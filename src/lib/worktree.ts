@@ -21,22 +21,39 @@ export function createWorktree(opts: CreateWorktreeOpts): string {
   const wtPath = getWorktreePath(opts.repoRoot, opts.branch);
 
   if (existsSync(wtPath)) {
-    throw new Error(
-      `Worktree path already exists: ${wtPath}\n` +
-        'A previous run may have crashed. Remove it with:\n' +
-        `  git worktree remove --force "${wtPath}"`
-    );
+    // Clean up stale worktree from a previous crashed run
+    try {
+      execFileSync('git', ['worktree', 'remove', '--force', wtPath], {
+        cwd: opts.repoRoot,
+        stdio: 'inherit',
+      });
+    } catch {
+      // If git worktree remove fails, try just deleting the directory
+    }
   }
 
   mkdirSync(WORKTREES_DIR, { recursive: true });
 
   const args = ['worktree', 'add'];
   if (opts.createBranch) {
-    args.push('-b', opts.branch);
-  }
-  args.push(wtPath);
-  if (!opts.createBranch) {
-    args.push(opts.branch);
+    // Check if branch already exists (e.g. from a previous crashed run)
+    let branchExists = false;
+    try {
+      execFileSync('git', ['rev-parse', '--verify', opts.branch], {
+        cwd: opts.repoRoot,
+        stdio: 'ignore',
+      });
+      branchExists = true;
+    } catch {
+      // Branch doesn't exist — create it
+      args.push('-b', opts.branch);
+    }
+    args.push(wtPath);
+    if (branchExists) {
+      args.push(opts.branch);
+    }
+  } else {
+    args.push(wtPath, opts.branch);
   }
 
   execFileSync('git', args, { cwd: opts.repoRoot, stdio: 'inherit' });
