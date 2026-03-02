@@ -1,11 +1,14 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
+import { homedir } from 'node:os';
 import path from 'node:path';
+
+const WORKTREES_DIR = path.join(homedir(), '.shipper', 'worktrees');
 
 export function getWorktreePath(repoRoot: string, branch: string): string {
   const repoName = path.basename(repoRoot);
   const safeBranch = branch.replace(/\//g, '-');
-  return path.resolve(repoRoot, '..', `${repoName}--wt--${safeBranch}`);
+  return path.join(WORKTREES_DIR, `${repoName}--wt--${safeBranch}`);
 }
 
 export interface CreateWorktreeOpts {
@@ -24,6 +27,8 @@ export function createWorktree(opts: CreateWorktreeOpts): string {
         `  git worktree remove --force "${wtPath}"`
     );
   }
+
+  mkdirSync(WORKTREES_DIR, { recursive: true });
 
   const args = ['worktree', 'add'];
   if (opts.createBranch) {
