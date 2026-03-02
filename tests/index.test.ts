@@ -9,5 +9,8 @@ describe('shipper-cli', () => {
     expect(output).toContain('init');
     expect(output).toContain('new');
     expect(output).toContain('groom');
+    expect(output).toContain('design');
+    expect(output).toContain('plan');
+    expect(output).toContain('pr');
   });
 });

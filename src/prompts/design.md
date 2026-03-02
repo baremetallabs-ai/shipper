@@ -16,7 +16,7 @@ This issue has already been **product-groomed** — product-level decisions (sco
 
 This session is non-interactive. You will not ask the user questions. If there are multiple viable technical approaches, commit to the one you believe is best and document the alternatives and tradeoffs in your review comment. If you encounter unresolved product questions that you cannot answer with technical judgment, use the NEEDS GROOMING verdict — do not ask the user.
 
-The **next user message** will provide the issue reference (usually an issue number like `137`, or a URL). Treat that as the target issue for this session.
+The **next user message** contains the full GitHub issue including title, labels, body, and all comments. This is your source of truth for the issue's current state.
 
 ## Core Philosophy
 

@@ -2,8 +2,15 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseFrontmatter } from './frontmatter.js';
+import { fetchIssue, fetchPR } from './github.js';
 
-export function runPrompt(name: string, userInput: string): never {
+export interface RunPromptOpts {
+  userInput?: string;
+  issueRef?: string;
+  prRef?: string;
+}
+
+export function runPrompt(name: string, opts: RunPromptOpts): never {
   const promptPath = path.resolve('.shipper', 'prompts', `${name}.md`);
 
   let raw: string;
@@ -20,8 +27,23 @@ export function runPrompt(name: string, userInput: string): never {
   const args = [...frontmatter.args];
   args.push('--append-system-prompt', body);
 
-  if (userInput) {
-    args.push(userInput);
+  const messageParts: string[] = [];
+
+  if (frontmatter['append-issue'] && opts.issueRef) {
+    messageParts.push(fetchIssue(opts.issueRef));
+  }
+
+  if (frontmatter['append-pr'] && opts.prRef) {
+    messageParts.push(fetchPR(opts.prRef));
+  }
+
+  if (frontmatter['append-user-input'] && opts.userInput) {
+    messageParts.push(opts.userInput);
+  }
+
+  const userMessage = messageParts.join('\n\n---\n\n');
+  if (userMessage) {
+    args.push(userMessage);
   }
 
   const result = spawnSync(frontmatter.cmd, args, {

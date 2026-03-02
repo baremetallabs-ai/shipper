@@ -1,13 +1,13 @@
 import { ensureInitialized } from '../lib/prerequisites.js';
 import { runPrompt } from '../lib/prompt-runner.js';
 
-export function groomCommand(issue: string) {
+export function designCommand(issue: string) {
   if (!issue) {
     console.error('Error: Please provide an issue number or URL.');
-    console.error('Usage: shipper groom <issue>');
+    console.error('Usage: shipper design <issue>');
     process.exit(1);
   }
 
   ensureInitialized();
-  runPrompt('groom', { issueRef: issue });
+  runPrompt('design', { issueRef: issue });
 }
