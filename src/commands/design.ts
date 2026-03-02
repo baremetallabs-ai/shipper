@@ -9,5 +9,5 @@ export function designCommand(issue: string) {
   }
 
   ensureInitialized();
-  runPrompt('design', { issueRef: issue });
+  process.exit(runPrompt('design', { issueRef: issue }));
 }

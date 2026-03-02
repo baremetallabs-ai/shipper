@@ -10,5 +10,5 @@ export function newCommand(pitchWords: string[]) {
   }
 
   ensureInitialized();
-  runPrompt('new', { userInput: pitch });
+  process.exit(runPrompt('new', { userInput: pitch }));
 }

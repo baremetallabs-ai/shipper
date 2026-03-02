@@ -8,9 +8,10 @@ export interface RunPromptOpts {
   userInput?: string;
   issueRef?: string;
   prRef?: string;
+  cwd?: string;
 }
 
-export function runPrompt(name: string, opts: RunPromptOpts): never {
+export function runPrompt(name: string, opts: RunPromptOpts): number {
   const promptPath = path.resolve('.shipper', 'prompts', `${name}.md`);
 
   let raw: string;
@@ -19,7 +20,7 @@ export function runPrompt(name: string, opts: RunPromptOpts): never {
   } catch {
     console.error(`Error: Could not read prompt file at ${promptPath}`);
     console.error('Run `shipper init` to set up prompts.');
-    process.exit(1);
+    return 1;
   }
 
   const { frontmatter, body } = parseFrontmatter(raw);
@@ -49,12 +50,13 @@ export function runPrompt(name: string, opts: RunPromptOpts): never {
   const result = spawnSync(frontmatter.cmd, args, {
     stdio: 'inherit',
     env: process.env,
+    cwd: opts.cwd,
   });
 
   if (result.error) {
     console.error(`Error: Failed to spawn ${frontmatter.cmd}: ${result.error.message}`);
-    process.exit(1);
+    return 1;
   }
 
-  process.exit(result.status ?? 1);
+  return result.status ?? 1;
 }

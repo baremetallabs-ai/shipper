@@ -9,5 +9,5 @@ export function prReviewCommand(pr: string) {
   }
 
   ensureInitialized();
-  runPrompt('pr_review', { prRef: pr });
+  process.exit(runPrompt('pr_review', { prRef: pr }));
 }

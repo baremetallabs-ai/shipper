@@ -9,5 +9,5 @@ export function groomCommand(issue: string) {
   }
 
   ensureInitialized();
-  runPrompt('groom', { issueRef: issue });
+  process.exit(runPrompt('groom', { issueRef: issue }));
 }

@@ -4,7 +4,10 @@ import { newCommand } from './commands/new.js';
 import { groomCommand } from './commands/groom.js';
 import { designCommand } from './commands/design.js';
 import { planCommand } from './commands/plan.js';
+import { implementCommand } from './commands/implement.js';
 import { prReviewCommand } from './commands/pr-review.js';
+import { prOpenCommand } from './commands/pr-open.js';
+import { prRemediateCommand } from './commands/pr-remediate.js';
 
 const program = new Command();
 
@@ -52,6 +55,14 @@ program
     planCommand(issue);
   });
 
+program
+  .command('implement')
+  .description('Implement an issue in a worktree')
+  .argument('<issue>', 'issue number or URL')
+  .action((issue: string) => {
+    implementCommand(issue);
+  });
+
 const pr = program.command('pr').description('Pull request commands');
 
 pr.command('review')
@@ -59,6 +70,20 @@ pr.command('review')
   .argument('<pr>', 'PR number or URL')
   .action((prArg: string) => {
     prReviewCommand(prArg);
+  });
+
+pr.command('open')
+  .description('Open a pull request for an implemented issue')
+  .argument('<issue>', 'issue number or URL')
+  .action((issue: string) => {
+    prOpenCommand(issue);
+  });
+
+pr.command('remediate')
+  .description('Remediate a pull request after review feedback')
+  .argument('<pr>', 'PR number or URL')
+  .action((prArg: string) => {
+    prRemediateCommand(prArg);
   });
 
 program.parse();
