@@ -17,6 +17,7 @@ const LABELS = [
   { name: 'shipper:planned', color: 'FEF2C0', description: 'Implementation planned' },
   { name: 'shipper:implemented', color: 'FBCA04', description: 'Implementation complete' },
   { name: 'shipper:pr-open', color: 'F9D0C4', description: 'PR opened' },
+  { name: 'shipper:pr-reviewed', color: 'E6B8AF', description: 'PR reviewed, pending remediation' },
   { name: 'shipper:ready', color: '0E8A16', description: 'Ready for final review and merge' },
 ];
 

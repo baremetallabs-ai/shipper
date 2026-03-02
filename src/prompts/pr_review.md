@@ -306,6 +306,16 @@ gh issue comment <ISSUE> --body "Shipper review posted on PR #<PR>: [APPROVE|REQ
 
 If the PR is not associated with a shipper-managed issue, skip this step.
 
+### Step 5: Update labels (if applicable)
+
+If the PR is associated with a shipper-managed issue (has `shipper:` labels), update the workflow label:
+
+```bash
+gh issue edit <ISSUE> --add-label "shipper:pr-reviewed" --remove-label "shipper:pr-open"
+```
+
+If the issue does not have `shipper:pr-open` (e.g., this is a re-review), skip this step.
+
 ---
 
 ## Phase 5: Report
