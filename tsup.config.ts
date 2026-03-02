@@ -7,6 +7,9 @@ export default defineConfig({
   splitting: false,
   sourcemap: true,
   clean: true,
+  loader: {
+    '.md': 'text',
+  },
   shims: true,
   minify: false,
   platform: 'node',
