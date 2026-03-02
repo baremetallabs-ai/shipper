@@ -4,6 +4,7 @@ import { newCommand } from './commands/new.js';
 import { groomCommand } from './commands/groom.js';
 import { designCommand } from './commands/design.js';
 import { planCommand } from './commands/plan.js';
+import { nextCommand } from './commands/next.js';
 import { implementCommand } from './commands/implement.js';
 import { prReviewCommand } from './commands/pr-review.js';
 import { prOpenCommand } from './commands/pr-open.js';
@@ -29,6 +30,14 @@ program
   .argument('<pitch...>', 'your idea for the new issue')
   .action((pitch: string[]) => {
     newCommand(pitch);
+  });
+
+program
+  .command('next')
+  .description('Advance an issue to the next workflow step')
+  .argument('<ref>', 'issue or PR number/URL')
+  .action((ref: string) => {
+    nextCommand(ref);
   });
 
 program
