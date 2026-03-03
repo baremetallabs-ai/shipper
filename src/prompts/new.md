@@ -61,7 +61,7 @@ If a tool for asking the user questions is available (e.g., inside agentic codin
 
 Once you have enough information and prerequisites pass:
 
-Generate a timestamp (e.g. Unix epoch or `YYYYMMDDHHMMSS`) and use it as `<timestamp>` in the filenames below.
+Generate a millisecond-precision timestamp (e.g. `date +%s%3N`) and use it as `<timestamp>` in the filenames below.
 
 1. Write the final issue body to `.shipper/tmp/issue-<timestamp>.md`.
 2. Create the issue: `gh issue create --title "<TITLE>" --body-file ./.shipper/tmp/issue-<timestamp>.md --label "shipper:new"`
