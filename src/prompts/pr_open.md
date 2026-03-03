@@ -206,11 +206,11 @@ Closes #<ISSUE_NUMBER>
 
 ### Step 2: Create the PR
 
-1. Use the **Write** tool to save the PR body to `./.shipper/tmp/pr_body.md`.
+1. Use the **Write** tool to save the PR body to `./.shipper/tmp/pr_body-<number>.md`.
 2. Create the PR:
 
 ```bash
-gh pr create --title "<TITLE>" --body-file ./.shipper/tmp/pr_body.md
+gh pr create --title "<TITLE>" --body-file ./.shipper/tmp/pr_body-<number>.md
 ```
 
 3. Capture the PR URL from the output.
