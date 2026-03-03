@@ -59,9 +59,14 @@ export function adoptCommand(issue: string): void {
   }
 
   // Add the shipper:new label
-  execFileSync('gh', ['issue', 'edit', cleanRef, '--add-label', 'shipper:new'], {
-    stdio: ['ignore', 'ignore', 'ignore'],
-  });
+  try {
+    execFileSync('gh', ['issue', 'edit', cleanRef, '--add-label', 'shipper:new'], {
+      stdio: ['ignore', 'ignore', 'ignore'],
+    });
+  } catch {
+    console.error(`Error: Failed to add 'shipper:new' label to issue #${cleanRef}.`);
+    process.exit(1);
+  }
 
   console.log(`Issue #${cleanRef} adopted into shipper workflow.`);
 }
