@@ -6,7 +6,7 @@ export interface Settings {
 }
 
 export const DEFAULTS: Settings = {
-  prReviewWaitMinutes: 30,
+  prReviewWaitMinutes: 15,
 };
 
 export const SETTING_DESCRIPTIONS: Record<keyof Settings, string> = {
