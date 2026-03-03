@@ -70,7 +70,16 @@ function scanArtifacts(issueNum: number, nwo: string): ArtifactScan {
   try {
     const prJson = execFileSync(
       'gh',
-      ['pr', 'list', '--search', String(issueNum), '--state', 'open', '--json', 'number,headRefName'],
+      [
+        'pr',
+        'list',
+        '--search',
+        String(issueNum),
+        '--state',
+        'open',
+        '--json',
+        'number,headRefName',
+      ],
       { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
     );
     const allPrs: PREntry[] = JSON.parse(prJson);
@@ -151,9 +160,13 @@ function executeReset(issueNum: number, scan: ArtifactScan, nwo: string): void {
   // 3. Delete comments
   for (const id of scan.commentIds) {
     try {
-      execFileSync('gh', ['api', '-X', 'DELETE', `repos/${nwo}/issues/${issueNum}/comments/${id}`], {
-        stdio: ['ignore', 'ignore', 'ignore'],
-      });
+      execFileSync(
+        'gh',
+        ['api', '-X', 'DELETE', `repos/${nwo}/issues/${issueNum}/comments/${id}`],
+        {
+          stdio: ['ignore', 'ignore', 'ignore'],
+        }
+      );
     } catch {
       console.error(`  Warning: Failed to delete comment ${id}`);
     }
