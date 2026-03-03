@@ -163,12 +163,18 @@ pr.command('remediate')
 program
   .command('merge')
   .description('Run the merge queue for PRs labeled shipper:ready')
+  .argument('[number]', 'PR or issue number to merge')
   .option('--interval <seconds>', 'polling interval in seconds', '60')
   .option('--once', 'process the queue once and exit', false)
   .option('--dry-run', 'print actions without executing', false)
   .option('--repo <owner/repo>', 'repository (default: inferred from cwd)')
-  .action((options: { interval: string; once: boolean; dryRun: boolean; repo?: string }) => {
-    mergeCommand(options);
-  });
+  .action(
+    (
+      number: string | undefined,
+      options: { interval: string; once: boolean; dryRun: boolean; repo?: string }
+    ) => {
+      mergeCommand({ ...options, number });
+    }
+  );
 
 program.parse();

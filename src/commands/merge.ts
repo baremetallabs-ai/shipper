@@ -2,7 +2,7 @@ import { execFileSync, execSync } from 'node:child_process';
 import { openSync, closeSync, readFileSync, writeFileSync, unlinkSync, constants } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { getRepoNwo } from '../lib/github.js';
+import { getRepoNwo, tryResolvePrForIssue } from '../lib/github.js';
 import { getSettings } from '../lib/settings.js';
 
 interface MergeOptions {
@@ -10,6 +10,7 @@ interface MergeOptions {
   once: boolean;
   dryRun: boolean;
   repo?: string;
+  number?: string;
 }
 
 export interface QueuedPR {
@@ -58,6 +59,64 @@ interface PRChecksLine {
 function resolveRepo(override?: string): string {
   if (override) return override;
   return getRepoNwo();
+}
+
+interface PRViewResult {
+  number: number;
+  title: string;
+  headRefName: string;
+  baseRefName: string;
+  state: string;
+  labels: { name: string }[];
+}
+
+function fetchPRView(ref: string, nwo: string): PRViewResult {
+  const json = execFileSync(
+    'gh',
+    ['pr', 'view', ref, '-R', nwo, '--json', 'number,title,headRefName,baseRefName,state,labels'],
+    { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }
+  );
+  return JSON.parse(json) as PRViewResult;
+}
+
+export function lookupPR(ref: string, nwo: string): QueuedPR {
+  let data: PRViewResult;
+
+  try {
+    data = fetchPRView(ref, nwo);
+  } catch {
+    // Not a PR — try resolving as an issue number
+    const resolved = tryResolvePrForIssue(Number(ref));
+    if (!resolved) {
+      console.error(`Error: #${ref} is not a PR and no linked PR was found.`);
+      process.exit(1);
+    }
+    try {
+      data = fetchPRView(resolved, nwo);
+    } catch {
+      console.error(`Error: Failed to fetch resolved PR #${resolved}.`);
+      process.exit(1);
+    }
+  }
+
+  if (data.state !== 'OPEN') {
+    console.error(`Error: PR #${data.number} is not open (state: ${data.state}).`);
+    process.exit(1);
+  }
+
+  const hasReadyLabel = data.labels.some((l) => l.name === 'shipper:ready');
+  if (!hasReadyLabel) {
+    console.error(`Error: PR #${data.number} does not have the shipper:ready label.`);
+    process.exit(1);
+  }
+
+  return {
+    number: data.number,
+    title: data.title,
+    headRefName: data.headRefName,
+    baseRefName: data.baseRefName,
+    labeledAt: '',
+  };
 }
 
 function getLockPath(nwo: string): string {
@@ -476,6 +535,21 @@ function sleep(ms: number): Promise<void> {
 
 export async function mergeCommand(options: MergeOptions): Promise<void> {
   const nwo = resolveRepo(options.repo);
+
+  if (options.number) {
+    const cleaned = options.number.replace(/^#/, '');
+    if (!/^\d+$/.test(cleaned)) {
+      console.error('Error: argument must be a numeric issue or PR number.');
+      process.exit(1);
+    }
+    console.log(`Merge queue for ${nwo}`);
+    if (options.dryRun) console.log('[dry-run mode]');
+    const pr = lookupPR(cleaned, nwo);
+    console.log(`Targeting PR #${pr.number}: ${pr.title}`);
+    processPR(pr, nwo, options.dryRun);
+    return;
+  }
+
   if (!/^\d+$/.test(options.interval)) {
     console.error('Error: --interval must be a positive integer (seconds).');
     process.exit(1);
