@@ -9,6 +9,10 @@ export const DEFAULTS: Settings = {
   prReviewWaitMinutes: 30,
 };
 
+export const SETTING_DESCRIPTIONS: Record<keyof Settings, string> = {
+  prReviewWaitMinutes: 'minimum wait (minutes) before PR review remediation',
+};
+
 let settings: Settings | undefined;
 
 export function loadSettings(): void {

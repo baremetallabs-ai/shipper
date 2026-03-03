@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { prompts } from '../lib/prompts.js';
-import { DEFAULTS } from '../lib/settings.js';
+import { DEFAULTS, SETTING_DESCRIPTIONS } from '../lib/settings.js';
 import {
   runPrereqChecks,
   checkGitRepo,
@@ -58,7 +58,10 @@ export function initCommand() {
   }
   writeFileSync(settingsPath, JSON.stringify(merged, null, 2) + '\n');
   console.log('Wrote .shipper/settings.json with default settings:');
-  console.log('  prReviewWaitMinutes: 30  — minimum wait (minutes) before PR review remediation');
+  for (const [key, value] of Object.entries(DEFAULTS)) {
+    const desc = SETTING_DESCRIPTIONS[key as keyof typeof SETTING_DESCRIPTIONS];
+    console.log(`  ${key}: ${value}${desc ? `  — ${desc}` : ''}`);
+  }
 
   // Write prompt files
   let promptCount = 0;
