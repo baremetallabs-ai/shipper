@@ -10,6 +10,7 @@ import { implementCommand } from './commands/implement.js';
 import { prReviewCommand } from './commands/pr-review.js';
 import { prOpenCommand } from './commands/pr-open.js';
 import { prRemediateCommand } from './commands/pr-remediate.js';
+import { mergeCommand } from './commands/merge.js';
 
 const program = new Command();
 
@@ -19,7 +20,7 @@ program
   .version('0.1.0');
 
 program.hook('preAction', (_thisCommand, actionCommand) => {
-  if (actionCommand.name() === 'init') return;
+  if (actionCommand.name() === 'init' || actionCommand.name() === 'merge') return;
   runPreflight();
 });
 
@@ -99,6 +100,17 @@ pr.command('remediate')
   .argument('<pr>', 'PR number or URL')
   .action((prArg: string) => {
     prRemediateCommand(prArg);
+  });
+
+program
+  .command('merge')
+  .description('Run the merge queue for PRs labeled shipper:ready')
+  .option('--interval <seconds>', 'polling interval in seconds', '60')
+  .option('--once', 'process the queue once and exit', false)
+  .option('--dry-run', 'print actions without executing', false)
+  .option('--repo <owner/repo>', 'repository (default: inferred from cwd)')
+  .action((options: { interval: string; once: boolean; dryRun: boolean; repo?: string }) => {
+    mergeCommand(options);
   });
 
 program.parse();
