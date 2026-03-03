@@ -1,4 +1,3 @@
-import { ensureInitialized } from '../lib/prerequisites.js';
 import { runPrompt } from '../lib/prompt-runner.js';
 
 export function groomCommand(issue: string) {
@@ -8,6 +7,5 @@ export function groomCommand(issue: string) {
     process.exit(1);
   }
 
-  ensureInitialized();
   process.exit(runPrompt('groom', { issueRef: issue }));
 }

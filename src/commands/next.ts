@@ -1,5 +1,4 @@
 import { execFileSync } from 'node:child_process';
-import { ensureInitialized } from '../lib/prerequisites.js';
 import { groomCommand } from './groom.js';
 import { designCommand } from './design.js';
 import { planCommand } from './plan.js';
@@ -63,8 +62,6 @@ export function nextCommand(ref: string) {
     console.error('Usage: shipper next <issue-or-pr>');
     process.exit(1);
   }
-
-  ensureInitialized();
 
   // Strip leading # if present
   const cleanRef = ref.replace(/^#/, '');

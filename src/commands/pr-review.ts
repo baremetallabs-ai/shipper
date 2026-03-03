@@ -1,4 +1,3 @@
-import { ensureInitialized } from '../lib/prerequisites.js';
 import { runPrompt } from '../lib/prompt-runner.js';
 
 export function prReviewCommand(pr: string) {
@@ -8,6 +7,5 @@ export function prReviewCommand(pr: string) {
     process.exit(1);
   }
 
-  ensureInitialized();
   process.exit(runPrompt('pr_review', { prRef: pr }));
 }

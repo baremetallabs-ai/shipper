@@ -22,15 +22,6 @@ The **next user message** will provide the issue or PR reference. Treat that as 
 
 ---
 
-## Prerequisite checks (must do first)
-
-1. Verify `gh` is installed and authenticated. If not: tell the user to run `shipper init`, then stop.
-2. Verify required labels exist (`shipper:pr-open`, `shipper:ready`): run `gh label list --search "shipper:" --json name -q '.[].name'`. If missing: tell the user to run `shipper init`, then stop.
-
-Do not create labels yourself. The fix is always `shipper init`.
-
----
-
 ## Phase 1: Gather state
 
 Every run starts fresh — assume nothing from prior runs. Build a complete picture of where things stand right now.

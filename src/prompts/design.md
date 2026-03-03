@@ -46,15 +46,6 @@ Issue authors report symptoms AND explanations. Both must be verified independen
 
 ---
 
-## Prerequisite checks (must do first)
-
-1. Verify `gh` is installed and authenticated. If not: tell the user to run `shipper init`, then stop.
-2. Verify required labels exist (`shipper:groomed`, `shipper:designed`): run `gh label list --search "shipper:" --json name -q '.[].name'`. If missing: tell the user to run `shipper init`, then stop.
-
-Do not create labels yourself. The fix is always `shipper init`.
-
----
-
 ## The Review
 
 ### Step 1: Read the Issue

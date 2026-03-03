@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { runPreflight } from './lib/prerequisites.js';
 import { initCommand } from './commands/init.js';
 import { newCommand } from './commands/new.js';
 import { groomCommand } from './commands/groom.js';
@@ -16,6 +17,11 @@ program
   .name('shipper')
   .description('CLI tool for automating development workflow with coding agents')
   .version('0.1.0');
+
+program.hook('preAction', (_thisCommand, actionCommand) => {
+  if (actionCommand.name() === 'init') return;
+  runPreflight();
+});
 
 program
   .command('init')

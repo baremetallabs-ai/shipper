@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 
 interface CheckResult {
@@ -66,11 +66,31 @@ export function checkShipperDir(): CheckResult {
   return { ok: false, message: '.shipper directory not found. Run: shipper init' };
 }
 
-export function ensureInitialized(): void {
-  const check = checkShipperDir();
-  if (!check.ok) {
-    console.error(`Error: ${check.message}`);
-    process.exit(1);
+const REQUIRED_LABELS = [
+  'shipper:new',
+  'shipper:groomed',
+  'shipper:designed',
+  'shipper:planned',
+  'shipper:implemented',
+  'shipper:pr-open',
+  'shipper:ready',
+];
+
+export function checkLabels(): CheckResult {
+  try {
+    const output = execFileSync(
+      'gh',
+      ['label', 'list', '--search', 'shipper:', '--json', 'name', '-q', '.[].name'],
+      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
+    ).trim();
+    const existing = output ? output.split('\n') : [];
+    const missing = REQUIRED_LABELS.filter((l) => !existing.includes(l));
+    if (missing.length === 0) {
+      return { ok: true, message: 'All required labels exist' };
+    }
+    return { ok: false, message: `Missing label(s): ${missing.join(', ')}` };
+  } catch {
+    return { ok: false, message: 'Could not check labels (gh label list failed)' };
   }
 }
 
@@ -83,4 +103,27 @@ export function runPrereqChecks(checks: Array<() => CheckResult>): boolean {
     }
   }
   return true;
+}
+
+export function runPreflight(): void {
+  const checks = [checkGhInstalled, checkGhAuth, checkShipperDir, checkLabels];
+
+  const failures: string[] = [];
+  for (const check of checks) {
+    const result = check();
+    if (!result.ok) {
+      failures.push(result.message);
+    }
+  }
+
+  // Auto-create .shipper/tmp if missing (cheap, idempotent)
+  mkdirSync(path.resolve('.shipper', 'tmp'), { recursive: true });
+
+  if (failures.length > 0) {
+    for (const msg of failures) {
+      console.error(`  ✗ ${msg}`);
+    }
+    console.error('\nRun `shipper init` to fix these issues.');
+    process.exit(1);
+  }
 }

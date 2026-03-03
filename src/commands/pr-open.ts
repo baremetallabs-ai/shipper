@@ -1,4 +1,3 @@
-import { ensureInitialized } from '../lib/prerequisites.js';
 import { findBranchForIssue, getRepoRoot } from '../lib/branch.js';
 import { withWorktree } from '../lib/worktree.js';
 import { runPrompt } from '../lib/prompt-runner.js';
@@ -9,8 +8,6 @@ export function prOpenCommand(issue: string) {
     console.error('Usage: shipper pr open <issue>');
     process.exit(1);
   }
-
-  ensureInitialized();
 
   const repoRoot = getRepoRoot();
   const branch = findBranchForIssue(issue);
