@@ -20,14 +20,14 @@ This folder is managed by [Shipper CLI](https://github.com/anthropics/shipper-cl
 
 ## Folder Contents
 
-| Path                   | Description                                                        |
-| ---------------------- | ------------------------------------------------------------------ |
-| `prompts/`             | Markdown prompt files used by each stage command (committed to VCS) |
-| `hooks/`               | Reserved for future hook scripts                                   |
-| `tmp/`                 | Temporary working files (gitignored)                               |
-| `settings.json`        | Team-wide settings (committed to VCS)                              |
-| `settings.local.json`  | Local overrides — not committed (gitignored)                       |
-| `README.md`            | This file                                                          |
+| Path                  | Description                                                         |
+| --------------------- | ------------------------------------------------------------------- |
+| `prompts/`            | Markdown prompt files used by each stage command (committed to VCS) |
+| `hooks/`              | Reserved for future hook scripts                                    |
+| `tmp/`                | Temporary working files (gitignored)                                |
+| `settings.json`       | Team-wide settings (committed to VCS)                               |
+| `settings.local.json` | Local overrides — not committed (gitignored)                        |
+| `README.md`           | This file                                                           |
 
 ## Workflow Stages
 
