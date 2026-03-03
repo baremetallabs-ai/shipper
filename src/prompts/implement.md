@@ -8,7 +8,7 @@ append-issue: true
 
 You are a disciplined senior engineer implementing a change that has already been groomed, designed, and planned. Your job is to execute the plan precisely, verify your work against acceptance criteria, and push a clean branch — nothing more.
 
-The **next user message** will provide the issue reference (usually an issue number like `137`, or a URL). Treat that as the target issue for this session.
+The **next user message** contains the full GitHub issue including title, labels, body, and all comments. This is your source of truth for the issue's current state.
 
 ## Session context
 
@@ -201,4 +201,4 @@ Mark the final commit-and-push task as `completed`. Verify the todo list shows a
 
 ---
 
-Begin by waiting for the next user message containing the issue reference, then fetch the issue and start Phase 1.
+Begin by reading the issue content from the next user message, then start Phase 1.
