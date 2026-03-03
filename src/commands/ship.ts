@@ -84,7 +84,9 @@ function printAutoSummary(results: AutoResult[]): void {
   console.log('  #    Issue                                          Outcome');
   for (const r of results) {
     const num = String(r.issue).padEnd(5);
-    const title = r.title.length > 45 ? r.title.slice(0, 42) + '...' : r.title.padEnd(45);
+    const titleChars = Array.from(r.title);
+    const title =
+      titleChars.length > 45 ? titleChars.slice(0, 42).join('') + '...' : r.title.padEnd(45);
     const outcome = r.outcome === 'pass' ? '✓ pass' : `✗ fail — ${r.error ?? 'unknown error'}`;
     console.log(`  ${num}${title} ${outcome}`);
   }
