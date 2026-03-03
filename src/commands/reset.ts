@@ -170,13 +170,9 @@ function executeReset(issueNum: number, scan: ArtifactScan, nwo: string): void {
   // 3. Delete comments
   for (const id of scan.commentIds) {
     try {
-      execFileSync(
-        'gh',
-        ['api', '-X', 'DELETE', `repos/${nwo}/issues/comments/${id}`],
-        {
-          stdio: ['ignore', 'ignore', 'ignore'],
-        }
-      );
+      execFileSync('gh', ['api', '-X', 'DELETE', `repos/${nwo}/issues/comments/${id}`], {
+        stdio: ['ignore', 'ignore', 'ignore'],
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`  Warning: Failed to delete comment ${id}: ${msg}`);
