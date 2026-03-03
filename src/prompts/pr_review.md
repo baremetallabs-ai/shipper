@@ -188,6 +188,22 @@ Based on your findings:
 - **REQUEST_CHANGES** — One or more must-fix issues exist. The PR should not merge until they're resolved.
 - **COMMENT** — No must-fix issues, but you have should-fix items worth discussing before you'd be comfortable approving. Use this when you want to have a conversation before approving, not when you want to block.
 
+### Step 1b: Check for self-authored PR
+
+Determine whether the authenticated GitHub user is the PR author. GitHub does not allow a PR author to submit `APPROVE` or `REQUEST_CHANGES` reviews on their own PR (returns 422), so these must be submitted as `COMMENT` instead.
+
+1. Get the authenticated GitHub username:
+   ```bash
+   gh api /user --jq .login
+   ```
+2. Get the PR author:
+   ```bash
+   gh pr view <PR> --json author --jq .author.login
+   ```
+3. Compare the two values:
+   - If they **match** and the verdict from Step 1 is `APPROVE` or `REQUEST_CHANGES`: set the submission event to `COMMENT` and note the original intended verdict for use in Step 2 (summary) and Step 3c (JSON payload).
+   - If they **do not match**, or if the verdict is already `COMMENT`: make no changes — proceed as normal.
+
 ### Step 2: Write the review summary
 
 Write a brief top-level review body:
@@ -208,6 +224,13 @@ Write a brief top-level review body:
 [If APPROVE with no findings: "No issues found. Implementation matches requirements and design."]
 [If REQUEST_CHANGES: one sentence summarizing what must be fixed before merge.]
 ```
+
+**Self-authored PR fallback:** If Step 1b determined the event must be changed due to self-authorship, modify the verdict line in the summary:
+
+- For APPROVE fallback: `**Verdict: APPROVE** (submitted as COMMENT — GitHub does not allow approving your own PR)`
+- For REQUEST_CHANGES fallback: `**Verdict: REQUEST CHANGES** (submitted as COMMENT — GitHub does not allow requesting changes on your own PR)`
+
+When the reviewer is NOT the PR author, the verdict line remains unchanged from the template above.
 
 ### Step 3: Construct and submit the review via GitHub API
 
@@ -272,6 +295,8 @@ The JSON structure must be:
 - Use `RIGHT` side for commenting on added or modified lines (the new version of the file).
 - Use `LEFT` side only for commenting on deleted lines (the old version of the file).
 - The `line` field is the **actual file line number**, not a diff offset.
+
+**Self-authored PR fallback:** If Step 1b determined that the event must be changed due to self-authorship, use `COMMENT` as the `event` value here instead of the original verdict (`APPROVE` or `REQUEST_CHANGES`).
 
 #### 3d: Submit the review
 
