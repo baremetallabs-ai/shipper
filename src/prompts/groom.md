@@ -110,9 +110,9 @@ After producing the final artifacts, you must update GitHub using repo-local tem
 
 ### Update the existing issue
 
-1. Save the updated issue body to `.shipper/tmp/issue_body-<number>.md`.
+1. Save the updated issue body to `.shipper/tmp/issue_body-<number>.md` (using the issue number).
 2. Update the issue: `gh issue edit <ISSUE> --body-file ./.shipper/tmp/issue_body-<number>.md`
-3. Save the grooming summary comment to `.shipper/tmp/grooming_comment-<number>.md`.
+3. Save the grooming summary comment to `.shipper/tmp/grooming_comment-<number>.md` (using the issue number).
 4. Post the comment: `gh issue comment <ISSUE> --body-file ./.shipper/tmp/grooming_comment-<number>.md`
 
 5. Update labels:
@@ -126,7 +126,7 @@ After producing the final artifacts, you must update GitHub using repo-local tem
 
 If your decomposition recommendation includes additional issues, you must create them:
 
-1. For each new issue, write its body to its own file under `./.shipper/tmp/` (e.g. `split_issue-<number>-1.md`, `split_issue-<number>-2.md`).
+1. For each new issue, write its body to its own file under `./.shipper/tmp/` (e.g. `split_issue-<number>-1.md`, `split_issue-<number>-2.md`), where `<number>` is the parent issue number.
 2. Create each new issue using `gh issue create --title "<TITLE>" --body-file <FILE> --label "shipper:new"`.
    - These new issues must start in the **new** status (not groomed).
 3. After creating them, include the created URLs in your final response, and (optionally) add them as links in the original issue comment if appropriate.

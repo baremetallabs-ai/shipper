@@ -237,7 +237,7 @@ gh repo view --json owner,name -q '.owner.login + "/" + .name'
 
 #### 3c: Build the review JSON payload
 
-Construct a JSON file containing the review body, event, and all inline comments. Save it to `./.shipper/tmp/pr_review_payload-<number>.json`.
+Construct a JSON file containing the review body, event, and all inline comments. Save it to `./.shipper/tmp/pr_review_payload-<number>.json` (using the PR number).
 
 The JSON structure must be:
 

@@ -206,7 +206,7 @@ Closes #<ISSUE_NUMBER>
 
 ### Step 2: Create the PR
 
-1. Use the **Write** tool to save the PR body to `./.shipper/tmp/pr_body-<number>.md`.
+1. Use the **Write** tool to save the PR body to `./.shipper/tmp/pr_body-<number>.md` (using the issue number).
 2. Create the PR:
 
 ```bash
