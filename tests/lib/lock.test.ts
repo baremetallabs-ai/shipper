@@ -46,54 +46,45 @@ afterEach(() => {
 describe('isLockStale', () => {
   it('returns false when lock was added recently', () => {
     const recentTime = new Date(Date.now() - 5 * 60_000).toISOString(); // 5 min ago
-    mockExecFileSync.mockReturnValue(
-      JSON.stringify({
-        event: 'labeled',
-        label: { name: 'shipper:locked' },
-        created_at: recentTime,
-      })
-    );
+    mockExecFileSync.mockReturnValue(recentTime);
     expect(isLockStale('42')).toBe(false);
   });
 
   it('returns true when lock was added longer ago than timeout', () => {
     const oldTime = new Date(Date.now() - 60 * 60_000).toISOString(); // 60 min ago
-    mockExecFileSync.mockReturnValue(
-      JSON.stringify({ event: 'labeled', label: { name: 'shipper:locked' }, created_at: oldTime })
-    );
+    mockExecFileSync.mockReturnValue(oldTime);
     expect(isLockStale('42')).toBe(true);
   });
 
-  it('returns true when no matching events found', () => {
-    mockExecFileSync.mockReturnValue(
-      JSON.stringify({
-        event: 'labeled',
-        label: { name: 'shipper:groomed' },
-        created_at: new Date().toISOString(),
-      })
-    );
+  it('returns true when no matching events found (empty output)', () => {
+    mockExecFileSync.mockReturnValue('');
     expect(isLockStale('42')).toBe(true);
   });
 
-  it('returns true when timeline fetch fails', () => {
+  it('returns false when timeline fetch fails (fail closed)', () => {
     mockExecFileSync.mockImplementation(() => {
       throw new Error('API error');
     });
-    expect(isLockStale('42')).toBe(true);
+    expect(isLockStale('42')).toBe(false);
   });
 
-  it('returns true when output is empty', () => {
-    mockExecFileSync.mockReturnValue('');
-    expect(isLockStale('42')).toBe(true);
+  it('returns false when timestamp is malformed (fail closed)', () => {
+    mockExecFileSync.mockReturnValue('not-a-date');
+    expect(isLockStale('42')).toBe(false);
   });
 
   it('uses custom lockTimeoutMinutes from settings', () => {
     mockGetSettings.mockReturnValue({ lockTimeoutMinutes: 5, prReviewWaitMinutes: 15, hooks: {} });
     const sixMinAgo = new Date(Date.now() - 6 * 60_000).toISOString();
-    mockExecFileSync.mockReturnValue(
-      JSON.stringify({ event: 'labeled', label: { name: 'shipper:locked' }, created_at: sixMinAgo })
-    );
+    mockExecFileSync.mockReturnValue(sixMinAgo);
     expect(isLockStale('42')).toBe(true);
+  });
+
+  it('uses last timestamp when multiple are returned', () => {
+    const oldTime = new Date(Date.now() - 60 * 60_000).toISOString();
+    const recentTime = new Date(Date.now() - 5 * 60_000).toISOString();
+    mockExecFileSync.mockReturnValue(`${oldTime}\n${recentTime}`);
+    expect(isLockStale('42')).toBe(false);
   });
 });
 
@@ -115,13 +106,7 @@ describe('acquireIssueLock', () => {
     const recentTime = new Date(Date.now() - 5 * 60_000).toISOString();
     mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
       if (args[0] === 'issue' && args[1] === 'view') return 'shipper:groomed\nshipper:locked\n';
-      if (args[0] === 'api') {
-        return JSON.stringify({
-          event: 'labeled',
-          label: { name: 'shipper:locked' },
-          created_at: recentTime,
-        });
-      }
+      if (args[0] === 'api') return recentTime;
       return '';
     });
     try {
@@ -139,13 +124,7 @@ describe('acquireIssueLock', () => {
     const oldTime = new Date(Date.now() - 60 * 60_000).toISOString();
     mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
       if (args[0] === 'issue' && args[1] === 'view') return 'shipper:groomed\nshipper:locked\n';
-      if (args[0] === 'api') {
-        return JSON.stringify({
-          event: 'labeled',
-          label: { name: 'shipper:locked' },
-          created_at: oldTime,
-        });
-      }
+      if (args[0] === 'api') return oldTime;
       return '';
     });
     acquireIssueLock('42');
