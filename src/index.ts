@@ -55,8 +55,9 @@ program
   .command('ship')
   .description('Run the full workflow end-to-end')
   .argument('<issue>', 'issue number')
-  .action((issue: string) => {
-    shipCommand(issue);
+  .option('--merge', 'auto-merge the PR after reaching shipper:ready', false)
+  .action((issue: string, options: { merge: boolean }) => {
+    shipCommand(issue, options);
   });
 
 program
