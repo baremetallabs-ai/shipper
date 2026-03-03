@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { formatIssue, formatPR } from '../../src/lib/github.js';
+import {
+  formatIssue,
+  formatPR,
+  sortIssuesByLabelTime,
+  type TimelineLabelEvent,
+} from '../../src/lib/github.js';
 
 describe('formatIssue', () => {
   it('formats a basic issue with comments', () => {
@@ -120,5 +125,86 @@ describe('formatPR', () => {
     expect(result).toContain('**Branch:** patch-1 → main');
     expect(result).not.toContain('## Reviews');
     expect(result).not.toContain('## Comments');
+  });
+});
+
+describe('sortIssuesByLabelTime', () => {
+  const label = 'shipper:new';
+
+  it('returns empty array for empty input', () => {
+    const result = sortIssuesByLabelTime([], new Map(), label);
+    expect(result).toEqual([]);
+  });
+
+  it('returns single issue as-is', () => {
+    const issues = [{ number: 1, title: 'First' }];
+    const timelines = new Map<number, TimelineLabelEvent[]>();
+    timelines.set(1, [
+      { event: 'labeled', label: { name: label }, created_at: '2025-01-01T00:00:00Z' },
+    ]);
+    const result = sortIssuesByLabelTime(issues, timelines, label);
+    expect(result).toEqual([{ number: 1, title: 'First' }]);
+  });
+
+  it('sorts multiple issues by label timestamp oldest first', () => {
+    const issues = [
+      { number: 2, title: 'Second' },
+      { number: 1, title: 'First' },
+      { number: 3, title: 'Third' },
+    ];
+    const timelines = new Map<number, TimelineLabelEvent[]>();
+    timelines.set(2, [
+      { event: 'labeled', label: { name: label }, created_at: '2025-01-02T00:00:00Z' },
+    ]);
+    timelines.set(1, [
+      { event: 'labeled', label: { name: label }, created_at: '2025-01-01T00:00:00Z' },
+    ]);
+    timelines.set(3, [
+      { event: 'labeled', label: { name: label }, created_at: '2025-01-03T00:00:00Z' },
+    ]);
+    const result = sortIssuesByLabelTime(issues, timelines, label);
+    expect(result).toEqual([
+      { number: 1, title: 'First' },
+      { number: 2, title: 'Second' },
+      { number: 3, title: 'Third' },
+    ]);
+  });
+
+  it('uses last label event when label was applied multiple times', () => {
+    const issues = [
+      { number: 1, title: 'Reset issue' },
+      { number: 2, title: 'Normal issue' },
+    ];
+    const timelines = new Map<number, TimelineLabelEvent[]>();
+    timelines.set(1, [
+      { event: 'labeled', label: { name: label }, created_at: '2025-01-01T00:00:00Z' },
+      { event: 'unlabeled', label: { name: label }, created_at: '2025-01-02T00:00:00Z' },
+      { event: 'labeled', label: { name: label }, created_at: '2025-01-05T00:00:00Z' },
+    ]);
+    timelines.set(2, [
+      { event: 'labeled', label: { name: label }, created_at: '2025-01-03T00:00:00Z' },
+    ]);
+    const result = sortIssuesByLabelTime(issues, timelines, label);
+    expect(result).toEqual([
+      { number: 2, title: 'Normal issue' },
+      { number: 1, title: 'Reset issue' },
+    ]);
+  });
+
+  it('sorts issues with no matching label event to the end', () => {
+    const issues = [
+      { number: 1, title: 'No events' },
+      { number: 2, title: 'Has events' },
+    ];
+    const timelines = new Map<number, TimelineLabelEvent[]>();
+    timelines.set(1, []);
+    timelines.set(2, [
+      { event: 'labeled', label: { name: label }, created_at: '2025-01-01T00:00:00Z' },
+    ]);
+    const result = sortIssuesByLabelTime(issues, timelines, label);
+    expect(result).toEqual([
+      { number: 2, title: 'Has events' },
+      { number: 1, title: 'No events' },
+    ]);
   });
 });

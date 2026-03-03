@@ -1,10 +1,15 @@
+import { autoSelectIssue } from '../lib/github.js';
 import { runPrompt } from '../lib/prompt-runner.js';
 
-export function planCommand(issue: string) {
+export function planCommand(issue?: string) {
   if (!issue) {
-    console.error('Error: Please provide an issue number or URL.');
-    console.error('Usage: shipper plan <issue>');
-    process.exit(1);
+    const selected = autoSelectIssue('shipper:designed');
+    if (!selected) {
+      console.error("No issues ready for planning. Run 'shipper design' first.");
+      process.exit(1);
+    }
+    console.error(`Auto-selected #${selected.number}: ${selected.title}`);
+    issue = String(selected.number);
   }
 
   process.exit(runPrompt('plan', { issueRef: issue }));

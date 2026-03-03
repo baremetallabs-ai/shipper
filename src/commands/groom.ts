@@ -1,10 +1,15 @@
+import { autoSelectIssue } from '../lib/github.js';
 import { runPrompt } from '../lib/prompt-runner.js';
 
-export function groomCommand(issue: string) {
+export function groomCommand(issue?: string) {
   if (!issue) {
-    console.error('Error: Please provide an issue number or URL.');
-    console.error('Usage: shipper groom <issue>');
-    process.exit(1);
+    const selected = autoSelectIssue('shipper:new');
+    if (!selected) {
+      console.error("No issues ready for grooming. Create one with 'shipper new'.");
+      process.exit(1);
+    }
+    console.error(`Auto-selected #${selected.number}: ${selected.title}`);
+    issue = String(selected.number);
   }
 
   process.exit(runPrompt('groom', { issueRef: issue }));
