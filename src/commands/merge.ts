@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { openSync, closeSync, readFileSync, writeFileSync, unlinkSync, constants } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { getRepoNwo } from '../lib/github.js';
 
 interface MergeOptions {
   interval: string;
@@ -53,19 +54,9 @@ interface PRChecksLine {
   conclusion: string;
 }
 
-function getRepoNwo(override?: string): string {
+function resolveRepo(override?: string): string {
   if (override) return override;
-  try {
-    return execFileSync('gh', ['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'], {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
-  } catch {
-    console.error(
-      'Error: Could not determine repository. Use --repo <owner/repo> or run from a repo.'
-    );
-    process.exit(1);
-  }
+  return getRepoNwo();
 }
 
 function getLockPath(nwo: string): string {
@@ -388,7 +379,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 export async function mergeCommand(options: MergeOptions): Promise<void> {
-  const nwo = getRepoNwo(options.repo);
+  const nwo = resolveRepo(options.repo);
   if (!/^\d+$/.test(options.interval)) {
     console.error('Error: --interval must be a positive integer (seconds).');
     process.exit(1);

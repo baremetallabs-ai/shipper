@@ -13,6 +13,7 @@ import { prReviewCommand } from './commands/pr-review.js';
 import { prOpenCommand } from './commands/pr-open.js';
 import { prRemediateCommand } from './commands/pr-remediate.js';
 import { mergeCommand } from './commands/merge.js';
+import { resetCommand } from './commands/reset.js';
 
 const program = new Command();
 
@@ -88,6 +89,15 @@ program
   .argument('<issue>', 'issue number or URL')
   .action((issue: string) => {
     implementCommand(issue);
+  });
+
+program
+  .command('reset')
+  .description('Reset an issue back to shipper:new status')
+  .argument('<issue>', 'issue number')
+  .option('-f, --force', 'skip confirmation prompt')
+  .action((issue: string, opts: { force: boolean }) => {
+    resetCommand(issue, opts);
   });
 
 const pr = program.command('pr').description('Pull request commands');

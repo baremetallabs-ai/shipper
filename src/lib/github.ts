@@ -101,6 +101,18 @@ export function formatIssue(data: IssueData): string {
   return lines.join('\n');
 }
 
+export function getRepoNwo(): string {
+  try {
+    return execFileSync('gh', ['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    console.error('Error: Could not determine repository.');
+    process.exit(1);
+  }
+}
+
 export function formatPR(data: PRData): string {
   const labels = data.labels.map((l) => l.name).join(', ') || 'none';
   const lines: string[] = [
