@@ -117,6 +117,23 @@ export function getRepoNwo(): string {
   }
 }
 
+export function tryResolvePrForIssue(issueNumber: number): string | undefined {
+  try {
+    const output = execFileSync(
+      'gh',
+      ['pr', 'list', '--search', String(issueNumber), '--state', 'open', '--json', 'number'],
+      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
+    ).trim();
+    const prs = JSON.parse(output) as { number: number }[];
+    if (Array.isArray(prs) && prs.length > 0) {
+      return String(prs[0]!.number);
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function formatPR(data: PRData): string {
   const labels = data.labels.map((l) => l.name).join(', ') || 'none';
   const lines: string[] = [
@@ -149,4 +166,76 @@ export function formatPR(data: PRData): string {
   }
 
   return lines.join('\n');
+}
+
+export interface TimelineLabelEvent {
+  event: string;
+  label?: { name: string };
+  created_at?: string;
+}
+
+export function sortIssuesByLabelTime(
+  issues: { number: number; title: string }[],
+  timelinesByIssue: Map<number, TimelineLabelEvent[]>,
+  label: string
+): { number: number; title: string }[] {
+  const withTimestamps = issues.map((issue) => {
+    const events = timelinesByIssue.get(issue.number) ?? [];
+    const labelEvents = events.filter(
+      (e) => e.event === 'labeled' && e.label?.name === label && e.created_at
+    );
+    const lastEvent = labelEvents.length > 0 ? labelEvents[labelEvents.length - 1] : undefined;
+    return { issue, timestamp: lastEvent?.created_at ?? '' };
+  });
+
+  withTimestamps.sort((a, b) => {
+    if (!a.timestamp && !b.timestamp) return 0;
+    if (!a.timestamp) return 1;
+    if (!b.timestamp) return -1;
+    return a.timestamp.localeCompare(b.timestamp);
+  });
+
+  return withTimestamps.map((w) => w.issue);
+}
+
+export function selectIssuesForStage(label: string): { number: number; title: string }[] {
+  let issues: { number: number; title: string }[];
+  try {
+    const output = execFileSync(
+      'gh',
+      ['issue', 'list', '--label', label, '--state', 'open', '--json', 'number,title'],
+      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
+    ).trim();
+    issues = JSON.parse(output) as { number: number; title: string }[];
+  } catch {
+    return [];
+  }
+
+  if (issues.length <= 1) {
+    return issues;
+  }
+
+  const nwo = getRepoNwo();
+  const timelinesByIssue = new Map<number, TimelineLabelEvent[]>();
+
+  for (const issue of issues) {
+    try {
+      const output = execFileSync(
+        'gh',
+        ['api', `repos/${nwo}/issues/${issue.number}/timeline`, '--paginate'],
+        { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
+      ).trim();
+      const events = JSON.parse(output) as TimelineLabelEvent[];
+      timelinesByIssue.set(issue.number, events);
+    } catch {
+      timelinesByIssue.set(issue.number, []);
+    }
+  }
+
+  return sortIssuesByLabelTime(issues, timelinesByIssue, label);
+}
+
+export function autoSelectIssue(label: string): { number: number; title: string } | null {
+  const issues = selectIssuesForStage(label);
+  return issues[0] ?? null;
 }

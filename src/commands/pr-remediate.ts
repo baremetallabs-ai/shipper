@@ -1,14 +1,30 @@
 import { execFileSync } from 'node:child_process';
 import { getBranchForPR, getRepoRoot } from '../lib/branch.js';
+import { selectIssuesForStage, tryResolvePrForIssue } from '../lib/github.js';
 import { withWorktree } from '../lib/worktree.js';
 import { runPrompt } from '../lib/prompt-runner.js';
 import { getSettings } from '../lib/settings.js';
 
-export function prRemediateCommand(pr: string) {
+export function prRemediateCommand(pr?: string) {
   if (!pr) {
-    console.error('Error: Please provide a PR number or URL.');
-    console.error('Usage: shipper pr remediate <pr>');
-    process.exit(1);
+    const issues = selectIssuesForStage('shipper:pr-reviewed');
+    let resolved: string | undefined;
+    let resolvedIssue: { number: number; title: string } | undefined;
+    for (const issue of issues) {
+      resolved = tryResolvePrForIssue(issue.number);
+      if (resolved) {
+        resolvedIssue = issue;
+        break;
+      }
+    }
+    if (!resolved || !resolvedIssue) {
+      console.error("No PRs ready for remediation. Run 'shipper pr review' first.");
+      process.exit(1);
+    }
+    console.error(
+      `Auto-selected PR #${resolved} (issue #${resolvedIssue.number}: ${resolvedIssue.title})`
+    );
+    pr = resolved;
   }
 
   const waitMinutes = getSettings().prReviewWaitMinutes;

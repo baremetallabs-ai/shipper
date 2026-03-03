@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { tryResolvePrForIssue } from '../lib/github.js';
 import { groomCommand } from './groom.js';
 import { designCommand } from './design.js';
 import { planCommand } from './plan.js';
@@ -35,25 +36,14 @@ function resolveIssueFromPrBody(body: string): string | undefined {
 }
 
 function resolvePrForIssue(issueNumber: number): string {
-  const prs = ghJson<{ number: number }[]>([
-    'pr',
-    'list',
-    '--search',
-    String(issueNumber),
-    '--state',
-    'open',
-    '--json',
-    'number',
-  ]);
-
-  if (!Array.isArray(prs) || prs.length === 0) {
+  const pr = tryResolvePrForIssue(issueNumber);
+  if (!pr) {
     console.error(
       `No open PR found for issue #${issueNumber}. Run \`shipper pr open ${issueNumber}\` first.`
     );
     process.exit(1);
   }
-
-  return String(prs[0]!.number);
+  return pr;
 }
 
 export function nextCommand(ref: string) {
