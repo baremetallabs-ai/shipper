@@ -3,6 +3,7 @@ import { runPreflight } from './lib/prerequisites.js';
 import { loadSettings } from './lib/settings.js';
 import { initCommand } from './commands/init.js';
 import { newCommand } from './commands/new.js';
+import { adoptCommand } from './commands/adopt.js';
 import { groomCommand } from './commands/groom.js';
 import { designCommand } from './commands/design.js';
 import { planCommand } from './commands/plan.js';
@@ -42,6 +43,14 @@ program
   .argument('<pitch...>', 'your idea for the new issue')
   .action((pitch: string[]) => {
     newCommand(pitch);
+  });
+
+program
+  .command('adopt')
+  .description('Adopt an existing issue into the shipper workflow')
+  .argument('<issue>', 'issue number')
+  .action((issue: string) => {
+    adoptCommand(issue);
   });
 
 program
