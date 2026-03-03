@@ -2,6 +2,8 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import { runAdvisoryHook } from './hooks.js';
+import { getSettings } from './settings.js';
 
 const WORKTREES_DIR = path.join(homedir(), '.shipper', 'worktrees');
 
@@ -15,6 +17,7 @@ export interface CreateWorktreeOpts {
   repoRoot: string;
   branch: string;
   createBranch: boolean;
+  issueNumber?: string;
 }
 
 export function createWorktree(opts: CreateWorktreeOpts): string {
@@ -74,8 +77,22 @@ export function removeWorktree(repoRoot: string, wtPath: string): void {
 
 export function withWorktree<T>(opts: CreateWorktreeOpts, fn: (wtPath: string) => T): T {
   const wtPath = createWorktree(opts);
+  const hookEnv = {
+    SHIPPER_WORKTREE_PATH: wtPath,
+    SHIPPER_ISSUE_NUMBER: opts.issueNumber ?? '',
+    SHIPPER_BRANCH_NAME: opts.branch,
+  };
+
+  const { worktreeSetup, worktreeTeardown } = getSettings().hooks;
+
+  if (worktreeSetup) {
+    runAdvisoryHook('Worktree setup', worktreeSetup, hookEnv, wtPath);
+  }
 
   const cleanup = () => {
+    if (worktreeTeardown) {
+      runAdvisoryHook('Worktree teardown', worktreeTeardown, hookEnv, wtPath);
+    }
     removeWorktree(opts.repoRoot, wtPath);
   };
 

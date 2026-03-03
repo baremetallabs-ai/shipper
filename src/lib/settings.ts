@@ -6,6 +6,8 @@ export interface Settings {
   lockTimeoutMinutes: number;
   hooks: {
     postMerge?: string;
+    worktreeSetup?: string;
+    worktreeTeardown?: string;
   };
 }
 
@@ -19,6 +21,9 @@ export const SETTING_DESCRIPTIONS: Record<string, string> = {
   prReviewWaitMinutes: 'minimum wait (minutes) before PR review remediation',
   lockTimeoutMinutes: 'stale lock timeout (minutes) before auto-clearing shipper:locked',
   'hooks.postMerge': 'shell command to run after a PR is merged',
+  'hooks.worktreeSetup':
+    'shell command to run after a worktree is created (before the agent starts)',
+  'hooks.worktreeTeardown': 'shell command to run before a worktree is removed',
 };
 
 let settings: Settings | undefined;
