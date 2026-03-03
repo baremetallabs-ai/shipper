@@ -60,7 +60,7 @@ Skip the question phase entirely. Instead:
 
 ### Phase 2B: Complex issue — targeted questions
 
-Generate targeted questions to close every open product decision. Ask as many questions as needed — this may be as few as 3 or as many as 15, depending on the issue's complexity. Use the following categories as guidance:
+Generate targeted questions to close every open product decision. Ask as many questions as needed to resolve all ambiguities — the number will vary based on the issue's complexity. Use the following categories as guidance:
 
 **Scope & Requirements**
 
@@ -109,7 +109,7 @@ Rewrite the issue body to include:
 2. **Requirements** — numbered list of every functional requirement as specific, unambiguous expected behavior
 3. **Acceptance Criteria** — checklist of testable conditions (Given/When/Then or simple checkboxes). Every requirement must have at least one corresponding criterion.
 4. **Out of Scope** — explicitly excluded or deferred
-5. **Open Questions (if any)** — only technical/design-level questions for engineering
+5. **Open Questions** — technical/design-level questions for engineering (write "None" if there are no open questions)
 
 #### Artifact 2 — Grooming summary comment
 
