@@ -61,9 +61,9 @@ export function checkGitHubRemote(): CheckResult {
 export function checkShipperDir(): CheckResult {
   const shipperDir = path.resolve('.shipper', 'prompts');
   if (existsSync(shipperDir)) {
-    return { ok: true, message: '.shipper directory exists' };
+    return { ok: true, message: '.shipper/prompts directory exists' };
   }
-  return { ok: false, message: '.shipper directory not found. Run: shipper init' };
+  return { ok: false, message: '.shipper/prompts directory not found. Run: shipper init' };
 }
 
 const REQUIRED_LABELS = [
@@ -83,7 +83,7 @@ export function checkLabels(): CheckResult {
       ['label', 'list', '--search', 'shipper:', '--json', 'name', '-q', '.[].name'],
       { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
     ).trim();
-    const existing = output ? output.split('\n') : [];
+    const existing = output ? output.split(/\r?\n/) : [];
     const missing = REQUIRED_LABELS.filter((l) => !existing.includes(l));
     if (missing.length === 0) {
       return { ok: true, message: 'All required labels exist' };
@@ -116,9 +116,6 @@ export function runPreflight(): void {
     }
   }
 
-  // Auto-create .shipper/tmp if missing (cheap, idempotent)
-  mkdirSync(path.resolve('.shipper', 'tmp'), { recursive: true });
-
   if (failures.length > 0) {
     for (const msg of failures) {
       console.error(`  ✗ ${msg}`);
@@ -126,4 +123,7 @@ export function runPreflight(): void {
     console.error('\nRun `shipper init` to fix these issues.');
     process.exit(1);
   }
+
+  // Auto-create .shipper/tmp if missing (cheap, idempotent)
+  mkdirSync(path.resolve('.shipper', 'tmp'), { recursive: true });
 }
