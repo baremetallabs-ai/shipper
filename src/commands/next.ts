@@ -36,34 +36,25 @@ function resolveIssueFromPrBody(body: string): string | undefined {
 }
 
 function resolvePrForIssue(issueNumber: number): string {
-  const output = execFileSync(
-    'gh',
-    [
-      'pr',
-      'list',
-      '--search',
-      String(issueNumber),
-      '--state',
-      'open',
-      '--json',
-      'number',
-      '-q',
-      '.[0].number',
-    ],
-    {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }
-  ).trim();
+  const prs = ghJson<{ number: number }[]>([
+    'pr',
+    'list',
+    '--search',
+    String(issueNumber),
+    '--state',
+    'open',
+    '--json',
+    'number',
+  ]);
 
-  if (!output) {
+  if (!Array.isArray(prs) || prs.length === 0) {
     console.error(
       `No open PR found for issue #${issueNumber}. Run \`shipper pr open ${issueNumber}\` first.`
     );
     process.exit(1);
   }
 
-  return output;
+  return String(prs[0]!.number);
 }
 
 export function nextCommand(ref: string) {
@@ -106,7 +97,13 @@ export function nextCommand(ref: string) {
       process.exit(1);
     }
 
-    const issueData = ghJson<IssueData>(['issue', 'view', linkedIssue, '--json', 'number,labels']);
+    let issueData: IssueData;
+    try {
+      issueData = ghJson<IssueData>(['issue', 'view', linkedIssue, '--json', 'number,labels']);
+    } catch {
+      console.error(`Could not find issue #${linkedIssue} linked from PR #${prData.number}.`);
+      process.exit(1);
+    }
     issueNumber = issueData.number;
     shipperLabels = issueData.labels
       .map((l) => l.name)
