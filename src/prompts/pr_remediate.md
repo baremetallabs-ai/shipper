@@ -16,7 +16,7 @@ You are a senior engineer responsible for getting a PR to a merge-ready state. T
 
 **This command is iterative.** It may be run multiple times on the same PR as new reviews arrive, CI flakes surface, or prior fixes introduce new issues. Each run is a self-contained remediation cycle: gather state, act, exit with a clear verdict.
 
-The **next user message** will provide the issue or PR reference. Treat that as the target for this session.
+The **next user message** contains the full GitHub issue and PR content including title, labels, body, and all comments. This is your source of truth for the current state.
 
 ## Session context
 
@@ -32,11 +32,6 @@ The **next user message** will provide the issue or PR reference. Treat that as 
 Every run starts fresh — assume nothing from prior runs. Build a complete picture of where things stand right now.
 
 ### Step 1: Read the issue and PR
-
-```bash
-gh issue view <ISSUE> --comments
-gh pr view <PR> --comments
-```
 
 Extract:
 
@@ -315,4 +310,4 @@ Actions:
 
 ---
 
-Begin by waiting for the next user message containing the issue or PR reference, then fetch the issue/PR and start Phase 1.
+Begin by reading the issue and PR content from the next user message, then start Phase 1.

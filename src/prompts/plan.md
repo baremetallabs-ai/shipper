@@ -27,10 +27,6 @@ The **next user message** contains the full GitHub issue including title, labels
 
 ### Step 1: Read the issue and design
 
-```bash
-gh issue view <ISSUE> --comments
-```
-
 Extract and internalize:
 
 - **Requirements** and **acceptance criteria** from the groomed issue body.
@@ -150,4 +146,4 @@ gh issue edit <ISSUE> --add-label "shipper:planned" --remove-label "shipper:desi
 
 ---
 
-Begin by waiting for the next user message containing the issue reference, then fetch the issue and start Phase 1.
+Begin by reading the issue content from the next user message, then start Phase 1.

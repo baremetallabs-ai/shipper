@@ -31,10 +31,6 @@ If the issue already has the `shipper:pr-open` label, check for an existing PR: 
 
 ### Step 1: Read the issue
 
-```bash
-gh issue view <ISSUE> --comments
-```
-
 Extract whatever context is available:
 
 - **Requirements** and **acceptance criteria** from the issue body (if present).

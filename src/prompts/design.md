@@ -55,10 +55,6 @@ Issue authors report symptoms AND explanations. Both must be verified independen
 
 ### Step 1: Read the Issue
 
-```bash
-gh issue view <ISSUE> --comments
-```
-
 First pass: What is the claim?
 Second pass: What would have to be true for this claim to matter?
 Third pass: What decisions are still unmade?

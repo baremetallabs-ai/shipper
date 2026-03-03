@@ -28,10 +28,6 @@ The **next user message** contains the full GitHub issue including title, labels
 
 ### Step 1: Read the issue, design, and plan
 
-```bash
-gh issue view <ISSUE> --comments
-```
-
 Extract and internalize:
 
 - **Requirements** and **acceptance criteria** from the issue body.
