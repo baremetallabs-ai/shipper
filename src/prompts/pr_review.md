@@ -227,8 +227,8 @@ Write a brief top-level review body:
 
 **Self-authored PR fallback:** If Step 1b determined the event must be changed due to self-authorship, modify the verdict line in the summary:
 
-- For APPROVE fallback: `**Verdict: APPROVE** (submitted as COMMENT — GitHub does not allow approving your own PR)`
-- For REQUEST_CHANGES fallback: `**Verdict: REQUEST CHANGES** (submitted as COMMENT — GitHub does not allow requesting changes on your own PR)`
+- For APPROVE fallback: `**Verdict: APPROVE** (submitted as COMMENT — GitHub does not allow authors to approve their own PRs)`
+- For REQUEST_CHANGES fallback: `**Verdict: REQUEST CHANGES** (submitted as COMMENT — GitHub does not allow authors to request changes on their own PRs)`
 
 When the reviewer is NOT the PR author, the verdict line remains unchanged from the template above.
 
