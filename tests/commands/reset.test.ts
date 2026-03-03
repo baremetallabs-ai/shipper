@@ -40,11 +40,7 @@ function mockIssueView(state: string, labels: string[]) {
   });
 }
 
-function setupExecMock(overrides?: {
-  issueJson?: string;
-  commentIds?: string;
-  prJson?: string;
-}) {
+function setupExecMock(overrides?: { issueJson?: string; commentIds?: string; prJson?: string }) {
   const issueJson = overrides?.issueJson ?? mockIssueView('OPEN', ['shipper:groomed']);
   const commentIds = overrides?.commentIds ?? '101\n102\n';
   const prJson = overrides?.prJson ?? '[]';
