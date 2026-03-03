@@ -51,11 +51,11 @@ gh pr view <PR> --json mergeStateStatus --jq '.mergeStateStatus'
 - If the result is **not** `DIRTY`, proceed to Step 3 (CI check) — no action needed.
 - If the result is `DIRTY`, the PR has merge conflicts that will prevent CI from running. Resolve them before proceeding:
 
-1. Fetch and rebase onto main:
+1. Fetch and rebase onto the PR's base branch:
 
 ```bash
 git fetch origin
-git rebase origin/main
+git rebase origin/<base_branch>
 ```
 
 2. If conflicts arise, resolve them carefully. The implementation should take priority unless the conflict reveals a fundamental incompatibility.
@@ -68,9 +68,15 @@ git push --force-with-lease
 
 If conflicts cannot be resolved:
 
-1. Post a comment on the issue explaining that the branch could not be rebased onto main and the conflict details.
-2. Roll back labels: `gh issue edit <ISSUE> --add-label "shipper:planned" --remove-label "shipper:pr-reviewed"`
-3. Recommend the user run `shipper implement` again, then stop.
+1. Abort the in-progress rebase and restore a clean working tree:
+
+```bash
+git rebase --abort || true
+```
+
+2. Post a comment on the issue explaining that the branch could not be rebased onto the PR's base branch and the conflict details.
+3. Roll back labels: `gh issue edit <ISSUE> --add-label "shipper:planned" --remove-label "shipper:pr-reviewed"`
+4. Recommend the user run `shipper implement` again, then stop.
 
 ### Step 3: Check CI status
 
