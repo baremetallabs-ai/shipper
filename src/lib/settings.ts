@@ -1,0 +1,49 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+
+export interface Settings {
+  prReviewWaitMinutes: number;
+}
+
+export const DEFAULTS: Settings = {
+  prReviewWaitMinutes: 30,
+};
+
+let settings: Settings | undefined;
+
+export function loadSettings(): void {
+  const basePath = path.resolve('.shipper', 'settings.json');
+  const localPath = path.resolve('.shipper', 'settings.local.json');
+
+  let base: Partial<Settings> = {};
+  let local: Partial<Settings> = {};
+
+  base = readSettingsFile(basePath);
+  local = readSettingsFile(localPath);
+
+  settings = { ...DEFAULTS, ...base, ...local };
+}
+
+export function getSettings(): Settings {
+  return settings ?? { ...DEFAULTS };
+}
+
+function readSettingsFile(filepath: string): Partial<Settings> {
+  let raw: string;
+  try {
+    raw = readFileSync(filepath, 'utf-8');
+  } catch (err: unknown) {
+    if (err instanceof Error && 'code' in err && (err as { code: string }).code === 'ENOENT') {
+      return {};
+    }
+    throw err;
+  }
+
+  try {
+    return JSON.parse(raw) as Partial<Settings>;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`Error: Malformed JSON in ${filepath}: ${message}`);
+    process.exit(1);
+  }
+}

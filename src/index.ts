@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { runPreflight } from './lib/prerequisites.js';
+import { loadSettings } from './lib/settings.js';
 import { initCommand } from './commands/init.js';
 import { newCommand } from './commands/new.js';
 import { groomCommand } from './commands/groom.js';
@@ -22,6 +23,7 @@ program
 
 program.hook('preAction', (_thisCommand, actionCommand) => {
   if (actionCommand.name() === 'init' || actionCommand.name() === 'merge') return;
+  loadSettings();
   runPreflight();
 });
 
