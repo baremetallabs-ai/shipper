@@ -6,6 +6,7 @@ import { groomCommand } from './commands/groom.js';
 import { designCommand } from './commands/design.js';
 import { planCommand } from './commands/plan.js';
 import { nextCommand } from './commands/next.js';
+import { shipCommand } from './commands/ship.js';
 import { implementCommand } from './commands/implement.js';
 import { prReviewCommand } from './commands/pr-review.js';
 import { prOpenCommand } from './commands/pr-open.js';
@@ -45,6 +46,14 @@ program
   .argument('<ref>', 'issue or PR number/URL')
   .action((ref: string) => {
     nextCommand(ref);
+  });
+
+program
+  .command('ship')
+  .description('Run the full workflow end-to-end')
+  .argument('<issue>', 'issue number')
+  .action((issue: string) => {
+    shipCommand(issue);
   });
 
 program
