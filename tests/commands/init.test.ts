@@ -25,6 +25,10 @@ vi.mock('../../src/lib/prompts.js', () => ({
   prompts: {},
 }));
 
+vi.mock('../../src/templates/readme.md', () => ({
+  default: '# Test README content',
+}));
+
 vi.mock('../../src/lib/prerequisites.js', () => ({
   runPrereqChecks: () => true,
   checkGitRepo: vi.fn(),
@@ -51,6 +55,17 @@ beforeEach(() => {
 });
 
 const { initCommand } = await import('../../src/commands/init.js');
+
+describe('initCommand README', () => {
+  it('writes .shipper/README.md', () => {
+    initCommand();
+    const readmeCall = writeFileSyncMock.mock.calls.find(
+      (call: unknown[]) => call[0] === path.resolve('.shipper', 'README.md')
+    );
+    expect(readmeCall).toBeDefined();
+    expect(readmeCall![1]).toBe('# Test README content');
+  });
+});
 
 describe('initCommand settings', () => {
   it('writes defaults on fresh init', () => {

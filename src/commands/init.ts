@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { prompts } from '../lib/prompts.js';
 import { DEFAULTS, SETTING_DESCRIPTIONS } from '../lib/settings.js';
+import readmeContent from '../templates/readme.md';
 import {
   runPrereqChecks,
   checkGitRepo,
@@ -81,6 +82,11 @@ export function initCommand() {
     promptCount++;
   }
   console.log(`Wrote ${promptCount} prompt files to .shipper/prompts/`);
+
+  // Write README
+  const readmePath = path.resolve('.shipper', 'README.md');
+  writeFileSync(readmePath, readmeContent);
+  console.log('Wrote .shipper/README.md');
 
   // Ensure labels exist
   let labelCount = 0;
