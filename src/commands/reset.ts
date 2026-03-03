@@ -137,34 +137,37 @@ function printDryRun(issueNum: number, scan: ArtifactScan): void {
 function executeReset(issueNum: number, scan: ArtifactScan, nwo: string): void {
   const actions: string[] = [];
 
-  // 1. Close PRs
+  // 1. Close PRs and track which ones succeeded for branch deletion
+  const closedPrBranches = new Set<string>();
   for (const pr of scan.prs) {
     try {
       execFileSync('gh', ['pr', 'close', String(pr.number)], {
         stdio: ['ignore', 'ignore', 'ignore'],
       });
+      closedPrBranches.add(pr.headRefName);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`  Warning: Failed to close PR #${pr.number}: ${msg}`);
+      console.warn(`  Warning: Failed to close PR #${pr.number}: ${msg}`);
     }
   }
   if (scan.prs.length > 0) {
     actions.push(`Closed PRs: ${scan.prs.map((pr) => `#${pr.number}`).join(', ')}`);
   }
 
-  // 2. Delete branches
-  for (const branch of scan.branchesToDelete) {
+  // 2. Delete branches (only for PRs that were successfully closed)
+  const deletableBranches = scan.branchesToDelete.filter((b) => closedPrBranches.has(b));
+  for (const branch of deletableBranches) {
     try {
       execFileSync('git', ['push', 'origin', '--delete', branch], {
         stdio: ['ignore', 'ignore', 'ignore'],
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`  Warning: Failed to delete branch ${branch}: ${msg}`);
+      console.warn(`  Warning: Failed to delete branch ${branch}: ${msg}`);
     }
   }
-  if (scan.branchesToDelete.length > 0) {
-    actions.push(`Deleted branches: ${scan.branchesToDelete.join(', ')}`);
+  if (deletableBranches.length > 0) {
+    actions.push(`Deleted branches: ${deletableBranches.join(', ')}`);
   }
 
   // 3. Delete comments
@@ -175,7 +178,7 @@ function executeReset(issueNum: number, scan: ArtifactScan, nwo: string): void {
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`  Warning: Failed to delete comment ${id}: ${msg}`);
+      console.warn(`  Warning: Failed to delete comment ${id}: ${msg}`);
     }
   }
   if (scan.commentIds.length > 0) {
@@ -195,7 +198,7 @@ function executeReset(issueNum: number, scan: ArtifactScan, nwo: string): void {
       execFileSync('gh', args, { stdio: ['ignore', 'ignore', 'ignore'] });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`  Warning: Failed to update labels: ${msg}`);
+      console.warn(`  Warning: Failed to update labels: ${msg}`);
     }
   }
   if (scan.labelsToRemove.length > 0) {
@@ -217,7 +220,7 @@ function executeReset(issueNum: number, scan: ArtifactScan, nwo: string): void {
     actions.push('Posted reset notice comment');
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`  Warning: Failed to post reset comment: ${msg}`);
+    console.warn(`  Warning: Failed to post reset comment: ${msg}`);
   }
 
   // Print summary

@@ -5,7 +5,8 @@ export function confirm(message: string): Promise<boolean> {
   return new Promise((resolve) => {
     rl.question(message, (answer) => {
       rl.close();
-      resolve(answer === 'y' || answer === 'Y');
+      const trimmed = answer.trim();
+      resolve(trimmed === 'y' || trimmed === 'Y');
     });
   });
 }
