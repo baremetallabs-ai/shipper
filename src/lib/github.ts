@@ -21,7 +21,7 @@ interface ReviewComment {
   author: { login: string };
   body: string;
   state: string;
-  createdAt: string;
+  submittedAt: string;
 }
 
 interface PRData {
@@ -117,7 +117,7 @@ export function formatPR(data: PRData): string {
     lines.push('', '## Reviews', '');
     for (const r of data.reviews) {
       lines.push(
-        `### @${r.author.login} — ${r.state} — ${r.createdAt}`,
+        `### @${r.author.login} — ${r.state} — ${r.submittedAt}`,
         '',
         r.body || '*No review body.*',
         ''
