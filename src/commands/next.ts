@@ -67,15 +67,18 @@ export function nextCommand(ref: string) {
   const cleanRef = ref.replace(/^#/, '');
 
   let issueNumber: number;
+  let isBlocked = false;
   let shipperLabels: string[];
 
   // Try as issue first
   try {
     const issueData = ghJson<IssueData>(['issue', 'view', cleanRef, '--json', 'number,labels']);
     issueNumber = issueData.number;
-    shipperLabels = issueData.labels
+    const allLabels = issueData.labels
       .map((l) => l.name)
       .filter((name) => name.startsWith('shipper:'));
+    isBlocked = allLabels.includes('shipper:blocked');
+    shipperLabels = allLabels.filter((name) => name !== 'shipper:blocked');
   } catch {
     // Not an issue — try as PR
     let prData: PrData;
@@ -102,9 +105,11 @@ export function nextCommand(ref: string) {
       process.exit(1);
     }
     issueNumber = issueData.number;
-    shipperLabels = issueData.labels
+    const allLabels = issueData.labels
       .map((l) => l.name)
       .filter((name) => name.startsWith('shipper:'));
+    isBlocked = allLabels.includes('shipper:blocked');
+    shipperLabels = allLabels.filter((name) => name !== 'shipper:blocked');
   }
 
   // Validate labels
@@ -118,6 +123,13 @@ export function nextCommand(ref: string) {
   if (shipperLabels.length > 1) {
     console.error(
       `Multiple shipper labels found on issue #${issueNumber}. Please resolve manually.`
+    );
+    process.exit(1);
+  }
+
+  if (isBlocked) {
+    console.error(
+      `Issue #${issueNumber} is blocked. Run 'shipper unblock ${issueNumber}' to check if it can proceed.`
     );
     process.exit(1);
   }

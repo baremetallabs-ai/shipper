@@ -20,6 +20,10 @@ describe('STAGE_NAME', () => {
     expect(STAGE_NAME).not.toHaveProperty('shipper:ready');
   });
 
+  it('does not include shipper:blocked (orthogonal modifier, not a stage)', () => {
+    expect(STAGE_NAME).not.toHaveProperty('shipper:blocked');
+  });
+
   it('maps each label to a non-empty stage name', () => {
     for (const [label, stage] of Object.entries(STAGE_NAME)) {
       expect(stage, `stage name for ${label}`).toBeTruthy();

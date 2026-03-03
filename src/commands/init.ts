@@ -20,6 +20,11 @@ const LABELS = [
   { name: 'shipper:pr-open', color: 'F9D0C4', description: 'PR opened' },
   { name: 'shipper:pr-reviewed', color: 'E6B8AF', description: 'PR reviewed, pending remediation' },
   { name: 'shipper:ready', color: '0E8A16', description: 'Ready for final review and merge' },
+  {
+    name: 'shipper:blocked',
+    color: 'E11D48',
+    description: 'Blocked by a dependency — run shipper unblock',
+  },
 ];
 
 export function initCommand() {

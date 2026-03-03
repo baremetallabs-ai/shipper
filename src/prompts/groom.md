@@ -120,6 +120,7 @@ Write a comment suitable for posting on the GitHub Issue that documents:
    - Single PR vs split into multiple issues
    - Reasoning
    - If split: proposed issues with title + one-line scope each
+   - If the sibling issues have a dependency order (one must be completed before another can proceed), identify which issues are blocked and what condition unblocks them.
    - The decomposition recommendation is required for both simple and complex issues.
 
 ---
@@ -149,6 +150,9 @@ If your decomposition recommendation includes additional issues, you must create
 1. For each new issue, write its body to its own file under `./.shipper/tmp/` (e.g. `split_issue-<number>-1.md`, `split_issue-<number>-2.md`), where `<number>` is the parent issue number.
 2. Create each new issue using `gh issue create --title "<TITLE>" --body-file <FILE> --label "shipper:new"`.
    - These new issues must start in the **new** status (not groomed).
+   - If this issue depends on another sibling being completed first, also add `shipper:blocked`: `--label "shipper:new" --label "shipper:blocked"`.
+   - For each blocked issue, post a comment starting with `## Blocked` that explains the unblock condition in natural language. Example: `## Blocked\n\nBlocked until #35 is merged — reset's branch cleanup depends on the shipper/ prefix convention being in place.`
+   - The original issue can also receive `shipper:blocked` if grooming determines a sibling should go first. In that case, add the label and post the blocking-condition comment on the original issue too.
 3. After creating them, include the created URLs in your final response, and (optionally) add them as links in the original issue comment if appropriate.
 
 ---

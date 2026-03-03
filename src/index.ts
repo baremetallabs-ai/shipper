@@ -14,6 +14,7 @@ import { prOpenCommand } from './commands/pr-open.js';
 import { prRemediateCommand } from './commands/pr-remediate.js';
 import { mergeCommand } from './commands/merge.js';
 import { resetCommand } from './commands/reset.js';
+import { unblockCommand } from './commands/unblock.js';
 
 const program = new Command();
 
@@ -99,6 +100,14 @@ program
   .option('-f, --force', 'skip confirmation prompt')
   .action((issue: string, opts: { force: boolean }) => {
     resetCommand(issue, opts);
+  });
+
+program
+  .command('unblock')
+  .description('Check if a blocked issue can proceed')
+  .argument('<issue>', 'issue number')
+  .action((issue: string) => {
+    unblockCommand(issue);
   });
 
 const pr = program.command('pr').description('Pull request commands');

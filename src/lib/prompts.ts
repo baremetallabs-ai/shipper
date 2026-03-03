@@ -6,6 +6,7 @@ import implementPrompt from '../prompts/implement.md';
 import prOpenPrompt from '../prompts/pr_open.md';
 import prReviewPrompt from '../prompts/pr_review.md';
 import prRemediatePrompt from '../prompts/pr_remediate.md';
+import unblockPrompt from '../prompts/unblock.md';
 
 export const prompts: Record<string, string> = {
   'new.md': newPrompt,
@@ -16,4 +17,5 @@ export const prompts: Record<string, string> = {
   'pr_open.md': prOpenPrompt,
   'pr_review.md': prReviewPrompt,
   'pr_remediate.md': prRemediatePrompt,
+  'unblock.md': unblockPrompt,
 };
