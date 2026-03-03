@@ -44,17 +44,17 @@ describe('loadSettings', () => {
 
   it('loads base settings file', async () => {
     readFileSyncMock.mockImplementation((p: string) => {
-      if (p === settingsPath) return '{"prReviewWaitMinutes": 15}';
+      if (p === settingsPath) return '{"prReviewWaitMinutes": 20}';
       throw enoent(p);
     });
     const { loadSettings, getSettings } = await loadModule();
     loadSettings();
-    expect(getSettings().prReviewWaitMinutes).toBe(15);
+    expect(getSettings().prReviewWaitMinutes).toBe(20);
   });
 
   it('local overrides base', async () => {
     readFileSyncMock.mockImplementation((p: string) => {
-      if (p === settingsPath) return '{"prReviewWaitMinutes": 15}';
+      if (p === settingsPath) return '{"prReviewWaitMinutes": 20}';
       if (p === localPath) return '{"prReviewWaitMinutes": 5}';
       throw enoent(p);
     });
@@ -88,7 +88,7 @@ describe('loadSettings', () => {
 
   it('exits with error on malformed local JSON', async () => {
     readFileSyncMock.mockImplementation((p: string) => {
-      if (p === settingsPath) return '{"prReviewWaitMinutes": 15}';
+      if (p === settingsPath) return '{"prReviewWaitMinutes": 20}';
       if (p === localPath) return 'not json';
       throw enoent(p);
     });
