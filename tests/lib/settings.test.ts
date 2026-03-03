@@ -39,7 +39,7 @@ describe('loadSettings', () => {
     });
     const { loadSettings, getSettings } = await loadModule();
     loadSettings();
-    expect(getSettings()).toEqual({ prReviewWaitMinutes: 30 });
+    expect(getSettings()).toEqual({ prReviewWaitMinutes: 15 });
   });
 
   it('loads base settings file', async () => {
@@ -88,7 +88,7 @@ describe('loadSettings', () => {
 
   it('exits with error on malformed local JSON', async () => {
     readFileSyncMock.mockImplementation((p: string) => {
-      if (p === settingsPath) return '{"prReviewWaitMinutes": 30}';
+      if (p === settingsPath) return '{"prReviewWaitMinutes": 15}';
       if (p === localPath) return 'not json';
       throw enoent(p);
     });
@@ -104,6 +104,6 @@ describe('loadSettings', () => {
 describe('getSettings', () => {
   it('returns defaults when loadSettings has not been called', async () => {
     const { getSettings } = await loadModule();
-    expect(getSettings()).toEqual({ prReviewWaitMinutes: 30 });
+    expect(getSettings()).toEqual({ prReviewWaitMinutes: 15 });
   });
 });
