@@ -34,7 +34,7 @@ describe('generateBranchName', () => {
     vi.mocked(execFileSync).mockReturnValueOnce('a'.repeat(100) + '\n');
 
     const result = generateBranchName('7');
-    expect(result.length).toBeLessThanOrEqual(61); // "shipper/7-" + 50 chars max
+    expect(result.length).toBeLessThanOrEqual(60); // "shipper/7-" (10) + 50-char slug max
   });
 
   it('falls back to implement when title fetch fails', async () => {
