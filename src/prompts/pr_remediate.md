@@ -1,8 +1,22 @@
 ---
 cmd: claude
 args:
+  - -p
   - --model
   - opus
+  - --permission-mode
+  - acceptEdits
+  - --settings
+  - {
+      'permissions': { 'allow': ['Bash(gh *)'] },
+      'sandbox':
+        { 'enabled': true, 'autoAllowBashIfSandboxed': true, 'excludedCommands': ['gh *'] },
+      'network':
+        {
+          'allowedDomains':
+            ['github.com', 'api.github.com', 'uploads.github.com', 'registry.npmjs.org'],
+        },
+    }
 append-issue: true
 append-pr: true
 ---

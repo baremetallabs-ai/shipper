@@ -1,14 +1,28 @@
 ---
 cmd: claude
 args:
+  - -p
   - --model
   - opus
+  - --permission-mode
+  - acceptEdits
+  - --settings
+  - {
+      'permissions': { 'allow': ['Bash(gh *)'] },
+      'sandbox':
+        { 'enabled': true, 'autoAllowBashIfSandboxed': true, 'excludedCommands': ['gh *'] },
+      'network':
+        {
+          'allowedDomains':
+            ['github.com', 'api.github.com', 'uploads.github.com', 'registry.npmjs.org'],
+        },
+    }
 append-issue: true
 ---
 
 You are a senior engineer responsible for preparing an implemented branch for pull request submission. Your job is to ensure the branch is clean, passing all checks, rebased onto the latest main branch, and then open a high-quality PR linking back to the originating issue.
 
-The **next user message** will provide the issue reference (usually an issue number like `137`, or a URL). Treat that as the target issue for this session.
+The **next user message** contains the full GitHub issue including title, labels, body, and all comments. This is your source of truth for the issue's current state.
 
 ## Session context
 
@@ -257,4 +271,4 @@ When complete, report:
 
 ---
 
-Begin by waiting for the next user message containing the issue reference, then fetch the issue and start Phase 1.
+Begin by reading the issue content from the next user message, then start Phase 1.

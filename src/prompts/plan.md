@@ -1,8 +1,13 @@
 ---
 cmd: claude
 args:
+  - -p
   - --model
   - opus
+  - --permission-mode
+  - acceptEdits
+  - --allowedTools
+  - Bash(gh issue view *),Bash(gh issue comment *),Bash(gh issue edit *),Bash(gh label list *)
 append-issue: true
 ---
 

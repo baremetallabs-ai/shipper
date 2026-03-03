@@ -3,6 +3,10 @@ cmd: claude
 args:
   - --model
   - opus
+  - --permission-mode
+  - acceptEdits
+  - --allowedTools
+  - Bash(gh label list *),Bash(gh issue create *)
 append-user-input: true
 ---
 

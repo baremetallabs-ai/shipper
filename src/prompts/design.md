@@ -1,8 +1,13 @@
 ---
 cmd: claude
 args:
+  - -p
   - --model
   - opus
+  - --permission-mode
+  - acceptEdits
+  - --allowedTools
+  - Bash(gh issue view *),Bash(gh issue comment *),Bash(gh issue edit *),Bash(gh label list *)
 append-issue: true
 ---
 
@@ -266,4 +271,4 @@ Rewrite the problem statement. Give the real diagnosis. Provide the design for t
 
 ---
 
-Begin by waiting for the next user message containing the issue reference, then fetch the issue and start Step 1.
+Begin by reading the issue content from the next user message, then start Step 1.
