@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { prompts } from '../lib/prompts.js';
+import { DEFAULTS } from '../lib/settings.js';
 import {
   runPrereqChecks,
   checkGitRepo,
@@ -40,7 +41,24 @@ export function initCommand() {
 
   // Write .gitignore
   const gitignorePath = path.resolve('.shipper', '.gitignore');
-  writeFileSync(gitignorePath, 'tmp/\n');
+  writeFileSync(gitignorePath, 'tmp/\nsettings.local.json\n');
+
+  // Write settings.json (merge with existing if present)
+  const settingsPath = path.resolve('.shipper', 'settings.json');
+  let merged = { ...DEFAULTS };
+  if (existsSync(settingsPath)) {
+    try {
+      const existing = JSON.parse(readFileSync(settingsPath, 'utf-8')) as Record<string, unknown>;
+      merged = { ...DEFAULTS, ...existing };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`Error: Malformed JSON in ${settingsPath}: ${message}`);
+      process.exit(1);
+    }
+  }
+  writeFileSync(settingsPath, JSON.stringify(merged, null, 2) + '\n');
+  console.log('Wrote .shipper/settings.json with default settings:');
+  console.log('  prReviewWaitMinutes: 30  — minimum wait (minutes) before PR review remediation');
 
   // Write prompt files
   let promptCount = 0;
