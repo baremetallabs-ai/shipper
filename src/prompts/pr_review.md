@@ -59,9 +59,9 @@ If no open PR is found for the issue:
 1. If working from an issue reference in a shipper-managed repo (the issue has `shipper:` labels), post a comment on the issue: `gh issue comment <ISSUE> --body "Shipper review attempted but no open PR was found for this issue. Run \`shipper pr open\` to create one."`
 2. Tell the user no PR was found and stop.
 
-### Step 2: Review the issue context (if available)
+### Step 2: Review PR and issue context
 
-If issue content was provided in the session context (via `Closes #N` or similar in the PR body), review it.
+Review the full PR content provided in the user message. If associated issue content is also present (injected when the CLI has an issue reference), review it as well.
 
 Extract whatever is available:
 
