@@ -39,7 +39,7 @@ describe('loadSettings', () => {
     });
     const { loadSettings, getSettings } = await loadModule();
     loadSettings();
-    expect(getSettings()).toEqual({ prReviewWaitMinutes: 15, hooks: {} });
+    expect(getSettings()).toEqual({ prReviewWaitMinutes: 15, lockTimeoutMinutes: 30, hooks: {} });
   });
 
   it('loads base settings file', async () => {
@@ -104,7 +104,39 @@ describe('loadSettings', () => {
 describe('getSettings', () => {
   it('returns defaults when loadSettings has not been called', async () => {
     const { getSettings } = await loadModule();
-    expect(getSettings()).toEqual({ prReviewWaitMinutes: 15, hooks: {} });
+    expect(getSettings()).toEqual({ prReviewWaitMinutes: 15, lockTimeoutMinutes: 30, hooks: {} });
+  });
+});
+
+describe('lockTimeoutMinutes', () => {
+  it('defaults to 30', async () => {
+    readFileSyncMock.mockImplementation((p: string) => {
+      throw enoent(p);
+    });
+    const { loadSettings, getSettings } = await loadModule();
+    loadSettings();
+    expect(getSettings().lockTimeoutMinutes).toBe(30);
+  });
+
+  it('can be overridden via settings file', async () => {
+    readFileSyncMock.mockImplementation((p: string) => {
+      if (p === settingsPath) return '{"lockTimeoutMinutes": 60}';
+      throw enoent(p);
+    });
+    const { loadSettings, getSettings } = await loadModule();
+    loadSettings();
+    expect(getSettings().lockTimeoutMinutes).toBe(60);
+  });
+
+  it('can be overridden via local settings file', async () => {
+    readFileSyncMock.mockImplementation((p: string) => {
+      if (p === settingsPath) return '{"lockTimeoutMinutes": 60}';
+      if (p === localPath) return '{"lockTimeoutMinutes": 5}';
+      throw enoent(p);
+    });
+    const { loadSettings, getSettings } = await loadModule();
+    loadSettings();
+    expect(getSettings().lockTimeoutMinutes).toBe(5);
   });
 });
 

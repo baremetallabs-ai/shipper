@@ -1,5 +1,6 @@
 import { findBranchForIssue, getRepoRoot } from '../lib/branch.js';
 import { autoSelectIssue } from '../lib/github.js';
+import { withIssueLock } from '../lib/lock.js';
 import { withWorktree } from '../lib/worktree.js';
 import { runPrompt } from '../lib/prompt-runner.js';
 
@@ -14,12 +15,14 @@ export function prOpenCommand(issue?: string) {
     issue = String(selected.number);
   }
 
-  const repoRoot = getRepoRoot();
-  const branch = findBranchForIssue(issue);
+  withIssueLock(issue, () => {
+    const repoRoot = getRepoRoot();
+    const branch = findBranchForIssue(issue);
 
-  const code = withWorktree({ repoRoot, branch, createBranch: false }, (wtPath) => {
-    return runPrompt('pr_open', { issueRef: issue, cwd: wtPath });
+    const code = withWorktree({ repoRoot, branch, createBranch: false }, (wtPath) => {
+      return runPrompt('pr_open', { issueRef: issue, cwd: wtPath });
+    });
+
+    process.exit(code);
   });
-
-  process.exit(code);
 }

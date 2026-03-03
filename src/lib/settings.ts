@@ -3,6 +3,7 @@ import path from 'node:path';
 
 export interface Settings {
   prReviewWaitMinutes: number;
+  lockTimeoutMinutes: number;
   hooks: {
     postMerge?: string;
   };
@@ -10,11 +11,13 @@ export interface Settings {
 
 export const DEFAULTS: Settings = {
   prReviewWaitMinutes: 15,
+  lockTimeoutMinutes: 30,
   hooks: {},
 };
 
 export const SETTING_DESCRIPTIONS: Record<string, string> = {
   prReviewWaitMinutes: 'minimum wait (minutes) before PR review remediation',
+  lockTimeoutMinutes: 'stale lock timeout (minutes) before auto-clearing shipper:locked',
   'hooks.postMerge': 'shell command to run after a PR is merged',
 };
 

@@ -16,6 +16,7 @@ import { prRemediateCommand } from './commands/pr-remediate.js';
 import { mergeCommand } from './commands/merge.js';
 import { resetCommand } from './commands/reset.js';
 import { unblockCommand } from './commands/unblock.js';
+import { unlockCommand } from './commands/unlock.js';
 
 const program = new Command();
 
@@ -126,6 +127,14 @@ program
   .argument('<issue>', 'issue number')
   .action((issue: string) => {
     unblockCommand(issue);
+  });
+
+program
+  .command('unlock')
+  .description('Force-release the lock on an issue')
+  .argument('<issue>', 'issue number')
+  .action((issue: string) => {
+    unlockCommand(issue);
   });
 
 const pr = program.command('pr').description('Pull request commands');

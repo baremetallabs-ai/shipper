@@ -25,6 +25,7 @@ const LABELS = [
     color: 'E11D48',
     description: 'Blocked by a dependency — run shipper unblock',
   },
+  { name: 'shipper:locked', color: 'D93F0B', description: 'Locked by an active shipper instance' },
 ];
 
 export function initCommand() {

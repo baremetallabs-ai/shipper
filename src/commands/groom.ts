@@ -1,4 +1,5 @@
 import { autoSelectIssue } from '../lib/github.js';
+import { withIssueLock } from '../lib/lock.js';
 import { runPrompt } from '../lib/prompt-runner.js';
 
 export function groomCommand(issue?: string) {
@@ -12,5 +13,5 @@ export function groomCommand(issue?: string) {
     issue = String(selected.number);
   }
 
-  process.exit(runPrompt('groom', { issueRef: issue }));
+  process.exit(withIssueLock(issue, () => runPrompt('groom', { issueRef: issue })));
 }

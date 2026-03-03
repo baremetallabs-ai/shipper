@@ -225,4 +225,28 @@ describe('resetCommand', () => {
     expect((cleanupCalls[3]![1] as string[])[1]).toBe('edit'); // gh issue edit
     expect((cleanupCalls[4]![1] as string[])[1]).toBe('comment'); // gh issue comment
   });
+
+  it('removes shipper:locked label during reset', async () => {
+    setupExecMock({
+      issueJson: mockIssueView('OPEN', ['shipper:groomed', 'shipper:locked']),
+      commentIds: '',
+      prJson: '[]',
+    });
+
+    await resetCommand('18', { force: true });
+
+    const editCalls = mockExecFileSync.mock.calls.filter(
+      (call: unknown[]) =>
+        call[0] === 'gh' &&
+        (call[1] as string[])[0] === 'issue' &&
+        (call[1] as string[])[1] === 'edit'
+    );
+    expect(editCalls.length).toBe(1);
+    const editArgs = editCalls[0]![1] as string[];
+    expect(editArgs).toContain('--remove-label');
+    const removeLabelIdx = editArgs.indexOf('--remove-label');
+    const labelsStr = editArgs[removeLabelIdx + 1]!;
+    expect(labelsStr).toContain('shipper:locked');
+    expect(labelsStr).toContain('shipper:groomed');
+  });
 });

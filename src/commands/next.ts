@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { tryResolvePrForIssue } from '../lib/github.js';
+import { withIssueLock } from '../lib/lock.js';
 import { groomCommand } from './groom.js';
 import { designCommand } from './design.js';
 import { planCommand } from './plan.js';
@@ -68,7 +69,9 @@ export function nextCommand(ref: string) {
       .map((l) => l.name)
       .filter((name) => name.startsWith('shipper:'));
     isBlocked = allLabels.includes('shipper:blocked');
-    shipperLabels = allLabels.filter((name) => name !== 'shipper:blocked');
+    shipperLabels = allLabels.filter(
+      (name) => name !== 'shipper:blocked' && name !== 'shipper:locked'
+    );
   } catch {
     // Not an issue — try as PR
     let prData: PrData;
@@ -99,7 +102,9 @@ export function nextCommand(ref: string) {
       .map((l) => l.name)
       .filter((name) => name.startsWith('shipper:'));
     isBlocked = allLabels.includes('shipper:blocked');
-    shipperLabels = allLabels.filter((name) => name !== 'shipper:blocked');
+    shipperLabels = allLabels.filter(
+      (name) => name !== 'shipper:blocked' && name !== 'shipper:locked'
+    );
   }
 
   // Validate labels
@@ -127,45 +132,47 @@ export function nextCommand(ref: string) {
   const label = shipperLabels[0]!;
   const issueStr = String(issueNumber);
 
-  // Dispatch
-  switch (label) {
-    case 'shipper:new':
-      console.log(`Running: shipper groom ${issueStr}`);
-      groomCommand(issueStr);
-      break;
-    case 'shipper:groomed':
-      console.log(`Running: shipper design ${issueStr}`);
-      designCommand(issueStr);
-      break;
-    case 'shipper:designed':
-      console.log(`Running: shipper plan ${issueStr}`);
-      planCommand(issueStr);
-      break;
-    case 'shipper:planned':
-      console.log(`Running: shipper implement ${issueStr}`);
-      implementCommand(issueStr);
-      break;
-    case 'shipper:implemented':
-      console.log(`Running: shipper pr open ${issueStr}`);
-      prOpenCommand(issueStr);
-      break;
-    case 'shipper:pr-open': {
-      const prNum = resolvePrForIssue(issueNumber);
-      console.log(`Running: shipper pr review ${prNum}`);
-      prReviewCommand(prNum);
-      break;
+  // Dispatch (wrapped in lock so inner commands become passthroughs)
+  withIssueLock(issueStr, () => {
+    switch (label) {
+      case 'shipper:new':
+        console.log(`Running: shipper groom ${issueStr}`);
+        groomCommand(issueStr);
+        break;
+      case 'shipper:groomed':
+        console.log(`Running: shipper design ${issueStr}`);
+        designCommand(issueStr);
+        break;
+      case 'shipper:designed':
+        console.log(`Running: shipper plan ${issueStr}`);
+        planCommand(issueStr);
+        break;
+      case 'shipper:planned':
+        console.log(`Running: shipper implement ${issueStr}`);
+        implementCommand(issueStr);
+        break;
+      case 'shipper:implemented':
+        console.log(`Running: shipper pr open ${issueStr}`);
+        prOpenCommand(issueStr);
+        break;
+      case 'shipper:pr-open': {
+        const prNum = resolvePrForIssue(issueNumber);
+        console.log(`Running: shipper pr review ${prNum}`);
+        prReviewCommand(prNum);
+        break;
+      }
+      case 'shipper:pr-reviewed': {
+        const prNum = resolvePrForIssue(issueNumber);
+        console.log(`Running: shipper pr remediate ${prNum}`);
+        prRemediateCommand(prNum);
+        break;
+      }
+      case 'shipper:ready':
+        console.log(`Issue #${issueNumber} is ready — no remaining workflow steps.`);
+        break;
+      default:
+        console.error(`Unrecognized shipper label "${label}" on issue #${issueNumber}.`);
+        process.exit(1);
     }
-    case 'shipper:pr-reviewed': {
-      const prNum = resolvePrForIssue(issueNumber);
-      console.log(`Running: shipper pr remediate ${prNum}`);
-      prRemediateCommand(prNum);
-      break;
-    }
-    case 'shipper:ready':
-      console.log(`Issue #${issueNumber} is ready — no remaining workflow steps.`);
-      break;
-    default:
-      console.error(`Unrecognized shipper label "${label}" on issue #${issueNumber}.`);
-      process.exit(1);
-  }
+  });
 }
