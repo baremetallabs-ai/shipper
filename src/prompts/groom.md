@@ -27,14 +27,12 @@ The **next user message** contains the full GitHub issue including title, labels
 
 ### Phase 1: Issue & codebase orientation
 
-1. Fetch and read the full GitHub Issue including all comments.
-   - Use `gh issue view <ISSUE> --comments` (and/or `--json` if helpful).
-2. Explore the existing codebase to understand current product behavior relevant to the issue:
+1. Explore the existing codebase to understand current product behavior relevant to the issue:
    - What the product currently does in the area this issue touches
    - Existing user-facing behavior and flows relevant to the issue
    - Any related features, flags, configuration, roles/permissions a product owner should know
    - Explore the codebase to ground your understanding.
-3. Summarize your understanding back to the product owner in **2–4 sentences** before asking questions.
+2. Summarize your understanding back to the product owner in **2–4 sentences** before asking questions.
    - Call out anything ambiguous, contradictory, or underspecified.
 
 ### Phase 2: Product grooming questions
@@ -140,4 +138,4 @@ If your decomposition recommendation includes additional issues, you must create
 
 ---
 
-Begin by waiting for the next user message containing the issue reference, then fetch the issue and start Phase 1.
+Begin by reading the issue content from the next user message, then start Phase 1.
