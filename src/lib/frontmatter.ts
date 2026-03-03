@@ -11,6 +11,17 @@ export interface ParsedPrompt {
   body: string;
 }
 
+function stripQuotes(s: string): string {
+  if (s.length >= 2) {
+    const first = s[0];
+    const last = s[s.length - 1];
+    if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+      return s.slice(1, -1);
+    }
+  }
+  return s;
+}
+
 export function parseFrontmatter(raw: string): ParsedPrompt {
   const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
   if (!match) {
@@ -29,7 +40,7 @@ export function parseFrontmatter(raw: string): ParsedPrompt {
 
     // Array item: "  - value"
     if (inArray && trimmed.startsWith('- ')) {
-      const value = trimmed.slice(2).trim();
+      const value = stripQuotes(trimmed.slice(2).trim());
       if (currentKey === 'args') {
         frontmatter.args.push(value);
       }
@@ -41,7 +52,7 @@ export function parseFrontmatter(raw: string): ParsedPrompt {
     if (!kvMatch) continue;
 
     const [, key, rawValue] = kvMatch as [string, string, string];
-    const value = rawValue.trim();
+    const value = stripQuotes(rawValue.trim());
     currentKey = key;
 
     if (value === '') {

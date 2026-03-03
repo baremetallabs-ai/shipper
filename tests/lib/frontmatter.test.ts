@@ -86,6 +86,79 @@ Some **bold** text.
     expect(result.body).toContain('- list item 1');
   });
 
+  it('strips double quotes from cmd value', () => {
+    const input = `---
+cmd: "claude"
+---
+
+Body.`;
+
+    const result = parseFrontmatter(input);
+    expect(result.frontmatter.cmd).toBe('claude');
+  });
+
+  it('strips single quotes from cmd value', () => {
+    const input = `---
+cmd: 'claude'
+---
+
+Body.`;
+
+    const result = parseFrontmatter(input);
+    expect(result.frontmatter.cmd).toBe('claude');
+  });
+
+  it('strips double quotes from args items', () => {
+    const input = `---
+cmd: claude
+args:
+  - "--model"
+  - "opus"
+---
+
+Body.`;
+
+    const result = parseFrontmatter(input);
+    expect(result.frontmatter.args).toEqual(['--model', 'opus']);
+  });
+
+  it('strips single quotes from args items', () => {
+    const input = `---
+cmd: claude
+args:
+  - '--model'
+  - 'opus'
+---
+
+Body.`;
+
+    const result = parseFrontmatter(input);
+    expect(result.frontmatter.args).toEqual(['--model', 'opus']);
+  });
+
+  it('strips quotes from boolean flag values', () => {
+    const input = `---
+cmd: claude
+append-issue: "true"
+---
+
+Body.`;
+
+    const result = parseFrontmatter(input);
+    expect(result.frontmatter['append-issue']).toBe(true);
+  });
+
+  it('leaves mismatched quotes as-is', () => {
+    const input = `---
+cmd: "claude'
+---
+
+Body.`;
+
+    const result = parseFrontmatter(input);
+    expect(result.frontmatter.cmd).toBe('"claude\'');
+  });
+
   it('parses the actual new.md prompt format', () => {
     const input = `---
 cmd: claude
