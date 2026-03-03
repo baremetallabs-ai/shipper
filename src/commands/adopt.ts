@@ -33,7 +33,7 @@ export function adoptCommand(issue: string): void {
   // Check if it's a PR
   let isPr = false;
   try {
-    execFileSync('gh', ['pr', 'view', cleanRef, '--json', 'number'], {
+    execFileSync('gh', ['pr', 'view', cleanRef, '--json', 'number,url'], {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
     });
