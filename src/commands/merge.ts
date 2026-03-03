@@ -1,8 +1,9 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { openSync, closeSync, readFileSync, writeFileSync, unlinkSync, constants } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { getRepoNwo } from '../lib/github.js';
+import { getSettings } from '../lib/settings.js';
 
 interface MergeOptions {
   interval: string;
@@ -11,7 +12,7 @@ interface MergeOptions {
   repo?: string;
 }
 
-interface QueuedPR {
+export interface QueuedPR {
   number: number;
   title: string;
   headRefName: string;
@@ -242,6 +243,84 @@ function failPR(pr: QueuedPR, reason: string, nwo: string, dryRun: boolean): voi
   }
 }
 
+export function getLinkedIssueNumber(prNumber: number, nwo: string): number | null {
+  try {
+    const json = execFileSync('gh', ['pr', 'view', String(prNumber), '-R', nwo, '--json', 'body'], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const { body } = JSON.parse(json) as { body: string };
+    const match = /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/i.exec(body);
+    return match?.[1] ? Number(match[1]) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function postMerge(pr: QueuedPR, issueNumber: number, nwo: string, dryRun: boolean): void {
+  // 1. Run hook if configured
+  const hookCmd = getSettings().hooks.postMerge;
+  if (hookCmd) {
+    if (dryRun) {
+      console.log(`  [dry-run] Would execute post-merge hook: ${hookCmd}`);
+      console.log(
+        `    SHIPPER_PR_NUMBER=${pr.number} SHIPPER_ISSUE_NUMBER=${issueNumber} SHIPPER_BRANCH_NAME=${pr.headRefName}`
+      );
+    } else {
+      try {
+        execSync(hookCmd, {
+          stdio: 'inherit',
+          env: {
+            ...process.env,
+            SHIPPER_PR_NUMBER: String(pr.number),
+            SHIPPER_ISSUE_NUMBER: String(issueNumber),
+            SHIPPER_BRANCH_NAME: pr.headRefName,
+          },
+        });
+        console.log(`  Post-merge hook completed.`);
+      } catch (err) {
+        const code =
+          err && typeof err === 'object' && 'status' in err
+            ? (err as { status: number }).status
+            : 'unknown';
+        const stderr =
+          err && typeof err === 'object' && 'stderr' in err
+            ? String((err as { stderr: unknown }).stderr).trim()
+            : '';
+        console.warn(
+          `  Warning: Post-merge hook exited with code ${code}${stderr ? ': ' + stderr : ''}`
+        );
+      }
+    }
+  }
+
+  // 2. Clean up label and close issue
+  if (dryRun) {
+    console.log(`  [dry-run] Would remove shipper:ready and close issue #${issueNumber}`);
+    return;
+  }
+
+  const repoArgs = ['-R', nwo];
+  try {
+    execFileSync(
+      'gh',
+      ['issue', 'edit', String(issueNumber), ...repoArgs, '--remove-label', 'shipper:ready'],
+      { stdio: 'ignore' }
+    );
+  } catch {
+    console.warn(`  Warning: Failed to remove shipper:ready label from issue #${issueNumber}`);
+  }
+
+  try {
+    execFileSync('gh', ['issue', 'close', String(issueNumber), ...repoArgs], {
+      stdio: 'ignore',
+    });
+    console.log(`  Issue #${issueNumber} closed.`);
+  } catch {
+    console.warn(`  Warning: Failed to close issue #${issueNumber}`);
+  }
+}
+
 function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): boolean {
   console.log(`  Processing PR #${pr.number}: ${pr.title}`);
 
@@ -339,6 +418,14 @@ function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): boolean {
   // Ready to merge
   if (dryRun) {
     console.log(`  [dry-run] Would merge PR #${pr.number} with --rebase --delete-branch`);
+    const issueNumber = getLinkedIssueNumber(pr.number, nwo);
+    if (issueNumber == null) {
+      console.warn(
+        `  Warning: Could not determine linked issue for PR #${pr.number}. Skipping post-merge actions.`
+      );
+    } else {
+      postMerge(pr, issueNumber, nwo, dryRun);
+    }
     return true;
   }
 
@@ -349,6 +436,14 @@ function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): boolean {
       { stdio: 'inherit' }
     );
     console.log(`  PR #${pr.number} merged successfully.`);
+    const issueNumber = getLinkedIssueNumber(pr.number, nwo);
+    if (issueNumber == null) {
+      console.warn(
+        `  Warning: Could not determine linked issue for PR #${pr.number}. Skipping post-merge actions.`
+      );
+    } else {
+      postMerge(pr, issueNumber, nwo, false);
+    }
     return true;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

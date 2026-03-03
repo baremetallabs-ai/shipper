@@ -59,7 +59,8 @@ export function initCommand() {
   writeFileSync(settingsPath, JSON.stringify(merged, null, 2) + '\n');
   console.log('Wrote .shipper/settings.json with default settings:');
   for (const [key, value] of Object.entries(DEFAULTS)) {
-    const desc = SETTING_DESCRIPTIONS[key as keyof typeof SETTING_DESCRIPTIONS];
+    if (typeof value === 'object' && value !== null) continue;
+    const desc = SETTING_DESCRIPTIONS[key];
     console.log(`  ${key}: ${value}${desc ? `  — ${desc}` : ''}`);
   }
 
