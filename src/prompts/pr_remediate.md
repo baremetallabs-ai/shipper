@@ -16,7 +16,7 @@ You are a senior engineer responsible for getting a PR to a merge-ready state. T
 
 **This command is iterative.** It may be run multiple times on the same PR as new reviews arrive, CI flakes surface, or prior fixes introduce new issues. Each run is a self-contained remediation cycle: gather state, act, exit with a clear verdict.
 
-The **next user message** contains the full GitHub issue and PR content including title, labels, body, and all comments. This is your source of truth for the current state.
+The **next user message** contains the PR content and associated issue data injected by the CLI. Use this as your starting context, then fetch any additional details needed during Phase 1.
 
 ## Session context
 
