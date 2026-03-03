@@ -64,9 +64,18 @@ program
 program
   .command('ship')
   .description('Run the full workflow end-to-end')
-  .argument('<issue>', 'issue number')
+  .argument('[issue]', 'issue number')
   .option('--merge', 'auto-merge the PR after reaching shipper:ready', false)
-  .action((issue: string, options: { merge: boolean }) => {
+  .option('--auto', 'run autonomous continuous shipping loop', false)
+  .action((issue: string | undefined, options: { merge: boolean; auto: boolean }) => {
+    if (options.auto && issue) {
+      console.error('Error: --auto and an explicit issue number are mutually exclusive.');
+      process.exit(1);
+    }
+    if (!options.auto && !issue) {
+      console.error('Error: an issue number is required unless --auto is used.');
+      process.exit(1);
+    }
     shipCommand(issue, options);
   });
 
