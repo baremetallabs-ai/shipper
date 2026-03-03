@@ -34,7 +34,9 @@ function getCurrentLabel(issueStr: string): string | undefined {
 
   if (!output) return undefined;
 
-  const shipperLabels = output.split(/\r?\n/).filter((name) => name.startsWith('shipper:'));
+  const shipperLabels = output
+    .split(/\r?\n/)
+    .filter((name) => name.startsWith('shipper:') && name !== 'shipper:blocked');
 
   if (shipperLabels.length !== 1) return undefined;
 
