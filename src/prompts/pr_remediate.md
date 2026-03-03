@@ -42,7 +42,37 @@ Extract:
 
 If the PR does not exist or is already merged/closed, tell the user and stop.
 
-### Step 2: Check CI status
+### Step 2: Check for merge conflicts
+
+```bash
+gh pr view <PR> --json mergeStateStatus --jq '.mergeStateStatus'
+```
+
+- If the result is **not** `DIRTY`, proceed to Step 3 (CI check) — no action needed.
+- If the result is `DIRTY`, the PR has merge conflicts that will prevent CI from running. Resolve them before proceeding:
+
+1. Fetch and rebase onto main:
+
+```bash
+git fetch origin
+git rebase origin/main
+```
+
+2. If conflicts arise, resolve them carefully. The implementation should take priority unless the conflict reveals a fundamental incompatibility.
+3. After resolving conflicts, continue the rebase with `git rebase --continue`.
+4. Once the rebase succeeds, force-push the updated branch:
+
+```bash
+git push --force-with-lease
+```
+
+If conflicts cannot be resolved:
+
+1. Post a comment on the issue explaining that the branch could not be rebased onto main and the conflict details.
+2. Roll back labels: `gh issue edit <ISSUE> --add-label "shipper:planned" --remove-label "shipper:pr-reviewed"`
+3. Recommend the user run `shipper implement` again, then stop.
+
+### Step 3: Check CI status
 
 ```bash
 gh pr checks <PR>
@@ -53,7 +83,7 @@ Categorize every check as **passing**, **failing**, or **pending**.
 - If checks are still running, wait for them to complete before proceeding. Use `gh pr checks <PR> --watch` with a reasonable timeout.
 - If checks cannot be retrieved, report the error and stop.
 
-### Step 3: Gather review feedback
+### Step 4: Gather review feedback
 
 ```bash
 gh api repos/{owner}/{repo}/pulls/<PR>/reviews --paginate
@@ -67,7 +97,7 @@ Identify:
 
 Ignore dismissed reviews and already-resolved threads. Focus only on what is currently blocking.
 
-### Step 4: Assess the situation
+### Step 5: Assess the situation
 
 You now have three categories of work:
 
