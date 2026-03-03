@@ -61,8 +61,9 @@ function scanArtifacts(issueNum: number, nwo: string): ArtifactScan {
       .split('\n')
       .filter((s) => s !== '')
       .map(Number);
-  } catch {
-    // No comments or API error — treat as empty
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`Warning: Could not fetch comments for issue #${issueNum}: ${msg}`);
   }
 
   // PRs
@@ -83,9 +84,16 @@ function scanArtifacts(issueNum: number, nwo: string): ArtifactScan {
       { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
     );
     const allPrs: PREntry[] = JSON.parse(prJson);
-    prs = allPrs.filter((pr) => pr.headRefName.includes(String(issueNum)));
-  } catch {
-    // No PRs or error — treat as empty
+    prs = allPrs.filter(
+      (pr) =>
+        pr.headRefName === `shipper/${issueNum}` ||
+        pr.headRefName.startsWith(`shipper/${issueNum}-`) ||
+        pr.headRefName === `${issueNum}` ||
+        pr.headRefName.startsWith(`${issueNum}-`)
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`Warning: Could not fetch PRs for issue #${issueNum}: ${msg}`);
   }
 
   // Branches to delete (only shipper/-prefixed)
@@ -135,8 +143,9 @@ function executeReset(issueNum: number, scan: ArtifactScan, nwo: string): void {
       execFileSync('gh', ['pr', 'close', String(pr.number)], {
         stdio: ['ignore', 'ignore', 'ignore'],
       });
-    } catch {
-      console.error(`  Warning: Failed to close PR #${pr.number}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`  Warning: Failed to close PR #${pr.number}: ${msg}`);
     }
   }
   if (scan.prs.length > 0) {
@@ -149,8 +158,9 @@ function executeReset(issueNum: number, scan: ArtifactScan, nwo: string): void {
       execFileSync('git', ['push', 'origin', '--delete', branch], {
         stdio: ['ignore', 'ignore', 'ignore'],
       });
-    } catch {
-      console.error(`  Warning: Failed to delete branch ${branch}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`  Warning: Failed to delete branch ${branch}: ${msg}`);
     }
   }
   if (scan.branchesToDelete.length > 0) {
@@ -162,13 +172,14 @@ function executeReset(issueNum: number, scan: ArtifactScan, nwo: string): void {
     try {
       execFileSync(
         'gh',
-        ['api', '-X', 'DELETE', `repos/${nwo}/issues/${issueNum}/comments/${id}`],
+        ['api', '-X', 'DELETE', `repos/${nwo}/issues/comments/${id}`],
         {
           stdio: ['ignore', 'ignore', 'ignore'],
         }
       );
-    } catch {
-      console.error(`  Warning: Failed to delete comment ${id}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`  Warning: Failed to delete comment ${id}: ${msg}`);
     }
   }
   if (scan.commentIds.length > 0) {
@@ -186,8 +197,9 @@ function executeReset(issueNum: number, scan: ArtifactScan, nwo: string): void {
     }
     try {
       execFileSync('gh', args, { stdio: ['ignore', 'ignore', 'ignore'] });
-    } catch {
-      console.error('  Warning: Failed to update labels');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`  Warning: Failed to update labels: ${msg}`);
     }
   }
   if (scan.labelsToRemove.length > 0) {
@@ -207,8 +219,9 @@ function executeReset(issueNum: number, scan: ArtifactScan, nwo: string): void {
       stdio: ['ignore', 'ignore', 'ignore'],
     });
     actions.push('Posted reset notice comment');
-  } catch {
-    console.error('  Warning: Failed to post reset comment');
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`  Warning: Failed to post reset comment: ${msg}`);
   }
 
   // Print summary
@@ -220,12 +233,12 @@ function executeReset(issueNum: number, scan: ArtifactScan, nwo: string): void {
 
 export async function resetCommand(issue: string, opts: { force: boolean }): Promise<void> {
   const cleaned = issue.replace(/^#/, '');
-  const issueNum = parseInt(cleaned, 10);
-  if (isNaN(issueNum)) {
+  if (!/^\d+$/.test(cleaned)) {
     console.error('Error: Please provide a valid issue number.');
     console.error('Usage: shipper reset <issue>');
     process.exit(1);
   }
+  const issueNum = Number(cleaned);
 
   const nwo = getRepoNwo();
   const scan = scanArtifacts(issueNum, nwo);
