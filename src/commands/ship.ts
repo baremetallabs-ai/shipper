@@ -1,5 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { getRepoNwo, selectIssuesForStage } from '../lib/github.js';
+import { withIssueLock } from '../lib/lock.js';
 import { postMerge } from './merge.js';
 import type { QueuedPR } from './merge.js';
 
@@ -59,7 +60,10 @@ function getCurrentLabel(issueStr: string): string | undefined {
 
   const shipperLabels = output
     .split(/\r?\n/)
-    .filter((name) => name.startsWith('shipper:') && name !== 'shipper:blocked');
+    .filter(
+      (name) =>
+        name.startsWith('shipper:') && name !== 'shipper:blocked' && name !== 'shipper:locked'
+    );
 
   if (shipperLabels.length !== 1) return undefined;
 
@@ -161,123 +165,125 @@ function mergePr(pr: QueuedPR, issueNumber: number, nwo: string): boolean {
 function shipOneIssue(issue: string, merge: boolean): { success: boolean; error?: string } {
   const issueStr = issue.replace(/^#/, '');
 
-  let label = getCurrentLabel(issueStr);
+  return withIssueLock(issueStr, () => {
+    let label = getCurrentLabel(issueStr);
 
-  if (!label) {
-    const msg = `Issue #${issueStr} has no shipper label. Run \`shipper next\` or add a label first.`;
-    console.error(msg);
-    return { success: false, error: msg };
-  }
-
-  if (label === 'shipper:ready') {
-    if (!merge) {
-      console.log(`Issue #${issueStr} is already at shipper:ready.`);
-      return { success: true };
+    if (!label) {
+      const msg = `Issue #${issueStr} has no shipper label. Run \`shipper next\` or add a label first.`;
+      console.error(msg);
+      return { success: false, error: msg };
     }
-    // Fall through to merge logic below the loop
-  }
 
-  if (label !== 'shipper:ready' && !(label in STAGE_NAME)) {
-    const msg = `Unrecognized shipper label "${label}" on issue #${issueStr}.`;
-    console.error(msg);
-    return { success: false, error: msg };
-  }
-
-  const results: StageResult[] = [];
-
-  if (label !== 'shipper:ready') {
-    let reviewCycles = 0;
-    let seenPrReviewed = false;
-
-    for (;;) {
-      const stageName = STAGE_NAME[label]!;
-      const previousLabel: string | undefined = label;
-
-      console.log(`Running stage: ${stageName}`);
-
-      const result = spawnSync(process.execPath, [process.argv[1]!, 'next', issueStr], {
-        stdio: 'inherit',
-        env: process.env,
-      });
-
-      if (result.status !== 0) {
-        results.push({ stage: stageName, status: 'fail' });
-        printSummary(results);
-        return { success: false, error: `stage "${stageName}" failed` };
+    if (label === 'shipper:ready') {
+      if (!merge) {
+        console.log(`Issue #${issueStr} is already at shipper:ready.`);
+        return { success: true };
       }
+      // Fall through to merge logic below the loop
+    }
 
-      results.push({ stage: stageName, status: 'pass' });
+    if (label !== 'shipper:ready' && !(label in STAGE_NAME)) {
+      const msg = `Unrecognized shipper label "${label}" on issue #${issueStr}.`;
+      console.error(msg);
+      return { success: false, error: msg };
+    }
 
-      label = getCurrentLabel(issueStr);
+    const results: StageResult[] = [];
 
-      if (label === 'shipper:ready') {
-        break;
-      }
+    if (label !== 'shipper:ready') {
+      let reviewCycles = 0;
+      let seenPrReviewed = false;
 
-      if (!label || !(label in STAGE_NAME)) {
-        if (!label) {
-          console.error(`Issue #${issueStr} has no shipper label after stage "${stageName}".`);
-        } else {
-          console.error(
-            `Unrecognized shipper label "${label}" on issue #${issueStr} after stage "${stageName}".`
-          );
+      for (;;) {
+        const stageName = STAGE_NAME[label]!;
+        const previousLabel: string | undefined = label;
+
+        console.log(`Running stage: ${stageName}`);
+
+        const result = spawnSync(process.execPath, [process.argv[1]!, 'next', issueStr], {
+          stdio: 'inherit',
+          env: process.env,
+        });
+
+        if (result.status !== 0) {
+          results.push({ stage: stageName, status: 'fail' });
+          printSummary(results);
+          return { success: false, error: `stage "${stageName}" failed` };
         }
-        printSummary(results);
-        return { success: false, error: `unexpected label after stage "${stageName}"` };
-      }
 
-      if (label === previousLabel) {
-        const msg = `Label did not advance after stage "${stageName}" (still "${label}"). Aborting to avoid infinite loop.`;
+        results.push({ stage: stageName, status: 'pass' });
+
+        label = getCurrentLabel(issueStr);
+
+        if (label === 'shipper:ready') {
+          break;
+        }
+
+        if (!label || !(label in STAGE_NAME)) {
+          if (!label) {
+            console.error(`Issue #${issueStr} has no shipper label after stage "${stageName}".`);
+          } else {
+            console.error(
+              `Unrecognized shipper label "${label}" on issue #${issueStr} after stage "${stageName}".`
+            );
+          }
+          printSummary(results);
+          return { success: false, error: `unexpected label after stage "${stageName}"` };
+        }
+
+        if (label === previousLabel) {
+          const msg = `Label did not advance after stage "${stageName}" (still "${label}"). Aborting to avoid infinite loop.`;
+          console.error(msg);
+          printSummary(results);
+          return { success: false, error: msg };
+        }
+
+        if (label === 'shipper:pr-reviewed') {
+          if (seenPrReviewed) {
+            reviewCycles++;
+            if (reviewCycles >= MAX_REVIEW_CYCLES) {
+              const msg = `Review loop cap reached after ${MAX_REVIEW_CYCLES} cycles. Issue is at shipper:pr-reviewed. Continue manually.`;
+              console.error(msg);
+              results.push({ stage: 'pr remediate', status: 'fail' });
+              printSummary(results);
+              return { success: false, error: msg };
+            }
+          }
+          seenPrReviewed = true;
+        }
+      }
+    }
+
+    if (merge) {
+      console.log('Running stage: merge');
+      const issueNumber = Number(issueStr);
+      const nwo = getRepoNwo();
+
+      let pr: QueuedPR;
+      try {
+        pr = resolvePrForIssue(issueNumber, nwo);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
         console.error(msg);
+        results.push({ stage: 'merge', status: 'fail' });
         printSummary(results);
         return { success: false, error: msg };
       }
 
-      if (label === 'shipper:pr-reviewed') {
-        if (seenPrReviewed) {
-          reviewCycles++;
-          if (reviewCycles >= MAX_REVIEW_CYCLES) {
-            const msg = `Review loop cap reached after ${MAX_REVIEW_CYCLES} cycles. Issue is at shipper:pr-reviewed. Continue manually.`;
-            console.error(msg);
-            results.push({ stage: 'pr remediate', status: 'fail' });
-            printSummary(results);
-            return { success: false, error: msg };
-          }
-        }
-        seenPrReviewed = true;
+      const merged = mergePr(pr, issueNumber, nwo);
+
+      if (merged) {
+        results.push({ stage: 'merge', status: 'pass' });
+      } else {
+        results.push({ stage: 'merge', status: 'fail' });
+        printSummary(results);
+        return { success: false, error: 'merge failed' };
       }
     }
-  }
 
-  if (merge) {
-    console.log('Running stage: merge');
-    const issueNumber = Number(issueStr);
-    const nwo = getRepoNwo();
-
-    let pr: QueuedPR;
-    try {
-      pr = resolvePrForIssue(issueNumber, nwo);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(msg);
-      results.push({ stage: 'merge', status: 'fail' });
-      printSummary(results);
-      return { success: false, error: msg };
-    }
-
-    const merged = mergePr(pr, issueNumber, nwo);
-
-    if (merged) {
-      results.push({ stage: 'merge', status: 'pass' });
-    } else {
-      results.push({ stage: 'merge', status: 'fail' });
-      printSummary(results);
-      return { success: false, error: 'merge failed' };
-    }
-  }
-
-  printSummary(results);
-  return { success: true };
+    printSummary(results);
+    return { success: true };
+  });
 }
 
 export function selectNextCandidate(

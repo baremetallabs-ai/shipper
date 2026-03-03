@@ -213,7 +213,7 @@ export function selectIssuesForStage(label: string): { number: number; title: st
         '--limit',
         '1000',
         '--search',
-        '-label:shipper:blocked',
+        '-label:shipper:blocked -label:shipper:locked',
         '--json',
         'number,title',
       ],
@@ -274,4 +274,17 @@ export function autoSelectPrForStage(
   }
   console.error(emptyMessage);
   process.exit(1);
+}
+
+export function resolveIssueFromPr(prNumber: string): string | undefined {
+  try {
+    const body = execFileSync('gh', ['pr', 'view', prNumber, '--json', 'body', '--jq', '.body'], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    const match = /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/i.exec(body);
+    return match?.[1];
+  } catch {
+    return undefined;
+  }
 }

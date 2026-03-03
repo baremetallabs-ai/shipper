@@ -1,4 +1,5 @@
 import { autoSelectIssue } from '../lib/github.js';
+import { withIssueLock } from '../lib/lock.js';
 import { runPrompt } from '../lib/prompt-runner.js';
 
 export function designCommand(issue?: string) {
@@ -12,5 +13,5 @@ export function designCommand(issue?: string) {
     issue = String(selected.number);
   }
 
-  process.exit(runPrompt('design', { issueRef: issue }));
+  process.exit(withIssueLock(issue, () => runPrompt('design', { issueRef: issue })));
 }

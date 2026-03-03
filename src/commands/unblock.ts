@@ -1,3 +1,4 @@
+import { withIssueLock } from '../lib/lock.js';
 import { runPrompt } from '../lib/prompt-runner.js';
 
 export function unblockCommand(issue: string) {
@@ -7,5 +8,5 @@ export function unblockCommand(issue: string) {
     process.exit(1);
   }
 
-  process.exit(runPrompt('unblock', { issueRef: issue }));
+  process.exit(withIssueLock(issue, () => runPrompt('unblock', { issueRef: issue })));
 }
