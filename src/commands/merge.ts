@@ -1,8 +1,9 @@
-import { execFileSync, execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { openSync, closeSync, readFileSync, writeFileSync, unlinkSync, constants } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { getRepoNwo, tryResolvePrForIssue } from '../lib/github.js';
+import { runAdvisoryHook } from '../lib/hooks.js';
 import { getSettings } from '../lib/settings.js';
 
 interface MergeOptions {
@@ -326,30 +327,11 @@ export function postMerge(pr: QueuedPR, issueNumber: number, nwo: string, dryRun
         `    SHIPPER_PR_NUMBER=${pr.number} SHIPPER_ISSUE_NUMBER=${issueNumber} SHIPPER_BRANCH_NAME=${pr.headRefName}`
       );
     } else {
-      try {
-        execSync(hookCmd, {
-          stdio: ['inherit', 'inherit', 'pipe'],
-          env: {
-            ...process.env,
-            SHIPPER_PR_NUMBER: String(pr.number),
-            SHIPPER_ISSUE_NUMBER: String(issueNumber),
-            SHIPPER_BRANCH_NAME: pr.headRefName,
-          },
-        });
-        console.log(`  Post-merge hook completed.`);
-      } catch (err) {
-        const code =
-          err && typeof err === 'object' && 'status' in err
-            ? (err as { status: number }).status
-            : 'unknown';
-        const stderr =
-          err && typeof err === 'object' && 'stderr' in err
-            ? String((err as { stderr: unknown }).stderr).trim()
-            : '';
-        console.warn(
-          `  Warning: Post-merge hook exited with code ${code}${stderr ? ': ' + stderr : ''}`
-        );
-      }
+      runAdvisoryHook('Post-merge', hookCmd, {
+        SHIPPER_PR_NUMBER: String(pr.number),
+        SHIPPER_ISSUE_NUMBER: String(issueNumber),
+        SHIPPER_BRANCH_NAME: pr.headRefName,
+      });
     }
   }
 

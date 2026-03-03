@@ -19,9 +19,12 @@ export function implementCommand(issue?: string) {
     const repoRoot = getRepoRoot();
     const branch = generateBranchName(issue);
 
-    const code = withWorktree({ repoRoot, branch, createBranch: true }, (wtPath) => {
-      return runPrompt('implement', { issueRef: issue, cwd: wtPath });
-    });
+    const code = withWorktree(
+      { repoRoot, branch, createBranch: true, issueNumber: issue },
+      (wtPath) => {
+        return runPrompt('implement', { issueRef: issue, cwd: wtPath });
+      }
+    );
 
     process.exit(code);
   });
