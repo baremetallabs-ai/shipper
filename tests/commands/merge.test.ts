@@ -222,7 +222,15 @@ describe('lookupPR', () => {
     });
     expect(execFileSyncMock).toHaveBeenCalledWith(
       'gh',
-      ['pr', 'view', '42', '-R', 'owner/repo', '--json', 'number,title,headRefName,baseRefName,state,labels'],
+      [
+        'pr',
+        'view',
+        '42',
+        '-R',
+        'owner/repo',
+        '--json',
+        'number,title,headRefName,baseRefName,state,labels',
+      ],
       expect.objectContaining({ encoding: 'utf-8' })
     );
   });
@@ -240,9 +248,7 @@ describe('lookupPR', () => {
     );
 
     expect(() => lookupPR('42', 'owner/repo')).toThrow('exit:1');
-    expect(errorMock).toHaveBeenCalledWith(
-      'Error: PR #42 does not have the shipper:ready label.'
-    );
+    expect(errorMock).toHaveBeenCalledWith('Error: PR #42 does not have the shipper:ready label.');
   });
 
   it('exits with error when PR is closed', () => {
@@ -288,8 +294,6 @@ describe('lookupPR', () => {
     tryResolvePrForIssueMock.mockReturnValue(undefined);
 
     expect(() => lookupPR('99', 'owner/repo')).toThrow('exit:1');
-    expect(errorMock).toHaveBeenCalledWith(
-      'Error: #99 is not a PR and no linked PR was found.'
-    );
+    expect(errorMock).toHaveBeenCalledWith('Error: #99 is not a PR and no linked PR was found.');
   });
 });
