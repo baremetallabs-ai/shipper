@@ -203,7 +203,20 @@ export function selectIssuesForStage(label: string): { number: number; title: st
   try {
     const output = execFileSync(
       'gh',
-      ['issue', 'list', '--label', label, '--state', 'open', '--json', 'number,title'],
+      [
+        'issue',
+        'list',
+        '--label',
+        label,
+        '--state',
+        'open',
+        '--limit',
+        '1000',
+        '--search',
+        '-label:shipper:blocked',
+        '--json',
+        'number,title',
+      ],
       { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
     ).trim();
     issues = JSON.parse(output) as { number: number; title: string }[];
@@ -222,10 +235,18 @@ export function selectIssuesForStage(label: string): { number: number; title: st
     try {
       const output = execFileSync(
         'gh',
-        ['api', `repos/${nwo}/issues/${issue.number}/timeline`, '--paginate'],
+        [
+          'api',
+          `repos/${nwo}/issues/${issue.number}/timeline`,
+          '--paginate',
+          '--jq',
+          '.[] | select(.event == "labeled") | {event, label, created_at}',
+        ],
         { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
       ).trim();
-      const events = JSON.parse(output) as TimelineLabelEvent[];
+      const events: TimelineLabelEvent[] = output
+        ? output.split('\n').map((line) => JSON.parse(line) as TimelineLabelEvent)
+        : [];
       timelinesByIssue.set(issue.number, events);
     } catch {
       timelinesByIssue.set(issue.number, []);
@@ -238,4 +259,19 @@ export function selectIssuesForStage(label: string): { number: number; title: st
 export function autoSelectIssue(label: string): { number: number; title: string } | null {
   const issues = selectIssuesForStage(label);
   return issues[0] ?? null;
+}
+
+export function autoSelectPrForStage(
+  label: string,
+  emptyMessage: string
+): { pr: string; issue: { number: number; title: string } } {
+  const issues = selectIssuesForStage(label);
+  for (const issue of issues) {
+    const resolved = tryResolvePrForIssue(issue.number);
+    if (resolved) {
+      return { pr: resolved, issue };
+    }
+  }
+  console.error(emptyMessage);
+  process.exit(1);
 }
