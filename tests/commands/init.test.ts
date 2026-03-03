@@ -60,7 +60,7 @@ describe('initCommand settings', () => {
     );
     expect(settingsCall).toBeDefined();
     const written = JSON.parse(settingsCall![1] as string);
-    expect(written).toEqual({ prReviewWaitMinutes: 15 });
+    expect(written).toEqual({ prReviewWaitMinutes: 15, hooks: {} });
   });
 
   it('preserves existing keys on re-init', () => {

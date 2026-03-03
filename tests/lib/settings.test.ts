@@ -39,7 +39,7 @@ describe('loadSettings', () => {
     });
     const { loadSettings, getSettings } = await loadModule();
     loadSettings();
-    expect(getSettings()).toEqual({ prReviewWaitMinutes: 15 });
+    expect(getSettings()).toEqual({ prReviewWaitMinutes: 15, hooks: {} });
   });
 
   it('loads base settings file', async () => {
@@ -104,6 +104,29 @@ describe('loadSettings', () => {
 describe('getSettings', () => {
   it('returns defaults when loadSettings has not been called', async () => {
     const { getSettings } = await loadModule();
-    expect(getSettings()).toEqual({ prReviewWaitMinutes: 15 });
+    expect(getSettings()).toEqual({ prReviewWaitMinutes: 15, hooks: {} });
+  });
+});
+
+describe('hooks settings', () => {
+  it('loads hooks.postMerge from settings', async () => {
+    readFileSyncMock.mockImplementation((p: string) => {
+      if (p === settingsPath) return '{"hooks": {"postMerge": "echo done"}}';
+      throw enoent(p);
+    });
+    const { loadSettings, getSettings } = await loadModule();
+    loadSettings();
+    expect(getSettings().hooks.postMerge).toBe('echo done');
+  });
+
+  it('local hooks override base hooks', async () => {
+    readFileSyncMock.mockImplementation((p: string) => {
+      if (p === settingsPath) return '{"hooks": {"postMerge": "echo base"}}';
+      if (p === localPath) return '{"hooks": {"postMerge": "echo local"}}';
+      throw enoent(p);
+    });
+    const { loadSettings, getSettings } = await loadModule();
+    loadSettings();
+    expect(getSettings().hooks.postMerge).toBe('echo local');
   });
 });

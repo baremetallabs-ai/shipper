@@ -3,14 +3,19 @@ import path from 'node:path';
 
 export interface Settings {
   prReviewWaitMinutes: number;
+  hooks: {
+    postMerge?: string;
+  };
 }
 
 export const DEFAULTS: Settings = {
   prReviewWaitMinutes: 15,
+  hooks: {},
 };
 
-export const SETTING_DESCRIPTIONS: Record<keyof Settings, string> = {
+export const SETTING_DESCRIPTIONS: Record<string, string> = {
   prReviewWaitMinutes: 'minimum wait (minutes) before PR review remediation',
+  'hooks.postMerge': 'shell command to run after a PR is merged',
 };
 
 let settings: Settings | undefined;
