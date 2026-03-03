@@ -87,7 +87,7 @@ describe('formatPR', () => {
           author: { login: 'reviewer' },
           body: 'Approved with minor notes.',
           state: 'APPROVED',
-          createdAt: '2025-02-01T11:00:00Z',
+          submittedAt: '2025-02-01T11:00:00Z',
         },
       ],
     });
