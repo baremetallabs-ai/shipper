@@ -232,7 +232,7 @@ All checks passing. All review feedback addressed. PR is ready for final review 
    - `gh issue comment <ISSUE> --body-file ./.shipper/tmp/remediate-summary-<number>.md`
 3. Update labels:
    - `gh pr edit <PR> --add-label "shipper:ready"`
-   - `gh issue edit <ISSUE> --add-label "shipper:ready" --remove-label "shipper:pr-open"`
+   - `gh issue edit <ISSUE> --add-label "shipper:ready" --remove-label "shipper:pr-reviewed"`
 4. Report the PR URL and confirm it's ready.
 
 ---
@@ -292,10 +292,10 @@ Actions:
    - Write to `./.shipper/tmp/remediate-blocked-<number>.md`
    - `gh issue comment <ISSUE> --body-file ./.shipper/tmp/remediate-blocked-<number>.md`
 3. Update labels back to the appropriate stage:
-   - If recommending `shipper implement`: set label to `shipper:planned`, remove `shipper:pr-open`
-   - If recommending `shipper plan`: set label to `shipper:designed`, remove `shipper:pr-open`
-   - If recommending `shipper design`: set label to `shipper:groomed`, remove `shipper:pr-open`
-   - If recommending `shipper groom`: set label to `shipper:new`, remove `shipper:pr-open`
+   - If recommending `shipper implement`: set label to `shipper:planned`, remove `shipper:pr-reviewed`
+   - If recommending `shipper plan`: set label to `shipper:designed`, remove `shipper:pr-reviewed`
+   - If recommending `shipper design`: set label to `shipper:groomed`, remove `shipper:pr-reviewed`
+   - If recommending `shipper groom`: set label to `shipper:new`, remove `shipper:pr-reviewed`
 4. Tell the user which command to run and why.
 
 ---
