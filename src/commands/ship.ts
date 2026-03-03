@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { getRepoNwo } from '../lib/github.js';
+import { getRepoNwo, selectIssuesForStage } from '../lib/github.js';
 import { postMerge } from './merge.js';
 import type { QueuedPR } from './merge.js';
 
@@ -15,9 +15,32 @@ export const STAGE_NAME: Record<string, string> = {
   'shipper:pr-reviewed': 'pr remediate',
 };
 
+export const AUTO_PRIORITY_LABELS: string[] = [
+  'shipper:ready',
+  'shipper:pr-reviewed',
+  'shipper:pr-open',
+  'shipper:implemented',
+  'shipper:planned',
+  'shipper:designed',
+  'shipper:groomed',
+  'shipper:new',
+];
+
 interface StageResult {
   stage: string;
   status: 'pass' | 'fail';
+}
+
+interface AutoResult {
+  issue: number;
+  title: string;
+  outcome: 'pass' | 'fail';
+  error?: string;
+}
+
+export interface ShipOptions {
+  merge: boolean;
+  auto: boolean;
 }
 
 function getCurrentLabel(issueStr: string): string | undefined {
@@ -52,8 +75,19 @@ function printSummary(results: StageResult[]): void {
   }
 }
 
-interface ShipOptions {
-  merge: boolean;
+function printAutoSummary(results: AutoResult[]): void {
+  if (results.length === 0) {
+    console.log('\nAuto run complete. No eligible issues found.');
+    return;
+  }
+  console.log('\nAuto run complete.\n');
+  console.log('  #    Issue                                          Outcome');
+  for (const r of results) {
+    const num = String(r.issue).padEnd(5);
+    const title = r.title.length > 45 ? r.title.slice(0, 42) + '...' : r.title.padEnd(45);
+    const outcome = r.outcome === 'pass' ? '✓ pass' : `✗ fail — ${r.error ?? 'unknown error'}`;
+    console.log(`  ${num}${title} ${outcome}`);
+  }
 }
 
 function resolvePrForIssue(issueNumber: number, nwo: string): QueuedPR {
@@ -122,29 +156,29 @@ function mergePr(pr: QueuedPR, issueNumber: number, nwo: string): boolean {
   }
 }
 
-export function shipCommand(issue: string, options: ShipOptions = { merge: false }): void {
+function shipOneIssue(issue: string, merge: boolean): { success: boolean; error?: string } {
   const issueStr = issue.replace(/^#/, '');
 
   let label = getCurrentLabel(issueStr);
 
   if (!label) {
-    console.error(
-      `Issue #${issueStr} has no shipper label. Run \`shipper next\` or add a label first.`
-    );
-    process.exit(1);
+    const msg = `Issue #${issueStr} has no shipper label. Run \`shipper next\` or add a label first.`;
+    console.error(msg);
+    return { success: false, error: msg };
   }
 
   if (label === 'shipper:ready') {
-    if (!options.merge) {
+    if (!merge) {
       console.log(`Issue #${issueStr} is already at shipper:ready.`);
-      process.exit(0);
+      return { success: true };
     }
     // Fall through to merge logic below the loop
   }
 
   if (label !== 'shipper:ready' && !(label in STAGE_NAME)) {
-    console.error(`Unrecognized shipper label "${label}" on issue #${issueStr}.`);
-    process.exit(1);
+    const msg = `Unrecognized shipper label "${label}" on issue #${issueStr}.`;
+    console.error(msg);
+    return { success: false, error: msg };
   }
 
   const results: StageResult[] = [];
@@ -167,7 +201,7 @@ export function shipCommand(issue: string, options: ShipOptions = { merge: false
       if (result.status !== 0) {
         results.push({ stage: stageName, status: 'fail' });
         printSummary(results);
-        process.exit(1);
+        return { success: false, error: `stage "${stageName}" failed` };
       }
 
       results.push({ stage: stageName, status: 'pass' });
@@ -187,27 +221,25 @@ export function shipCommand(issue: string, options: ShipOptions = { merge: false
           );
         }
         printSummary(results);
-        process.exit(1);
+        return { success: false, error: `unexpected label after stage "${stageName}"` };
       }
 
       if (label === previousLabel) {
-        console.error(
-          `Label did not advance after stage "${stageName}" (still "${label}"). Aborting to avoid infinite loop.`
-        );
+        const msg = `Label did not advance after stage "${stageName}" (still "${label}"). Aborting to avoid infinite loop.`;
+        console.error(msg);
         printSummary(results);
-        process.exit(1);
+        return { success: false, error: msg };
       }
 
       if (label === 'shipper:pr-reviewed') {
         if (seenPrReviewed) {
           reviewCycles++;
           if (reviewCycles >= MAX_REVIEW_CYCLES) {
-            console.error(
-              `Review loop cap reached after ${MAX_REVIEW_CYCLES} cycles. Issue is at shipper:pr-reviewed. Continue manually.`
-            );
+            const msg = `Review loop cap reached after ${MAX_REVIEW_CYCLES} cycles. Issue is at shipper:pr-reviewed. Continue manually.`;
+            console.error(msg);
             results.push({ stage: 'pr remediate', status: 'fail' });
             printSummary(results);
-            process.exit(1);
+            return { success: false, error: msg };
           }
         }
         seenPrReviewed = true;
@@ -215,7 +247,7 @@ export function shipCommand(issue: string, options: ShipOptions = { merge: false
     }
   }
 
-  if (options.merge) {
+  if (merge) {
     console.log('Running stage: merge');
     const issueNumber = Number(issueStr);
     const nwo = getRepoNwo();
@@ -224,10 +256,11 @@ export function shipCommand(issue: string, options: ShipOptions = { merge: false
     try {
       pr = resolvePrForIssue(issueNumber, nwo);
     } catch (err) {
-      console.error(err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(msg);
       results.push({ stage: 'merge', status: 'fail' });
       printSummary(results);
-      process.exit(1);
+      return { success: false, error: msg };
     }
 
     const merged = mergePr(pr, issueNumber, nwo);
@@ -237,10 +270,58 @@ export function shipCommand(issue: string, options: ShipOptions = { merge: false
     } else {
       results.push({ stage: 'merge', status: 'fail' });
       printSummary(results);
-      process.exit(1);
+      return { success: false, error: 'merge failed' };
     }
   }
 
   printSummary(results);
-  process.exit(0);
+  return { success: true };
+}
+
+export function selectNextCandidate(
+  skippedIssues: Set<number>
+): { number: number; title: string } | null {
+  for (const label of AUTO_PRIORITY_LABELS) {
+    const issues = selectIssuesForStage(label);
+    const candidate = issues.find((i) => !skippedIssues.has(i.number));
+    if (candidate) return candidate;
+  }
+  return null;
+}
+
+export function shipCommand(
+  issue: string | undefined,
+  options: ShipOptions = { merge: false, auto: false }
+): void {
+  if (options.auto) {
+    const skippedIssues = new Set<number>();
+    const results: AutoResult[] = [];
+
+    for (;;) {
+      const candidate = selectNextCandidate(skippedIssues);
+      if (!candidate) break;
+
+      console.log(`\nAuto: advancing issue #${candidate.number} — ${candidate.title}`);
+      const result = shipOneIssue(String(candidate.number), true);
+
+      if (result.success) {
+        results.push({ issue: candidate.number, title: candidate.title, outcome: 'pass' });
+      } else {
+        skippedIssues.add(candidate.number);
+        results.push({
+          issue: candidate.number,
+          title: candidate.title,
+          outcome: 'fail',
+          error: result.error,
+        });
+      }
+    }
+
+    printAutoSummary(results);
+    process.exit(0);
+  }
+
+  // Non-auto path: issue is required (validated in index.ts)
+  const result = shipOneIssue(issue!, options.merge);
+  process.exit(result.success ? 0 : 1);
 }
