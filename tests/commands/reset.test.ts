@@ -137,7 +137,9 @@ describe('resetCommand', () => {
     // Should close only PR #52 (shipper/18-correct-match)
     const closeCalls = mockExecFileSync.mock.calls.filter(
       (call: unknown[]) =>
-        call[0] === 'gh' && (call[1] as string[])[0] === 'pr' && (call[1] as string[])[1] === 'close'
+        call[0] === 'gh' &&
+        (call[1] as string[])[0] === 'pr' &&
+        (call[1] as string[])[1] === 'close'
     );
     expect(closeCalls).toHaveLength(1);
     expect((closeCalls[0]![1] as string[])[2]).toBe('52');
