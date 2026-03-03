@@ -44,12 +44,6 @@ Your review exists to catch things that will break in production, confuse the ne
 
 ---
 
-## Prerequisite checks (must do first)
-
-1. Verify `gh` is installed and authenticated. If not: tell the user to install and authenticate `gh`, then stop.
-
----
-
 ## Phase 1: Orientation
 
 ### Step 1: Resolve the PR

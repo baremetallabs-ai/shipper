@@ -23,15 +23,11 @@ The **next user message** contains the full GitHub issue including title, labels
 
 ---
 
-## Prerequisite checks (must do first)
-
-1. Verify `gh` is installed and authenticated. If not: tell the user to run `shipper init`, then stop.
-2. Verify required labels exist (`shipper:implemented`, `shipper:pr-open`): run `gh label list --search "shipper:" --json name -q '.[].name'`. If missing: tell the user to run `shipper init`, then stop.
-3. **Idempotency guard**: If the issue already has the `shipper:pr-open` label, check for an existing PR: `gh pr list --search "<ISSUE_NUMBER>" --json number,url -q '.[]'`. If a PR exists, report its URL and stop — do not create a duplicate.
-
----
-
 ## Phase 1: Orientation
+
+### Step 0: Idempotency guard
+
+If the issue already has the `shipper:pr-open` label, check for an existing PR: `gh pr list --search "<ISSUE_NUMBER>" --json number,url -q '.[]'`. If a PR exists, report its URL and stop — do not create a duplicate.
 
 ### Step 1: Read the issue
 

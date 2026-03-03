@@ -1,4 +1,3 @@
-import { ensureInitialized } from '../lib/prerequisites.js';
 import { getBranchForPR, getRepoRoot } from '../lib/branch.js';
 import { withWorktree } from '../lib/worktree.js';
 import { runPrompt } from '../lib/prompt-runner.js';
@@ -9,8 +8,6 @@ export function prRemediateCommand(pr: string) {
     console.error('Usage: shipper pr remediate <pr>');
     process.exit(1);
   }
-
-  ensureInitialized();
 
   const repoRoot = getRepoRoot();
   const branch = getBranchForPR(pr);
