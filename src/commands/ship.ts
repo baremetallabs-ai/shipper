@@ -54,7 +54,7 @@ interface ShipOptions {
   merge: boolean;
 }
 
-function resolvePrForIssue(issueNumber: number): QueuedPR {
+function resolvePrForIssue(issueNumber: number, nwo: string): QueuedPR {
   let output: string;
   try {
     output = execFileSync(
@@ -62,8 +62,8 @@ function resolvePrForIssue(issueNumber: number): QueuedPR {
       [
         'pr',
         'list',
-        '--search',
-        String(issueNumber),
+        '-R',
+        nwo,
         '--state',
         'open',
         '--json',
@@ -72,15 +72,35 @@ function resolvePrForIssue(issueNumber: number): QueuedPR {
       { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }
     );
   } catch {
-    console.error(`Failed to look up PR for issue #${issueNumber}.`);
-    process.exit(1);
+    throw new Error(`Failed to look up PRs for issue #${issueNumber}.`);
   }
 
-  const prs = JSON.parse(output) as QueuedPR[];
-  if (!prs || prs.length === 0) {
-    console.error(`No open PR found for issue #${issueNumber}.`);
-    process.exit(1);
+  let allPrs: QueuedPR[];
+  try {
+    allPrs = JSON.parse(output) as QueuedPR[];
+  } catch {
+    throw new Error(
+      `Failed to parse GitHub CLI output while looking up PR for issue #${issueNumber}.`
+    );
   }
+
+  const prs = (allPrs ?? []).filter(
+    (pr) =>
+      pr.headRefName === `shipper/${issueNumber}` ||
+      pr.headRefName.startsWith(`shipper/${issueNumber}-`)
+  );
+
+  if (prs.length === 0) {
+    throw new Error(`No open PR found for issue #${issueNumber}.`);
+  }
+
+  if (prs.length > 1) {
+    const prNumbers = prs.map((pr) => `#${pr.number}`).join(', ');
+    throw new Error(
+      `Multiple open PRs found for issue #${issueNumber}: ${prNumbers}. Please ensure only one is open.`
+    );
+  }
+
   return { ...prs[0]!, labeledAt: '' };
 }
 
@@ -94,9 +114,8 @@ function mergePr(pr: QueuedPR, issueNumber: number, nwo: string): boolean {
     console.log(`PR #${pr.number} merged successfully.`);
     postMerge(pr, issueNumber, nwo, false);
     return true;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(`Merge failed for PR #${pr.number}: ${msg}`);
+  } catch {
+    console.error(`\nMerge failed for PR #${pr.number}. See command output above for details.`);
     return false;
   }
 }
@@ -197,8 +216,18 @@ export function shipCommand(issue: string, options: ShipOptions = { merge: false
   if (options.merge) {
     console.log('Running stage: merge');
     const issueNumber = Number(issueStr);
-    const pr = resolvePrForIssue(issueNumber);
     const nwo = getRepoNwo();
+
+    let pr: QueuedPR;
+    try {
+      pr = resolvePrForIssue(issueNumber, nwo);
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      results.push({ stage: 'merge', status: 'fail' });
+      printSummary(results);
+      process.exit(1);
+    }
+
     const merged = mergePr(pr, issueNumber, nwo);
 
     if (merged) {
