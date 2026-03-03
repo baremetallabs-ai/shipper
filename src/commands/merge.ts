@@ -546,7 +546,8 @@ export async function mergeCommand(options: MergeOptions): Promise<void> {
     if (options.dryRun) console.log('[dry-run mode]');
     const pr = lookupPR(cleaned, nwo);
     console.log(`Targeting PR #${pr.number}: ${pr.title}`);
-    processPR(pr, nwo, options.dryRun);
+    const merged = processPR(pr, nwo, options.dryRun);
+    if (!merged) process.exit(1);
     return;
   }
 
