@@ -121,6 +121,33 @@ describe('resetCommand', () => {
     expect(deleteCalls).toHaveLength(0);
   });
 
+  it('does not match PRs where issue number is a substring of branch number', async () => {
+    setupExecMock({
+      issueJson: mockIssueView('OPEN', ['shipper:groomed']),
+      prJson: JSON.stringify([
+        { number: 50, headRefName: 'shipper/180-other-feature' },
+        { number: 51, headRefName: 'shipper/118-another' },
+        { number: 52, headRefName: 'shipper/18-correct-match' },
+      ]),
+      commentIds: '',
+    });
+
+    await resetCommand('18', { force: true });
+
+    // Should close only PR #52 (shipper/18-correct-match)
+    const closeCalls = mockExecFileSync.mock.calls.filter(
+      (call: unknown[]) =>
+        call[0] === 'gh' && (call[1] as string[])[0] === 'pr' && (call[1] as string[])[1] === 'close'
+    );
+    expect(closeCalls).toHaveLength(1);
+    expect((closeCalls[0]![1] as string[])[2]).toBe('52');
+  });
+
+  it('rejects partial numeric input like 18foo', async () => {
+    await expect(resetCommand('18foo', { force: true })).rejects.toThrow('process.exit');
+    expect(mockConsoleError).toHaveBeenCalledWith('Error: Please provide a valid issue number.');
+  });
+
   it('skips confirmation with --force flag', async () => {
     setupExecMock();
     await resetCommand('18', { force: true });
@@ -191,6 +218,8 @@ describe('resetCommand', () => {
     expect((cleanupCalls[0]![1] as string[])[1]).toBe('close'); // gh pr close
     expect(cleanupCalls[1]![0]).toBe('git'); // git push --delete
     expect((cleanupCalls[2]![1] as string[]).includes('DELETE')).toBe(true); // gh api DELETE
+    // Verify correct comment deletion endpoint (no issue number in path)
+    expect((cleanupCalls[2]![1] as string[])[3]).toBe('repos/owner/repo/issues/comments/101');
     expect((cleanupCalls[3]![1] as string[])[1]).toBe('edit'); // gh issue edit
     expect((cleanupCalls[4]![1] as string[])[1]).toBe('comment'); // gh issue comment
   });
