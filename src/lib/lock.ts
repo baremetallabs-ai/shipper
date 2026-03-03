@@ -2,12 +2,6 @@ import { execFileSync } from 'node:child_process';
 import { getRepoNwo } from './github.js';
 import { getSettings } from './settings.js';
 
-interface TimelineEvent {
-  event: string;
-  label: { name: string };
-  created_at: string;
-}
-
 export function isLockStale(issueNumber: string): boolean {
   const nwo = getRepoNwo();
   let output: string;
@@ -19,29 +13,29 @@ export function isLockStale(issueNumber: string): boolean {
         `repos/${nwo}/issues/${issueNumber}/timeline`,
         '--paginate',
         '--jq',
-        '.[] | select(.event == "labeled") | {event, label, created_at}',
+        '.[] | select(.event == "labeled" and .label.name? == "shipper:locked") | .created_at',
       ],
       { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
     ).trim();
   } catch {
-    // If we can't fetch timeline, treat as stale (defensive)
-    return true;
+    // If we can't fetch timeline, fail closed — treat as NOT stale to preserve the lock
+    return false;
   }
 
   if (!output) return true;
 
-  const events: TimelineEvent[] = output
-    .split('\n')
-    .map((line) => JSON.parse(line) as TimelineEvent);
+  const timestamps = output.split('\n').filter((line) => line.trim());
 
-  const lockEvents = events.filter(
-    (e) => e.event === 'labeled' && e.label?.name === 'shipper:locked'
-  );
+  if (timestamps.length === 0) return true;
 
-  if (lockEvents.length === 0) return true;
+  const lastTimestamp = timestamps[timestamps.length - 1]!;
+  const labeledAt = new Date(lastTimestamp).getTime();
 
-  const lastEvent = lockEvents[lockEvents.length - 1]!;
-  const labeledAt = new Date(lastEvent.created_at).getTime();
+  if (isNaN(labeledAt)) {
+    // Malformed timestamp — fail closed
+    return false;
+  }
+
   const timeoutMs = getSettings().lockTimeoutMinutes * 60_000;
 
   return Date.now() - labeledAt > timeoutMs;
@@ -75,9 +69,15 @@ export function acquireIssueLock(issueNumber: string): void {
     }
   }
 
-  execFileSync('gh', ['issue', 'edit', issueNumber, '--add-label', 'shipper:locked'], {
-    stdio: 'ignore',
-  });
+  try {
+    execFileSync('gh', ['issue', 'edit', issueNumber, '--add-label', 'shipper:locked'], {
+      stdio: 'ignore',
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`Error: Failed to acquire lock on issue #${issueNumber}: ${msg}`);
+    process.exit(1);
+  }
 }
 
 export function releaseIssueLock(issueNumber: string): void {
@@ -98,19 +98,31 @@ export function withIssueLock<T>(issueNumber: string, fn: () => T): T {
   acquireIssueLock(issueNumber);
   process.env.SHIPPER_LOCK_HELD = issueNumber;
 
-  const onSignal = () => {
+  const cleanup = () => {
     releaseIssueLock(issueNumber);
+    delete process.env.SHIPPER_LOCK_HELD;
+  };
+
+  const onSignal = () => {
+    cleanup();
+  };
+
+  // process.exit() bypasses finally blocks, so register an exit handler
+  // to ensure the lock is always released (e.g. when inner code calls process.exit).
+  const onExit = () => {
+    cleanup();
   };
 
   process.on('SIGINT', onSignal);
   process.on('SIGTERM', onSignal);
+  process.on('exit', onExit);
 
   try {
     return fn();
   } finally {
     process.removeListener('SIGINT', onSignal);
     process.removeListener('SIGTERM', onSignal);
-    releaseIssueLock(issueNumber);
-    delete process.env.SHIPPER_LOCK_HELD;
+    process.removeListener('exit', onExit);
+    cleanup();
   }
 }
