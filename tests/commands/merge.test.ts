@@ -83,7 +83,7 @@ describe('postMerge', () => {
     postMerge(mockPR, 25, 'owner/repo', false);
 
     expect(execSyncMock).toHaveBeenCalledWith('echo done', {
-      stdio: 'inherit',
+      stdio: ['inherit', 'inherit', 'pipe'],
       env: expect.objectContaining({
         SHIPPER_PR_NUMBER: '42',
         SHIPPER_ISSUE_NUMBER: '25',

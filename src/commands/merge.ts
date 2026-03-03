@@ -250,7 +250,7 @@ export function getLinkedIssueNumber(prNumber: number, nwo: string): number | nu
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const { body } = JSON.parse(json) as { body: string };
-    const match = /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/i.exec(body);
+    const match = /(?:^|\s)(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/im.exec(body);
     return match?.[1] ? Number(match[1]) : null;
   } catch {
     return null;
@@ -269,7 +269,7 @@ export function postMerge(pr: QueuedPR, issueNumber: number, nwo: string, dryRun
     } else {
       try {
         execSync(hookCmd, {
-          stdio: 'inherit',
+          stdio: ['inherit', 'inherit', 'pipe'],
           env: {
             ...process.env,
             SHIPPER_PR_NUMBER: String(pr.number),
@@ -307,8 +307,11 @@ export function postMerge(pr: QueuedPR, issueNumber: number, nwo: string, dryRun
       ['issue', 'edit', String(issueNumber), ...repoArgs, '--remove-label', 'shipper:ready'],
       { stdio: 'ignore' }
     );
-  } catch {
-    console.warn(`  Warning: Failed to remove shipper:ready label from issue #${issueNumber}`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(
+      `  Warning: Failed to remove shipper:ready label from issue #${issueNumber}: ${msg}`
+    );
   }
 
   try {
@@ -316,9 +319,21 @@ export function postMerge(pr: QueuedPR, issueNumber: number, nwo: string, dryRun
       stdio: 'ignore',
     });
     console.log(`  Issue #${issueNumber} closed.`);
-  } catch {
-    console.warn(`  Warning: Failed to close issue #${issueNumber}`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`  Warning: Failed to close issue #${issueNumber}: ${msg}`);
   }
+}
+
+function runPostMergeActions(pr: QueuedPR, nwo: string, dryRun: boolean): void {
+  const issueNumber = getLinkedIssueNumber(pr.number, nwo);
+  if (issueNumber == null) {
+    console.warn(
+      `  Warning: Could not determine linked issue for PR #${pr.number}. Skipping post-merge actions.`
+    );
+    return;
+  }
+  postMerge(pr, issueNumber, nwo, dryRun);
 }
 
 function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): boolean {
@@ -418,14 +433,7 @@ function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): boolean {
   // Ready to merge
   if (dryRun) {
     console.log(`  [dry-run] Would merge PR #${pr.number} with --rebase --delete-branch`);
-    const issueNumber = getLinkedIssueNumber(pr.number, nwo);
-    if (issueNumber == null) {
-      console.warn(
-        `  Warning: Could not determine linked issue for PR #${pr.number}. Skipping post-merge actions.`
-      );
-    } else {
-      postMerge(pr, issueNumber, nwo, dryRun);
-    }
+    runPostMergeActions(pr, nwo, true);
     return true;
   }
 
@@ -436,14 +444,7 @@ function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): boolean {
       { stdio: 'inherit' }
     );
     console.log(`  PR #${pr.number} merged successfully.`);
-    const issueNumber = getLinkedIssueNumber(pr.number, nwo);
-    if (issueNumber == null) {
-      console.warn(
-        `  Warning: Could not determine linked issue for PR #${pr.number}. Skipping post-merge actions.`
-      );
-    } else {
-      postMerge(pr, issueNumber, nwo, false);
-    }
+    runPostMergeActions(pr, nwo, false);
     return true;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
