@@ -24,21 +24,21 @@ export function generateBranchName(issueRef: string): string {
     .replace(/-$/, '');
 
   if (slug) {
-    return `${num}-${slug}`;
+    return `shipper/${num}-${slug}`;
   }
-  return `${num}-implement`;
+  return `shipper/${num}-implement`;
 }
 
 export function findBranchForIssue(issueRef: string): string {
   const num = issueRef.replace(/^#/, '');
 
-  const output = execFileSync('git', ['branch', '-r', '--list', `origin/${num}-*`], {
+  const output = execFileSync('git', ['branch', '-r', '--list', `origin/shipper/${num}-*`], {
     encoding: 'utf-8',
   }).trim();
 
   if (!output) {
     throw new Error(
-      `No remote branch found matching origin/${num}-*.\n` +
+      `No remote branch found matching origin/shipper/${num}-*.\n` +
         `Run \`shipper implement ${issueRef}\` first to create one.`
     );
   }
@@ -59,7 +59,7 @@ export function findBranchForIssue(issueRef: string): string {
   // Strip "origin/" prefix
   const branch = branches[0];
   if (!branch) {
-    throw new Error(`No remote branch found matching origin/${num}-*.`);
+    throw new Error(`No remote branch found matching origin/shipper/${num}-*.`);
   }
   return branch.replace(/^origin\//, '');
 }
