@@ -237,7 +237,7 @@ gh repo view --json owner,name -q '.owner.login + "/" + .name'
 
 #### 3c: Build the review JSON payload
 
-Construct a JSON file containing the review body, event, and all inline comments. Save it to `./.shipper/tmp/pr_review_payload.json`.
+Construct a JSON file containing the review body, event, and all inline comments. Save it to `./.shipper/tmp/pr_review_payload-<number>.json`.
 
 The JSON structure must be:
 
@@ -285,12 +285,12 @@ The JSON structure must be:
 
 #### 3d: Submit the review
 
-Use the **Write** tool to save the JSON payload to `./.shipper/tmp/pr_review_payload.json`, then submit:
+Use the **Write** tool to save the JSON payload to `./.shipper/tmp/pr_review_payload-<number>.json`, then submit:
 
 ```bash
 gh api repos/{owner}/{repo}/pulls/<PR>/reviews \
   --method POST \
-  --input ./.shipper/tmp/pr_review_payload.json
+  --input ./.shipper/tmp/pr_review_payload-<number>.json
 ```
 
 If the API returns a validation error about a comment line number, that line is outside the diff. Remove that comment from the inline array, add it to the top-level review body instead, and resubmit.

@@ -61,8 +61,10 @@ If a tool for asking the user questions is available (e.g., inside agentic codin
 
 Once you have enough information and prerequisites pass:
 
-1. Write the final issue body to `.shipper/tmp/issue.md`.
-2. Create the issue: `gh issue create --title "<TITLE>" --body-file ./.shipper/tmp/issue.md --label "shipper:new"`
+Generate a timestamp (e.g. Unix epoch or `YYYYMMDDHHMMSS`) and use it as `<timestamp>` in the filenames below.
+
+1. Write the final issue body to `.shipper/tmp/issue-<timestamp>.md`.
+2. Create the issue: `gh issue create --title "<TITLE>" --body-file ./.shipper/tmp/issue-<timestamp>.md --label "shipper:new"`
 3. After success:
    - Output the created issue URL (and number if shown).
    - Confirm with a short message: title + 1 sentence summary.
