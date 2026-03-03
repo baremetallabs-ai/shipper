@@ -31,7 +31,7 @@ function getCurrentLabel(issueStr: string): string | undefined {
 
   if (!output) return undefined;
 
-  const shipperLabels = output.split('\n').filter((name) => name.startsWith('shipper:'));
+  const shipperLabels = output.split(/\r?\n/).filter((name) => name.startsWith('shipper:'));
 
   if (shipperLabels.length !== 1) return undefined;
 
@@ -48,12 +48,6 @@ function printSummary(results: StageResult[]): void {
 }
 
 export function shipCommand(issue: string): void {
-  if (!issue) {
-    console.error('Error: Please provide an issue number.');
-    console.error('Usage: shipper ship <issue>');
-    process.exit(1);
-  }
-
   const issueStr = issue.replace(/^#/, '');
 
   let label = getCurrentLabel(issueStr);
@@ -77,9 +71,11 @@ export function shipCommand(issue: string): void {
 
   const results: StageResult[] = [];
   let reviewCycles = 0;
+  let seenPrReviewed = false;
 
   for (;;) {
     const stageName = STAGE_NAME[label]!;
+    const previousLabel: string | undefined = label;
 
     console.log(`Running stage: ${stageName}`);
 
@@ -114,15 +110,27 @@ export function shipCommand(issue: string): void {
       process.exit(1);
     }
 
+    if (label === previousLabel) {
+      console.error(
+        `Label did not advance after stage "${stageName}" (still "${label}"). Aborting to avoid infinite loop.`
+      );
+      printSummary(results);
+      process.exit(1);
+    }
+
     if (label === 'shipper:pr-reviewed') {
-      reviewCycles++;
-      if (reviewCycles >= MAX_REVIEW_CYCLES) {
-        console.error(
-          `Review loop cap reached after ${MAX_REVIEW_CYCLES} cycles. Issue is at shipper:pr-reviewed. Continue manually.`
-        );
-        printSummary(results);
-        process.exit(1);
+      if (seenPrReviewed) {
+        reviewCycles++;
+        if (reviewCycles >= MAX_REVIEW_CYCLES) {
+          console.error(
+            `Review loop cap reached after ${MAX_REVIEW_CYCLES} cycles. Issue is at shipper:pr-reviewed. Continue manually.`
+          );
+          results.push({ stage: 'pr remediate', status: 'fail' });
+          printSummary(results);
+          process.exit(1);
+        }
       }
+      seenPrReviewed = true;
     }
   }
 
