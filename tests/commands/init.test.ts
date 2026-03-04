@@ -172,9 +172,7 @@ describe('initCommand agent selection', () => {
 
   it('--agent invalid prints validation error and exits', async () => {
     await initCommand({ agent: 'invalid' });
-    expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('Invalid agent')
-    );
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('Invalid agent'));
     expect(exitMock).toHaveBeenCalledWith(1);
   });
 
