@@ -44,7 +44,9 @@ export async function initCommand(options: { agent?: string }) {
   let agent: string;
   if (options.agent) {
     if (!VALID_AGENTS.includes(options.agent as (typeof VALID_AGENTS)[number])) {
-      console.error(`Error: Invalid agent "${options.agent}". Must be one of: ${VALID_AGENTS.join(', ')}`);
+      console.error(
+        `Error: Invalid agent "${options.agent}". Must be one of: ${VALID_AGENTS.join(', ')}`
+      );
       process.exit(1);
       return;
     }
@@ -61,7 +63,9 @@ export async function initCommand(options: { agent?: string }) {
     } else if (trimmed === 'codex cli' || trimmed === 'codex') {
       agent = 'codex';
     } else {
-      console.error(`Error: Unrecognized agent "${answer.trim()}". Expected "Claude Code" or "Codex CLI".`);
+      console.error(
+        `Error: Unrecognized agent "${answer.trim()}". Expected "Claude Code" or "Codex CLI".`
+      );
       process.exit(1);
       return;
     }
