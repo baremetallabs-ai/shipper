@@ -3,7 +3,7 @@ import { runPreflight } from './lib/prerequisites.js';
 import { loadSettings } from './lib/settings.js';
 import { initCommand } from './commands/init.js';
 import { newCommand } from './commands/new.js';
-import { adoptCommand } from './commands/adopt.js';
+import { adoptCommand, adoptAllCommand } from './commands/adopt.js';
 import { groomCommand } from './commands/groom.js';
 import { designCommand } from './commands/design.js';
 import { planCommand } from './commands/plan.js';
@@ -49,9 +49,22 @@ program
 program
   .command('adopt')
   .description('Adopt an existing issue into the shipper workflow')
-  .argument('<issue>', 'issue number')
-  .action((issue: string) => {
-    adoptCommand(issue);
+  .argument('[issue]', 'issue number')
+  .option('--all', 'adopt all open issues without shipper labels')
+  .action((issue: string | undefined, options: { all: boolean }) => {
+    if (options.all && issue) {
+      console.error('Error: --all and an explicit issue number are mutually exclusive.');
+      process.exit(1);
+    }
+    if (!options.all && !issue) {
+      console.error('Error: an issue number is required unless --all is used.');
+      process.exit(1);
+    }
+    if (options.all) {
+      adoptAllCommand();
+    } else {
+      adoptCommand(issue as string);
+    }
   });
 
 program

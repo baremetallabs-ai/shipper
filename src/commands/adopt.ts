@@ -70,3 +70,41 @@ export function adoptCommand(issue: string): void {
 
   console.log(`Issue #${cleanRef} adopted into shipper workflow.`);
 }
+
+export function adoptAllCommand(): void {
+  let issues: IssueData[];
+  try {
+    const output = execFileSync(
+      'gh',
+      ['issue', 'list', '--state', 'open', '--limit', '1000', '--json', 'number,labels'],
+      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
+    ).trim();
+    issues = JSON.parse(output) as IssueData[];
+  } catch {
+    console.error('Error: Failed to fetch issues.');
+    process.exit(1);
+  }
+
+  const eligible = issues.filter(
+    (issue) => !issue.labels.some((l) => l.name.startsWith('shipper:'))
+  );
+
+  if (eligible.length === 0) {
+    console.log('No eligible issues found.');
+    return;
+  }
+
+  for (const issue of eligible) {
+    try {
+      execFileSync('gh', ['issue', 'edit', String(issue.number), '--add-label', 'shipper:new'], {
+        stdio: ['ignore', 'ignore', 'ignore'],
+      });
+    } catch {
+      console.error(`Error: Failed to add 'shipper:new' label to issue #${issue.number}.`);
+      process.exit(1);
+    }
+  }
+
+  const nums = eligible.map((i) => `#${i.number}`).join(', ');
+  console.log(`Adopted ${nums} into shipper workflow.`);
+}
