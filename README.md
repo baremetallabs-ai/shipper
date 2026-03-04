@@ -38,21 +38,20 @@ Temporary files created during runs must be stored under:
 
 Workflow state is tracked in GitHub using labels on issues (and optionally PRs). Comments and issue bodies hold the human-readable artifacts produced by each stage.
 
-Recommended labels:
+Workflow states (the happy path):
 
-- `shipper:new`
-- `shipper:groomed`
-- `shipper:designed`
-- `shipper:planned`
-- `shipper:implemented`
-- `shipper:pr-open`
-- `shipper:ready`
+`shipper:new` → `shipper:groomed` → `shipper:designed` → `shipper:planned` → `shipper:implemented` → `shipper:pr-open` → `shipper:pr-reviewed` → `shipper:ready`
 
-(Additional “blocked” labels are optional; not required for v0.)
+Control labels:
+
+- `shipper:blocked` — dependency block, resolved by `shipper unblock`
+- `shipper:locked` — active instance lock, resolved by `shipper unlock`
 
 ---
 
 # End-to-end lifecycle
+
+Stage commands (`groom`, `design`, `plan`, `implement`, `pr open`, `pr review`, `pr remediate`) accept an optional issue argument. When omitted, they auto-select the first eligible issue.
 
 ## 1) `shipper new <pitch>`
 
@@ -201,11 +200,128 @@ Output:
 
 ---
 
+# Orchestration commands
+
+## `shipper next <ref>`
+
+Purpose: advance an issue to the next workflow step based on its current label.
+
+Behavior:
+
+- Reads the issue's current shipper label.
+- Runs the corresponding next-stage command (e.g. `shipper:new` → `groom`, `shipper:groomed` → `design`, etc.).
+- Works with both issue numbers and PR numbers.
+
+Output:
+
+- The issue advances one step in the workflow.
+
+## `shipper ship [issue] [--merge] [--auto]`
+
+Purpose: run the full workflow end-to-end for a single issue.
+
+Behavior:
+
+- Repeatedly calls `next` until the issue reaches `shipper:ready`.
+- `--merge`: auto-merges the PR after reaching `shipper:ready`.
+- `--auto`: runs a continuous loop that auto-selects issues and ships them. Mutually exclusive with an explicit issue number.
+
+Output:
+
+- The issue progresses through all remaining stages.
+
+## `shipper merge [number] [--once] [--dry-run] [--interval <seconds>] [--repo <owner/repo>]`
+
+Purpose: merge queue for PRs labeled `shipper:ready`.
+
+Behavior:
+
+- Polls for PRs labeled `shipper:ready` and merges them one at a time.
+- If a specific PR or issue number is given, merges only that PR.
+- `--once`: process the queue once and exit (no polling).
+- `--dry-run`: print actions without executing.
+- `--interval <seconds>`: polling interval (default: 60).
+- `--repo <owner/repo>`: target repository (default: inferred from cwd).
+
+Output:
+
+- PRs are merged and cleaned up.
+
+---
+
+# Utility commands
+
+## `shipper adopt <issue>`
+
+Purpose: bring an existing GitHub issue into the shipper workflow.
+
+Behavior:
+
+- Applies the `shipper:new` label to the specified issue.
+
+Output:
+
+- Issue labeled `shipper:new`, ready for `groom` or `next`.
+
+## `shipper reset <issue> [-f]`
+
+Purpose: reset an issue back to `shipper:new` status.
+
+Behavior:
+
+- Removes all shipper labels from the issue and applies `shipper:new`.
+- Prompts for confirmation unless `-f` / `--force` is passed.
+
+Output:
+
+- Issue labeled `shipper:new` with all other shipper labels removed.
+
+## `shipper unblock <issue>`
+
+Purpose: check if a blocked issue's dependencies are resolved and advance it.
+
+Behavior:
+
+- Reads the issue to determine what it's blocked on.
+- If the dependency is resolved, removes `shipper:blocked` and advances the issue.
+
+Output:
+
+- Issue unblocked and advanced, or still blocked with an explanation.
+
+## `shipper unlock <issue>`
+
+Purpose: force-release the `shipper:locked` label on an issue.
+
+Behavior:
+
+- Removes the `shipper:locked` label from the specified issue.
+
+Output:
+
+- Lock released. The issue can be worked on by a new shipper instance.
+
+---
+
 # Worktrees & hooks
 
 Implementation and PR-affecting commands run in ephemeral worktrees that are created for the duration of the command and then deleted.
 
 Repo-specific setup/cleanup can be added under `./.shipper/hooks/` and configured by `shipper init` (e.g. install deps on create, clean caches on destroy).
+
+---
+
+# Settings
+
+Settings are stored in `.shipper/settings.json` (created by `shipper init`). Local overrides can be placed in `.shipper/settings.local.json` (gitignored).
+
+| Setting                  | Default | Description                                                                |
+| ------------------------ | ------- | -------------------------------------------------------------------------- |
+| `prReviewWaitMinutes`    | `15`    | Minimum wait (minutes) before PR review remediation                        |
+| `lockTimeoutMinutes`     | `30`    | Stale lock timeout (minutes) before auto-clearing `shipper:locked`         |
+| `hooks.postMerge`        | —       | Shell command to run after a PR is merged                                  |
+| `hooks.worktreeSetup`    | —       | Shell command to run after a worktree is created (before the agent starts) |
+| `hooks.worktreeTeardown` | —       | Shell command to run before a worktree is removed                          |
 
 ---
 

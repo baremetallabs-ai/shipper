@@ -1,7 +1,7 @@
 {
   "name": "shipper-cli",
   "version": "0.1.0",
-  "description": "CLI tool for automating development workflow with coding agents",
+  "description": "CLI workflow orchestrator for GitHub issues using coding agents",
   "type": "module",
   "bin": {
     "shipper": "./dist/index.js"
@@ -22,7 +22,10 @@
   },
   "keywords": [
     "cli",
-    "typescript",
+    "github",
+    "workflow",
+    "coding-agents",
+    "issue-lifecycle",
     "developer-tools"
   ],
   "license": "MIT",
