@@ -257,9 +257,9 @@ All checks passing. All review feedback addressed. PR is ready for final review 
 2. Save and post:
    - Write to `./.shipper/tmp/remediate-summary-<number>.md`
    - `gh issue comment <ISSUE> --body-file ./.shipper/tmp/remediate-summary-<number>.md`
-3. Update labels:
-   - `gh pr edit <PR> --add-label "shipper:ready"`
+3. Update labels (both commands are required — run both):
    - `gh issue edit <ISSUE> --add-label "shipper:ready" --remove-label "shipper:pr-reviewed"`
+   - `gh pr edit <PR> --add-label "shipper:ready"`
 4. Report the PR URL and confirm it's ready.
 
 ---
