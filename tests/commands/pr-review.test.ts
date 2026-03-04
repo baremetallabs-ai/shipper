@@ -27,6 +27,7 @@ describe('prReviewCommand', () => {
   let exitSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
+    vi.clearAllMocks();
     mockResolveRef.mockReturnValue({ prNumber: '42', issueNumber: '10' });
     mockRunPrompt.mockReturnValue(0);
     exitSpy = vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
