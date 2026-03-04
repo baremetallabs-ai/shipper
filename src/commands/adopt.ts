@@ -94,17 +94,27 @@ export function adoptAllCommand(): void {
     return;
   }
 
+  const adopted: number[] = [];
+  const failed: number[] = [];
+
   for (const issue of eligible) {
     try {
       execFileSync('gh', ['issue', 'edit', String(issue.number), '--add-label', 'shipper:new'], {
         stdio: ['ignore', 'ignore', 'ignore'],
       });
+      adopted.push(issue.number);
     } catch {
       console.error(`Error: Failed to add 'shipper:new' label to issue #${issue.number}.`);
-      process.exit(1);
+      failed.push(issue.number);
     }
   }
 
-  const nums = eligible.map((i) => `#${i.number}`).join(', ');
-  console.log(`Adopted ${nums} into shipper workflow.`);
+  if (adopted.length > 0) {
+    const nums = adopted.map((n) => `#${n}`).join(', ');
+    console.log(`Adopted ${nums} into shipper workflow.`);
+  }
+
+  if (failed.length > 0) {
+    process.exit(1);
+  }
 }

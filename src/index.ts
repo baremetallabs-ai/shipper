@@ -50,7 +50,7 @@ program
   .command('adopt')
   .description('Adopt an existing issue into the shipper workflow')
   .argument('[issue]', 'issue number')
-  .option('--all', 'adopt all open issues without shipper labels')
+  .option('--all', 'adopt all open issues without shipper labels', false)
   .action((issue: string | undefined, options: { all: boolean }) => {
     if (options.all && issue) {
       console.error('Error: --all and an explicit issue number are mutually exclusive.');
