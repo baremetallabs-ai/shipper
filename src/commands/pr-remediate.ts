@@ -21,7 +21,7 @@ export function prRemediateCommand(pr?: string) {
     issueNumber = String(selected.issue.number);
   } else {
     const resolved = resolveRef(pr, 'both');
-    pr = resolved.prNumber!;
+    pr = resolved.prNumber;
     issueNumber = resolved.issueNumber;
   }
 
