@@ -7,7 +7,7 @@ args:
   - --permission-mode
   - acceptEdits
   - --settings
-  - {"permissions":{"allow":["Bash(gh *)","Bash(git *)"]},"sandbox":{"enabled":true,"autoAllowBashIfSandboxed":true,"excludedCommands":["gh *","git *"]},"network":{"allowedDomains":["github.com","api.github.com","uploads.github.com","registry.npmjs.org"]}}
+  - {"permissions":{"allow":["Bash(git branch *)","Bash(git log *)","Bash(git fetch *)","Bash(git rebase *)","Bash(git diff *)","Bash(./.shipper/scripts/safe-push.sh *)","Bash(gh pr list *)","Bash(gh pr create *)","Bash(gh pr checks *)","Bash(gh issue comment *)","Bash(gh issue edit *)"]},"sandbox":{"enabled":true,"autoAllowBashIfSandboxed":true,"excludedCommands":["git branch *","git log *","git fetch *","git rebase *","git diff *","./.shipper/scripts/safe-push.sh *","gh pr list *","gh pr create *","gh pr checks *","gh issue comment *","gh issue edit *"]},"network":{"allowedDomains":["github.com","api.github.com","uploads.github.com","registry.npmjs.org"]}}
 append-issue: true
 ---
 
@@ -83,7 +83,7 @@ If conflicts cannot be resolved:
 After a successful rebase, update the remote:
 
 ```bash
-git push --force-with-lease
+./.shipper/scripts/safe-push.sh --force-with-lease
 ```
 
 (Force-push is expected here — the rebase rewrites commit history, so a force-with-lease push is required to update the remote branch.)
