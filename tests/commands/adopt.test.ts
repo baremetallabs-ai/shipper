@@ -175,6 +175,42 @@ describe('adoptAllCommand', () => {
     expect(editCalls).toHaveLength(0);
   });
 
+  it('exits with error when gh issue list fails', () => {
+    mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+      if (args[0] === 'issue' && args[1] === 'list') {
+        throw new Error('gh issue list failed');
+      }
+      return '';
+    });
+
+    expect(() => adoptAllCommand()).toThrow('process.exit');
+    expect(mockConsoleError).toHaveBeenCalledWith('Error: Failed to fetch issues.');
+  });
+
+  it('continues labeling remaining issues when one fails', () => {
+    const issues = [
+      { number: 10, labels: [] },
+      { number: 12, labels: [] },
+      { number: 13, labels: [] },
+    ];
+
+    mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+      if (args[0] === 'issue' && args[1] === 'list') {
+        return JSON.stringify(issues);
+      }
+      if (args[0] === 'issue' && args[1] === 'edit' && (args as string[])[2] === '12') {
+        throw new Error('API error');
+      }
+      return '';
+    });
+
+    expect(() => adoptAllCommand()).toThrow('process.exit');
+    expect(mockConsoleError).toHaveBeenCalledWith(
+      "Error: Failed to add 'shipper:new' label to issue #12."
+    );
+    expect(mockConsoleLog).toHaveBeenCalledWith('Adopted #10, #13 into shipper workflow.');
+  });
+
   it('handles empty repo with no issues', () => {
     mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
       if (args[0] === 'issue' && args[1] === 'list') {
