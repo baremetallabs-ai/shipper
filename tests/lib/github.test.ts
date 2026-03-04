@@ -228,9 +228,7 @@ describe('tryResolvePrForIssue', () => {
   });
 
   it('matches exact branch shipper/12', () => {
-    execFileSync.mockReturnValueOnce(
-      JSON.stringify([{ number: 99, headRefName: 'shipper/12' }])
-    );
+    execFileSync.mockReturnValueOnce(JSON.stringify([{ number: 99, headRefName: 'shipper/12' }]));
     expect(tryResolvePrForIssue(12)).toBe('99');
   });
 
@@ -249,9 +247,7 @@ describe('tryResolvePrForIssue', () => {
   });
 
   it('does NOT match partial prefix shipper/123 when searching for 12', () => {
-    execFileSync.mockReturnValueOnce(
-      JSON.stringify([{ number: 88, headRefName: 'shipper/123' }])
-    );
+    execFileSync.mockReturnValueOnce(JSON.stringify([{ number: 88, headRefName: 'shipper/123' }]));
     expect(tryResolvePrForIssue(12)).toBeUndefined();
   });
 
