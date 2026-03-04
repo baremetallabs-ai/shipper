@@ -6,7 +6,7 @@ args:
   - --permission-mode
   - acceptEdits
   - --allowedTools
-  - Bash(gh label list *),Bash(gh issue create *)
+  - Bash(gh label list *),Bash(gh issue create *),WebSearch
 append-user-input: true
 ---
 

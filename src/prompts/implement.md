@@ -7,7 +7,7 @@ args:
   - --permission-mode
   - acceptEdits
   - --settings
-  - {"permissions":{"allow":["Bash(git add *)","Bash(git commit *)","Bash(./.shipper/scripts/safe-push.sh *)","Bash(gh issue comment *)","Bash(gh issue edit *)"]},"sandbox":{"enabled":true,"autoAllowBashIfSandboxed":true,"excludedCommands":["git add *","git commit *","./.shipper/scripts/safe-push.sh *","gh issue comment *","gh issue edit *"]},"network":{"allowedDomains":["github.com","api.github.com","uploads.github.com","registry.npmjs.org"]}}
+  - {"permissions":{"allow":["Bash(git add *)","Bash(git commit *)","Bash(./.shipper/scripts/safe-push.sh *)","Bash(gh issue comment *)","Bash(gh issue edit *)","WebSearch"]},"sandbox":{"enabled":true,"autoAllowBashIfSandboxed":true,"excludedCommands":["git add *","git commit *","./.shipper/scripts/safe-push.sh *","gh issue comment *","gh issue edit *"]},"network":{"allowedDomains":["github.com","api.github.com","uploads.github.com","registry.npmjs.org"]}}
 append-issue: true
 ---
 
