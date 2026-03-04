@@ -27,7 +27,9 @@ export function prRemediateCommand(pr?: string) {
   }
 
   const run = () => {
-    const code = withStageHooks('pr-remediate', { issueNumber, branchName: '' }, () => {
+    const branch = getBranchForPR(pr!);
+
+    const code = withStageHooks('pr-remediate', { issueNumber, branchName: branch }, () => {
       const waitMinutes = getSettings().prReviewWaitMinutes;
       if (waitMinutes > 0) {
         const prJson = execFileSync('gh', ['pr', 'view', pr!, '--json', 'createdAt'], {
@@ -49,7 +51,6 @@ export function prRemediateCommand(pr?: string) {
       }
 
       const repoRoot = getRepoRoot();
-      const branch = getBranchForPR(pr!);
 
       return withWorktree({ repoRoot, branch, createBranch: false, issueNumber }, (wtPath) => {
         return runPrompt('pr_remediate', { issueRef: pr, prRef: pr, cwd: wtPath });
