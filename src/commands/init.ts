@@ -122,7 +122,9 @@ export function initCommand() {
 
   console.log('\nshipper initialized! You can now run:');
   console.log('  shipper new <pitch>    — create a new issue from an idea');
-  console.log('  shipper groom <issue>  — groom an existing issue');
+  console.log('  shipper adopt <issue>  — bring an existing issue into the workflow');
+  console.log('  shipper groom <issue>  — groom an issue for implementation');
+  console.log('  shipper next <issue>   — advance an issue to its next step');
 }
 
 function readGitignore(filepath: string): string {

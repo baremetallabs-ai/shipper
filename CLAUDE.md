@@ -30,7 +30,7 @@ npx vitest run tests/lib/branch.test.ts   # Run a single test file
 
 **GitHub integration:** All GitHub interaction goes through the `gh` CLI (no REST API). See `src/lib/github.ts`.
 
-**Workflow state machine via labels:** `shipper:new` → `shipper:groomed` → `shipper:designed` → `shipper:planned` → `shipper:implemented` → `shipper:pr-open` → `shipper:ready`. The `next` command auto-advances based on current label.
+**Workflow state machine via labels:** `shipper:new` → `shipper:groomed` → `shipper:designed` → `shipper:planned` → `shipper:implemented` → `shipper:pr-open` → `shipper:pr-reviewed` → `shipper:ready`. Control labels: `shipper:blocked` (dependency block), `shipper:locked` (active instance lock). The `next` command auto-advances based on current label.
 
 ## Code Conventions
 
