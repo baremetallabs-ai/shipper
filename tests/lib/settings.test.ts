@@ -39,7 +39,12 @@ describe('loadSettings', () => {
     });
     const { loadSettings, getSettings } = await loadModule();
     loadSettings();
-    expect(getSettings()).toEqual({ prReviewWaitMinutes: 15, lockTimeoutMinutes: 30, hooks: {} });
+    expect(getSettings()).toEqual({
+      prReviewWaitMinutes: 15,
+      lockTimeoutMinutes: 30,
+      agent: 'claude',
+      hooks: {},
+    });
   });
 
   it('loads base settings file', async () => {
@@ -104,7 +109,12 @@ describe('loadSettings', () => {
 describe('getSettings', () => {
   it('returns defaults when loadSettings has not been called', async () => {
     const { getSettings } = await loadModule();
-    expect(getSettings()).toEqual({ prReviewWaitMinutes: 15, lockTimeoutMinutes: 30, hooks: {} });
+    expect(getSettings()).toEqual({
+      prReviewWaitMinutes: 15,
+      lockTimeoutMinutes: 30,
+      agent: 'claude',
+      hooks: {},
+    });
   });
 });
 
