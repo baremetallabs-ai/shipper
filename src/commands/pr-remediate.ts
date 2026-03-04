@@ -1,13 +1,13 @@
 import { execFileSync } from 'node:child_process';
 import { getBranchForPR, getRepoRoot } from '../lib/branch.js';
-import { autoSelectPrForStage, resolveIssueFromPr } from '../lib/github.js';
+import { autoSelectPrForStage, resolveRef } from '../lib/github.js';
 import { withIssueLock } from '../lib/lock.js';
 import { withWorktree } from '../lib/worktree.js';
 import { runPrompt } from '../lib/prompt-runner.js';
 import { getSettings } from '../lib/settings.js';
 
 export function prRemediateCommand(pr?: string) {
-  let issueNumber: string | undefined;
+  let issueNumber: string;
 
   if (!pr) {
     const selected = autoSelectPrForStage(
@@ -20,7 +20,9 @@ export function prRemediateCommand(pr?: string) {
     pr = selected.pr;
     issueNumber = String(selected.issue.number);
   } else {
-    issueNumber = resolveIssueFromPr(pr);
+    const resolved = resolveRef(pr, 'both');
+    pr = resolved.prNumber!;
+    issueNumber = resolved.issueNumber;
   }
 
   const run = () => {
@@ -47,19 +49,12 @@ export function prRemediateCommand(pr?: string) {
     const repoRoot = getRepoRoot();
     const branch = getBranchForPR(pr!);
 
-    const code = withWorktree(
-      { repoRoot, branch, createBranch: false, issueNumber: issueNumber ?? pr },
-      (wtPath) => {
-        return runPrompt('pr_remediate', { issueRef: pr, prRef: pr, cwd: wtPath });
-      }
-    );
+    const code = withWorktree({ repoRoot, branch, createBranch: false, issueNumber }, (wtPath) => {
+      return runPrompt('pr_remediate', { issueRef: pr, prRef: pr, cwd: wtPath });
+    });
 
     process.exit(code);
   };
 
-  if (issueNumber) {
-    withIssueLock(issueNumber, run);
-  } else {
-    run();
-  }
+  withIssueLock(issueNumber, run);
 }
