@@ -14,10 +14,11 @@ export function runAdvisoryHook(
     });
     console.log(`  ${label} hook completed.`);
   } catch (err) {
-    const code =
+    const rawStatus =
       err && typeof err === 'object' && 'status' in err
-        ? (err as { status: number }).status
-        : 'unknown';
+        ? (err as { status: unknown }).status
+        : undefined;
+    const code = typeof rawStatus === 'number' ? rawStatus : 'unknown';
     const stderr =
       err && typeof err === 'object' && 'stderr' in err
         ? String((err as { stderr: unknown }).stderr).trim()

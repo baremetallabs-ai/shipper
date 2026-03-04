@@ -121,24 +121,30 @@ describe('withWorktree hooks', () => {
     expect(runAdvisoryHookMock).not.toHaveBeenCalled();
   });
 
-  it('runs teardown hook on signal cleanup', () => {
+  it('runs teardown hook exactly once when signal fires during callback', () => {
     getSettingsMock.mockReturnValue({
       hooks: { worktreeTeardown: 'cleanup-cmd' },
     });
 
-    // Capture the SIGINT listener
-    const listeners: Array<() => void> = [];
-    const onSpy = vi.spyOn(process, 'on').mockImplementation((_event, listener) => {
-      listeners.push(listener as () => void);
+    // Capture the SIGINT listener registered by withWorktree
+    let sigintListener: (() => void) | undefined;
+    const onSpy = vi.spyOn(process, 'on').mockImplementation((event, listener) => {
+      if (event === 'SIGINT') {
+        sigintListener = listener as () => void;
+      }
       return process;
     });
     const removeListenerSpy = vi.spyOn(process, 'removeListener').mockImplementation(() => process);
 
-    withWorktree(defaultOpts, () => {});
+    withWorktree(defaultOpts, () => {
+      // Simulate SIGINT arriving during the callback
+      expect(sigintListener).toBeDefined();
+      sigintListener!();
+    });
 
-    // The cleanup function was registered as a SIGINT listener.
-    // It was also already called in the finally block.
-    // Verify the teardown hook was invoked.
+    // The teardown hook should run exactly once — from the signal handler.
+    // The finally block's cleanup call is short-circuited by the idempotent guard.
+    expect(runAdvisoryHookMock).toHaveBeenCalledTimes(1);
     expect(runAdvisoryHookMock).toHaveBeenCalledWith(
       'Worktree teardown',
       'cleanup-cmd',
@@ -147,18 +153,6 @@ describe('withWorktree hooks', () => {
         SHIPPER_ISSUE_NUMBER: '42',
         SHIPPER_BRANCH_NAME: 'shipper/42-add-feature',
       }),
-      expectedWtPath
-    );
-
-    // Simulate signal by invoking the captured listener
-    runAdvisoryHookMock.mockClear();
-    if (listeners.length > 0) {
-      listeners[0]!();
-    }
-    expect(runAdvisoryHookMock).toHaveBeenCalledWith(
-      'Worktree teardown',
-      'cleanup-cmd',
-      expect.objectContaining({ SHIPPER_WORKTREE_PATH: expectedWtPath }),
       expectedWtPath
     );
 
