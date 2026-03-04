@@ -89,7 +89,10 @@ export function withWorktree<T>(opts: CreateWorktreeOpts, fn: (wtPath: string) =
     runAdvisoryHook('Worktree setup', worktreeSetup, hookEnv, wtPath);
   }
 
+  let cleanedUp = false;
   const cleanup = () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
     if (worktreeTeardown) {
       runAdvisoryHook('Worktree teardown', worktreeTeardown, hookEnv, wtPath);
     }

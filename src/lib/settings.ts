@@ -38,7 +38,12 @@ export function loadSettings(): void {
   base = readSettingsFile(basePath);
   local = readSettingsFile(localPath);
 
-  settings = { ...DEFAULTS, ...base, ...local };
+  settings = {
+    ...DEFAULTS,
+    ...base,
+    ...local,
+    hooks: { ...DEFAULTS.hooks, ...base?.hooks, ...local?.hooks },
+  };
 }
 
 export function getSettings(): Settings {
