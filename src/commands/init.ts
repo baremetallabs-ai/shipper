@@ -1,7 +1,8 @@
 import { mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync } from 'node:fs';
+import { createInterface } from 'node:readline/promises';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { prompts } from '../lib/prompts.js';
+import { agentPrompts } from '../lib/prompts.js';
 import { scripts } from '../lib/scripts.js';
 import { DEFAULTS, SETTING_DESCRIPTIONS } from '../lib/settings.js';
 import readmeContent from '../templates/readme.md';
@@ -30,11 +31,47 @@ const LABELS = [
   { name: 'shipper:locked', color: 'D93F0B', description: 'Locked by an active shipper instance' },
 ];
 
-export function initCommand() {
+const VALID_AGENTS = ['claude', 'codex'] as const;
+
+export async function initCommand(options: { agent?: string }) {
   // Check prerequisites
   const ok = runPrereqChecks([checkGitRepo, checkGhInstalled, checkGhAuth, checkGitHubRemote]);
   if (!ok) {
     process.exit(1);
+  }
+
+  // Resolve agent selection
+  let agent: string;
+  if (options.agent) {
+    if (!VALID_AGENTS.includes(options.agent as (typeof VALID_AGENTS)[number])) {
+      console.error(`Error: Invalid agent "${options.agent}". Must be one of: ${VALID_AGENTS.join(', ')}`);
+      process.exit(1);
+      return;
+    }
+    agent = options.agent;
+  } else {
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    const answer = await rl.question(
+      'Which coding agent do you use? [Claude Code / Codex CLI] (default: Claude Code): '
+    );
+    rl.close();
+    const trimmed = answer.trim().toLowerCase();
+    if (!trimmed || trimmed === 'claude code' || trimmed === 'claude') {
+      agent = 'claude';
+    } else if (trimmed === 'codex cli' || trimmed === 'codex') {
+      agent = 'codex';
+    } else {
+      console.error(`Error: Unrecognized agent "${answer.trim()}". Expected "Claude Code" or "Codex CLI".`);
+      process.exit(1);
+      return;
+    }
+  }
+
+  // Codex guard
+  if (!agentPrompts[agent]) {
+    console.error('Codex CLI prompts are not yet available. Use Claude Code or check for updates.');
+    process.exit(1);
+    return;
   }
 
   // Create directories
@@ -55,9 +92,11 @@ export function initCommand() {
   // Write settings.json (merge with existing if present)
   const settingsPath = path.resolve('.shipper', 'settings.json');
   let merged = { ...DEFAULTS };
+  let existingAgent: string | undefined;
   if (existsSync(settingsPath)) {
     try {
       const existing = JSON.parse(readFileSync(settingsPath, 'utf-8')) as Record<string, unknown>;
+      existingAgent = existing.agent as string | undefined;
       merged = { ...DEFAULTS, ...existing };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -65,6 +104,13 @@ export function initCommand() {
       process.exit(1);
     }
   }
+
+  // Re-init warning
+  if (existingAgent && existingAgent !== agent) {
+    console.log(`Switching agent from ${existingAgent} to ${agent} — overwriting prompt files`);
+  }
+
+  merged.agent = agent as typeof merged.agent;
   writeFileSync(settingsPath, JSON.stringify(merged, null, 2) + '\n');
   console.log('Wrote .shipper/settings.json with default settings:');
   for (const [key, value] of Object.entries(DEFAULTS)) {
@@ -93,8 +139,9 @@ export function initCommand() {
   }
 
   // Write prompt files
+  const selectedPrompts = agentPrompts[agent]!;
   let promptCount = 0;
-  for (const [filename, content] of Object.entries(prompts)) {
+  for (const [filename, content] of Object.entries(selectedPrompts)) {
     const dest = path.resolve('.shipper', 'prompts', filename);
     writeFileSync(dest, content);
     promptCount++;
@@ -151,7 +198,6 @@ export function initCommand() {
   console.log('  shipper new <pitch>    — create a new issue from an idea');
   console.log('  shipper adopt <issue>  — bring an existing issue into the workflow');
   console.log('  shipper groom <issue>  — groom an issue for implementation');
-  console.log('  shipper next <ref>     — advance an issue or PR to its next step');
 }
 
 function readGitignore(filepath: string): string {

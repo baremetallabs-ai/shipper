@@ -4,6 +4,7 @@ import path from 'node:path';
 export interface Settings {
   prReviewWaitMinutes: number;
   lockTimeoutMinutes: number;
+  agent: 'claude' | 'codex';
   defaultBaseBranch?: string;
   hooks: {
     worktreeSetup?: string;
@@ -14,12 +15,14 @@ export interface Settings {
 export const DEFAULTS: Settings = {
   prReviewWaitMinutes: 15,
   lockTimeoutMinutes: 30,
+  agent: 'claude' as const,
   hooks: {},
 };
 
 export const SETTING_DESCRIPTIONS: Record<string, string> = {
   prReviewWaitMinutes: 'minimum wait (minutes) before PR review remediation',
   lockTimeoutMinutes: 'stale lock timeout (minutes) before auto-clearing shipper:locked',
+  agent: 'coding agent used for prompt execution',
   defaultBaseBranch: 'target branch for PRs (auto-detected from GitHub if not set)',
   'hooks.worktreeSetup':
     'shell command to run after a worktree is created (before the agent starts)',

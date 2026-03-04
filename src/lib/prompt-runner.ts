@@ -32,7 +32,14 @@ export function runPrompt(name: string, opts: RunPromptOpts): number {
   }
 
   const args = [...frontmatter.args];
-  args.push('--append-system-prompt', promptBody);
+
+  if (frontmatter.cmd === 'claude') {
+    args.push('--append-system-prompt', promptBody);
+  } else if (frontmatter.cmd === 'codex') {
+    args.push(promptBody);
+  } else {
+    args.push('--append-system-prompt', promptBody);
+  }
 
   const messageParts: string[] = [];
 
