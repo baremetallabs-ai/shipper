@@ -24,7 +24,9 @@ export function prReviewCommand(pr?: string) {
 
   process.exit(
     withIssueLock(issueNumber, () =>
-      withStageHooks('pr-review', { issueNumber }, () => runPrompt('pr_review', { prRef: pr }))
+      withStageHooks('pr-review', { issueNumber }, () =>
+        runPrompt('pr_review', { issueRef: issueNumber, prRef: pr })
+      )
     )
   );
 }
