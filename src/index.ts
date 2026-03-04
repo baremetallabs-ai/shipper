@@ -34,8 +34,9 @@ program.hook('preAction', (_thisCommand, actionCommand) => {
 program
   .command('init')
   .description('Initialize shipper in the current repository')
-  .action(() => {
-    initCommand();
+  .option('--agent <name>', 'coding agent to use (claude or codex)')
+  .action(async (options: { agent?: string }) => {
+    await initCommand(options);
   });
 
 program

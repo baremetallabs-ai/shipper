@@ -18,6 +18,32 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+describe('runPrompt agent-specific arg construction', () => {
+  it('uses --append-system-prompt for cmd: claude', () => {
+    const prompt = ['---', 'cmd: claude', '---', '', 'prompt body'].join('\n');
+    readFileSyncMock.mockReturnValueOnce(prompt);
+    spawnSyncMock.mockReturnValueOnce({ status: 0, error: null });
+
+    runPrompt('test', {});
+
+    const args = spawnSyncMock.mock.calls[0][1] as string[];
+    expect(args).toContain('--append-system-prompt');
+    expect(args).toContain('prompt body');
+  });
+
+  it('passes prompt body as positional arg for cmd: codex', () => {
+    const prompt = ['---', 'cmd: codex', '---', '', 'prompt body'].join('\n');
+    readFileSyncMock.mockReturnValueOnce(prompt);
+    spawnSyncMock.mockReturnValueOnce({ status: 0, error: null });
+
+    runPrompt('test', {});
+
+    const args = spawnSyncMock.mock.calls[0][1] as string[];
+    expect(args).not.toContain('--append-system-prompt');
+    expect(args).toContain('prompt body');
+  });
+});
+
 describe('runPrompt baseBranch replacement', () => {
   it('replaces {{BASE_BRANCH}} in prompt body when baseBranch is provided', () => {
     const prompt = [
