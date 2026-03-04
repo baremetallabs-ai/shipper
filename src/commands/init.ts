@@ -71,9 +71,21 @@ export function initCommand() {
     console.log(`  ${key}: ${value}${desc ? `  — ${desc}` : ''}`);
   }
   for (const [key, desc] of Object.entries(SETTING_DESCRIPTIONS)) {
+    if (key in DEFAULTS) continue;
+    let value: unknown;
     if (key.includes('.')) {
-      console.log(`  ${key}: (not set)  — ${desc}`);
-    } else if (!(key in DEFAULTS)) {
+      const parts = key.split('.');
+      let obj: unknown = merged;
+      for (const part of parts) {
+        obj = (obj as Record<string, unknown>)?.[part];
+      }
+      value = obj;
+    } else {
+      value = (merged as Record<string, unknown>)[key];
+    }
+    if (value !== undefined) {
+      console.log(`  ${key}: ${value}  — ${desc}`);
+    } else {
       console.log(`  ${key}: (not set)  — ${desc}`);
     }
   }

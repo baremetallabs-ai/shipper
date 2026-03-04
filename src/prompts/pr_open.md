@@ -53,7 +53,7 @@ Review the commit history to understand what was implemented.
 
 ---
 
-## Phase 2: Rebase onto latest main
+## Phase 2: Rebase onto latest base branch
 
 Before running any checks, ensure the branch is up to date with the base branch.
 
@@ -63,7 +63,7 @@ Before running any checks, ensure the branch is up to date with the base branch.
 git fetch origin
 ```
 
-### Step 2: Rebase onto main
+### Step 2: Rebase onto base branch
 
 ```bash
 git rebase origin/{{BASE_BRANCH}}
@@ -148,7 +148,7 @@ If the failure is not straightforward — the tests reveal a fundamental impleme
 Before opening the PR, do a final validation:
 
 1. Re-read the **acceptance criteria** from the issue.
-2. Review the **diff** against main:
+2. Review the **diff** against the base branch:
 
 ```bash
 git diff origin/{{BASE_BRANCH}}...HEAD --stat
