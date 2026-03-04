@@ -49,10 +49,23 @@ export interface ResolvedRefBoth extends ResolvedRef {
 
 export function resolveBaseBranch(configured?: string): string {
   if (configured) {
-    const result = execFileSync('git', ['ls-remote', '--heads', 'origin', configured], {
-      encoding: 'utf-8',
-    });
-    if (!result.trim()) {
+    let result: string;
+    try {
+      result = execFileSync('git', ['ls-remote', '--heads', 'origin', configured], {
+        encoding: 'utf-8',
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`Error: Failed to check remote branch '${configured}': ${msg}`);
+      process.exit(1);
+    }
+    // ls-remote uses pattern matching, so verify the exact ref is present
+    const exactRef = `refs/heads/${configured}`;
+    const found = result
+      .trim()
+      .split('\n')
+      .some((line) => line.endsWith(`\t${exactRef}`));
+    if (!found) {
       console.error(
         `Error: configured defaultBaseBranch '${configured}' does not exist on remote.`
       );
@@ -60,12 +73,24 @@ export function resolveBaseBranch(configured?: string): string {
     }
     return configured;
   }
-  const output = execFileSync(
-    'gh',
-    ['repo', 'view', '--json', 'defaultBranchRef', '-q', '.defaultBranchRef.name'],
-    { encoding: 'utf-8' }
-  );
-  return output.trim();
+  let output: string;
+  try {
+    output = execFileSync(
+      'gh',
+      ['repo', 'view', '--json', 'defaultBranchRef', '-q', '.defaultBranchRef.name'],
+      { encoding: 'utf-8' }
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`Error: Failed to auto-detect default base branch: ${msg}`);
+    process.exit(1);
+  }
+  const branch = output.trim();
+  if (!branch) {
+    console.error('Error: Failed to auto-detect default base branch: received empty branch name.');
+    process.exit(1);
+  }
+  return branch;
 }
 
 export function fetchIssue(ref: string): string {

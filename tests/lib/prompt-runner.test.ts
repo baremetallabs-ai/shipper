@@ -15,7 +15,7 @@ vi.mock('../../src/lib/github.js', () => ({
 import { runPrompt } from '../../src/lib/prompt-runner.js';
 
 afterEach(() => {
-  vi.restoreAllMocks();
+  vi.clearAllMocks();
 });
 
 describe('runPrompt baseBranch replacement', () => {
