@@ -1,7 +1,8 @@
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { prompts } from '../lib/prompts.js';
+import { scripts } from '../lib/scripts.js';
 import { DEFAULTS, SETTING_DESCRIPTIONS } from '../lib/settings.js';
 import readmeContent from '../templates/readme.md';
 import {
@@ -39,6 +40,7 @@ export function initCommand() {
   // Create directories
   const dirs = [
     path.resolve('.shipper', 'prompts'),
+    path.resolve('.shipper', 'scripts'),
     path.resolve('.shipper', 'tmp'),
     path.resolve('.shipper', 'hooks'),
   ];
@@ -98,6 +100,16 @@ export function initCommand() {
     promptCount++;
   }
   console.log(`Wrote ${promptCount} prompt files to .shipper/prompts/`);
+
+  // Write script files
+  let scriptCount = 0;
+  for (const [filename, content] of Object.entries(scripts)) {
+    const dest = path.resolve('.shipper', 'scripts', filename);
+    writeFileSync(dest, content);
+    chmodSync(dest, 0o755);
+    scriptCount++;
+  }
+  console.log(`Wrote ${scriptCount} script files to .shipper/scripts/`);
 
   // Write README
   const readmePath = path.resolve('.shipper', 'README.md');
