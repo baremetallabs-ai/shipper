@@ -7,7 +7,7 @@ args:
   - --permission-mode
   - acceptEdits
   - --allowedTools
-  - Bash(gh issue view *),Bash(gh issue comment *),Bash(gh issue edit *),Bash(gh label list *),Bash(gh pr view *),Bash(gh pr list *),Bash(gh pr diff *),Bash(gh api *),Bash(gh repo view *)
+  - Bash(gh issue view *),Bash(gh issue comment *),Bash(gh issue edit *),Bash(gh label list *),Bash(gh pr view *),Bash(gh pr list *),Bash(gh pr diff *),Bash(gh repo view *),Bash(./.shipper/scripts/gh-api-get-pr-files.sh *),Bash(./.shipper/scripts/gh-api-get-user.sh *),Bash(./.shipper/scripts/gh-api-post-review.sh *)
 append-issue: true
 append-pr: true
 ---
@@ -85,7 +85,7 @@ gh pr diff <PR>
 Also get structured file information (you'll need this for inline comments):
 
 ```bash
-gh api repos/{owner}/{repo}/pulls/<PR>/files --jq '.[] | {filename, status, additions, deletions, patch}'
+./.shipper/scripts/gh-api-get-pr-files.sh {owner}/{repo} <PR>
 ```
 
 **First pass**: scan the full diff to understand the shape of the change. What files were touched? What's the overall approach? Does it match the plan?
@@ -194,7 +194,7 @@ Determine whether the authenticated GitHub user is the PR author. GitHub does no
 
 1. Get the authenticated GitHub username:
    ```bash
-   gh api /user --jq .login
+   ./.shipper/scripts/gh-api-get-user.sh
    ```
 2. Get the PR author:
    ```bash
@@ -234,7 +234,7 @@ When the reviewer is NOT the PR author, the verdict line remains unchanged from 
 
 ### Step 3: Construct and submit the review via GitHub API
 
-The `gh pr review` command does NOT support inline comments on specific lines. You must use the GitHub REST API directly via `gh api`.
+The `gh pr review` command does NOT support inline comments on specific lines. You must use the GitHub REST API directly via the wrapper scripts.
 
 #### 3a: Get the head commit SHA
 
@@ -303,9 +303,7 @@ The JSON structure must be:
 Use the **Write** tool to save the JSON payload to `./.shipper/tmp/pr_review_payload-<number>.json`, then submit:
 
 ```bash
-gh api repos/{owner}/{repo}/pulls/<PR>/reviews \
-  --method POST \
-  --input ./.shipper/tmp/pr_review_payload-<number>.json
+./.shipper/scripts/gh-api-post-review.sh {owner}/{repo} <PR> ./.shipper/tmp/pr_review_payload-<number>.json
 ```
 
 If the API returns a validation error about a comment line number, that line is outside the diff. Remove that comment from the inline array, add it to the top-level review body instead, and resubmit.
