@@ -82,46 +82,11 @@ describe('getLinkedIssueNumber', () => {
 });
 
 describe('postMerge', () => {
-  it('executes hook with correct env vars when configured', () => {
-    getSettingsMock.mockReturnValue({
-      prReviewWaitMinutes: 30,
-      hooks: { postMerge: 'echo done' },
-    });
+  it('cleans up labels and closes issue', () => {
     execFileSyncMock.mockReturnValue('');
 
     postMerge(mockPR, 25, 'owner/repo', false);
 
-    expect(execSyncMock).toHaveBeenCalledWith('echo done', {
-      stdio: ['inherit', 'inherit', 'pipe'],
-      env: expect.objectContaining({
-        SHIPPER_PR_NUMBER: '42',
-        SHIPPER_ISSUE_NUMBER: '25',
-        SHIPPER_BRANCH_NAME: '25-add-feature',
-      }),
-    });
-    expect(logMock).toHaveBeenCalledWith('  Post-merge hook completed.');
-  });
-
-  it('logs warning when hook exits non-zero and continues', () => {
-    getSettingsMock.mockReturnValue({
-      prReviewWaitMinutes: 30,
-      hooks: { postMerge: 'exit 1' },
-    });
-    const err = new Error('Command failed') as Error & { status: number; stderr: Buffer };
-    err.status = 1;
-    err.stderr = Buffer.from('something went wrong');
-    execSyncMock.mockImplementation(() => {
-      throw err;
-    });
-    // execFileSync for label cleanup and issue close
-    execFileSyncMock.mockReturnValue('');
-
-    postMerge(mockPR, 25, 'owner/repo', false);
-
-    expect(warnMock).toHaveBeenCalledWith(
-      expect.stringContaining('Warning: Post-merge hook exited with code 1')
-    );
-    // Label cleanup and issue close should still be called
     expect(execFileSyncMock).toHaveBeenCalledWith(
       'gh',
       ['issue', 'edit', '25', '-R', 'owner/repo', '--remove-label', 'shipper:ready'],
@@ -134,48 +99,7 @@ describe('postMerge', () => {
     );
   });
 
-  it('skips hook when not configured and still cleans up', () => {
-    getSettingsMock.mockReturnValue({ prReviewWaitMinutes: 30, hooks: {} });
-    execFileSyncMock.mockReturnValue('');
-
-    postMerge(mockPR, 25, 'owner/repo', false);
-
-    expect(execSyncMock).not.toHaveBeenCalled();
-    // Label cleanup should still run
-    expect(execFileSyncMock).toHaveBeenCalledWith(
-      'gh',
-      ['issue', 'edit', '25', '-R', 'owner/repo', '--remove-label', 'shipper:ready'],
-      expect.anything()
-    );
-    expect(execFileSyncMock).toHaveBeenCalledWith(
-      'gh',
-      ['issue', 'close', '25', '-R', 'owner/repo'],
-      expect.anything()
-    );
-  });
-
-  it('logs dry-run messages with hook configured', () => {
-    getSettingsMock.mockReturnValue({
-      prReviewWaitMinutes: 30,
-      hooks: { postMerge: 'echo done' },
-    });
-
-    postMerge(mockPR, 25, 'owner/repo', true);
-
-    expect(execSyncMock).not.toHaveBeenCalled();
-    expect(execFileSyncMock).not.toHaveBeenCalled();
-    expect(logMock).toHaveBeenCalledWith('  [dry-run] Would execute post-merge hook: echo done');
-    expect(logMock).toHaveBeenCalledWith(
-      '    SHIPPER_PR_NUMBER=42 SHIPPER_ISSUE_NUMBER=25 SHIPPER_BRANCH_NAME=25-add-feature'
-    );
-    expect(logMock).toHaveBeenCalledWith(
-      '  [dry-run] Would remove shipper:ready and close issue #25'
-    );
-  });
-
-  it('logs dry-run label message without hook configured', () => {
-    getSettingsMock.mockReturnValue({ prReviewWaitMinutes: 30, hooks: {} });
-
+  it('logs dry-run message', () => {
     postMerge(mockPR, 25, 'owner/repo', true);
 
     expect(execSyncMock).not.toHaveBeenCalled();

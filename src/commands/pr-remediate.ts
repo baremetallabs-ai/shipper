@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { getBranchForPR, getRepoRoot } from '../lib/branch.js';
 import { autoSelectPrForStage, resolveRef } from '../lib/github.js';
+import { withStageHooks } from '../lib/hooks.js';
 import { withIssueLock } from '../lib/lock.js';
 import { withWorktree } from '../lib/worktree.js';
 import { runPrompt } from '../lib/prompt-runner.js';
@@ -26,31 +27,33 @@ export function prRemediateCommand(pr?: string) {
   }
 
   const run = () => {
-    const waitMinutes = getSettings().prReviewWaitMinutes;
-    if (waitMinutes > 0) {
-      const prJson = execFileSync('gh', ['pr', 'view', pr!, '--json', 'createdAt'], {
-        encoding: 'utf-8',
-      });
-      const { createdAt } = JSON.parse(prJson) as { createdAt: string };
-      const elapsedMs = Date.now() - new Date(createdAt).getTime();
-      const waitMs = waitMinutes * 60_000;
-      const remainingMs = waitMs - elapsedMs;
+    const code = withStageHooks('pr-remediate', { issueNumber, branchName: '' }, () => {
+      const waitMinutes = getSettings().prReviewWaitMinutes;
+      if (waitMinutes > 0) {
+        const prJson = execFileSync('gh', ['pr', 'view', pr!, '--json', 'createdAt'], {
+          encoding: 'utf-8',
+        });
+        const { createdAt } = JSON.parse(prJson) as { createdAt: string };
+        const elapsedMs = Date.now() - new Date(createdAt).getTime();
+        const waitMs = waitMinutes * 60_000;
+        const remainingMs = waitMs - elapsedMs;
 
-      if (remainingMs > 0) {
-        const remainingMin = Math.ceil(remainingMs / 60_000);
-        console.log(
-          `PR #${pr} is ${Math.floor(elapsedMs / 60_000)} minutes old. ` +
-            `Waiting ${remainingMin} more minute(s) for reviewers (prReviewWaitMinutes: ${waitMinutes})...`
-        );
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, remainingMs);
+        if (remainingMs > 0) {
+          const remainingMin = Math.ceil(remainingMs / 60_000);
+          console.log(
+            `PR #${pr} is ${Math.floor(elapsedMs / 60_000)} minutes old. ` +
+              `Waiting ${remainingMin} more minute(s) for reviewers (prReviewWaitMinutes: ${waitMinutes})...`
+          );
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, remainingMs);
+        }
       }
-    }
 
-    const repoRoot = getRepoRoot();
-    const branch = getBranchForPR(pr!);
+      const repoRoot = getRepoRoot();
+      const branch = getBranchForPR(pr!);
 
-    const code = withWorktree({ repoRoot, branch, createBranch: false, issueNumber }, (wtPath) => {
-      return runPrompt('pr_remediate', { issueRef: pr, prRef: pr, cwd: wtPath });
+      return withWorktree({ repoRoot, branch, createBranch: false, issueNumber }, (wtPath) => {
+        return runPrompt('pr_remediate', { issueRef: pr, prRef: pr, cwd: wtPath });
+      });
     });
 
     process.exit(code);

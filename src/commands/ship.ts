@@ -1,5 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { getRepoNwo, selectIssuesForStage } from '../lib/github.js';
+import { withStageHooks } from '../lib/hooks.js';
 import { withIssueLock } from '../lib/lock.js';
 import { postMerge } from './merge.js';
 import type { QueuedPR } from './merge.js';
@@ -270,7 +271,11 @@ function shipOneIssue(issue: string, merge: boolean): { success: boolean; error?
         return { success: false, error: msg };
       }
 
-      const merged = mergePr(pr, issueNumber, nwo);
+      const merged = withStageHooks(
+        'merge',
+        { issueNumber: issueStr, branchName: pr.headRefName },
+        () => mergePr(pr, issueNumber, nwo)
+      );
 
       if (merged) {
         results.push({ stage: 'merge', status: 'pass' });

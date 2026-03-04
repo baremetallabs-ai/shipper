@@ -1,4 +1,5 @@
 import { autoSelectIssue } from '../lib/github.js';
+import { withStageHooks } from '../lib/hooks.js';
 import { withIssueLock } from '../lib/lock.js';
 import { runPrompt } from '../lib/prompt-runner.js';
 
@@ -13,5 +14,9 @@ export function groomCommand(issue?: string) {
     issue = String(selected.number);
   }
 
-  process.exit(withIssueLock(issue, () => runPrompt('groom', { issueRef: issue })));
+  process.exit(
+    withIssueLock(issue, () =>
+      withStageHooks('groom', { issueNumber: issue }, () => runPrompt('groom', { issueRef: issue }))
+    )
+  );
 }

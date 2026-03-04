@@ -1,7 +1,5 @@
 {
   "prReviewWaitMinutes": 15,
   "lockTimeoutMinutes": 30,
-  "hooks": {
-    "postMerge": "git pull && npm install && npm run build && shipper init"
-  }
+  "hooks": {}
 }

@@ -6,7 +6,6 @@ export interface Settings {
   lockTimeoutMinutes: number;
   defaultBaseBranch?: string;
   hooks: {
-    postMerge?: string;
     worktreeSetup?: string;
     worktreeTeardown?: string;
   };
@@ -22,7 +21,6 @@ export const SETTING_DESCRIPTIONS: Record<string, string> = {
   prReviewWaitMinutes: 'minimum wait (minutes) before PR review remediation',
   lockTimeoutMinutes: 'stale lock timeout (minutes) before auto-clearing shipper:locked',
   defaultBaseBranch: 'target branch for PRs (auto-detected from GitHub if not set)',
-  'hooks.postMerge': 'shell command to run after a PR is merged',
   'hooks.worktreeSetup':
     'shell command to run after a worktree is created (before the agent starts)',
   'hooks.worktreeTeardown': 'shell command to run before a worktree is removed',

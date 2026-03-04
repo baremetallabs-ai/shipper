@@ -1,5 +1,6 @@
 import { findBranchForIssue, getRepoRoot } from '../lib/branch.js';
 import { autoSelectIssue, resolveBaseBranch, resolveRef } from '../lib/github.js';
+import { withStageHooks } from '../lib/hooks.js';
 import { getSettings } from '../lib/settings.js';
 import { withIssueLock } from '../lib/lock.js';
 import { withWorktree } from '../lib/worktree.js';
@@ -26,11 +27,10 @@ export function prOpenCommand(issue?: string) {
     const repoRoot = getRepoRoot();
     const branch = findBranchForIssue(issue);
 
-    const code = withWorktree(
-      { repoRoot, branch, createBranch: false, issueNumber: issue },
-      (wtPath) => {
+    const code = withStageHooks('pr-open', { issueNumber: issue, branchName: branch }, () =>
+      withWorktree({ repoRoot, branch, createBranch: false, issueNumber: issue }, (wtPath) => {
         return runPrompt('pr_open', { issueRef: issue, cwd: wtPath, baseBranch });
-      }
+      })
     );
 
     process.exit(code);
