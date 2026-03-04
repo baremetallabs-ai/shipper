@@ -7,7 +7,7 @@ args:
   - --permission-mode
   - acceptEdits
   - --allowedTools
-  - Bash(gh issue view *),Bash(gh issue comment *),Bash(gh issue edit *),Bash(gh label list *),Bash(gh pr view *),Bash(gh pr list *),Bash(gh pr diff *),Bash(gh repo view *),Bash(.shipper/scripts/gh-api-get-pr-files.sh *),Bash(.shipper/scripts/gh-api-get-user.sh *),Bash(.shipper/scripts/gh-api-post-review.sh *)
+  - Bash(gh issue view *),Bash(gh issue comment *),Bash(gh issue edit *),Bash(gh label list *),Bash(gh pr view *),Bash(gh pr list *),Bash(gh pr diff *),Bash(gh repo view *),Bash(./.shipper/scripts/gh-api-get-pr-files.sh *),Bash(./.shipper/scripts/gh-api-get-user.sh *),Bash(./.shipper/scripts/gh-api-post-review.sh *)
 append-issue: true
 append-pr: true
 ---
