@@ -6,7 +6,7 @@ args:
   - --permission-mode
   - acceptEdits
   - --allowedTools
-  - Bash(gh label list *),Bash(gh issue view *),Bash(gh issue edit *),Bash(gh issue comment *),Bash(gh issue create *)
+  - Bash(gh label list *),Bash(gh issue view *),Bash(gh issue edit *),Bash(gh issue comment *),Bash(gh issue create *),WebSearch
 append-issue: true
 ---
 
