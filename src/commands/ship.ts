@@ -157,8 +157,66 @@ function mergePr(pr: QueuedPR, issueNumber: number, nwo: string): boolean {
     console.log(`PR #${pr.number} merged successfully.`);
     postMerge(pr, issueNumber, nwo, false);
     return true;
-  } catch {
+  } catch (err) {
     console.error(`\nMerge failed for PR #${pr.number}. See command output above for details.`);
+
+    try {
+      execFileSync(
+        'gh',
+        ['pr', 'edit', String(pr.number), '-R', nwo, '--remove-label', 'shipper:ready'],
+        { stdio: 'ignore' }
+      );
+    } catch {
+      console.error(`Warning: Failed to remove shipper:ready label from PR #${pr.number}`);
+    }
+
+    try {
+      execFileSync(
+        'gh',
+        ['pr', 'edit', String(pr.number), '-R', nwo, '--add-label', 'shipper:pr-reviewed'],
+        { stdio: 'ignore' }
+      );
+    } catch {
+      console.error(`Warning: Failed to add shipper:pr-reviewed label to PR #${pr.number}`);
+    }
+
+    try {
+      execFileSync(
+        'gh',
+        ['issue', 'edit', String(issueNumber), '-R', nwo, '--remove-label', 'shipper:ready'],
+        { stdio: 'ignore' }
+      );
+    } catch {
+      console.error(`Warning: Failed to remove shipper:ready label from issue #${issueNumber}`);
+    }
+
+    try {
+      execFileSync(
+        'gh',
+        ['issue', 'edit', String(issueNumber), '-R', nwo, '--add-label', 'shipper:pr-reviewed'],
+        { stdio: 'ignore' }
+      );
+    } catch {
+      console.error(`Warning: Failed to add shipper:pr-reviewed label to issue #${issueNumber}`);
+    }
+
+    const reason = err instanceof Error ? err.message : String(err);
+    const comment = [
+      `Merge failed for PR #${pr.number}.`,
+      '',
+      `**Reason:** ${reason}`,
+      '',
+      'The `shipper:pr-reviewed` label has been re-applied so the PR can be remediated and re-queued.',
+    ].join('\n');
+
+    try {
+      execFileSync('gh', ['pr', 'comment', String(pr.number), '-R', nwo, '--body', comment], {
+        stdio: 'ignore',
+      });
+    } catch {
+      console.error(`Warning: Failed to post failure comment on PR #${pr.number}`);
+    }
+
     return false;
   }
 }
