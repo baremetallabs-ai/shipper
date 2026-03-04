@@ -9,6 +9,7 @@ export default defineConfig({
   clean: true,
   loader: {
     '.md': 'text',
+    '.sh': 'text',
   },
   shims: true,
   minify: false,

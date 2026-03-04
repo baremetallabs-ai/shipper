@@ -7,7 +7,7 @@ args:
   - --permission-mode
   - acceptEdits
   - --settings
-  - {"permissions":{"allow":["Bash(gh *)","Bash(git *)"]},"sandbox":{"enabled":true,"autoAllowBashIfSandboxed":true,"excludedCommands":["gh *","git *"]},"network":{"allowedDomains":["github.com","api.github.com","uploads.github.com","registry.npmjs.org"]}}
+  - {"permissions":{"allow":["Bash(git fetch *)","Bash(git rebase *)","Bash(.shipper/scripts/safe-push.sh *)","Bash(gh pr view *)","Bash(gh pr checks *)","Bash(gh pr comment *)","Bash(gh pr edit *)","Bash(gh issue comment *)","Bash(gh issue edit *)","Bash(gh run view *)","Bash(.shipper/scripts/gh-api-get-reviews.sh *)","Bash(.shipper/scripts/gh-api-reply-thread.sh *)"]},"sandbox":{"enabled":true,"autoAllowBashIfSandboxed":true,"excludedCommands":["git fetch *","git rebase *",".shipper/scripts/safe-push.sh *","gh pr view *","gh pr checks *","gh pr comment *","gh pr edit *","gh issue comment *","gh issue edit *","gh run view *",".shipper/scripts/gh-api-get-reviews.sh *",".shipper/scripts/gh-api-reply-thread.sh *"]},"network":{"allowedDomains":["github.com","api.github.com","uploads.github.com","registry.npmjs.org"]}}
 append-issue: true
 append-pr: true
 ---
@@ -63,7 +63,7 @@ git rebase origin/<base_branch>
 4. Once the rebase succeeds, force-push the updated branch:
 
 ```bash
-git push --force-with-lease
+./.shipper/scripts/safe-push.sh --force-with-lease
 ```
 
 If conflicts cannot be resolved:
@@ -92,7 +92,7 @@ Categorize every check as **passing**, **failing**, or **pending**.
 ### Step 4: Gather review feedback
 
 ```bash
-gh api repos/{owner}/{repo}/pulls/<PR>/reviews --paginate
+./.shipper/scripts/gh-api-get-reviews.sh {owner}/{repo} <PR>
 ```
 
 Identify:
@@ -199,7 +199,7 @@ Make the targeted changes needed to satisfy the unmet criteria.
 3. Push:
 
 ```bash
-git push
+./.shipper/scripts/safe-push.sh
 ```
 
 ### Respond to reviewers
@@ -210,7 +210,7 @@ For every review thread you addressed or discussed, post a reply:
 - **Discuss:** Your explanation with evidence. Be direct but respectful.
 - **Deferred:** Acknowledge the feedback, explain it's out of scope for this PR, and note that a follow-up issue will be created (or has been created).
 
-Use `gh api` to reply to specific review threads, or `gh pr comment` for general responses.
+Use `./.shipper/scripts/gh-api-reply-thread.sh` to reply to specific review threads, or `gh pr comment` for general responses.
 
 ---
 

@@ -5,6 +5,7 @@ const mkdirSyncMock = vi.fn();
 const writeFileSyncMock = vi.fn();
 const readFileSyncMock = vi.fn();
 const existsSyncMock = vi.fn();
+const chmodSyncMock = vi.fn();
 
 vi.mock('node:fs', async () => {
   const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
@@ -14,6 +15,7 @@ vi.mock('node:fs', async () => {
     writeFileSync: (...args: unknown[]) => writeFileSyncMock(...args),
     readFileSync: (...args: unknown[]) => readFileSyncMock(...args),
     existsSync: (...args: unknown[]) => existsSyncMock(...args),
+    chmodSync: (...args: unknown[]) => chmodSyncMock(...args),
   };
 });
 
@@ -23,6 +25,10 @@ vi.mock('node:child_process', () => ({
 
 vi.mock('../../src/lib/prompts.js', () => ({
   prompts: {},
+}));
+
+vi.mock('../../src/lib/scripts.js', () => ({
+  scripts: {},
 }));
 
 vi.mock('../../src/templates/readme.md', () => ({
@@ -49,6 +55,7 @@ beforeEach(() => {
   writeFileSyncMock.mockReset();
   readFileSyncMock.mockReset();
   existsSyncMock.mockReset();
+  chmodSyncMock.mockReset();
   exitMock.mockClear();
   // Default: settings.json doesn't exist, root .gitignore doesn't exist
   existsSyncMock.mockReturnValue(false);
@@ -64,6 +71,16 @@ describe('initCommand README', () => {
     );
     expect(readmeCall).toBeDefined();
     expect(readmeCall![1]).toBe('# Test README content');
+  });
+});
+
+describe('initCommand directories', () => {
+  it('creates .shipper/scripts directory', () => {
+    initCommand();
+    const scriptsDirCall = mkdirSyncMock.mock.calls.find(
+      (call: unknown[]) => call[0] === path.resolve('.shipper', 'scripts')
+    );
+    expect(scriptsDirCall).toBeDefined();
   });
 });
 
