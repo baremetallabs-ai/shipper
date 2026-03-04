@@ -1,5 +1,6 @@
 import { generateBranchName, getRepoRoot } from '../lib/branch.js';
 import { autoSelectIssue } from '../lib/github.js';
+import { withStageHooks } from '../lib/hooks.js';
 import { withIssueLock } from '../lib/lock.js';
 import { withWorktree } from '../lib/worktree.js';
 import { runPrompt } from '../lib/prompt-runner.js';
@@ -19,11 +20,10 @@ export function implementCommand(issue?: string) {
     const repoRoot = getRepoRoot();
     const branch = generateBranchName(issue);
 
-    const code = withWorktree(
-      { repoRoot, branch, createBranch: true, issueNumber: issue },
-      (wtPath) => {
+    const code = withStageHooks('implement', { issueNumber: issue, branchName: branch }, () =>
+      withWorktree({ repoRoot, branch, createBranch: true, issueNumber: issue }, (wtPath) => {
         return runPrompt('implement', { issueRef: issue, cwd: wtPath });
-      }
+      })
     );
 
     process.exit(code);

@@ -1,4 +1,5 @@
 import { autoSelectPrForStage, resolveRef } from '../lib/github.js';
+import { withStageHooks } from '../lib/hooks.js';
 import { withIssueLock } from '../lib/lock.js';
 import { runPrompt } from '../lib/prompt-runner.js';
 
@@ -21,5 +22,9 @@ export function prReviewCommand(pr?: string) {
     issueNumber = resolved.issueNumber;
   }
 
-  process.exit(withIssueLock(issueNumber, () => runPrompt('pr_review', { prRef: pr })));
+  process.exit(
+    withIssueLock(issueNumber, () =>
+      withStageHooks('pr-review', { issueNumber }, () => runPrompt('pr_review', { prRef: pr }))
+    )
+  );
 }

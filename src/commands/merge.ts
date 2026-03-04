@@ -3,8 +3,7 @@ import { openSync, closeSync, readFileSync, writeFileSync, unlinkSync, constants
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { getRepoNwo, tryResolvePrForIssue } from '../lib/github.js';
-import { runAdvisoryHook } from '../lib/hooks.js';
-import { getSettings } from '../lib/settings.js';
+import { withStageHooks } from '../lib/hooks.js';
 
 interface MergeOptions {
   interval: string;
@@ -317,25 +316,8 @@ export function getLinkedIssueNumber(prNumber: number, nwo: string): number | nu
   }
 }
 
-export function postMerge(pr: QueuedPR, issueNumber: number, nwo: string, dryRun: boolean): void {
-  // 1. Run hook if configured
-  const hookCmd = getSettings().hooks.postMerge;
-  if (hookCmd) {
-    if (dryRun) {
-      console.log(`  [dry-run] Would execute post-merge hook: ${hookCmd}`);
-      console.log(
-        `    SHIPPER_PR_NUMBER=${pr.number} SHIPPER_ISSUE_NUMBER=${issueNumber} SHIPPER_BRANCH_NAME=${pr.headRefName}`
-      );
-    } else {
-      runAdvisoryHook('Post-merge', hookCmd, {
-        SHIPPER_PR_NUMBER: String(pr.number),
-        SHIPPER_ISSUE_NUMBER: String(issueNumber),
-        SHIPPER_BRANCH_NAME: pr.headRefName,
-      });
-    }
-  }
-
-  // 2. Clean up label and close issue
+export function postMerge(_pr: QueuedPR, issueNumber: number, nwo: string, dryRun: boolean): void {
+  // Clean up label and close issue
   if (dryRun) {
     console.log(`  [dry-run] Would remove shipper:ready and close issue #${issueNumber}`);
     return;
@@ -508,7 +490,14 @@ function processQueue(nwo: string, dryRun: boolean): void {
   }
 
   const first = queue[0]!;
-  processPR(first, nwo, dryRun);
+  withStageHooks(
+    'merge',
+    {
+      issueNumber: String(getLinkedIssueNumber(first.number, nwo) ?? ''),
+      branchName: first.headRefName,
+    },
+    () => processPR(first, nwo, dryRun)
+  );
 }
 
 function sleep(ms: number): Promise<void> {
@@ -528,7 +517,14 @@ export async function mergeCommand(options: MergeOptions): Promise<void> {
     if (options.dryRun) console.log('[dry-run mode]');
     const pr = lookupPR(cleaned, nwo);
     console.log(`Targeting PR #${pr.number}: ${pr.title}`);
-    const merged = processPR(pr, nwo, options.dryRun);
+    const merged = withStageHooks(
+      'merge',
+      {
+        issueNumber: String(getLinkedIssueNumber(pr.number, nwo) ?? ''),
+        branchName: pr.headRefName,
+      },
+      () => processPR(pr, nwo, options.dryRun)
+    );
     if (!merged) process.exit(1);
     return;
   }
