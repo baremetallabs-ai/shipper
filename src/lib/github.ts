@@ -47,6 +47,27 @@ export interface ResolvedRefBoth extends ResolvedRef {
   prNumber: string;
 }
 
+export function resolveBaseBranch(configured?: string): string {
+  if (configured) {
+    const result = execFileSync('git', ['ls-remote', '--heads', 'origin', configured], {
+      encoding: 'utf-8',
+    });
+    if (!result.trim()) {
+      console.error(
+        `Error: configured defaultBaseBranch '${configured}' does not exist on remote.`
+      );
+      process.exit(1);
+    }
+    return configured;
+  }
+  const output = execFileSync(
+    'gh',
+    ['repo', 'view', '--json', 'defaultBranchRef', '-q', '.defaultBranchRef.name'],
+    { encoding: 'utf-8' }
+  );
+  return output.trim();
+}
+
 export function fetchIssue(ref: string): string {
   let json: string;
   try {

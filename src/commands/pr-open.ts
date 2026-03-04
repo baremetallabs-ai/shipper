@@ -1,5 +1,6 @@
 import { findBranchForIssue, getRepoRoot } from '../lib/branch.js';
-import { autoSelectIssue, resolveRef } from '../lib/github.js';
+import { autoSelectIssue, resolveBaseBranch, resolveRef } from '../lib/github.js';
+import { getSettings } from '../lib/settings.js';
 import { withIssueLock } from '../lib/lock.js';
 import { withWorktree } from '../lib/worktree.js';
 import { runPrompt } from '../lib/prompt-runner.js';
@@ -18,6 +19,9 @@ export function prOpenCommand(issue?: string) {
     issue = resolved.issueNumber;
   }
 
+  const settings = getSettings();
+  const baseBranch = resolveBaseBranch(settings.defaultBaseBranch);
+
   withIssueLock(issue, () => {
     const repoRoot = getRepoRoot();
     const branch = findBranchForIssue(issue);
@@ -25,7 +29,7 @@ export function prOpenCommand(issue?: string) {
     const code = withWorktree(
       { repoRoot, branch, createBranch: false, issueNumber: issue },
       (wtPath) => {
-        return runPrompt('pr_open', { issueRef: issue, cwd: wtPath });
+        return runPrompt('pr_open', { issueRef: issue, cwd: wtPath, baseBranch });
       }
     );
 

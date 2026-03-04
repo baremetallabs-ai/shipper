@@ -9,6 +9,7 @@ export interface RunPromptOpts {
   issueRef?: string;
   prRef?: string;
   cwd?: string;
+  baseBranch?: string;
 }
 
 export function runPrompt(name: string, opts: RunPromptOpts): number {
@@ -25,8 +26,13 @@ export function runPrompt(name: string, opts: RunPromptOpts): number {
 
   const { frontmatter, body } = parseFrontmatter(raw);
 
+  let promptBody = body;
+  if (opts.baseBranch) {
+    promptBody = promptBody.replaceAll('{{BASE_BRANCH}}', opts.baseBranch);
+  }
+
   const args = [...frontmatter.args];
-  args.push('--append-system-prompt', body);
+  args.push('--append-system-prompt', promptBody);
 
   const messageParts: string[] = [];
 

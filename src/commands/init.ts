@@ -70,9 +70,12 @@ export function initCommand() {
     const desc = SETTING_DESCRIPTIONS[key];
     console.log(`  ${key}: ${value}${desc ? `  — ${desc}` : ''}`);
   }
-  for (const [dotKey, desc] of Object.entries(SETTING_DESCRIPTIONS)) {
-    if (!dotKey.includes('.')) continue;
-    console.log(`  ${dotKey}: (not set)  — ${desc}`);
+  for (const [key, desc] of Object.entries(SETTING_DESCRIPTIONS)) {
+    if (key.includes('.')) {
+      console.log(`  ${key}: (not set)  — ${desc}`);
+    } else if (!(key in DEFAULTS)) {
+      console.log(`  ${key}: (not set)  — ${desc}`);
+    }
   }
 
   // Write prompt files
