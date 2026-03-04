@@ -51,7 +51,7 @@ Control labels:
 
 # End-to-end lifecycle
 
-Stage commands (`groom`, `design`, `plan`, `implement`, `pr open`, `pr review`, `pr remediate`) accept an optional issue argument. When omitted, they auto-select the first eligible issue.
+Stage commands that operate on issues (`groom`, `design`, `plan`, `implement`) accept an optional issue argument and, when omitted, auto-select the first eligible issue. Stage commands that operate on pull requests (`pr open`, `pr review`, `pr remediate`) accept an optional PR argument and, when omitted, auto-select the first eligible PR.
 
 ## 1) `shipper new <pitch>`
 
@@ -216,15 +216,17 @@ Output:
 
 - The issue advances one step in the workflow.
 
-## `shipper ship [issue] [--merge] [--auto]`
+## `shipper ship <issue> [--merge] [--auto]`
 
 Purpose: run the full workflow end-to-end for a single issue.
+
+An `<issue>` or the `--auto` flag is required.
 
 Behavior:
 
 - Repeatedly calls `next` until the issue reaches `shipper:ready`.
 - `--merge`: auto-merges the PR after reaching `shipper:ready`.
-- `--auto`: runs a continuous loop that auto-selects issues and ships them. Mutually exclusive with an explicit issue number.
+- `--auto`: runs a continuous loop that auto-selects issues, ships them, and merges their PRs. Mutually exclusive with an explicit issue number. Implies `--merge`.
 
 Output:
 
@@ -263,31 +265,34 @@ Output:
 
 - Issue labeled `shipper:new`, ready for `groom` or `next`.
 
-## `shipper reset <issue> [-f]`
+## `shipper reset <issue> [-f | --force]`
 
 Purpose: reset an issue back to `shipper:new` status.
 
 Behavior:
 
-- Removes all shipper labels from the issue and applies `shipper:new`.
+- Closes any PRs associated with the issue.
+- Deletes shipper-prefixed branches created for the issue.
+- Deletes prior comments on the issue.
+- Removes all shipper labels and re-applies `shipper:new`.
 - Prompts for confirmation unless `-f` / `--force` is passed.
 
 Output:
 
-- Issue labeled `shipper:new` with all other shipper labels removed.
+- Issue reset to `shipper:new` with associated PRs closed, branches deleted, and comments cleared.
 
 ## `shipper unblock <issue>`
 
-Purpose: check if a blocked issue's dependencies are resolved and advance it.
+Purpose: check if a blocked issue's dependencies are resolved and clear the block.
 
 Behavior:
 
 - Reads the issue to determine what it's blocked on.
-- If the dependency is resolved, removes `shipper:blocked` and advances the issue.
+- If the dependency is resolved, removes `shipper:blocked` and instructs the user to continue with `shipper next`.
 
 Output:
 
-- Issue unblocked and advanced, or still blocked with an explanation.
+- Issue unblocked and ready to advance with `shipper next`, or still blocked with an explanation.
 
 ## `shipper unlock <issue>`
 
