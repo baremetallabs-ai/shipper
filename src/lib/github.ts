@@ -43,6 +43,10 @@ export interface ResolvedRef {
   prNumber?: string;
 }
 
+export interface ResolvedRefBoth extends ResolvedRef {
+  prNumber: string;
+}
+
 export function fetchIssue(ref: string): string {
   let json: string;
   try {
@@ -281,8 +285,33 @@ export function autoSelectPrForStage(
   process.exit(1);
 }
 
+export function resolveRef(ref: string, need: 'both'): ResolvedRefBoth;
+// eslint-disable-next-line no-redeclare
+export function resolveRef(ref: string, need: 'issue' | 'pr'): ResolvedRef;
+// eslint-disable-next-line no-redeclare
 export function resolveRef(ref: string, need: 'issue' | 'pr' | 'both'): ResolvedRef {
-  // Try as issue first
+  // Try as PR first — GitHub treats PRs as issues, so `gh issue view` succeeds
+  // for PR numbers. Checking `gh pr view` first avoids misclassifying PRs.
+  try {
+    const output = execFileSync('gh', ['pr', 'view', ref, '--json', 'number,body'], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    const prData = JSON.parse(output) as { number: number; body: string };
+    const prNumber = String(prData.number);
+    const match = /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/i.exec(prData.body);
+    const linkedIssue = match?.[1];
+    if (!linkedIssue && (need === 'issue' || need === 'both')) {
+      console.error(
+        `PR #${ref} has no linked issue. Ensure the PR body references an issue (e.g., 'Closes #42').`
+      );
+      process.exit(1);
+    }
+    return { issueNumber: linkedIssue ?? ref, prNumber };
+  } catch {
+    // Not a PR — try as issue
+  }
+
   try {
     execFileSync('gh', ['issue', 'view', ref, '--json', 'number'], {
       encoding: 'utf-8',
@@ -299,26 +328,7 @@ export function resolveRef(ref: string, need: 'issue' | 'pr' | 'both'): Resolved
     }
     return { issueNumber: ref, prNumber };
   } catch {
-    // Not an issue — try as PR
-  }
-
-  try {
-    const output = execFileSync('gh', ['pr', 'view', ref, '--json', 'number,body'], {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
-    const prData = JSON.parse(output) as { number: number; body: string };
-    const match = /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/i.exec(prData.body);
-    const linkedIssue = match?.[1];
-    if (!linkedIssue && (need === 'issue' || need === 'both')) {
-      console.error(
-        `PR #${ref} has no linked issue. Ensure the PR body references an issue (e.g., 'Closes #42').`
-      );
-      process.exit(1);
-    }
-    return { issueNumber: linkedIssue ?? ref, prNumber: ref };
-  } catch {
-    // Not a PR either
+    // Not an issue either
   }
 
   console.error(`Could not find issue or PR matching '${ref}'.`);
