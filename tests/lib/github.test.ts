@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
 import {
   formatIssue,
   formatPR,
+  resolveBaseBranch,
   sortIssuesByLabelTime,
   tryResolvePrForIssue,
   type TimelineLabelEvent,
@@ -261,5 +262,54 @@ describe('tryResolvePrForIssue', () => {
       throw new Error('gh failed');
     });
     expect(tryResolvePrForIssue(12)).toBeUndefined();
+  });
+});
+
+describe('resolveBaseBranch', () => {
+  let execFileSync: ReturnType<typeof vi.fn>;
+
+  beforeAll(async () => {
+    const cp = await import('node:child_process');
+    execFileSync = vi.mocked(cp.execFileSync);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('returns configured value when branch exists on remote', () => {
+    execFileSync.mockReturnValueOnce('abc123\trefs/heads/develop\n');
+    expect(resolveBaseBranch('develop')).toBe('develop');
+    expect(execFileSync).toHaveBeenCalledWith(
+      'git',
+      ['ls-remote', '--heads', 'origin', 'develop'],
+      { encoding: 'utf-8' }
+    );
+  });
+
+  it('exits with error when configured branch does not exist on remote', () => {
+    const exitMock = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+    const stderrMock = vi.spyOn(console, 'error').mockImplementation(() => {});
+    execFileSync.mockReturnValueOnce('');
+    resolveBaseBranch('nonexistent');
+    expect(stderrMock).toHaveBeenCalledWith(
+      "Error: configured defaultBaseBranch 'nonexistent' does not exist on remote."
+    );
+    expect(exitMock).toHaveBeenCalledWith(1);
+  });
+
+  it('auto-detects via gh repo view when no value configured', () => {
+    execFileSync.mockReturnValueOnce('main\n');
+    expect(resolveBaseBranch()).toBe('main');
+    expect(execFileSync).toHaveBeenCalledWith(
+      'gh',
+      ['repo', 'view', '--json', 'defaultBranchRef', '-q', '.defaultBranchRef.name'],
+      { encoding: 'utf-8' }
+    );
+  });
+
+  it('auto-detects non-main default branches', () => {
+    execFileSync.mockReturnValueOnce('master\n');
+    expect(resolveBaseBranch(undefined)).toBe('master');
   });
 });

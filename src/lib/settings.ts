@@ -4,6 +4,7 @@ import path from 'node:path';
 export interface Settings {
   prReviewWaitMinutes: number;
   lockTimeoutMinutes: number;
+  defaultBaseBranch?: string;
   hooks: {
     postMerge?: string;
     worktreeSetup?: string;
@@ -20,6 +21,7 @@ export const DEFAULTS: Settings = {
 export const SETTING_DESCRIPTIONS: Record<string, string> = {
   prReviewWaitMinutes: 'minimum wait (minutes) before PR review remediation',
   lockTimeoutMinutes: 'stale lock timeout (minutes) before auto-clearing shipper:locked',
+  defaultBaseBranch: 'target branch for PRs (auto-detected from GitHub if not set)',
   'hooks.postMerge': 'shell command to run after a PR is merged',
   'hooks.worktreeSetup':
     'shell command to run after a worktree is created (before the agent starts)',
