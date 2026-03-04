@@ -25,25 +25,34 @@ function runScript(...args: string[]) {
   });
 }
 
+function getStderr(...args: string[]): string {
+  try {
+    runScript(...args);
+    return '';
+  } catch (err: unknown) {
+    return (err as { stderr?: Buffer }).stderr?.toString() ?? '';
+  }
+}
+
 describe('safe-push.sh', () => {
   it('rejects --force flag', () => {
     expect(() => runScript('--force')).toThrow();
-    try {
-      runScript('--force');
-    } catch (err: unknown) {
-      const stderr = (err as { stderr?: Buffer }).stderr?.toString() ?? '';
-      expect(stderr).toContain('--force/-f push is not allowed');
-    }
+    expect(getStderr('--force')).toContain('--force push is not allowed');
   });
 
   it('rejects -f flag', () => {
     expect(() => runScript('-f')).toThrow();
-    try {
-      runScript('-f');
-    } catch (err: unknown) {
-      const stderr = (err as { stderr?: Buffer }).stderr?.toString() ?? '';
-      expect(stderr).toContain('--force/-f push is not allowed');
-    }
+    expect(getStderr('-f')).toContain('-f (force) push is not allowed');
+  });
+
+  it('rejects combined short flags containing f (e.g. -fu)', () => {
+    expect(() => runScript('-fu')).toThrow();
+    expect(getStderr('-fu')).toContain('-f (force) push is not allowed');
+  });
+
+  it('rejects force refspecs starting with +', () => {
+    expect(() => runScript('+main:main')).toThrow();
+    expect(getStderr('+main:main')).toContain("Force push refspecs (starting with '+')");
   });
 
   it('does not reject --force-with-lease', () => {
