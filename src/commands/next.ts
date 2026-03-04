@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { tryResolvePrForIssue } from '../lib/github.js';
+import { resolveRef, tryResolvePrForIssue } from '../lib/github.js';
 import { withIssueLock } from '../lib/lock.js';
 import { groomCommand } from './groom.js';
 import { designCommand } from './design.js';
@@ -18,22 +18,12 @@ interface IssueData {
   labels: IssueLabel[];
 }
 
-interface PrData {
-  number: number;
-  body: string;
-}
-
 function ghJson<T>(args: string[]): T {
   const output = execFileSync('gh', args, {
     encoding: 'utf-8',
     stdio: ['ignore', 'pipe', 'ignore'],
   }).trim();
   return JSON.parse(output) as T;
-}
-
-function resolveIssueFromPrBody(body: string): string | undefined {
-  const match = /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/i.exec(body);
-  return match?.[1];
 }
 
 function resolvePrForIssue(issueNumber: number): string {
@@ -57,55 +47,22 @@ export function nextCommand(ref: string) {
   // Strip leading # if present
   const cleanRef = ref.replace(/^#/, '');
 
-  let issueNumber: number;
-  let isBlocked = false;
-  let shipperLabels: string[];
-
-  // Try as issue first
-  try {
-    const issueData = ghJson<IssueData>(['issue', 'view', cleanRef, '--json', 'number,labels']);
-    issueNumber = issueData.number;
-    const allLabels = issueData.labels
-      .map((l) => l.name)
-      .filter((name) => name.startsWith('shipper:'));
-    isBlocked = allLabels.includes('shipper:blocked');
-    shipperLabels = allLabels.filter(
-      (name) => name !== 'shipper:blocked' && name !== 'shipper:locked'
-    );
-  } catch {
-    // Not an issue — try as PR
-    let prData: PrData;
-    try {
-      prData = ghJson<PrData>(['pr', 'view', cleanRef, '--json', 'number,body']);
-    } catch {
-      console.error(`Could not find issue or PR matching '${cleanRef}'.`);
-      process.exit(1);
-    }
-
-    const linkedIssue = resolveIssueFromPrBody(prData.body);
-    if (!linkedIssue) {
-      console.error(
-        `Could not find a linked issue for PR #${prData.number}. Ensure the PR body references an issue (e.g., 'Closes #42').`
-      );
-      process.exit(1);
-    }
-
-    let issueData: IssueData;
-    try {
-      issueData = ghJson<IssueData>(['issue', 'view', linkedIssue, '--json', 'number,labels']);
-    } catch {
-      console.error(`Could not find issue #${linkedIssue} linked from PR #${prData.number}.`);
-      process.exit(1);
-    }
-    issueNumber = issueData.number;
-    const allLabels = issueData.labels
-      .map((l) => l.name)
-      .filter((name) => name.startsWith('shipper:'));
-    isBlocked = allLabels.includes('shipper:blocked');
-    shipperLabels = allLabels.filter(
-      (name) => name !== 'shipper:blocked' && name !== 'shipper:locked'
-    );
-  }
+  const resolved = resolveRef(cleanRef, 'issue');
+  const issueData = ghJson<IssueData>([
+    'issue',
+    'view',
+    resolved.issueNumber,
+    '--json',
+    'number,labels',
+  ]);
+  const issueNumber = issueData.number;
+  const allLabels = issueData.labels
+    .map((l) => l.name)
+    .filter((name) => name.startsWith('shipper:'));
+  const isBlocked = allLabels.includes('shipper:blocked');
+  const shipperLabels = allLabels.filter(
+    (name) => name !== 'shipper:blocked' && name !== 'shipper:locked'
+  );
 
   // Validate labels
   if (shipperLabels.length === 0) {

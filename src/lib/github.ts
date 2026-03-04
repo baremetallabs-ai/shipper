@@ -38,6 +38,11 @@ interface PRData {
   reviews: ReviewComment[];
 }
 
+export interface ResolvedRef {
+  issueNumber: string;
+  prNumber?: string;
+}
+
 export function fetchIssue(ref: string): string {
   let json: string;
   try {
@@ -276,15 +281,46 @@ export function autoSelectPrForStage(
   process.exit(1);
 }
 
-export function resolveIssueFromPr(prNumber: string): string | undefined {
+export function resolveRef(ref: string, need: 'issue' | 'pr' | 'both'): ResolvedRef {
+  // Try as issue first
   try {
-    const body = execFileSync('gh', ['pr', 'view', prNumber, '--json', 'body', '--jq', '.body'], {
+    execFileSync('gh', ['issue', 'view', ref, '--json', 'number'], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    // ref is an issue number
+    let prNumber: string | undefined;
+    if (need === 'pr' || need === 'both') {
+      prNumber = tryResolvePrForIssue(Number(ref));
+      if (!prNumber) {
+        console.error(`No open PR found for issue #${ref}. Run 'shipper pr open ${ref}' first.`);
+        process.exit(1);
+      }
+    }
+    return { issueNumber: ref, prNumber };
+  } catch {
+    // Not an issue — try as PR
+  }
+
+  try {
+    const output = execFileSync('gh', ['pr', 'view', ref, '--json', 'number,body'], {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
-    const match = /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/i.exec(body);
-    return match?.[1];
+    const prData = JSON.parse(output) as { number: number; body: string };
+    const match = /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/i.exec(prData.body);
+    const linkedIssue = match?.[1];
+    if (!linkedIssue && (need === 'issue' || need === 'both')) {
+      console.error(
+        `PR #${ref} has no linked issue. Ensure the PR body references an issue (e.g., 'Closes #42').`
+      );
+      process.exit(1);
+    }
+    return { issueNumber: linkedIssue ?? ref, prNumber: ref };
   } catch {
-    return undefined;
+    // Not a PR either
   }
+
+  console.error(`Could not find issue or PR matching '${ref}'.`);
+  process.exit(1);
 }

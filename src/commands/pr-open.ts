@@ -1,5 +1,5 @@
 import { findBranchForIssue, getRepoRoot } from '../lib/branch.js';
-import { autoSelectIssue } from '../lib/github.js';
+import { autoSelectIssue, resolveRef } from '../lib/github.js';
 import { withIssueLock } from '../lib/lock.js';
 import { withWorktree } from '../lib/worktree.js';
 import { runPrompt } from '../lib/prompt-runner.js';
@@ -13,6 +13,9 @@ export function prOpenCommand(issue?: string) {
     }
     console.error(`Auto-selected #${selected.number}: ${selected.title}`);
     issue = String(selected.number);
+  } else {
+    const resolved = resolveRef(issue, 'issue');
+    issue = resolved.issueNumber;
   }
 
   withIssueLock(issue, () => {
