@@ -1,10 +1,16 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
 import {
   formatIssue,
   formatPR,
   sortIssuesByLabelTime,
+  tryResolvePrForIssue,
   type TimelineLabelEvent,
 } from '../../src/lib/github.js';
+
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return { ...actual, execFileSync: vi.fn() };
+});
 
 describe('formatIssue', () => {
   it('formats a basic issue with comments', () => {
@@ -206,5 +212,58 @@ describe('sortIssuesByLabelTime', () => {
       { number: 2, title: 'Has events' },
       { number: 1, title: 'No events' },
     ]);
+  });
+});
+
+describe('tryResolvePrForIssue', () => {
+  let execFileSync: ReturnType<typeof vi.fn>;
+
+  beforeAll(async () => {
+    const cp = await import('node:child_process');
+    execFileSync = vi.mocked(cp.execFileSync);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('matches exact branch shipper/12', () => {
+    execFileSync.mockReturnValueOnce(
+      JSON.stringify([{ number: 99, headRefName: 'shipper/12' }])
+    );
+    expect(tryResolvePrForIssue(12)).toBe('99');
+  });
+
+  it('matches prefixed branch shipper/12-some-slug', () => {
+    execFileSync.mockReturnValueOnce(
+      JSON.stringify([{ number: 50, headRefName: 'shipper/12-some-slug' }])
+    );
+    expect(tryResolvePrForIssue(12)).toBe('50');
+  });
+
+  it('does NOT match unrelated branch containing the number', () => {
+    execFileSync.mockReturnValueOnce(
+      JSON.stringify([{ number: 77, headRefName: 'fix/update-12-deps' }])
+    );
+    expect(tryResolvePrForIssue(12)).toBeUndefined();
+  });
+
+  it('does NOT match partial prefix shipper/123 when searching for 12', () => {
+    execFileSync.mockReturnValueOnce(
+      JSON.stringify([{ number: 88, headRefName: 'shipper/123' }])
+    );
+    expect(tryResolvePrForIssue(12)).toBeUndefined();
+  });
+
+  it('returns undefined when no PRs exist', () => {
+    execFileSync.mockReturnValueOnce(JSON.stringify([]));
+    expect(tryResolvePrForIssue(12)).toBeUndefined();
+  });
+
+  it('returns undefined when gh command fails', () => {
+    execFileSync.mockImplementationOnce(() => {
+      throw new Error('gh failed');
+    });
+    expect(tryResolvePrForIssue(12)).toBeUndefined();
   });
 });

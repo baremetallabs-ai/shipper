@@ -130,14 +130,16 @@ export function tryResolvePrForIssue(issueNumber: number): string | undefined {
   try {
     const output = execFileSync(
       'gh',
-      ['pr', 'list', '--search', String(issueNumber), '--state', 'open', '--json', 'number'],
+      ['pr', 'list', '--state', 'open', '--json', 'number,headRefName', '--limit', '100'],
       { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
     ).trim();
-    const prs = JSON.parse(output) as { number: number }[];
-    if (Array.isArray(prs) && prs.length > 0) {
-      return String(prs[0]!.number);
-    }
-    return undefined;
+    const prs = JSON.parse(output) as { number: number; headRefName: string }[];
+    const match = prs.find(
+      (pr) =>
+        pr.headRefName === `shipper/${issueNumber}` ||
+        pr.headRefName.startsWith(`shipper/${issueNumber}-`)
+    );
+    return match ? String(match.number) : undefined;
   } catch {
     return undefined;
   }
