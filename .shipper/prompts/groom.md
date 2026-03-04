@@ -35,65 +35,26 @@ The **next user message** contains the full GitHub issue including title, labels
 2. Summarize your understanding back to the product owner in **2–4 sentences** before asking questions.
    - Call out anything ambiguous, contradictory, or underspecified.
 
-### Phase 1.5: Complexity assessment
+### Phase 2: Groom
 
-After completing the Phase 1 summary, assess whether this issue is **simple** or **complex**:
+Ask targeted questions to close every open product decision. Use the four categories below as a thinking checklist — not as structural buckets or minimum counts:
 
-- **Simple** — clear scope, obvious requirements, unambiguous done-criteria, minimal product decisions needed. The issue is self-evident and you could draft a complete groomed body with reasonable defaults right now.
-- **Complex** — ambiguous scope, multiple stakeholders or cross-cutting concerns, unclear acceptance criteria, significant product decisions that need to be resolved through discussion.
+- **Scope & Requirements** — What is in/out of scope? Implicit requirements? Assumptions needing validation?
+- **User Experience & Behavior** — What should the user see/experience? Edge cases, error states, boundary conditions? Persona differences?
+- **Acceptance Criteria** — Specific, testable done-conditions? Vague scenarios needing concrete expected behavior?
+- **Scope Boundaries & Follow-ups** — Related work to defer? Adjacent behaviors the issue is silent on?
 
-This is a heuristic judgment call based on your understanding of the issue and the codebase — not a rigid checklist. State your classification and 1–2 sentences of reasoning to the product owner.
+Ask as many or as few questions as the issue demands. Simple issues may need 2–3 questions; complex issues may need 10+. Use judgment.
 
-- If **simple**: proceed to Phase 2A.
-- If **complex**: proceed to Phase 2B.
+**Ask questions using the interactive question-asking tool.** Do not output questions as formatted text. Each question must include:
 
-### Phase 2A: Simple issue — draft directly
+- **The question itself** — clear and specific
+- **Context** — why this decision matters, what gap you identified, and downstream impact if left unresolved. Reference the issue text or observed codebase behavior where relevant.
+- **A Suggested Answer** — your best guess based on the issue, its comments, and your codebase research. If you genuinely cannot suggest one, say so and explain what information is missing.
 
-Skip the question phase entirely. Instead:
+Ask in logical batches. Do not re-ask things already answered in the issue or comments — incorporate them. Answers often surface follow-up questions — continue until all product decisions are resolved.
 
-1. Draft the full groomed issue body (Summary, Requirements, Acceptance Criteria, Out of Scope, Open Questions) using reasonable defaults from the issue text and codebase context.
-2. Present the draft to the product owner for confirmation before updating GitHub.
-3. If the product owner **approves**: proceed to Phase 3 (compile and post).
-4. If the product owner **rejects or provides feedback**: ask targeted follow-up questions based on their feedback, or escalate to the full Phase 2B process if the issue turns out to be more complex than initially assessed.
-
-### Phase 2B: Complex issue — targeted questions
-
-Generate targeted questions to close every open product decision. Ask as many questions as needed to resolve all ambiguities — the number will vary based on the issue's complexity. Use the following categories as guidance:
-
-**Scope & Requirements**
-
-- What is explicitly in scope vs out of scope?
-- Any implicit requirements that should be explicit?
-- Any assumptions that need validation?
-
-**User Experience & Behavior**
-
-- What should the user see/experience/do when complete?
-- Edge cases: empty states, error states, boundary conditions
-- Roles/permissions/personas differences
-
-**Acceptance Criteria**
-
-- Specific, testable conditions that determine “done”
-- Vague scenarios needing concrete expected behavior
-
-**Scope Boundaries & Follow-ups**
-
-- Related work that should be explicitly deferred to follow-ups
-- Adjacent behaviors the issue is silent on: should they change or stay the same?
-
-**Question format (must match exactly)**
-Question [#]: [Clear, specific product question]
-
-Context: [Why this decision matters — what ambiguity or gap you identified,
-and what the downstream impact is if left unresolved. Reference the issue
-text or observed codebase behavior where relevant.]
-
-Suggested Answer: [Your best-guess answer based on the issue, its comments,
-and your codebase research. If you genuinely can't suggest one, say so and
-explain what information is missing.]
-
-If a tool for asking the user questions is available, you should use it. Otherwise, simply ask the questions in the specified format. Answers often elicit further questions, so ask questions in logical batches and do not re-ask things already answered in the issue or comments — incorporate them. Question asking tools are often provided natively inside agentic coding tools.
+**Do not proceed to Phase 3 until every question has been answered.** If the product owner's answers raise new questions, ask them. The compile phase produces the final artifacts — it must not begin while decisions remain open.
 
 ### Phase 3: Compile groomed outputs
 
@@ -114,7 +75,7 @@ Rewrite the issue body to include:
 Write a comment suitable for posting on the GitHub Issue that documents:
 
 1. Note that product grooming was conducted
-2. Key questions raised + decisions made (cleaned up; no raw transcript). For simple issues where no questions were needed, note this briefly (e.g., "No product questions were needed — the issue was self-evident") rather than omitting the section.
+2. Key questions raised + decisions made (cleaned up; no raw transcript)
 3. Notable context/constraints/rationale that helps explain _why_ decisions were made
 4. Your **issue decomposition recommendation**:
    - Single PR vs split into multiple issues
