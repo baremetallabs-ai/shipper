@@ -17,6 +17,7 @@ import { mergeCommand } from './commands/merge.js';
 import { resetCommand } from './commands/reset.js';
 import { unblockCommand } from './commands/unblock.js';
 import { unlockCommand } from './commands/unlock.js';
+import { issueListCommand } from './commands/issue-list.js';
 
 const program = new Command();
 
@@ -154,6 +155,16 @@ program
   .argument('<issue>', 'issue number')
   .action((issue: string) => {
     unlockCommand(issue);
+  });
+
+const issue = program.command('issue').description('Issue commands');
+
+issue
+  .command('list')
+  .description('List shipper-managed issues by pipeline status')
+  .option('--status <name>', 'filter to a single status (e.g. planned)')
+  .action((options: { status?: string }) => {
+    issueListCommand(options);
   });
 
 const pr = program.command('pr').description('Pull request commands');
