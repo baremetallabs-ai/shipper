@@ -33,7 +33,7 @@ interface StageResult {
   status: 'pass' | 'fail';
 }
 
-interface AutoResult {
+export interface AutoResult {
   issue: number;
   title: string;
   outcome: 'pass' | 'fail';
@@ -80,7 +80,7 @@ function printSummary(results: StageResult[]): void {
   }
 }
 
-function printAutoSummary(results: AutoResult[]): void {
+export function printAutoSummary(results: AutoResult[]): void {
   if (results.length === 0) {
     console.log('\nAuto run complete. No eligible issues found.');
     return;
