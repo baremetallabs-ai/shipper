@@ -7,7 +7,7 @@ args:
   - --permission-mode
   - acceptEdits
   - --settings
-  - {"permissions":{"allow":["Bash(git add *)","Bash(git commit *)","Bash(git fetch *)","Bash(git rebase *)","Bash(./.shipper/scripts/safe-push.sh *)","Bash(./.shipper/scripts/safe-push.sh)","Bash(gh pr view *)","Bash(gh pr checks *)","Bash(gh pr comment *)","Bash(gh pr edit *)","Bash(gh issue comment *)","Bash(gh issue edit *)","Bash(gh run view *)","Bash(gh run rerun *)","Bash(./.shipper/scripts/gh-api-get-reviews.sh *)","Bash(./.shipper/scripts/gh-api-reply-thread.sh *)","WebSearch"]},"sandbox":{"enabled":true,"autoAllowBashIfSandboxed":true,"excludedCommands":["git add *","git commit *","git fetch *","git rebase *","./.shipper/scripts/safe-push.sh *","./.shipper/scripts/safe-push.sh","gh pr view *","gh pr checks *","gh pr comment *","gh pr edit *","gh issue comment *","gh issue edit *","gh run view *","gh run rerun *","./.shipper/scripts/gh-api-get-reviews.sh *","./.shipper/scripts/gh-api-reply-thread.sh *"]},"network":{"allowedDomains":["github.com","api.github.com","uploads.github.com","registry.npmjs.org"]}}
+  - {"permissions":{"allow":["Bash(git add *)","Bash(git commit *)","Bash(git fetch *)","Bash(git rebase *)","Bash(./.shipper/scripts/safe-push.sh *)","Bash(./.shipper/scripts/safe-push.sh)","Bash(./.shipper/scripts/install-deps.sh)","Bash(gh pr view *)","Bash(gh pr checks *)","Bash(gh pr comment *)","Bash(gh pr edit *)","Bash(gh issue comment *)","Bash(gh issue edit *)","Bash(gh run view *)","Bash(gh run rerun *)","Bash(./.shipper/scripts/gh-api-get-reviews.sh *)","Bash(./.shipper/scripts/gh-api-reply-thread.sh *)","WebSearch"]},"sandbox":{"enabled":true,"autoAllowBashIfSandboxed":true,"excludedCommands":["git add *","git commit *","git fetch *","git rebase *","./.shipper/scripts/safe-push.sh *","./.shipper/scripts/safe-push.sh","./.shipper/scripts/install-deps.sh","gh pr view *","gh pr checks *","gh pr comment *","gh pr edit *","gh issue comment *","gh issue edit *","gh run view *","gh run rerun *","./.shipper/scripts/gh-api-get-reviews.sh *","./.shipper/scripts/gh-api-reply-thread.sh *"]},"network":{"allowedDomains":["github.com","api.github.com","uploads.github.com","registry.npmjs.org"]}}
 append-issue: true
 append-pr: true
 ---
@@ -211,9 +211,10 @@ Make the targeted changes needed to satisfy the unmet criteria.
 
 ### After all changes
 
-1. Run all project quality checks (lint, type check, build, tests). Fix any failures introduced by your remediation.
-2. Commit changes with a clear message referencing the issue number (e.g., `fix(#<ISSUE>): address review feedback and fix e2e timeout`).
-3. Push:
+1. If you modified any dependency files (package.json, Cargo.toml, requirements.txt, etc.), run `./.shipper/scripts/install-deps.sh` to install dependencies.
+2. Run all project quality checks (lint, type check, build, tests). Fix any failures introduced by your remediation.
+3. Commit changes with a clear message referencing the issue number (e.g., `fix(#<ISSUE>): address review feedback and fix e2e timeout`).
+4. Push:
 
 ```bash
 ./.shipper/scripts/safe-push.sh

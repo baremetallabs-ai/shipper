@@ -7,6 +7,7 @@ import prOpenPrompt from '../prompts/claude/pr_open.md';
 import prReviewPrompt from '../prompts/claude/pr_review.md';
 import prRemediatePrompt from '../prompts/claude/pr_remediate.md';
 import unblockPrompt from '../prompts/claude/unblock.md';
+import setupPrompt from '../prompts/claude/setup.md';
 
 export const agentPrompts: Record<string, Record<string, string>> = {
   claude: {
@@ -19,5 +20,6 @@ export const agentPrompts: Record<string, Record<string, string>> = {
     'pr_review.md': prReviewPrompt,
     'pr_remediate.md': prRemediatePrompt,
     'unblock.md': unblockPrompt,
+    'setup.md': setupPrompt,
   },
 };
