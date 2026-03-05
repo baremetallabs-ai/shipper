@@ -117,8 +117,7 @@ describe('initCommand settings', () => {
   it('preserves existing keys on re-init', async () => {
     existsSyncMock.mockImplementation((p: string) => p === settingsPath);
     readFileSyncMock.mockImplementation((p: string) => {
-      if (p === settingsPath)
-        return '{"prReviewWaitMinutes": 10, "agents": {"default": "claude"}}';
+      if (p === settingsPath) return '{"prReviewWaitMinutes": 10, "agents": {"default": "claude"}}';
       return '';
     });
     await initCommand({ agent: 'claude' });
