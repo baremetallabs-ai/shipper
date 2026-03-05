@@ -83,12 +83,13 @@ export function withWorktree<T>(opts: CreateWorktreeOpts, fn: (wtPath: string) =
     SHIPPER_BRANCH_NAME: opts.branch,
   };
 
-  const { installCommand } = getSettings();
+  const settings = getSettings();
+  const { installCommand } = settings;
   if (installCommand) {
     runAdvisoryHook('Install dependencies', installCommand, hookEnv, wtPath);
   }
 
-  const { worktreeSetup, worktreeTeardown } = getSettings().hooks;
+  const { worktreeSetup, worktreeTeardown } = settings.hooks;
 
   if (worktreeSetup) {
     runAdvisoryHook('Worktree setup', worktreeSetup, hookEnv, wtPath);
