@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseFrontmatter } from './frontmatter.js';
 import { fetchIssue, fetchPR } from './github.js';
+import { resolveAgent } from './settings.js';
 
 export interface RunPromptOpts {
   userInput?: string;
@@ -13,14 +14,17 @@ export interface RunPromptOpts {
 }
 
 export function runPrompt(name: string, opts: RunPromptOpts): number {
-  const promptPath = path.resolve('.shipper', 'prompts', `${name}.md`);
+  const agent = resolveAgent(name);
+  const promptPath = path.resolve('.shipper', 'prompts', agent, `${name}.md`);
 
   let raw: string;
   try {
     raw = readFileSync(promptPath, 'utf-8');
   } catch {
     console.error(`Error: Could not read prompt file at ${promptPath}`);
-    console.error('Run `shipper init` to set up prompts.');
+    console.error(
+      `Run 'shipper init --agent ${agent}' to generate prompts, or change agents.${name} in settings.`
+    );
     return 1;
   }
 
@@ -60,14 +64,14 @@ export function runPrompt(name: string, opts: RunPromptOpts): number {
     args.push(userMessage);
   }
 
-  const result = spawnSync(frontmatter.cmd, args, {
+  const result = spawnSync(agent, args, {
     stdio: 'inherit',
     env: process.env,
     cwd: opts.cwd,
   });
 
   if (result.error) {
-    console.error(`Error: Failed to spawn ${frontmatter.cmd}: ${result.error.message}`);
+    console.error(`Error: Failed to spawn ${agent}: ${result.error.message}`);
     return 1;
   }
 

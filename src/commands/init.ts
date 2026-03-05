@@ -39,6 +39,8 @@ function getStoredAgent(): string | undefined {
   for (const filepath of [localPath, basePath]) {
     try {
       const data = JSON.parse(readFileSync(filepath, 'utf-8')) as Record<string, unknown>;
+      const agents = data.agents as Record<string, unknown> | undefined;
+      if (agents?.default && typeof agents.default === 'string') return agents.default;
       if (typeof data.agent === 'string' && data.agent) return data.agent;
     } catch {
       // Missing or malformed — skip
@@ -120,7 +122,8 @@ export async function initCommand(options: { agent?: string }) {
   if (existsSync(settingsPath)) {
     try {
       const existing = JSON.parse(readFileSync(settingsPath, 'utf-8')) as Record<string, unknown>;
-      existingAgent = existing.agent as string | undefined;
+      const existingAgents = existing.agents as Record<string, unknown> | undefined;
+      existingAgent = (existingAgents?.default as string | undefined) ?? (existing.agent as string | undefined);
       merged = { ...DEFAULTS, ...existing };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -134,7 +137,8 @@ export async function initCommand(options: { agent?: string }) {
     console.log(`Switching agent from ${existingAgent} to ${agent} — overwriting prompt files`);
   }
 
-  merged.agent = agent as typeof merged.agent;
+  merged.agents = { ...merged.agents, default: agent as 'claude' | 'codex' };
+  delete (merged as Record<string, unknown>).agent;
   writeFileSync(settingsPath, JSON.stringify(merged, null, 2) + '\n');
   console.log('Wrote .shipper/settings.json with default settings:');
   for (const [key, value] of Object.entries(DEFAULTS)) {
@@ -163,14 +167,16 @@ export async function initCommand(options: { agent?: string }) {
   }
 
   // Write prompt files
+  const promptDir = path.resolve('.shipper', 'prompts', agent);
+  mkdirSync(promptDir, { recursive: true });
   const selectedPrompts = agentPrompts[agent]!;
   let promptCount = 0;
   for (const [filename, content] of Object.entries(selectedPrompts)) {
-    const dest = path.resolve('.shipper', 'prompts', filename);
+    const dest = path.resolve(promptDir, filename);
     writeFileSync(dest, content);
     promptCount++;
   }
-  console.log(`Wrote ${promptCount} prompt files to .shipper/prompts/`);
+  console.log(`Wrote ${promptCount} prompt files to .shipper/prompts/${agent}/`);
 
   // Write script files
   let scriptCount = 0;

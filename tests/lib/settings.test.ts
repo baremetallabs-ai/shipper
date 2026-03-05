@@ -42,7 +42,7 @@ describe('loadSettings', () => {
     expect(getSettings()).toEqual({
       prReviewWaitMinutes: 15,
       lockTimeoutMinutes: 30,
-      agent: 'claude',
+      agents: { default: 'claude' },
       hooks: {},
     });
   });
@@ -112,7 +112,7 @@ describe('getSettings', () => {
     expect(getSettings()).toEqual({
       prReviewWaitMinutes: 15,
       lockTimeoutMinutes: 30,
-      agent: 'claude',
+      agents: { default: 'claude' },
       hooks: {},
     });
   });
@@ -170,5 +170,80 @@ describe('hooks settings', () => {
     const { loadSettings, getSettings } = await loadModule();
     loadSettings();
     expect(getSettings().hooks.postMerge).toBe('echo local');
+  });
+});
+
+describe('agents settings', () => {
+  it('auto-migrates legacy agent string to agents.default', async () => {
+    readFileSyncMock.mockImplementation((p: string) => {
+      if (p === settingsPath) return '{"agent": "codex"}';
+      throw enoent(p);
+    });
+    const { loadSettings, getSettings } = await loadModule();
+    loadSettings();
+    expect(getSettings().agents.default).toBe('codex');
+    expect((getSettings() as Record<string, unknown>).agent).toBeUndefined();
+  });
+
+  it('deep-merges agents from base and local', async () => {
+    readFileSyncMock.mockImplementation((p: string) => {
+      if (p === settingsPath)
+        return '{"agents": {"default": "claude", "implement": "codex"}}';
+      if (p === localPath) return '{"agents": {"implement": "claude"}}';
+      throw enoent(p);
+    });
+    const { loadSettings, getSettings } = await loadModule();
+    loadSettings();
+    expect(getSettings().agents).toEqual({ default: 'claude', implement: 'claude' });
+  });
+
+  it('local agents do not clobber base agents.default', async () => {
+    readFileSyncMock.mockImplementation((p: string) => {
+      if (p === settingsPath) return '{"agents": {"default": "claude"}}';
+      if (p === localPath) return '{"agents": {"implement": "codex"}}';
+      throw enoent(p);
+    });
+    const { loadSettings, getSettings } = await loadModule();
+    loadSettings();
+    expect(getSettings().agents.default).toBe('claude');
+    expect(getSettings().agents.implement).toBe('codex');
+  });
+});
+
+describe('resolveAgent', () => {
+  it('returns per-step override when set', async () => {
+    readFileSyncMock.mockImplementation((p: string) => {
+      if (p === settingsPath)
+        return '{"agents": {"default": "claude", "implement": "codex"}}';
+      throw enoent(p);
+    });
+    const { loadSettings, resolveAgent } = await loadModule();
+    loadSettings();
+    expect(resolveAgent('implement')).toBe('codex');
+  });
+
+  it('falls back to default when step not configured', async () => {
+    readFileSyncMock.mockImplementation((p: string) => {
+      if (p === settingsPath) return '{"agents": {"default": "claude"}}';
+      throw enoent(p);
+    });
+    const { loadSettings, resolveAgent } = await loadModule();
+    loadSettings();
+    expect(resolveAgent('groom')).toBe('claude');
+  });
+
+  it('exits on invalid agent value', async () => {
+    readFileSyncMock.mockImplementation((p: string) => {
+      if (p === settingsPath)
+        return '{"agents": {"default": "claude", "implement": "vim"}}';
+      throw enoent(p);
+    });
+    const { loadSettings, resolveAgent } = await loadModule();
+    loadSettings();
+    resolveAgent('implement');
+    expect(exitMock).toHaveBeenCalledWith(1);
+    expect(stderrMock).toHaveBeenCalledWith(
+      expect.stringContaining('Invalid agent "vim" for step "implement"')
+    );
   });
 });
