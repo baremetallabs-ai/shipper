@@ -47,7 +47,7 @@ describe('STAGE_NAME', () => {
 });
 
 describe('AUTO_PRIORITY_LABELS', () => {
-  it('contains all 8 expected labels in priority order', () => {
+  it('contains all 7 expected labels in priority order', () => {
     expect(AUTO_PRIORITY_LABELS).toEqual([
       'shipper:ready',
       'shipper:pr-reviewed',
@@ -56,7 +56,6 @@ describe('AUTO_PRIORITY_LABELS', () => {
       'shipper:planned',
       'shipper:designed',
       'shipper:groomed',
-      'shipper:new',
     ]);
   });
 
@@ -64,8 +63,8 @@ describe('AUTO_PRIORITY_LABELS', () => {
     expect(AUTO_PRIORITY_LABELS[0]).toBe('shipper:ready');
   });
 
-  it('has shipper:new as the lowest priority', () => {
-    expect(AUTO_PRIORITY_LABELS[AUTO_PRIORITY_LABELS.length - 1]).toBe('shipper:new');
+  it('has shipper:groomed as the lowest priority', () => {
+    expect(AUTO_PRIORITY_LABELS[AUTO_PRIORITY_LABELS.length - 1]).toBe('shipper:groomed');
   });
 });
 
