@@ -30,6 +30,16 @@ export function runPrompt(name: string, opts: RunPromptOpts): number {
 
   const { frontmatter, body } = parseFrontmatter(raw);
 
+  if (frontmatter.cmd !== agent) {
+    console.error(
+      `Error: Agent mismatch for step "${name}". Settings resolve to "${agent}", but prompt frontmatter specifies "cmd: ${frontmatter.cmd}" in ${promptPath}.`
+    );
+    console.error(
+      `Update the prompt file's frontmatter to "cmd: ${agent}", or change agents.${name} in settings.`
+    );
+    return 1;
+  }
+
   let promptBody = body;
   if (opts.baseBranch) {
     promptBody = promptBody.replaceAll('{{BASE_BRANCH}}', opts.baseBranch);
@@ -37,9 +47,9 @@ export function runPrompt(name: string, opts: RunPromptOpts): number {
 
   const args = [...frontmatter.args];
 
-  if (frontmatter.cmd === 'claude') {
+  if (agent === 'claude') {
     args.push('--append-system-prompt', promptBody);
-  } else if (frontmatter.cmd === 'codex') {
+  } else if (agent === 'codex') {
     args.push(promptBody);
   } else {
     args.push('--append-system-prompt', promptBody);

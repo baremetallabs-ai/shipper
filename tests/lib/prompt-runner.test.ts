@@ -39,6 +39,7 @@ describe('runPrompt agent-specific arg construction', () => {
   });
 
   it('passes prompt body as positional arg for cmd: codex', () => {
+    resolveAgentMock.mockReturnValue('codex');
     const prompt = ['---', 'cmd: codex', '---', '', 'prompt body'].join('\n');
     readFileSyncMock.mockReturnValueOnce(prompt);
     spawnSyncMock.mockReturnValueOnce({ status: 0, error: null });
@@ -85,11 +86,23 @@ describe('runPrompt agent resolution', () => {
   });
 });
 
+describe('runPrompt agent/frontmatter mismatch', () => {
+  it('returns 1 when resolved agent differs from frontmatter cmd', () => {
+    const prompt = ['---', 'cmd: codex', '---', '', 'prompt body'].join('\n');
+    readFileSyncMock.mockReturnValueOnce(prompt);
+
+    const result = runPrompt('test', {});
+
+    expect(result).toBe(1);
+    expect(spawnSyncMock).not.toHaveBeenCalled();
+  });
+});
+
 describe('runPrompt baseBranch replacement', () => {
   it('replaces {{BASE_BRANCH}} in prompt body when baseBranch is provided', () => {
     const prompt = [
       '---',
-      'cmd: echo',
+      'cmd: claude',
       '---',
       '',
       'git rebase origin/{{BASE_BRANCH}}',
@@ -108,7 +121,9 @@ describe('runPrompt baseBranch replacement', () => {
   });
 
   it('leaves {{BASE_BRANCH}} as-is when baseBranch is not provided', () => {
-    const prompt = ['---', 'cmd: echo', '---', '', 'git rebase origin/{{BASE_BRANCH}}'].join('\n');
+    const prompt = ['---', 'cmd: claude', '---', '', 'git rebase origin/{{BASE_BRANCH}}'].join(
+      '\n'
+    );
     readFileSyncMock.mockReturnValueOnce(prompt);
     spawnSyncMock.mockReturnValueOnce({ status: 0, error: null });
 

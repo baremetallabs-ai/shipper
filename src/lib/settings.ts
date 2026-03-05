@@ -45,12 +45,15 @@ export function loadSettings(): void {
   base = readSettingsFile(basePath);
   local = readSettingsFile(localPath);
 
+  const baseAgents = isPlainObject(base?.agents) ? base.agents : {};
+  const localAgents = isPlainObject(local?.agents) ? local.agents : {};
+
   settings = {
     ...DEFAULTS,
     ...base,
     ...local,
     hooks: { ...DEFAULTS.hooks, ...base?.hooks, ...local?.hooks },
-    agents: { ...DEFAULTS.agents, ...base?.agents, ...local?.agents },
+    agents: { ...DEFAULTS.agents, ...baseAgents, ...localAgents },
   };
 }
 
@@ -68,6 +71,10 @@ export function resolveAgent(step: string): 'claude' | 'codex' {
     process.exit(1);
   }
   return agent;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function readSettingsFile(filepath: string): Partial<Settings> {
