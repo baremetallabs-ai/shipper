@@ -14,7 +14,7 @@ vi.mock('../../src/lib/confirm.js', () => ({
   promptChoice: mockPromptChoice,
 }));
 
-vi.mock('../../src/lib/github.js', () => ({
+vi.mock('../../src/lib/repo.js', () => ({
   getRepoNwo: () => mockGetRepoNwo(),
 }));
 

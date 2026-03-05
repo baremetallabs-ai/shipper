@@ -2,7 +2,8 @@ import { execFileSync } from 'node:child_process';
 import { openSync, closeSync, readFileSync, writeFileSync, unlinkSync, constants } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { getRepoNwo, tryResolvePrForIssue } from '../lib/github.js';
+import { tryResolvePrForIssue } from '../lib/github.js';
+import { getRepoNwo } from '../lib/repo.js';
 import { withStageHooks } from '../lib/hooks.js';
 
 interface MergeOptions {

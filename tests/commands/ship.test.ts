@@ -2,19 +2,18 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { STAGE_NAME, AUTO_PRIORITY_LABELS, selectNextCandidate } from '../../src/commands/ship.js';
 
 vi.mock('../../src/lib/github.js', () => ({
-  getRepoNwo: vi.fn(() => 'owner/repo'),
   selectIssuesForStage: vi.fn(() => []),
+  clearStaleLockIfNeeded: vi.fn(),
 }));
 
-vi.mock('../../src/lib/lock.js', () => ({
-  releaseIssueLock: vi.fn(),
+vi.mock('../../src/lib/repo.js', () => ({
+  getRepoNwo: vi.fn(() => 'owner/repo'),
 }));
 
-import { selectIssuesForStage } from '../../src/lib/github.js';
-import { releaseIssueLock } from '../../src/lib/lock.js';
+import { selectIssuesForStage, clearStaleLockIfNeeded } from '../../src/lib/github.js';
 
 const mockSelectIssuesForStage = vi.mocked(selectIssuesForStage);
-const mockReleaseIssueLock = vi.mocked(releaseIssueLock);
+const mockClearStaleLockIfNeeded = vi.mocked(clearStaleLockIfNeeded);
 
 describe('STAGE_NAME', () => {
   it('contains all expected workflow labels', () => {
@@ -74,7 +73,7 @@ describe('selectNextCandidate', () => {
   beforeEach(() => {
     mockSelectIssuesForStage.mockReset();
     mockSelectIssuesForStage.mockReturnValue([]);
-    mockReleaseIssueLock.mockReset();
+    mockClearStaleLockIfNeeded.mockReset();
   });
 
   it('returns the issue from the highest-priority label', () => {
@@ -136,7 +135,6 @@ describe('selectNextCandidate', () => {
   });
 
   it('clears stale lock on selected candidate', () => {
-    const stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     mockSelectIssuesForStage.mockImplementation((label: string, staleLocked?: Set<number>) => {
       if (label === 'shipper:planned') {
         const issues = [{ number: 7, title: 'Stale locked issue' }];
@@ -148,12 +146,10 @@ describe('selectNextCandidate', () => {
 
     const result = selectNextCandidate(new Set());
     expect(result).toEqual({ number: 7, title: 'Stale locked issue' });
-    expect(mockReleaseIssueLock).toHaveBeenCalledWith('7');
-    expect(stderrSpy).toHaveBeenCalledWith('Issue #7 lock is stale \u2014 clearing.');
-    stderrSpy.mockRestore();
+    expect(mockClearStaleLockIfNeeded).toHaveBeenCalledWith(7, expect.any(Set));
   });
 
-  it('does not clear lock for non-stale candidate', () => {
+  it('calls clearStaleLockIfNeeded with empty staleLocked set for non-stale candidate', () => {
     mockSelectIssuesForStage.mockImplementation((label: string) => {
       if (label === 'shipper:planned') return [{ number: 7, title: 'Normal issue' }];
       return [];
@@ -161,6 +157,6 @@ describe('selectNextCandidate', () => {
 
     const result = selectNextCandidate(new Set());
     expect(result).toEqual({ number: 7, title: 'Normal issue' });
-    expect(mockReleaseIssueLock).not.toHaveBeenCalled();
+    expect(mockClearStaleLockIfNeeded).toHaveBeenCalledWith(7, new Set());
   });
 });

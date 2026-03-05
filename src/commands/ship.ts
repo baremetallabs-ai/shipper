@@ -1,7 +1,8 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { getRepoNwo, selectIssuesForStage } from '../lib/github.js';
+import { clearStaleLockIfNeeded, selectIssuesForStage } from '../lib/github.js';
+import { getRepoNwo } from '../lib/repo.js';
 import { withStageHooks } from '../lib/hooks.js';
-import { releaseIssueLock, withIssueLock } from '../lib/lock.js';
+import { withIssueLock } from '../lib/lock.js';
 import { postMerge } from './merge.js';
 import type { QueuedPR } from './merge.js';
 
@@ -357,10 +358,7 @@ export function selectNextCandidate(
     const issues = selectIssuesForStage(label, staleLocked);
     const candidate = issues.find((i) => !skippedIssues.has(i.number));
     if (candidate) {
-      if (staleLocked.has(candidate.number)) {
-        console.error(`Issue #${candidate.number} lock is stale — clearing.`);
-        releaseIssueLock(String(candidate.number));
-      }
+      clearStaleLockIfNeeded(candidate.number, staleLocked);
       return candidate;
     }
   }

@@ -20,6 +20,10 @@ vi.mock('../../src/lib/lock.js', () => ({
   releaseIssueLock: vi.fn(),
 }));
 
+vi.mock('../../src/lib/repo.js', () => ({
+  getRepoNwo: vi.fn(() => 'owner/repo'),
+}));
+
 describe('formatIssue', () => {
   it('formats a basic issue with comments', () => {
     const result = formatIssue({
@@ -342,9 +346,7 @@ describe('selectIssuesForStage', () => {
     // Second call: locked issues query
     execFileSync.mockReturnValueOnce(JSON.stringify([{ number: 2, title: 'Stale locked' }]));
     mockIsLockStale.mockReturnValueOnce(true);
-    // Third call: getRepoNwo (triggered because issues.length > 1)
-    execFileSync.mockReturnValueOnce('owner/repo\n');
-    // Fourth + fifth calls: timeline for each issue
+    // Third + fourth calls: timeline for each issue (getRepoNwo is mocked via repo.js)
     execFileSync.mockReturnValueOnce('');
     execFileSync.mockReturnValueOnce('');
 
@@ -386,8 +388,7 @@ describe('selectIssuesForStage', () => {
     execFileSync.mockReturnValueOnce(JSON.stringify([{ number: 1, title: 'Normal' }]));
     execFileSync.mockReturnValueOnce(JSON.stringify([{ number: 2, title: 'Stale locked' }]));
     mockIsLockStale.mockReturnValueOnce(true);
-    // getRepoNwo + timelines (2 issues triggers sorting path)
-    execFileSync.mockReturnValueOnce('owner/repo\n');
+    // timelines (2 issues triggers sorting path; getRepoNwo is mocked via repo.js)
     execFileSync.mockReturnValueOnce('');
     execFileSync.mockReturnValueOnce('');
 
@@ -406,10 +407,15 @@ describe('selectIssuesForStage', () => {
     execFileSync.mockImplementationOnce(() => {
       throw new Error('gh failed');
     });
+    const stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const result = selectIssuesForStage('shipper:new');
 
     expect(result).toEqual([{ number: 1, title: 'Normal' }]);
+    expect(stderrSpy).toHaveBeenCalledWith(
+      'Warning: Could not check for stale-locked issues. Proceeding without them.'
+    );
+    stderrSpy.mockRestore();
   });
 });
 

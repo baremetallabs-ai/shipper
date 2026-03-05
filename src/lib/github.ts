@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { isLockStale, releaseIssueLock } from './lock.js';
+import { getRepoNwo } from './repo.js';
 
 interface IssueComment {
   author: { login: string };
@@ -157,22 +158,6 @@ export function formatIssue(data: IssueData): string {
   return lines.join('\n');
 }
 
-export function getRepoNwo(): string {
-  try {
-    return execFileSync('gh', ['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'], {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(
-      'Error: Could not determine repository. Run this command from inside a GitHub repository.'
-    );
-    console.error(`Underlying error: ${msg}`);
-    process.exit(1);
-  }
-}
-
 export function tryResolvePrForIssue(issueNumber: number): string | undefined {
   try {
     const output = execFileSync(
@@ -315,7 +300,7 @@ export function selectIssuesForStage(
       }
     }
   } catch {
-    // If we can't fetch locked issues, proceed with what we have
+    console.error('Warning: Could not check for stale-locked issues. Proceeding without them.');
   }
 
   if (issues.length <= 1) {
@@ -350,13 +335,19 @@ export function selectIssuesForStage(
   return sortIssuesByLabelTime(issues, timelinesByIssue, label);
 }
 
+export function clearStaleLockIfNeeded(issueNumber: number, staleLocked: Set<number>): void {
+  if (staleLocked.has(issueNumber)) {
+    console.error(`Issue #${issueNumber} lock is stale — clearing.`);
+    releaseIssueLock(String(issueNumber));
+  }
+}
+
 export function autoSelectIssue(label: string): { number: number; title: string } | null {
   const staleLocked = new Set<number>();
   const issues = selectIssuesForStage(label, staleLocked);
   const candidate = issues[0] ?? null;
-  if (candidate && staleLocked.has(candidate.number)) {
-    console.error(`Issue #${candidate.number} lock is stale — clearing.`);
-    releaseIssueLock(String(candidate.number));
+  if (candidate) {
+    clearStaleLockIfNeeded(candidate.number, staleLocked);
   }
   return candidate;
 }
@@ -370,10 +361,7 @@ export function autoSelectPrForStage(
   for (const issue of issues) {
     const resolved = tryResolvePrForIssue(issue.number);
     if (resolved) {
-      if (staleLocked.has(issue.number)) {
-        console.error(`Issue #${issue.number} lock is stale — clearing.`);
-        releaseIssueLock(String(issue.number));
-      }
+      clearStaleLockIfNeeded(issue.number, staleLocked);
       return { pr: resolved, issue };
     }
   }
