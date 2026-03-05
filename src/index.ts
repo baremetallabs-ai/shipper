@@ -24,7 +24,7 @@ const program = new Command();
 program
   .name('shipper')
   .description('CLI tool for automating development workflow with coding agents')
-  .version('0.1.0');
+  .version(process.env.SHIPPER_VERSION ?? '0.0.0-dev');
 
 program.hook('preAction', (_thisCommand, actionCommand) => {
   if (actionCommand.name() === 'init') return;
