@@ -7,7 +7,7 @@ args:
   - --permission-mode
   - acceptEdits
   - --settings
-  - {"permissions":{"allow":["Bash(git add *)","Bash(git commit *)","Bash(./.shipper/scripts/safe-push.sh *)","Bash(./.shipper/scripts/safe-push.sh)","Bash(gh issue comment *)","Bash(gh issue edit *)","WebSearch"]},"sandbox":{"enabled":true,"autoAllowBashIfSandboxed":true,"excludedCommands":["git add *","git commit *","./.shipper/scripts/safe-push.sh *","./.shipper/scripts/safe-push.sh","gh issue comment *","gh issue edit *"]},"network":{"allowedDomains":["github.com","api.github.com","uploads.github.com","registry.npmjs.org"]}}
+  - {"permissions":{"allow":["Bash(git add *)","Bash(git commit *)","Bash(./.shipper/scripts/safe-push.sh *)","Bash(./.shipper/scripts/safe-push.sh)","Bash(./.shipper/scripts/install-deps.sh)","Bash(gh issue comment *)","Bash(gh issue edit *)","WebSearch"]},"sandbox":{"enabled":true,"autoAllowBashIfSandboxed":true,"excludedCommands":["git add *","git commit *","./.shipper/scripts/safe-push.sh *","./.shipper/scripts/safe-push.sh","./.shipper/scripts/install-deps.sh","gh issue comment *","gh issue edit *"]},"network":{"allowedDomains":["github.com","api.github.com","uploads.github.com","registry.npmjs.org"]}}
 append-issue: true
 ---
 
@@ -85,6 +85,8 @@ Work through the plan steps **in order**, one at a time. For each step:
 - **Commit incrementally.** Make a commit after completing each logical group of plan steps (or after each individual step if the steps are substantial). Each commit should leave the codebase in a working state. Use clear commit messages that reference the issue number: e.g., `feat(#137): add session validation to AuthHandler`.
 
 - **Run checks after each step.** If the project has a linter, type checker, or test suite, run them. Fix failures immediately — do not accumulate broken state across steps.
+
+- **Install dependencies after modifying dependency files.** After modifying any dependency file (package.json, Cargo.toml, requirements.txt, etc.), run `./.shipper/scripts/install-deps.sh` to install dependencies.
 
 ### Scope guard
 

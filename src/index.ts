@@ -18,6 +18,7 @@ import { resetCommand } from './commands/reset.js';
 import { unblockCommand } from './commands/unblock.js';
 import { unlockCommand } from './commands/unlock.js';
 import { issueListCommand } from './commands/issue-list.js';
+import { setupCommand } from './commands/setup.js';
 
 const program = new Command();
 
@@ -27,7 +28,7 @@ program
   .version(process.env.SHIPPER_VERSION ?? '0.0.0-dev');
 
 program.hook('preAction', (_thisCommand, actionCommand) => {
-  if (actionCommand.name() === 'init') return;
+  if (actionCommand.name() === 'init' || actionCommand.name() === 'setup') return;
   loadSettings();
   runPreflight();
 });
@@ -38,6 +39,13 @@ program
   .option('--agent <name>', 'coding agent to use (claude or codex)')
   .action(async (options: { agent?: string }) => {
     await initCommand(options);
+  });
+
+program
+  .command('setup')
+  .description('Configure repository settings with an agent')
+  .action(() => {
+    setupCommand();
   });
 
 program

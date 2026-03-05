@@ -181,3 +181,74 @@ describe('withWorktree hooks', () => {
     );
   });
 });
+
+describe('installCommand in withWorktree', () => {
+  it('runs installCommand before worktreeSetup hook', () => {
+    getSettingsMock.mockReturnValue({
+      installCommand: 'npm ci',
+      hooks: { worktreeSetup: 'echo setup' },
+    });
+
+    const callOrder: string[] = [];
+    runAdvisoryHookMock.mockImplementation((label: string) => {
+      callOrder.push(label);
+    });
+
+    withWorktree(defaultOpts, () => {
+      callOrder.push('callback');
+    });
+
+    expect(callOrder.indexOf('Install dependencies')).toBeLessThan(
+      callOrder.indexOf('Worktree setup')
+    );
+    expect(callOrder.indexOf('Worktree setup')).toBeLessThan(callOrder.indexOf('callback'));
+  });
+
+  it('runs installCommand before callback when no worktreeSetup hook', () => {
+    getSettingsMock.mockReturnValue({
+      installCommand: 'npm ci',
+      hooks: {},
+    });
+
+    const callOrder: string[] = [];
+    runAdvisoryHookMock.mockImplementation((label: string) => {
+      callOrder.push(label);
+    });
+
+    withWorktree(defaultOpts, () => {
+      callOrder.push('callback');
+    });
+
+    expect(callOrder).toEqual(['Install dependencies', 'callback']);
+  });
+
+  it('passes correct arguments to runAdvisoryHook for installCommand', () => {
+    getSettingsMock.mockReturnValue({
+      installCommand: 'pnpm install --frozen-lockfile',
+      hooks: {},
+    });
+
+    withWorktree(defaultOpts, () => {});
+
+    expect(runAdvisoryHookMock).toHaveBeenCalledWith(
+      'Install dependencies',
+      'pnpm install --frozen-lockfile',
+      {
+        SHIPPER_WORKTREE_PATH: expectedWtPath,
+        SHIPPER_ISSUE_NUMBER: '42',
+        SHIPPER_BRANCH_NAME: 'shipper/42-add-feature',
+      },
+      expectedWtPath
+    );
+  });
+
+  it('does not run installCommand when not configured', () => {
+    getSettingsMock.mockReturnValue({
+      hooks: {},
+    });
+
+    withWorktree(defaultOpts, () => 'ok');
+
+    expect(runAdvisoryHookMock).not.toHaveBeenCalled();
+  });
+});

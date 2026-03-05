@@ -9,6 +9,7 @@ export interface Settings {
     [step: string]: 'claude' | 'codex' | undefined;
   };
   defaultBaseBranch?: string;
+  installCommand?: string;
   hooks: {
     worktreeSetup?: string;
     worktreeTeardown?: string;
@@ -28,6 +29,8 @@ export const SETTING_DESCRIPTIONS: Record<string, string> = {
   'agents.default':
     'default coding agent for all steps (supports per-step overrides via agents.<step>)',
   defaultBaseBranch: 'target branch for PRs (auto-detected from GitHub if not set)',
+  installCommand:
+    'shell command to install project dependencies (e.g. npm ci, pnpm install --frozen-lockfile)',
   'hooks.worktreeSetup':
     'shell command to run after a worktree is created (before the agent starts)',
   'hooks.worktreeTeardown': 'shell command to run before a worktree is removed',

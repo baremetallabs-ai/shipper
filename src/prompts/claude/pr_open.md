@@ -7,7 +7,7 @@ args:
   - --permission-mode
   - acceptEdits
   - --settings
-  - {"permissions":{"allow":["Bash(git branch *)","Bash(git log *)","Bash(git fetch *)","Bash(git rebase *)","Bash(git diff *)","Bash(./.shipper/scripts/safe-push.sh *)","Bash(./.shipper/scripts/safe-push.sh)","Bash(gh pr list *)","Bash(gh pr create *)","Bash(gh pr checks *)","Bash(gh issue comment *)","Bash(gh issue edit *)","WebSearch"]},"sandbox":{"enabled":true,"autoAllowBashIfSandboxed":true,"excludedCommands":["git branch *","git log *","git fetch *","git rebase *","git diff *","./.shipper/scripts/safe-push.sh *","./.shipper/scripts/safe-push.sh","gh pr list *","gh pr create *","gh pr checks *","gh issue comment *","gh issue edit *"]},"network":{"allowedDomains":["github.com","api.github.com","uploads.github.com","registry.npmjs.org"]}}
+  - {"permissions":{"allow":["Bash(git branch *)","Bash(git log *)","Bash(git fetch *)","Bash(git rebase *)","Bash(git diff *)","Bash(./.shipper/scripts/safe-push.sh *)","Bash(./.shipper/scripts/safe-push.sh)","Bash(./.shipper/scripts/install-deps.sh)","Bash(gh pr list *)","Bash(gh pr create *)","Bash(gh pr checks *)","Bash(gh issue comment *)","Bash(gh issue edit *)","WebSearch"]},"sandbox":{"enabled":true,"autoAllowBashIfSandboxed":true,"excludedCommands":["git branch *","git log *","git fetch *","git rebase *","git diff *","./.shipper/scripts/safe-push.sh *","./.shipper/scripts/safe-push.sh","./.shipper/scripts/install-deps.sh","gh pr list *","gh pr create *","gh pr checks *","gh issue comment *","gh issue edit *"]},"network":{"allowedDomains":["github.com","api.github.com","uploads.github.com","registry.npmjs.org"]}}
 append-issue: true
 ---
 
@@ -94,18 +94,9 @@ After a successful rebase, update the remote:
 
 Run all project quality checks. **All checks must pass before opening the PR.**
 
-### Step 1: Detect project environment and install dependencies
+### Step 1: Install dependencies
 
-Determine the project's ecosystem by inspecting the repo root for configuration files:
-
-- **Node.js**: `package.json` with lock file (`package-lock.json` → npm, `yarn.lock` → yarn, `pnpm-lock.yaml` → pnpm, `bun.lockb` → bun)
-- **Rust**: `Cargo.toml`
-- **Go**: `go.mod`
-- **Python**: `pyproject.toml`, `setup.cfg`, `requirements.txt`, `Pipfile`
-- **Make-based**: `Makefile`
-- Other ecosystems: use your judgment based on what you find.
-
-Run the appropriate install command for the detected ecosystem. If no recognizable dependency management is present, skip this step.
+Run `./.shipper/scripts/install-deps.sh` to install project dependencies. If no `installCommand` is configured, the script will skip gracefully.
 
 ### Step 2: Run checks in parallel
 
