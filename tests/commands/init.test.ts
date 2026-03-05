@@ -35,6 +35,11 @@ vi.mock('../../src/templates/readme.md', () => ({
   default: '# Test README content',
 }));
 
+vi.mock('../../src/lib/version.js', () => ({
+  CLI_VERSION: '1.2.3',
+  checkVersionFreshness: vi.fn(),
+}));
+
 vi.mock('../../src/lib/prerequisites.js', () => ({
   runPrereqChecks: () => true,
   checkGitRepo: vi.fn(),
@@ -137,6 +142,16 @@ describe('initCommand settings', () => {
     expect(gitignoreCall).toBeDefined();
     expect(gitignoreCall![1]).toContain('settings.local.json');
     expect(gitignoreCall![1]).toContain('tmp/');
+  });
+
+  it('writes cliVersion to settings.json', async () => {
+    await initCommand({ agent: 'claude' });
+    const settingsCall = writeFileSyncMock.mock.calls.find(
+      (call: unknown[]) => call[0] === settingsPath
+    );
+    expect(settingsCall).toBeDefined();
+    const written = JSON.parse(settingsCall![1] as string);
+    expect(written.cliVersion).toBe('1.2.3');
   });
 
   it('exits with error on malformed existing settings.json', async () => {

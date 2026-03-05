@@ -14,6 +14,7 @@ export interface Settings {
     worktreeSetup?: string;
     worktreeTeardown?: string;
   };
+  cliVersion?: string;
 }
 
 export const DEFAULTS: Settings = {

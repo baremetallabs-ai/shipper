@@ -5,6 +5,7 @@ import path from 'node:path';
 import { agentPrompts } from '../lib/prompts.js';
 import { scripts } from '../lib/scripts.js';
 import { DEFAULTS, SETTING_DESCRIPTIONS } from '../lib/settings.js';
+import { CLI_VERSION } from '../lib/version.js';
 import readmeContent from '../templates/readme.md';
 import {
   runPrereqChecks,
@@ -144,6 +145,7 @@ export async function initCommand(options: { agent?: string }) {
       : {};
   merged.agents = { ...existingAgentsObj, default: agent as 'claude' | 'codex' };
   delete (merged as Record<string, unknown>).agent;
+  (merged as Record<string, unknown>).cliVersion = CLI_VERSION;
   writeFileSync(settingsPath, JSON.stringify(merged, null, 2) + '\n');
   console.log('Wrote .shipper/settings.json with default settings:');
   for (const [key, value] of Object.entries(DEFAULTS)) {
