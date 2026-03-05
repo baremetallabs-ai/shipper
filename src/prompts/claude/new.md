@@ -20,7 +20,6 @@ The user's idea ("pitch") will be provided as the next user message in this chat
 - Only ask a question when something is genuinely ambiguous or missing — not to be thorough.
 - Keep everything product-oriented: what/why/expected behavior. Avoid implementation details.
 - When complete, **create the GitHub issue** and add label `shipper:new`.
-- If prerequisites are missing (no `gh`, not authenticated, missing label), **tell the user to run `shipper init`** and stop.
 
 ## Interaction style
 
@@ -59,7 +58,7 @@ If a tool for asking the user questions is available (e.g., inside agentic codin
 
 ## Creation steps (must do when ready)
 
-Once you have enough information and prerequisites pass:
+Once you have enough information:
 
 Generate an epoch timestamp (e.g. `date +%s`) and use it as `<timestamp>` in the filenames below.
 
@@ -71,5 +70,4 @@ Generate an epoch timestamp (e.g. `date +%s`) and use it as `<timestamp>` in the
 
 ## Stop conditions
 
-- If any prerequisite check fails, do not proceed with questions or drafting. Tell the user to run `shipper init`.
-- If any `gh issue create` step fails, report the error and tell the user to run `shipper init`.
+- If any `gh issue create` step fails, report the error.
