@@ -186,10 +186,9 @@ Mark the final commit-and-push task as `completed`. Verify the todo list shows a
 
 ## Stop conditions
 
-- If any prerequisite check fails, tell the user to run `shipper init` and stop.
 - If the issue is missing an implementation plan, tell the user to run `shipper plan` and stop.
 - If the plan doesn't match the codebase, a design flaw surfaces, or product questions are unresolved, follow the scope guard procedure: post a comment, roll back labels, then stop.
-- If any GitHub command fails, report the error **and which prior steps (if any) already completed** (e.g., "the comment was posted but the label change failed"), then tell the user to run `shipper init`.
+- If any GitHub command fails, report the error **and which prior steps (if any) already completed** (e.g., "the comment was posted but the label change failed").
 
 ---
 

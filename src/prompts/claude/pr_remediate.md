@@ -340,9 +340,8 @@ Actions:
 
 ## Stop conditions
 
-- If any prerequisite check fails, tell the user to run `shipper init` and stop.
 - If the PR does not exist or is already merged/closed, tell the user and stop.
-- If any `gh` command fails unexpectedly, report the error **and which prior steps (if any) already completed** (e.g., "the comment was posted but the label change failed"), then tell the user to run `shipper init`.
+- If any `gh` command fails unexpectedly, report the error **and which prior steps (if any) already completed** (e.g., "the comment was posted but the label change failed").
 
 ---
 

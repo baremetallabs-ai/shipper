@@ -102,7 +102,7 @@ After producing the final artifacts, you must update GitHub using repo-local tem
    - Remove `shipper:new` (if present)
    - Use `gh issue edit <ISSUE> --add-label ...` and `--remove-label ...`
 
-**If a later step fails after earlier steps succeeded:** Report which steps completed successfully and which failed, so the user can assess the state. For example, if the issue body was updated but the label change failed, tell the user the body is already updated and they may need to manually adjust the label. Then tell the user to run `shipper init` and retry.
+**If a later step fails after earlier steps succeeded:** Report which steps completed successfully and which failed, so the user can assess the state. For example, if the issue body was updated but the label change failed, tell the user the body is already updated and they may need to manually adjust the label.
 
 ### If you recommend splitting into additional issues
 
@@ -120,8 +120,7 @@ If your decomposition recommendation includes additional issues, you must create
 
 ## Stop conditions
 
-- If any prerequisite check fails, tell the user to run `shipper init` and stop.
-- If any GitHub update/create command fails, report the error **and which prior steps (if any) already completed** (e.g., "the issue body was updated but the label change failed"), then tell the user to run `shipper init`.
+- If any GitHub update/create command fails, report the error **and which prior steps (if any) already completed** (e.g., "the issue body was updated but the label change failed").
 
 ---
 
