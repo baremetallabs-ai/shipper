@@ -1,6 +1,11 @@
 import { execFileSync } from 'node:child_process';
-import { confirm } from '../lib/confirm.js';
+import { confirm, promptChoice } from '../lib/confirm.js';
 import { getRepoNwo } from '../lib/github.js';
+import { isLockStale } from '../lib/lock.js';
+
+type ResetMode = 'full' | 'partial';
+
+const PR_STAGE_LABELS = ['shipper:pr-open', 'shipper:pr-reviewed', 'shipper:ready'];
 
 interface IssueViewData {
   number: number;
@@ -15,55 +20,114 @@ interface PREntry {
 
 interface ArtifactScan {
   labelsToRemove: string[];
-  addNew: boolean;
+  addTarget: boolean;
+  targetLabel: string;
+  mode: ResetMode;
   commentIds: number[];
   prs: PREntry[];
   branchesToDelete: string[];
 }
 
-function scanArtifacts(issueNum: number, nwo: string): ArtifactScan {
-  // Fetch issue data
-  let issueJson: string;
+function getImplementedTimestamp(issueNum: number, nwo: string): string | null {
   try {
-    issueJson = execFileSync(
+    const output = execFileSync(
       'gh',
-      ['issue', 'view', String(issueNum), '--json', 'number,state,labels'],
+      [
+        'api',
+        `repos/${nwo}/issues/${issueNum}/timeline`,
+        '--paginate',
+        '--jq',
+        '.[] | select(.event == "labeled" and .label.name? == "shipper:implemented") | .created_at',
+      ],
       { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
-    );
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(`Error: Failed to fetch issue #${issueNum}: ${msg}`);
-    process.exit(1);
-  }
+    ).trim();
 
-  const issue: IssueViewData = JSON.parse(issueJson);
+    if (!output) return null;
 
-  if (issue.state !== 'OPEN') {
-    console.error(`Issue #${issueNum} is closed. Reset only works on open issues.`);
-    process.exit(1);
+    const timestamps = output.split('\n').filter((line) => line.trim());
+    if (timestamps.length === 0) return null;
+
+    return timestamps[timestamps.length - 1]!;
+  } catch {
+    return null;
   }
+}
+
+function scanArtifacts(
+  issueNum: number,
+  nwo: string,
+  mode: ResetMode,
+  labels: string[]
+): ArtifactScan {
+  const shipperLabels = labels.filter((n) => n.startsWith('shipper:'));
 
   // Labels
-  const shipperLabels = issue.labels.map((l) => l.name).filter((n) => n.startsWith('shipper:'));
-  const labelsToRemove = shipperLabels.filter((n) => n !== 'shipper:new');
-  const addNew = !shipperLabels.includes('shipper:new');
+  let labelsToRemove: string[];
+  let targetLabel: string;
+  let addTarget: boolean;
 
-  // Comments (use REST API for IDs)
+  if (mode === 'partial') {
+    labelsToRemove = labels.filter((l) => PR_STAGE_LABELS.includes(l));
+    targetLabel = 'shipper:implemented';
+    addTarget = !labels.includes('shipper:implemented');
+  } else {
+    labelsToRemove = shipperLabels.filter((n) => n !== 'shipper:new');
+    targetLabel = 'shipper:new';
+    addTarget = !shipperLabels.includes('shipper:new');
+  }
+
+  // Comments
   let commentIds: number[] = [];
-  try {
-    const raw = execFileSync(
-      'gh',
-      ['api', `repos/${nwo}/issues/${issueNum}/comments`, '--paginate', '--jq', '.[].id'],
-      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
-    );
-    commentIds = raw
-      .trim()
-      .split('\n')
-      .filter((s) => s !== '')
-      .map(Number);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`Warning: Could not fetch comments for issue #${issueNum}: ${msg}`);
+  if (mode === 'partial') {
+    const implementedAt = getImplementedTimestamp(issueNum, nwo);
+    if (implementedAt) {
+      try {
+        const raw = execFileSync(
+          'gh',
+          [
+            'api',
+            `repos/${nwo}/issues/${issueNum}/comments`,
+            '--paginate',
+            '--jq',
+            '.[] | {id, created_at}',
+          ],
+          { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
+        );
+        const lines = raw
+          .trim()
+          .split('\n')
+          .filter((s) => s !== '');
+        for (const line of lines) {
+          const comment = JSON.parse(line) as { id: number; created_at: string };
+          if (comment.created_at > implementedAt) {
+            commentIds.push(comment.id);
+          }
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`Warning: Could not fetch comments for issue #${issueNum}: ${msg}`);
+      }
+    } else {
+      console.warn(
+        'Warning: Could not determine when shipper:implemented was applied. Skipping comment cleanup.'
+      );
+    }
+  } else {
+    try {
+      const raw = execFileSync(
+        'gh',
+        ['api', `repos/${nwo}/issues/${issueNum}/comments`, '--paginate', '--jq', '.[].id'],
+        { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
+      );
+      commentIds = raw
+        .trim()
+        .split('\n')
+        .filter((s) => s !== '')
+        .map(Number);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`Warning: Could not fetch comments for issue #${issueNum}: ${msg}`);
+    }
   }
 
   // PRs
@@ -101,13 +165,13 @@ function scanArtifacts(issueNum: number, nwo: string): ArtifactScan {
     .map((pr) => pr.headRefName)
     .filter((name) => name.startsWith('shipper/'));
 
-  return { labelsToRemove, addNew, commentIds, prs, branchesToDelete };
+  return { labelsToRemove, addTarget, targetLabel, mode, commentIds, prs, branchesToDelete };
 }
 
 function isClean(scan: ArtifactScan): boolean {
   return (
     scan.labelsToRemove.length === 0 &&
-    !scan.addNew &&
+    !scan.addTarget &&
     scan.commentIds.length === 0 &&
     scan.prs.length === 0 &&
     scan.branchesToDelete.length === 0
@@ -116,11 +180,12 @@ function isClean(scan: ArtifactScan): boolean {
 
 function printDryRun(issueNum: number, scan: ArtifactScan): void {
   console.log(`\nReset summary for issue #${issueNum}:`);
+  console.log(`  Target: ${scan.targetLabel}`);
   if (scan.labelsToRemove.length > 0) {
     console.log(`  Labels to remove: ${scan.labelsToRemove.join(', ')}`);
   }
-  if (scan.addNew) {
-    console.log(`  Labels to add: shipper:new`);
+  if (scan.addTarget) {
+    console.log(`  Labels to add: ${scan.targetLabel}`);
   }
   if (scan.commentIds.length > 0) {
     console.log(`  Comments to delete: ${scan.commentIds.length}`);
@@ -186,13 +251,13 @@ function executeReset(issueNum: number, scan: ArtifactScan, nwo: string): void {
   }
 
   // 4. Reset labels
-  if (scan.labelsToRemove.length > 0 || scan.addNew) {
+  if (scan.labelsToRemove.length > 0 || scan.addTarget) {
     const args = ['issue', 'edit', String(issueNum)];
     if (scan.labelsToRemove.length > 0) {
       args.push('--remove-label', scan.labelsToRemove.join(','));
     }
-    if (scan.addNew) {
-      args.push('--add-label', 'shipper:new');
+    if (scan.addTarget) {
+      args.push('--add-label', scan.targetLabel);
     }
     try {
       execFileSync('gh', args, { stdio: ['ignore', 'ignore', 'ignore'] });
@@ -204,15 +269,22 @@ function executeReset(issueNum: number, scan: ArtifactScan, nwo: string): void {
   if (scan.labelsToRemove.length > 0) {
     actions.push(`Removed labels: ${scan.labelsToRemove.join(', ')}`);
   }
-  if (scan.addNew) {
-    actions.push('Added label: shipper:new');
+  if (scan.addTarget) {
+    actions.push(`Added label: ${scan.targetLabel}`);
   }
 
   // 5. Post reset comment
-  const resetBody =
-    '**This issue has been reset to `shipper:new`.**\n\n' +
-    'Any remaining content in the issue body is from a previous workflow run ' +
-    'and should be treated as a suggestion for the next grooming attempt, not as groomed or approved content.';
+  let resetBody: string;
+  if (scan.mode === 'partial') {
+    resetBody =
+      '**This issue has been reset to `shipper:implemented`.** ' +
+      'PR artifacts have been cleaned up. Grooming, design, and planning content is preserved.';
+  } else {
+    resetBody =
+      '**This issue has been reset to `shipper:new`.**\n\n' +
+      'Any remaining content in the issue body is from a previous workflow run ' +
+      'and should be treated as a suggestion for the next grooming attempt, not as groomed or approved content.';
+  }
   try {
     execFileSync('gh', ['issue', 'comment', String(issueNum), '--body', resetBody], {
       stdio: ['ignore', 'ignore', 'ignore'],
@@ -240,7 +312,51 @@ export async function resetCommand(issue: string, opts: { force: boolean }): Pro
   const issueNum = Number(cleaned);
 
   const nwo = getRepoNwo();
-  const scan = scanArtifacts(issueNum, nwo);
+
+  // Fetch issue data
+  let issueJson: string;
+  try {
+    issueJson = execFileSync(
+      'gh',
+      ['issue', 'view', String(issueNum), '--json', 'number,state,labels'],
+      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`Error: Failed to fetch issue #${issueNum}: ${msg}`);
+    process.exit(1);
+  }
+
+  const issueData: IssueViewData = JSON.parse(issueJson);
+
+  if (issueData.state !== 'OPEN') {
+    console.error(`Issue #${issueNum} is closed. Reset only works on open issues.`);
+    process.exit(1);
+  }
+
+  const labels = issueData.labels.map((l) => l.name);
+
+  // Lock check
+  if (!opts.force && labels.includes('shipper:locked')) {
+    if (!isLockStale(String(issueNum))) {
+      console.error(
+        `Issue #${issueNum} is locked by another shipper instance. Use --force to override.`
+      );
+      process.exit(1);
+    }
+  }
+
+  // Mode selection
+  const isPastImplemented = labels.some((l) => PR_STAGE_LABELS.includes(l));
+  let mode: ResetMode = 'full';
+  if (isPastImplemented && !opts.force) {
+    console.log('\nReset options:');
+    console.log('  1) Reset to shipper:implemented (PR cleanup only)');
+    console.log('  2) Reset to shipper:new (full reset)');
+    mode = (await promptChoice('Select [1-2]: ', ['1', '2'])) === '1' ? 'partial' : 'full';
+  }
+
+  const scan = scanArtifacts(issueNum, nwo, mode, labels);
 
   if (isClean(scan)) {
     console.log(`Issue #${issueNum} is already clean. Nothing to reset.`);

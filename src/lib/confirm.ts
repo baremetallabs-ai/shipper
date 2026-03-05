@@ -10,3 +10,21 @@ export function confirm(message: string): Promise<boolean> {
     });
   });
 }
+
+export function promptChoice(message: string, valid: string[]): Promise<string> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve) => {
+    const ask = () => {
+      rl.question(message, (answer) => {
+        const trimmed = answer.trim();
+        if (valid.includes(trimmed)) {
+          rl.close();
+          resolve(trimmed);
+        } else {
+          ask();
+        }
+      });
+    };
+    ask();
+  });
+}
