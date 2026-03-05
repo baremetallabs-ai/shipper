@@ -1,0 +1,61 @@
+---
+name: session-debugger
+description: |
+  Investigate Claude Code session transcripts from shipper runs.
+  Use for: "investigate session", "debug shipper run", "what went wrong",
+  "transcript", "remediation agent", "session failure", "why did the agent fail",
+  "check session logs", "find agent sessions for issue".
+---
+
+# Session Debugger
+
+Skill for investigating Claude Code session transcripts produced by `ship --auto` runs. Provides scripts to find, classify, and extract data from JSONL transcript files under `~/.claude/projects/`.
+
+## Skill Location
+
+This skill lives at `.claude/skills/session-debugger/` relative to the repo root. When running scripts, resolve the path from the repo root:
+
+```bash
+SKILL_DIR="$(git rev-parse --show-toplevel)/.claude/skills/session-debugger"
+```
+
+## Quick Reference
+
+| Need                                | Script                                         |
+| ----------------------------------- | ---------------------------------------------- |
+| **Find sessions for an issue**      | `./scripts/find-sessions.sh <issue-number>`    |
+| **Classify a session by stage**     | `./scripts/classify-session.sh <jsonl-path>`   |
+| **List all tool calls**             | `./scripts/extract-tool-calls.sh <jsonl-path>` |
+| **Extract verdict/labels/comments** | `./scripts/extract-verdict.sh <jsonl-path>`    |
+
+## Prerequisites
+
+- `jq` must be installed (`brew install jq` on macOS)
+- Session transcripts must exist under `~/.claude/projects/`
+
+## Reference Docs
+
+- [Transcript Format](references/transcript-format.md) — JSONL schema, directory layout, matching sessions to shipper stages
+
+## Task Workflows
+
+### Investigate a specific stage run
+
+1. `find-sessions.sh <issue>` — list all session files for the issue
+2. Pick the session matching the timeframe or stage of interest
+3. `classify-session.sh <file>` — confirm the stage type (implement, pr-open, pr-review, pr-remediate)
+4. `extract-tool-calls.sh <file>` — get numbered list of tool calls with error status
+5. Read the JSONL file directly to inspect interesting spans (e.g., around ERROR entries)
+
+### Find all sessions for an issue
+
+1. `find-sessions.sh <issue>` — get all session files
+2. For each file, run `classify-session.sh <file>` to identify the stage
+3. Build a timeline of what ran and when
+
+### Extract what went wrong
+
+1. `find-sessions.sh <issue>` — locate the failing session
+2. `extract-tool-calls.sh <file>` — scan for ERROR entries
+3. `extract-verdict.sh <file>` — check if a remediation agent left a verdict (READY/RETRY/NEEDS UPSTREAM)
+4. Read the JSONL around the error tool calls for full context
