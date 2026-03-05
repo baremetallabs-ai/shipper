@@ -58,7 +58,9 @@ Dispatch based on the result:
 
 - **BLOCKED:** Proceed directly to Step 3 (CI check). `BLOCKED` typically means required checks are pending or review approval is missing — both handled by Steps 3 and 4.
 
-- **CLEAN / HAS_HOOKS / UNSTABLE:** Proceed to Step 3. The branch is mergeable.
+- **CLEAN / HAS_HOOKS:** Proceed to Step 3. The branch is mergeable.
+
+- **UNSTABLE:** Proceed to Step 3 to check CI status. This status often indicates failing or pending non-required checks.
 
 - **Any other value:** Proceed to Step 3 optimistically (same as exhausted-UNKNOWN).
 
