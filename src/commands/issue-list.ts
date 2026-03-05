@@ -11,7 +11,7 @@ const STATUS_LABELS = [
   'shipper:ready',
 ] as const;
 
-const DISPLAY_NAMES: Record<string, string> = {
+const DISPLAY_NAMES: Record<(typeof STATUS_LABELS)[number], string> = {
   'shipper:new': 'New',
   'shipper:groomed': 'Groomed',
   'shipper:designed': 'Designed',
@@ -52,7 +52,7 @@ export function issueListCommand(options: { status?: string }): void {
         '--state',
         'open',
         '--search',
-        'label:shipper:new,shipper:groomed,shipper:designed,shipper:planned,shipper:implemented,shipper:pr-open,shipper:pr-reviewed,shipper:ready',
+        `label:${STATUS_LABELS.join(',')}`,
         '--limit',
         '1000',
         '--json',
@@ -74,12 +74,7 @@ export function issueListCommand(options: { status?: string }): void {
 
   for (const issue of issues) {
     const issueLabels = issue.labels.map((l) => l.name);
-    let bestIndex = -1;
-    for (let i = 0; i < STATUS_LABELS.length; i++) {
-      if (issueLabels.includes(STATUS_LABELS[i]!)) {
-        bestIndex = i;
-      }
-    }
+    const bestIndex = STATUS_LABELS.findLastIndex((label) => issueLabels.includes(label));
     if (bestIndex >= 0) {
       groups.get(STATUS_LABELS[bestIndex]!)!.push(issue);
     }
@@ -91,7 +86,10 @@ export function issueListCommand(options: { status?: string }): void {
   }
 
   // Determine which labels to display
-  const labelsToShow = options.status ? [`shipper:${options.status}`] : [...STATUS_LABELS];
+  type StatusLabel = (typeof STATUS_LABELS)[number];
+  const labelsToShow: StatusLabel[] = options.status
+    ? [`shipper:${options.status}` as StatusLabel]
+    : [...STATUS_LABELS];
 
   let hasOutput = false;
   for (const label of labelsToShow) {
