@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { runPreflight } from './lib/prerequisites.js';
 import { loadSettings } from './lib/settings.js';
+import { CLI_VERSION, checkVersionFreshness } from './lib/version.js';
 import { initCommand } from './commands/init.js';
 import { newCommand } from './commands/new.js';
 import { adoptCommand, adoptAllCommand } from './commands/adopt.js';
@@ -25,11 +26,12 @@ const program = new Command();
 program
   .name('shipper')
   .description('CLI tool for automating development workflow with coding agents')
-  .version(process.env.SHIPPER_VERSION ?? '0.0.0-dev');
+  .version(CLI_VERSION);
 
 program.hook('preAction', (_thisCommand, actionCommand) => {
   if (actionCommand.name() === 'init' || actionCommand.name() === 'setup') return;
   loadSettings();
+  checkVersionFreshness();
   runPreflight();
 });
 
