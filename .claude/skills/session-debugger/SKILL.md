@@ -21,12 +21,15 @@ SKILL_DIR="$(git rev-parse --show-toplevel)/.claude/skills/session-debugger"
 
 ## Quick Reference
 
-| Need                                | Script                                         |
-| ----------------------------------- | ---------------------------------------------- |
-| **Find sessions for an issue**      | `./scripts/find-sessions.sh <issue-number>`    |
-| **Classify a session by stage**     | `./scripts/classify-session.sh <jsonl-path>`   |
-| **List all tool calls**             | `./scripts/extract-tool-calls.sh <jsonl-path>` |
-| **Extract verdict/labels/comments** | `./scripts/extract-verdict.sh <jsonl-path>`    |
+| Need                                | Script                                                     |
+| ----------------------------------- | ---------------------------------------------------------- |
+| **Find sessions for an issue**      | `./scripts/find-sessions.sh <issue-number>`                |
+| **Classify a session by stage**     | `./scripts/classify-session.sh <jsonl-path>`               |
+| **List all tool calls**             | `./scripts/extract-tool-calls.sh <jsonl-path>`             |
+| **Find errors (including hidden)**  | `./scripts/extract-errors.sh <jsonl-path>`                 |
+| **Drill into a specific tool call** | `./scripts/show-tool-result.sh <jsonl-path> <call-number>` |
+| **Get agent's final message**       | `./scripts/extract-final-message.sh <jsonl-path>`          |
+| **Extract verdict/labels/comments** | `./scripts/extract-verdict.sh <jsonl-path>`                |
 
 ## Prerequisites
 
@@ -56,6 +59,14 @@ SKILL_DIR="$(git rev-parse --show-toplevel)/.claude/skills/session-debugger"
 ### Extract what went wrong
 
 1. `find-sessions.sh <issue>` — locate the failing session
-2. `extract-tool-calls.sh <file>` — scan for ERROR entries
-3. `extract-verdict.sh <file>` — check if a remediation agent left a verdict (READY/RETRY/NEEDS UPSTREAM)
-4. Read the JSONL around the error tool calls for full context
+2. `extract-errors.sh <file>` — find all errors (both `is_error` and content-level)
+3. `show-tool-result.sh <file> <N>` — drill into specific error tool calls for full context
+4. `extract-final-message.sh <file>` — see what the agent concluded
+5. `extract-verdict.sh <file>` — check if a remediation agent left a verdict (READY/RETRY/NEEDS UPSTREAM)
+
+### Quick error triage
+
+1. `find-sessions.sh <issue>` — find sessions
+2. `extract-errors.sh <file>` — scan for errors in one pass
+3. If content errors found, use `show-tool-result.sh <file> <N>` to see full output
+4. `extract-final-message.sh <file>` — check if the agent acknowledged the failure

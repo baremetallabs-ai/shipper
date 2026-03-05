@@ -46,11 +46,12 @@ for dir in "$PROJECTS_DIR"/*/; do
   fi
 done
 
-# Also check the main repo project directory
+# Also collect main repo project directories (need per-file filtering)
+main_repo_dirs=()
 for dir in "$PROJECTS_DIR"/*/; do
   dirname=$(basename "$dir")
   if [[ "$dirname" == *"repos-$REPO_NAME" ]] || [[ "$dirname" == *"repos-$REPO_NAME-"* ]]; then
-    # Only add if not already in the list
+    # Only add if not already in a worktree match
     already_added=false
     for existing in "${matching_dirs[@]+"${matching_dirs[@]}"}"; do
       if [[ "$existing" == "$dir" ]]; then
@@ -59,22 +60,39 @@ for dir in "$PROJECTS_DIR"/*/; do
       fi
     done
     if [[ "$already_added" == false ]]; then
-      matching_dirs+=("$dir")
+      main_repo_dirs+=("$dir")
     fi
   fi
 done
 
-if [[ ${#matching_dirs[@]} -eq 0 ]]; then
+if [[ ${#matching_dirs[@]} -eq 0 ]] && [[ ${#main_repo_dirs[@]} -eq 0 ]]; then
   echo "No project directories found for repo '$REPO_NAME' issue #$ISSUE_NUM" >&2
   exit 1
 fi
 
-# List all JSONL files (excluding subagents/) sorted by mtime descending
+# Issue reference patterns to grep for in JSONL content
+issue_pattern="(# Issue #${ISSUE_NUM}:|shipper/${ISSUE_NUM}-|issues/${ISSUE_NUM}([^0-9]|$)|#${ISSUE_NUM}[^0-9])"
+
+# List all JSONL files sorted by mtime descending
 output=""
-for dir in "${matching_dirs[@]}"; do
+
+# Worktree dirs: include all JSONL files (directory name already matched)
+for dir in "${matching_dirs[@]+"${matching_dirs[@]}"}"; do
+  [[ -n "$dir" ]] || continue
   while IFS= read -r -d '' file; do
     mtime=$(stat -f '%Sm' -t '%Y-%m-%d %H:%M:%S' "$file" 2>/dev/null || stat -c '%y' "$file" 2>/dev/null | cut -d. -f1)
     output+="$mtime  $file"$'\n'
+  done < <(find "$dir" -maxdepth 1 -name '*.jsonl' -print0 2>/dev/null)
+done
+
+# Main repo dirs: individually filter each JSONL by content
+for dir in "${main_repo_dirs[@]+"${main_repo_dirs[@]}"}"; do
+  [[ -n "$dir" ]] || continue
+  while IFS= read -r -d '' file; do
+    if head -c 20000 "$file" | grep -qE "$issue_pattern" 2>/dev/null; then
+      mtime=$(stat -f '%Sm' -t '%Y-%m-%d %H:%M:%S' "$file" 2>/dev/null || stat -c '%y' "$file" 2>/dev/null | cut -d. -f1)
+      output+="$mtime  $file"$'\n'
+    fi
   done < <(find "$dir" -maxdepth 1 -name '*.jsonl' -print0 2>/dev/null)
 done
 

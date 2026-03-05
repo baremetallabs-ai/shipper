@@ -31,12 +31,12 @@ fi
 cwd=$(echo "$first_user" | jq -r '.cwd // "unknown"')
 branch=$(echo "$first_user" | jq -r '.gitBranch // "unknown"')
 
-# Get first user message content (could be string or array)
+# Get first user message content (longer preview to capture labels)
 prompt_preview=$(echo "$first_user" | jq -r '
   if (.message.content | type) == "string" then
-    .message.content[:200]
+    .message.content[:2000]
   elif (.message.content | type) == "array" then
-    [.message.content[] | select(.type == "text") | .text][0][:200] // ""
+    [.message.content[] | select(.type == "text") | .text][0][:2000] // ""
   else
     ""
   end
@@ -48,10 +48,10 @@ if [[ "$branch" =~ ([0-9]+) ]]; then
   issue_num="${BASH_REMATCH[1]}"
 fi
 
-# Scan assistant records for characteristic tool calls to determine stage
-stage="unknown"
+# --- Stage detection (priority: tool calls > prompt labels > CWD/branch > unknown) ---
+stage=""
 
-# Check for gh commands in Bash tool calls
+# Priority 1: Check for characteristic tool calls (most specific)
 gh_commands=$(jq -r '
   select(.type == "assistant") |
   .message.content[]? |
@@ -77,6 +77,40 @@ verdict_text=$(jq -r '
 
 if echo "$verdict_text" | grep -qE '\b(READY|RETRY|NEEDS UPSTREAM)\b'; then
   stage="pr-remediate"
+fi
+
+# Priority 2: Check prompt labels (if tool calls didn't determine stage)
+if [[ -z "$stage" ]]; then
+  if echo "$prompt_preview" | grep -q 'shipper:pr-open'; then
+    # Session started with pr-open label — could be pr-review or pr-remediate
+    if echo "$prompt_preview" | grep -qiE '(pull request|PR #|diff|review)'; then
+      stage="pr-review"
+    else
+      stage="pr-review"
+    fi
+  elif echo "$prompt_preview" | grep -q 'shipper:implemented'; then
+    stage="pr-open"
+  elif echo "$prompt_preview" | grep -q 'shipper:planned'; then
+    stage="implement"
+  elif echo "$prompt_preview" | grep -q 'shipper:designed'; then
+    stage="plan"
+  elif echo "$prompt_preview" | grep -q 'shipper:groomed'; then
+    stage="design"
+  elif echo "$prompt_preview" | grep -q 'shipper:new'; then
+    stage="groom"
+  fi
+fi
+
+# Priority 3: CWD/branch hints
+if [[ -z "$stage" ]]; then
+  if [[ "$cwd" == *"shipper-worktrees"* ]] || [[ "$cwd" == *"--wt--"* ]]; then
+    stage="implement"
+  fi
+fi
+
+# Fallback
+if [[ -z "$stage" ]]; then
+  stage="unknown"
 fi
 
 # Build summary from first assistant text
