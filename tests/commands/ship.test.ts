@@ -225,6 +225,16 @@ describe('selectBlockedIssues', () => {
     expect(result).toEqual([]);
   });
 
+  it('passes --search flag to exclude shipper:locked issues', () => {
+    mockExecFileSync.mockReturnValue('[]');
+    selectBlockedIssues();
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      'gh',
+      expect.arrayContaining(['--search', '-label:shipper:locked']),
+      expect.any(Object)
+    );
+  });
+
   it('sorts issues with no recognized stage label to the end', () => {
     const issues = [
       {
