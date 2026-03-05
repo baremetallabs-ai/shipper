@@ -383,6 +383,8 @@ export function selectBlockedIssues(): { number: number; title: string }[] {
         'shipper:blocked',
         '--state',
         'open',
+        '--search',
+        '-label:shipper:locked',
         '--json',
         'number,title,labels',
         '--limit',
