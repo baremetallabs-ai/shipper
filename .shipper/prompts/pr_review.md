@@ -350,7 +350,6 @@ When complete, report to the user:
 
 ## Stop conditions
 
-- If any prerequisite check fails, tell the user to install and authenticate `gh`, then stop.
 - If no open PR is found for the given issue/PR reference, tell the user and stop.
 - If the PR has no associated issue with requirements/acceptance criteria, note this and do a best-effort review against the PR description only.
 - If any `gh` command fails unexpectedly, report the error **and which prior steps (if any) already completed**.

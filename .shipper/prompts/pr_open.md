@@ -248,9 +248,8 @@ When complete, report:
 
 ## Stop conditions
 
-- If any prerequisite check fails, tell the user to run `shipper init` and stop.
 - If the implementation is fundamentally broken (build fails due to architecture, tests reveal incorrect behavior), post a comment on the issue explaining the problem, roll back labels (`gh issue edit <ISSUE> --add-label "shipper:planned" --remove-label "shipper:pr-open"`), and stop. Recommend the user run `shipper implement` again.
-- If any `gh` command fails unexpectedly, report the error **and which prior steps (if any) already completed** (e.g., "the comment was posted but the label change failed"), then tell the user to run `shipper init`.
+- If any `gh` command fails unexpectedly, report the error **and which prior steps (if any) already completed** (e.g., "the comment was posted but the label change failed").
 
 ---
 

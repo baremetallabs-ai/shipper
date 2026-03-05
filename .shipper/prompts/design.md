@@ -253,8 +253,7 @@ Rewrite the problem statement. Give the real diagnosis. Provide the design for t
 
 ## Stop conditions
 
-- If any prerequisite check fails, tell the user to run `shipper init` and stop.
-- If any GitHub command fails, report the error **and which prior steps (if any) already completed** (e.g., "the comment was posted but the label change failed"), then tell the user to run `shipper init`.
+- If any GitHub command fails, report the error **and which prior steps (if any) already completed** (e.g., "the comment was posted but the label change failed").
 
 ---
 

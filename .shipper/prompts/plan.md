@@ -138,11 +138,10 @@ gh issue edit <ISSUE> --add-label "shipper:planned" --remove-label "shipper:desi
 
 ## Stop conditions
 
-- If any prerequisite check fails, tell the user to run `shipper init` and stop.
 - If the issue is missing a design review, tell the user to run `shipper design` and stop.
 - If the design is flawed or the codebase contradicts it, follow the scope guard procedure: post a comment explaining the problem and roll back labels before stopping.
 - If product questions are unresolved, follow the scope guard procedure: post a comment and roll back labels before stopping.
-- If any GitHub command fails, report the error **and which prior steps (if any) already completed** (e.g., "the comment was posted but the label change failed"), then tell the user to run `shipper init`.
+- If any GitHub command fails, report the error **and which prior steps (if any) already completed** (e.g., "the comment was posted but the label change failed").
 
 ---
 
