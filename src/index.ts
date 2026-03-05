@@ -98,8 +98,13 @@ program
   .command('groom')
   .description('Groom an existing issue')
   .argument('[issue]', 'issue number or URL')
-  .action((issue?: string) => {
-    groomCommand(issue);
+  .option('--auto', 'groom all eligible shipper:new issues in sequence', false)
+  .action((issue: string | undefined, options: { auto: boolean }) => {
+    if (options.auto && issue) {
+      console.error('Error: --auto and an explicit issue number are mutually exclusive.');
+      process.exit(1);
+    }
+    groomCommand(issue, options);
   });
 
 program
