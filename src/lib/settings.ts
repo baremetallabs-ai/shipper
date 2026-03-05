@@ -25,7 +25,8 @@ export const DEFAULTS: Settings = {
 export const SETTING_DESCRIPTIONS: Record<string, string> = {
   prReviewWaitMinutes: 'minimum wait (minutes) before PR review remediation',
   lockTimeoutMinutes: 'stale lock timeout (minutes) before auto-clearing shipper:locked',
-  'agents.default': 'default coding agent for all steps (supports per-step overrides via agents.<step>)',
+  'agents.default':
+    'default coding agent for all steps (supports per-step overrides via agents.<step>)',
   defaultBaseBranch: 'target branch for PRs (auto-detected from GitHub if not set)',
   'hooks.worktreeSetup':
     'shell command to run after a worktree is created (before the agent starts)',

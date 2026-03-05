@@ -123,7 +123,8 @@ export async function initCommand(options: { agent?: string }) {
     try {
       const existing = JSON.parse(readFileSync(settingsPath, 'utf-8')) as Record<string, unknown>;
       const existingAgents = existing.agents as Record<string, unknown> | undefined;
-      existingAgent = (existingAgents?.default as string | undefined) ?? (existing.agent as string | undefined);
+      existingAgent =
+        (existingAgents?.default as string | undefined) ?? (existing.agent as string | undefined);
       merged = { ...DEFAULTS, ...existing };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);

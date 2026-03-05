@@ -187,8 +187,7 @@ describe('agents settings', () => {
 
   it('deep-merges agents from base and local', async () => {
     readFileSyncMock.mockImplementation((p: string) => {
-      if (p === settingsPath)
-        return '{"agents": {"default": "claude", "implement": "codex"}}';
+      if (p === settingsPath) return '{"agents": {"default": "claude", "implement": "codex"}}';
       if (p === localPath) return '{"agents": {"implement": "claude"}}';
       throw enoent(p);
     });
@@ -213,8 +212,7 @@ describe('agents settings', () => {
 describe('resolveAgent', () => {
   it('returns per-step override when set', async () => {
     readFileSyncMock.mockImplementation((p: string) => {
-      if (p === settingsPath)
-        return '{"agents": {"default": "claude", "implement": "codex"}}';
+      if (p === settingsPath) return '{"agents": {"default": "claude", "implement": "codex"}}';
       throw enoent(p);
     });
     const { loadSettings, resolveAgent } = await loadModule();
@@ -234,8 +232,7 @@ describe('resolveAgent', () => {
 
   it('exits on invalid agent value', async () => {
     readFileSyncMock.mockImplementation((p: string) => {
-      if (p === settingsPath)
-        return '{"agents": {"default": "claude", "implement": "vim"}}';
+      if (p === settingsPath) return '{"agents": {"default": "claude", "implement": "vim"}}';
       throw enoent(p);
     });
     const { loadSettings, resolveAgent } = await loadModule();
