@@ -20,12 +20,6 @@ if ! command -v jq &>/dev/null; then
   exit 1
 fi
 
-# Build a lookup of tool_use_id -> is_error from tool_result records
-# Then extract tool_use blocks from assistant records in order
-jq -r '
-  # We process the whole file in slurp mode to correlate tool_use with tool_result
-  ' /dev/null >/dev/null 2>&1 || true
-
 # Two-pass approach:
 # Pass 1: collect tool results (is_error status) keyed by tool_use_id
 # Pass 2: collect tool uses in order, look up result status
