@@ -33,6 +33,20 @@ const LABELS = [
 
 const VALID_AGENTS = ['claude', 'codex'] as const;
 
+function getStoredAgent(): string | undefined {
+  const basePath = path.resolve('.shipper', 'settings.json');
+  const localPath = path.resolve('.shipper', 'settings.local.json');
+  for (const filepath of [localPath, basePath]) {
+    try {
+      const data = JSON.parse(readFileSync(filepath, 'utf-8')) as Record<string, unknown>;
+      if (typeof data.agent === 'string' && data.agent) return data.agent;
+    } catch {
+      // Missing or malformed — skip
+    }
+  }
+  return undefined;
+}
+
 export async function initCommand(options: { agent?: string }) {
   // Check prerequisites
   const ok = runPrereqChecks([checkGitRepo, checkGhInstalled, checkGhAuth, checkGitHubRemote]);
@@ -52,22 +66,28 @@ export async function initCommand(options: { agent?: string }) {
     }
     agent = options.agent;
   } else {
-    const rl = createInterface({ input: process.stdin, output: process.stdout });
-    const answer = await rl.question(
-      'Which coding agent do you use? [Claude Code / Codex CLI] (default: Claude Code): '
-    );
-    rl.close();
-    const trimmed = answer.trim().toLowerCase();
-    if (!trimmed || trimmed === 'claude code' || trimmed === 'claude') {
-      agent = 'claude';
-    } else if (trimmed === 'codex cli' || trimmed === 'codex') {
-      agent = 'codex';
+    const stored = getStoredAgent();
+    if (stored && VALID_AGENTS.includes(stored as (typeof VALID_AGENTS)[number])) {
+      agent = stored;
+      console.log(`Using agent: ${stored} (from settings)`);
     } else {
-      console.error(
-        `Error: Unrecognized agent "${answer.trim()}". Expected "Claude Code" or "Codex CLI".`
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      const answer = await rl.question(
+        'Which coding agent do you use? [Claude Code / Codex CLI] (default: Claude Code): '
       );
-      process.exit(1);
-      return;
+      rl.close();
+      const trimmed = answer.trim().toLowerCase();
+      if (!trimmed || trimmed === 'claude code' || trimmed === 'claude') {
+        agent = 'claude';
+      } else if (trimmed === 'codex cli' || trimmed === 'codex') {
+        agent = 'codex';
+      } else {
+        console.error(
+          `Error: Unrecognized agent "${answer.trim()}". Expected "Claude Code" or "Codex CLI".`
+        );
+        process.exit(1);
+        return;
+      }
     }
   }
 
