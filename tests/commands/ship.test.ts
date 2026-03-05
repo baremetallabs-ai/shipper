@@ -6,9 +6,15 @@ vi.mock('../../src/lib/github.js', () => ({
   selectIssuesForStage: vi.fn(() => []),
 }));
 
+vi.mock('../../src/lib/lock.js', () => ({
+  releaseIssueLock: vi.fn(),
+}));
+
 import { selectIssuesForStage } from '../../src/lib/github.js';
+import { releaseIssueLock } from '../../src/lib/lock.js';
 
 const mockSelectIssuesForStage = vi.mocked(selectIssuesForStage);
+const mockReleaseIssueLock = vi.mocked(releaseIssueLock);
 
 describe('STAGE_NAME', () => {
   it('contains all expected workflow labels', () => {
@@ -68,6 +74,7 @@ describe('selectNextCandidate', () => {
   beforeEach(() => {
     mockSelectIssuesForStage.mockReset();
     mockSelectIssuesForStage.mockReturnValue([]);
+    mockReleaseIssueLock.mockReset();
   });
 
   it('returns the issue from the highest-priority label', () => {
@@ -126,5 +133,36 @@ describe('selectNextCandidate', () => {
 
     const result = selectNextCandidate(new Set());
     expect(result).toEqual({ number: 1, title: 'Oldest' });
+  });
+
+  it('clears stale lock on selected candidate', () => {
+    const stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockSelectIssuesForStage.mockImplementation(
+      (label: string, staleLocked?: Set<number>) => {
+        if (label === 'shipper:planned') {
+          const issues = [{ number: 7, title: 'Stale locked issue' }];
+          staleLocked?.add(7);
+          return issues;
+        }
+        return [];
+      }
+    );
+
+    const result = selectNextCandidate(new Set());
+    expect(result).toEqual({ number: 7, title: 'Stale locked issue' });
+    expect(mockReleaseIssueLock).toHaveBeenCalledWith('7');
+    expect(stderrSpy).toHaveBeenCalledWith('Issue #7 lock is stale \u2014 clearing.');
+    stderrSpy.mockRestore();
+  });
+
+  it('does not clear lock for non-stale candidate', () => {
+    mockSelectIssuesForStage.mockImplementation((label: string) => {
+      if (label === 'shipper:planned') return [{ number: 7, title: 'Normal issue' }];
+      return [];
+    });
+
+    const result = selectNextCandidate(new Set());
+    expect(result).toEqual({ number: 7, title: 'Normal issue' });
+    expect(mockReleaseIssueLock).not.toHaveBeenCalled();
   });
 });

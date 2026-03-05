@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { isLockStale, releaseIssueLock } from './lock.js';
 
 interface IssueComment {
   author: { login: string };
@@ -255,7 +256,10 @@ export function sortIssuesByLabelTime(
   return withTimestamps.map((w) => w.issue);
 }
 
-export function selectIssuesForStage(label: string): { number: number; title: string }[] {
+export function selectIssuesForStage(
+  label: string,
+  staleLocked?: Set<number>
+): { number: number; title: string }[] {
   let issues: { number: number; title: string }[];
   try {
     const output = execFileSync(
@@ -279,6 +283,39 @@ export function selectIssuesForStage(label: string): { number: number; title: st
     issues = JSON.parse(output) as { number: number; title: string }[];
   } catch {
     return [];
+  }
+
+  // Fetch locked issues for the same stage and check for stale locks
+  try {
+    const lockedOutput = execFileSync(
+      'gh',
+      [
+        'issue',
+        'list',
+        '--label',
+        label,
+        '--label',
+        'shipper:locked',
+        '--state',
+        'open',
+        '--limit',
+        '1000',
+        '--search',
+        '-label:shipper:blocked',
+        '--json',
+        'number,title',
+      ],
+      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
+    ).trim();
+    const lockedIssues = JSON.parse(lockedOutput) as { number: number; title: string }[];
+    for (const issue of lockedIssues) {
+      if (isLockStale(String(issue.number))) {
+        issues.push(issue);
+        staleLocked?.add(issue.number);
+      }
+    }
+  } catch {
+    // If we can't fetch locked issues, proceed with what we have
   }
 
   if (issues.length <= 1) {
@@ -314,18 +351,29 @@ export function selectIssuesForStage(label: string): { number: number; title: st
 }
 
 export function autoSelectIssue(label: string): { number: number; title: string } | null {
-  const issues = selectIssuesForStage(label);
-  return issues[0] ?? null;
+  const staleLocked = new Set<number>();
+  const issues = selectIssuesForStage(label, staleLocked);
+  const candidate = issues[0] ?? null;
+  if (candidate && staleLocked.has(candidate.number)) {
+    console.error(`Issue #${candidate.number} lock is stale — clearing.`);
+    releaseIssueLock(String(candidate.number));
+  }
+  return candidate;
 }
 
 export function autoSelectPrForStage(
   label: string,
   emptyMessage: string
 ): { pr: string; issue: { number: number; title: string } } {
-  const issues = selectIssuesForStage(label);
+  const staleLocked = new Set<number>();
+  const issues = selectIssuesForStage(label, staleLocked);
   for (const issue of issues) {
     const resolved = tryResolvePrForIssue(issue.number);
     if (resolved) {
+      if (staleLocked.has(issue.number)) {
+        console.error(`Issue #${issue.number} lock is stale — clearing.`);
+        releaseIssueLock(String(issue.number));
+      }
       return { pr: resolved, issue };
     }
   }
