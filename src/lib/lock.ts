@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { getRepoNwo } from './github.js';
+import { getRepoNwo } from './repo.js';
 import { getSettings } from './settings.js';
 
 export function isLockStale(issueNumber: string): boolean {

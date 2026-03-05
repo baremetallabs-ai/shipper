@@ -18,8 +18,11 @@ vi.mock('../../src/lib/settings.js', () => ({
 
 const tryResolvePrForIssueMock = vi.fn();
 vi.mock('../../src/lib/github.js', () => ({
-  getRepoNwo: () => 'owner/repo',
   tryResolvePrForIssue: (...args: unknown[]) => tryResolvePrForIssueMock(...args),
+}));
+
+vi.mock('../../src/lib/repo.js', () => ({
+  getRepoNwo: () => 'owner/repo',
 }));
 
 const logMock = vi.spyOn(console, 'log').mockImplementation(() => {});

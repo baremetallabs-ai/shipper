@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { confirm, promptChoice } from '../lib/confirm.js';
-import { getRepoNwo } from '../lib/github.js';
+import { getRepoNwo } from '../lib/repo.js';
 import { isLockStale } from '../lib/lock.js';
 
 type ResetMode = 'full' | 'partial';

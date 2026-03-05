@@ -12,7 +12,7 @@ vi.mock('node:child_process', () => ({
   execFileSync: (...args: unknown[]) => mockExecFileSync(...args),
 }));
 
-vi.mock('../../src/lib/github.js', () => ({
+vi.mock('../../src/lib/repo.js', () => ({
   getRepoNwo: () => mockGetRepoNwo(),
 }));
 
