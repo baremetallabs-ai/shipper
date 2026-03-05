@@ -6,7 +6,7 @@ args:
   - --permission-mode
   - acceptEdits
   - --allowedTools
-  - Bash(gh label list *),Bash(gh issue view *),Bash(gh issue edit *),Bash(gh issue comment *),Bash(gh issue create *),WebSearch
+  - Bash(gh label list *),Bash(gh issue list *),Bash(gh issue view *),Bash(gh issue edit *),Bash(gh issue comment *),Bash(gh issue create *),WebSearch
 append-issue: true
 ---
 
@@ -35,7 +35,29 @@ The **next user message** contains the full GitHub issue including title, labels
 2. Summarize your understanding back to the product owner in **2–4 sentences** before asking questions.
    - Call out anything ambiguous, contradictory, or underspecified.
 
-### Phase 2: Groom
+### Phase 2: Cross-issue scan
+
+Scan all other open issues in the repo for relevance to the current issue. This surfaces dependencies, overlaps, conflicts, and scope impacts before product questioning begins.
+
+1. Fetch all open issue titles: `gh issue list --state open --limit 500 --json number,title`. Exclude the current issue number from consideration.
+2. From the title list, identify candidate issues that might relate to the current issue. Look for:
+   - **Same feature area** — issues touching the same commands, files, or user-facing behavior
+   - **Conflicting approaches** — issues proposing changes that would be incompatible with this one
+   - **Prerequisite work** — issues that must land first for this issue to make sense
+   - **Overlapping acceptance criteria** — issues that already cover part of what this issue proposes
+3. For each candidate, fetch the full body: `gh issue view <N> --json number,title,body,labels`. Assess whether the issue is genuinely relevant after reading the details.
+4. For issues that still seem potentially relevant after reading the body, optionally fetch comments for additional context: `gh issue view <N> --json comments`.
+5. Classify each relevant issue by relationship type:
+   - **Dependency** — must be done first
+   - **Overlap** — partially covers same ground
+   - **Conflict** — incompatible approach
+   - **Scope impact** — changes assumptions this issue relies on
+6. If no issues are relevant, note "No relevant issues found" and proceed.
+7. If a **hard dependency or conflict** is found (the current issue cannot proceed without the other being resolved), flag it internally for the blocking logic in Phase 4.
+
+**Start broad and narrow progressively.** Do not fetch full bodies for obviously unrelated issues. This manages token usage on repos with many open issues.
+
+### Phase 3: Groom
 
 Ask targeted questions to close every open product decision. Use the four categories below as a thinking checklist — not as structural buckets or minimum counts:
 
@@ -54,9 +76,9 @@ Ask as many or as few questions as the issue demands. Simple issues may need 2�
 
 Ask in logical batches. Do not re-ask things already answered in the issue or comments — incorporate them. Answers often surface follow-up questions — continue until all product decisions are resolved.
 
-**Do not proceed to Phase 3 until every question has been answered.** If the product owner's answers raise new questions, ask them. The compile phase produces the final artifacts — it must not begin while decisions remain open.
+**Do not proceed to Phase 4 until every question has been answered.** If the product owner's answers raise new questions, ask them. The compile phase produces the final artifacts — it must not begin while decisions remain open.
 
-### Phase 3: Compile groomed outputs
+### Phase 4: Compile groomed outputs
 
 Once all product decisions are resolved, produce two artifacts.
 
@@ -67,17 +89,19 @@ Rewrite the issue body to include:
 1. **Summary** — concise description of what this delivers
 2. **Requirements** — numbered list of every functional requirement as specific, unambiguous expected behavior
 3. **Acceptance Criteria** — checklist of testable conditions (Given/When/Then or simple checkboxes). Every requirement must have at least one corresponding criterion.
-4. **Out of Scope** — explicitly excluded or deferred
-5. **Open Questions** — technical/design-level questions for engineering (write "None" if there are no open questions)
+4. **Related Issues** — cross-issue scan results from Phase 2. For each relevant issue: `- #<number> — <title> — **<relationship type>** — <brief explanation>`. If no relevant issues were found: `No relevant issues found.`
+5. **Out of Scope** — explicitly excluded or deferred
+6. **Open Questions** — technical/design-level questions for engineering (write "None" if there are no open questions)
 
 #### Artifact 2 — Grooming summary comment
 
 Write a comment suitable for posting on the GitHub Issue that documents:
 
 1. Note that product grooming was conducted
-2. Key questions raised + decisions made (cleaned up; no raw transcript)
-3. Notable context/constraints/rationale that helps explain _why_ decisions were made
-4. Your **issue decomposition recommendation**:
+2. **Cross-issue findings** — summarize what the Phase 2 scan found (relevant issues with relationship types and explanations), or note that no relevant issues were found
+3. Key questions raised + decisions made (cleaned up; no raw transcript)
+4. Notable context/constraints/rationale that helps explain _why_ decisions were made
+5. Your **issue decomposition recommendation**:
    - Single PR vs split into multiple issues
    - Reasoning
    - If split: proposed issues with title + one-line scope each
@@ -97,10 +121,22 @@ After producing the final artifacts, you must update GitHub using repo-local tem
 3. Save the grooming summary comment to `.shipper/tmp/grooming_comment-<number>.md` (using the issue number).
 4. Post the comment: `gh issue comment <ISSUE> --body-file ./.shipper/tmp/grooming_comment-<number>.md`
 
-5. Update labels:
-   - Add `shipper:groomed`
-   - Remove `shipper:new` (if present)
-   - Use `gh issue edit <ISSUE> --add-label ...` and `--remove-label ...`
+5. Update labels — **conditional on Phase 2 cross-issue scan results:**
+
+   **If no hard conflicts or dependencies were found in Phase 2:**
+   - Add `shipper:groomed`, remove `shipper:new` (if present)
+   - Use `gh issue edit <ISSUE> --add-label "shipper:groomed" --remove-label "shipper:new"`
+
+   **If a hard conflict or dependency was found in Phase 2:**
+   - Do NOT add `shipper:groomed` — the label stays at `shipper:new`
+   - Add `shipper:blocked`: `gh issue edit <ISSUE> --add-label "shipper:blocked"`
+   - Post a separate `## Blocked` comment after the grooming summary comment, referencing the conflicting/dependent issue number(s) and stating the unblock condition. Save it to `.shipper/tmp/blocked_comment-<number>.md` and post with `gh issue comment <ISSUE> --body-file ./.shipper/tmp/blocked_comment-<number>.md`. Example format:
+     ```
+     ## Blocked
+
+     Blocked until #<N> is closed — <brief explanation of why this issue cannot proceed>.
+     ```
+   - The issue body update and grooming summary comment are still posted (grooming work is preserved).
 
 **If a later step fails after earlier steps succeeded:** Report which steps completed successfully and which failed, so the user can assess the state. For example, if the issue body was updated but the label change failed, tell the user the body is already updated and they may need to manually adjust the label.
 
