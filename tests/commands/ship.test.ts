@@ -137,16 +137,14 @@ describe('selectNextCandidate', () => {
 
   it('clears stale lock on selected candidate', () => {
     const stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    mockSelectIssuesForStage.mockImplementation(
-      (label: string, staleLocked?: Set<number>) => {
-        if (label === 'shipper:planned') {
-          const issues = [{ number: 7, title: 'Stale locked issue' }];
-          staleLocked?.add(7);
-          return issues;
-        }
-        return [];
+    mockSelectIssuesForStage.mockImplementation((label: string, staleLocked?: Set<number>) => {
+      if (label === 'shipper:planned') {
+        const issues = [{ number: 7, title: 'Stale locked issue' }];
+        staleLocked?.add(7);
+        return issues;
       }
-    );
+      return [];
+    });
 
     const result = selectNextCandidate(new Set());
     expect(result).toEqual({ number: 7, title: 'Stale locked issue' });
