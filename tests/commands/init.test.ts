@@ -146,6 +146,59 @@ describe('initCommand settings', () => {
   });
 });
 
+const localSettingsPath = path.resolve('.shipper', 'settings.local.json');
+
+describe('initCommand stored agent', () => {
+  it('uses stored agent from settings.json and skips prompt', async () => {
+    readFileSyncMock.mockImplementation((p: string) => {
+      if (p === settingsPath) return '{"agent": "claude"}';
+      throw new Error('ENOENT');
+    });
+    existsSyncMock.mockImplementation((p: string) => p === settingsPath);
+    await initCommand({});
+    expect(questionMock).not.toHaveBeenCalled();
+    expect(console.log).toHaveBeenCalledWith('Using agent: claude (from settings)');
+  });
+
+  it('settings.local.json overrides settings.json', async () => {
+    readFileSyncMock.mockImplementation((p: string) => {
+      if (p === localSettingsPath) return '{"agent": "codex"}';
+      if (p === settingsPath) return '{"agent": "claude"}';
+      throw new Error('ENOENT');
+    });
+    await initCommand({});
+    expect(questionMock).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledWith(
+      'Codex CLI prompts are not yet available. Use Claude Code or check for updates.'
+    );
+  });
+
+  it('invalid stored agent falls through to interactive prompt', async () => {
+    readFileSyncMock.mockImplementation((p: string) => {
+      if (p === settingsPath) return '{"agent": "vim"}';
+      throw new Error('ENOENT');
+    });
+    questionMock.mockResolvedValueOnce('');
+    await initCommand({});
+    expect(questionMock).toHaveBeenCalled();
+  });
+
+  it('--agent flag wins over stored setting', async () => {
+    readFileSyncMock.mockImplementation((p: string) => {
+      if (p === settingsPath) return '{"agent": "codex"}';
+      throw new Error('ENOENT');
+    });
+    existsSyncMock.mockImplementation((p: string) => p === settingsPath);
+    await initCommand({ agent: 'claude' });
+    const settingsCall = writeFileSyncMock.mock.calls.find(
+      (call: unknown[]) => call[0] === settingsPath
+    );
+    const written = JSON.parse(settingsCall![1] as string);
+    expect(written.agent).toBe('claude');
+    expect(console.log).not.toHaveBeenCalledWith(expect.stringContaining('from settings'));
+  });
+});
+
 describe('initCommand agent selection', () => {
   it('--agent claude installs prompts and writes agent to settings', async () => {
     await initCommand({ agent: 'claude' });
