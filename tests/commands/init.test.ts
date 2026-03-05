@@ -92,28 +92,33 @@ describe('initCommand directories', () => {
     );
     expect(scriptsDirCall).toBeDefined();
   });
+
+  it('creates .shipper/prompts/claude directory', async () => {
+    await initCommand({ agent: 'claude' });
+    const promptDirCall = mkdirSyncMock.mock.calls.find(
+      (call: unknown[]) => call[0] === path.resolve('.shipper', 'prompts', 'claude')
+    );
+    expect(promptDirCall).toBeDefined();
+  });
 });
 
 describe('initCommand settings', () => {
-  it('writes defaults with agent on fresh init', async () => {
+  it('writes defaults with agents on fresh init', async () => {
     await initCommand({ agent: 'claude' });
     const settingsCall = writeFileSyncMock.mock.calls.find(
       (call: unknown[]) => call[0] === settingsPath
     );
     expect(settingsCall).toBeDefined();
     const written = JSON.parse(settingsCall![1] as string);
-    expect(written).toEqual({
-      prReviewWaitMinutes: 15,
-      lockTimeoutMinutes: 30,
-      agent: 'claude',
-      hooks: {},
-    });
+    expect(written.agents).toEqual({ default: 'claude' });
+    expect(written.agent).toBeUndefined();
   });
 
   it('preserves existing keys on re-init', async () => {
     existsSyncMock.mockImplementation((p: string) => p === settingsPath);
     readFileSyncMock.mockImplementation((p: string) => {
-      if (p === settingsPath) return '{"prReviewWaitMinutes": 10, "agent": "claude"}';
+      if (p === settingsPath)
+        return '{"prReviewWaitMinutes": 10, "agents": {"default": "claude"}}';
       return '';
     });
     await initCommand({ agent: 'claude' });
@@ -149,7 +154,18 @@ describe('initCommand settings', () => {
 const localSettingsPath = path.resolve('.shipper', 'settings.local.json');
 
 describe('initCommand stored agent', () => {
-  it('uses stored agent from settings.json and skips prompt', async () => {
+  it('uses stored agent from settings.json (new schema) and skips prompt', async () => {
+    readFileSyncMock.mockImplementation((p: string) => {
+      if (p === settingsPath) return '{"agents": {"default": "claude"}}';
+      throw new Error('ENOENT');
+    });
+    existsSyncMock.mockImplementation((p: string) => p === settingsPath);
+    await initCommand({});
+    expect(questionMock).not.toHaveBeenCalled();
+    expect(console.log).toHaveBeenCalledWith('Using agent: claude (from settings)');
+  });
+
+  it('uses stored agent from legacy agent key', async () => {
     readFileSyncMock.mockImplementation((p: string) => {
       if (p === settingsPath) return '{"agent": "claude"}';
       throw new Error('ENOENT');
@@ -162,8 +178,8 @@ describe('initCommand stored agent', () => {
 
   it('settings.local.json overrides settings.json', async () => {
     readFileSyncMock.mockImplementation((p: string) => {
-      if (p === localSettingsPath) return '{"agent": "codex"}';
-      if (p === settingsPath) return '{"agent": "claude"}';
+      if (p === localSettingsPath) return '{"agents": {"default": "codex"}}';
+      if (p === settingsPath) return '{"agents": {"default": "claude"}}';
       throw new Error('ENOENT');
     });
     await initCommand({});
@@ -175,7 +191,7 @@ describe('initCommand stored agent', () => {
 
   it('invalid stored agent falls through to interactive prompt', async () => {
     readFileSyncMock.mockImplementation((p: string) => {
-      if (p === settingsPath) return '{"agent": "vim"}';
+      if (p === settingsPath) return '{"agents": {"default": "vim"}}';
       throw new Error('ENOENT');
     });
     questionMock.mockResolvedValueOnce('');
@@ -185,7 +201,7 @@ describe('initCommand stored agent', () => {
 
   it('--agent flag wins over stored setting', async () => {
     readFileSyncMock.mockImplementation((p: string) => {
-      if (p === settingsPath) return '{"agent": "codex"}';
+      if (p === settingsPath) return '{"agents": {"default": "codex"}}';
       throw new Error('ENOENT');
     });
     existsSyncMock.mockImplementation((p: string) => p === settingsPath);
@@ -194,22 +210,23 @@ describe('initCommand stored agent', () => {
       (call: unknown[]) => call[0] === settingsPath
     );
     const written = JSON.parse(settingsCall![1] as string);
-    expect(written.agent).toBe('claude');
+    expect(written.agents.default).toBe('claude');
     expect(console.log).not.toHaveBeenCalledWith(expect.stringContaining('from settings'));
   });
 });
 
 describe('initCommand agent selection', () => {
-  it('--agent claude installs prompts and writes agent to settings', async () => {
+  it('--agent claude installs prompts to agent subdirectory and writes agents to settings', async () => {
     await initCommand({ agent: 'claude' });
     const settingsCall = writeFileSyncMock.mock.calls.find(
       (call: unknown[]) => call[0] === settingsPath
     );
     const written = JSON.parse(settingsCall![1] as string);
-    expect(written.agent).toBe('claude');
+    expect(written.agents).toEqual({ default: 'claude' });
+    expect(written.agent).toBeUndefined();
 
     const promptCall = writeFileSyncMock.mock.calls.find(
-      (call: unknown[]) => call[0] === path.resolve('.shipper', 'prompts', 'test.md')
+      (call: unknown[]) => call[0] === path.resolve('.shipper', 'prompts', 'claude', 'test.md')
     );
     expect(promptCall).toBeDefined();
     expect(promptCall![1]).toBe('# test');
@@ -232,13 +249,28 @@ describe('initCommand agent selection', () => {
   it('re-init with different agent prints switching warning', async () => {
     existsSyncMock.mockImplementation((p: string) => p === settingsPath);
     readFileSyncMock.mockImplementation((p: string) => {
-      if (p === settingsPath) return '{"agent": "codex"}';
+      if (p === settingsPath) return '{"agents": {"default": "codex"}}';
       return '';
     });
     await initCommand({ agent: 'claude' });
     expect(console.log).toHaveBeenCalledWith(
       'Switching agent from codex to claude — overwriting prompt files'
     );
+  });
+
+  it('re-init migrates legacy agent key to agents', async () => {
+    existsSyncMock.mockImplementation((p: string) => p === settingsPath);
+    readFileSyncMock.mockImplementation((p: string) => {
+      if (p === settingsPath) return '{"agent": "claude"}';
+      return '';
+    });
+    await initCommand({ agent: 'claude' });
+    const settingsCall = writeFileSyncMock.mock.calls.find(
+      (call: unknown[]) => call[0] === settingsPath
+    );
+    const written = JSON.parse(settingsCall![1] as string);
+    expect(written.agents).toEqual({ default: 'claude' });
+    expect(written.agent).toBeUndefined();
   });
 
   it('interactive prompt defaults to claude on empty input', async () => {
@@ -248,7 +280,7 @@ describe('initCommand agent selection', () => {
       (call: unknown[]) => call[0] === settingsPath
     );
     const written = JSON.parse(settingsCall![1] as string);
-    expect(written.agent).toBe('claude');
+    expect(written.agents).toEqual({ default: 'claude' });
     expect(closeMock).toHaveBeenCalled();
   });
 
@@ -259,7 +291,7 @@ describe('initCommand agent selection', () => {
       (call: unknown[]) => call[0] === settingsPath
     );
     const written = JSON.parse(settingsCall![1] as string);
-    expect(written.agent).toBe('claude');
+    expect(written.agents).toEqual({ default: 'claude' });
   });
 
   it('interactive prompt accepts "Codex CLI" and prints not available', async () => {
