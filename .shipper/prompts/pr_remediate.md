@@ -48,8 +48,21 @@ If the PR does not exist or is already merged/closed, tell the user and stop.
 gh pr view <PR> --json mergeStateStatus --jq '.mergeStateStatus'
 ```
 
-- If the result is **not** `DIRTY`, proceed to Step 3 (CI check) — no action needed.
-- If the result is `DIRTY`, the PR has merge conflicts that will prevent CI from running. Resolve them before proceeding:
+Dispatch based on the result:
+
+- **UNKNOWN:** Retry the query up to 3 times, waiting 10 seconds between attempts (`sleep 10`). If the state resolves to a known value, handle that value per the rules below. If still `UNKNOWN` after 3 retries, proceed to Step 3 optimistically — `merge.ts` catches `UNKNOWN` as a safety net.
+
+- **DIRTY:** The PR has merge conflicts that will prevent CI from running. Resolve them using the rebase procedure below.
+
+- **BEHIND:** The branch is behind the base branch. Follow the same rebase procedure below. Conflicts are unlikely but should be handled if they occur.
+
+- **BLOCKED:** Proceed directly to Step 3 (CI check). `BLOCKED` typically means required checks are pending or review approval is missing — both handled by Steps 3 and 4.
+
+- **CLEAN / HAS_HOOKS / UNSTABLE:** Proceed to Step 3. The branch is mergeable.
+
+- **Any other value:** Proceed to Step 3 optimistically (same as exhausted-UNKNOWN).
+
+**Rebase procedure** (applies to `DIRTY` and `BEHIND`):
 
 1. Fetch and rebase onto the PR's base branch:
 
