@@ -66,7 +66,7 @@ git rebase origin/<base_branch>
 ./.shipper/scripts/safe-push.sh --force-with-lease
 ```
 
-If the force-push fails, retry a few times. If it continues to fail after a few attempts, **do not keep retrying.** Stop and proceed directly to Phase 4 with a **RETRY** verdict, noting that the rebase succeeded locally but the push failed. Include the push error output in the RETRY comment.
+If the force-push fails, retry a few times. If it continues to fail after a few attempts, **do not keep retrying.** Stop and proceed directly to Phase 4 with a **RETRY** verdict, noting that the rebase succeeded locally but the push failed. Include the push error output and the number of attempts in the RETRY comment. In Phase 4, **skip any post-push CI watching or re-check steps** (e.g., `gh pr checks --watch`) and go straight to emitting the RETRY verdict and posting the comment.
 
 If conflicts cannot be resolved:
 
@@ -204,7 +204,7 @@ Make the targeted changes needed to satisfy the unmet criteria.
 ./.shipper/scripts/safe-push.sh
 ```
 
-If push fails, retry a few times. If push continues to fail after a few attempts, **do not keep retrying.** Stop and proceed directly to Phase 4 with a **RETRY** verdict, noting that changes were committed locally but could not be pushed. Include the push error output in the RETRY comment.
+If push fails, retry a few times. If push continues to fail after a few attempts, **do not keep retrying.** Stop and proceed directly to Phase 4 with a **RETRY** verdict, noting that changes were committed locally but could not be pushed. Include the push error output and the number of attempts in the RETRY comment. In Phase 4, **skip any steps that assume the PR has been updated remotely** (e.g., watching CI or `gh pr checks --watch`) and go straight to emitting the RETRY verdict and posting the comment.
 
 ### Respond to reviewers
 
@@ -268,13 +268,13 @@ All checks passing. All review feedback addressed. PR is ready for final review 
 
 ---
 
-**RETRY** — You made changes and pushed them, but the situation is not yet fully resolved (CI is still running, a new failure appeared, awaiting reviewer response). **Also use RETRY if you committed changes locally but push failed persistently** — include the push error output in the comment so the operator can diagnose the failure.
+**RETRY** — You made changes but the situation is not yet fully resolved (CI is still running, a new failure appeared, awaiting reviewer response). **Also use RETRY if you committed changes locally but push failed persistently** — include the push error output in the comment so the operator can diagnose the failure.
 
 Actions:
 
 1. Post a status comment on the issue:
 
-```markdown
+````markdown
 ## Remediation Pass (retry needed)
 
 ### Changes made
@@ -297,7 +297,7 @@ Actions:
 ### Next step
 
 Run `shipper pr remediate` again after the above items resolve.
-```
+````
 
 2. Save and post:
    - Write to `./.shipper/tmp/remediate-status-<number>.md`
