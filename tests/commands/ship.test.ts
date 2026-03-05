@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { STAGE_NAME, AUTO_PRIORITY_LABELS, selectNextCandidate } from '../../src/commands/ship.js';
+import {
+  STAGE_NAME,
+  AUTO_PRIORITY_LABELS,
+  selectNextCandidate,
+  selectBlockedIssues,
+  printUnblockSummary,
+} from '../../src/commands/ship.js';
+import type { UnblockAttempt } from '../../src/commands/ship.js';
 
 vi.mock('../../src/lib/github.js', () => ({
   selectIssuesForStage: vi.fn(() => []),
@@ -10,10 +17,21 @@ vi.mock('../../src/lib/repo.js', () => ({
   getRepoNwo: vi.fn(() => 'owner/repo'),
 }));
 
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    execFileSync: vi.fn(),
+    spawnSync: vi.fn(),
+  };
+});
+
 import { selectIssuesForStage, clearStaleLockIfNeeded } from '../../src/lib/github.js';
+import { execFileSync } from 'node:child_process';
 
 const mockSelectIssuesForStage = vi.mocked(selectIssuesForStage);
 const mockClearStaleLockIfNeeded = vi.mocked(clearStaleLockIfNeeded);
+const mockExecFileSync = vi.mocked(execFileSync);
 
 describe('STAGE_NAME', () => {
   it('contains all expected workflow labels', () => {
@@ -157,5 +175,119 @@ describe('selectNextCandidate', () => {
     const result = selectNextCandidate(new Set());
     expect(result).toEqual({ number: 7, title: 'Normal issue' });
     expect(mockClearStaleLockIfNeeded).toHaveBeenCalledWith(7, new Set());
+  });
+});
+
+describe('selectBlockedIssues', () => {
+  beforeEach(() => {
+    mockExecFileSync.mockReset();
+  });
+
+  it('returns empty array when no blocked issues exist', () => {
+    mockExecFileSync.mockReturnValue('[]');
+    const result = selectBlockedIssues();
+    expect(result).toEqual([]);
+  });
+
+  it('returns issues sorted by stage priority', () => {
+    const issues = [
+      {
+        number: 10,
+        title: 'New issue',
+        labels: [{ name: 'shipper:new' }, { name: 'shipper:blocked' }],
+      },
+      {
+        number: 20,
+        title: 'PR reviewed issue',
+        labels: [{ name: 'shipper:pr-reviewed' }, { name: 'shipper:blocked' }],
+      },
+      {
+        number: 30,
+        title: 'Planned issue',
+        labels: [{ name: 'shipper:planned' }, { name: 'shipper:blocked' }],
+      },
+    ];
+    mockExecFileSync.mockReturnValue(JSON.stringify(issues));
+
+    const result = selectBlockedIssues();
+    expect(result).toEqual([
+      { number: 20, title: 'PR reviewed issue' },
+      { number: 30, title: 'Planned issue' },
+      { number: 10, title: 'New issue' },
+    ]);
+  });
+
+  it('returns empty array when execFileSync throws', () => {
+    mockExecFileSync.mockImplementation(() => {
+      throw new Error('gh CLI error');
+    });
+    const result = selectBlockedIssues();
+    expect(result).toEqual([]);
+  });
+
+  it('sorts issues with no recognized stage label to the end', () => {
+    const issues = [
+      {
+        number: 10,
+        title: 'No stage label',
+        labels: [{ name: 'shipper:blocked' }, { name: 'bug' }],
+      },
+      {
+        number: 20,
+        title: 'Groomed issue',
+        labels: [{ name: 'shipper:groomed' }, { name: 'shipper:blocked' }],
+      },
+    ];
+    mockExecFileSync.mockReturnValue(JSON.stringify(issues));
+
+    const result = selectBlockedIssues();
+    expect(result).toEqual([
+      { number: 20, title: 'Groomed issue' },
+      { number: 10, title: 'No stage label' },
+    ]);
+  });
+});
+
+describe('printUnblockSummary', () => {
+  it('prints each attempt with correct outcome markers', () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const attempts: UnblockAttempt[] = [
+      { issue: 12, title: 'Fix database migration', outcome: 'unblocked' },
+      { issue: 15, title: 'Add OAuth provider', outcome: 'still blocked' },
+    ];
+
+    printUnblockSummary(attempts);
+
+    const output = logSpy.mock.calls.map((c) => c[0]).join('\n');
+    expect(output).toContain('Unblock attempts:');
+    expect(output).toContain('12');
+    expect(output).toContain('Fix database migration');
+    expect(output).toContain('✓ unblocked');
+    expect(output).toContain('15');
+    expect(output).toContain('Add OAuth provider');
+    expect(output).toContain('— still blocked');
+
+    logSpy.mockRestore();
+  });
+
+  it('truncates long titles to 42 chars + ellipsis', () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const attempts: UnblockAttempt[] = [
+      {
+        issue: 99,
+        title: 'This is a very long title that exceeds the forty-five character limit',
+        outcome: 'unblocked',
+      },
+    ];
+
+    printUnblockSummary(attempts);
+
+    const output = logSpy.mock.calls.map((c) => c[0]).join('\n');
+    expect(output).toContain('This is a very long title that exceeds the...');
+    expect(output).not.toContain('forty-five character limit');
+
+    logSpy.mockRestore();
   });
 });

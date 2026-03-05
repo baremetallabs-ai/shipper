@@ -3,6 +3,7 @@ import { clearStaleLockIfNeeded, selectIssuesForStage } from '../lib/github.js';
 import { getRepoNwo } from '../lib/repo.js';
 import { withStageHooks } from '../lib/hooks.js';
 import { withIssueLock } from '../lib/lock.js';
+import { runPrompt } from '../lib/prompt-runner.js';
 import { postMerge } from './merge.js';
 import type { QueuedPR } from './merge.js';
 
@@ -38,6 +39,12 @@ export interface AutoResult {
   title: string;
   outcome: 'pass' | 'fail';
   error?: string;
+}
+
+export interface UnblockAttempt {
+  issue: number;
+  title: string;
+  outcome: 'unblocked' | 'still blocked';
 }
 
 export interface ShipOptions {
@@ -364,6 +371,86 @@ export function selectNextCandidate(
   return null;
 }
 
+export function selectBlockedIssues(): { number: number; title: string }[] {
+  let output: string;
+  try {
+    output = execFileSync(
+      'gh',
+      [
+        'issue',
+        'list',
+        '--label',
+        'shipper:blocked',
+        '--state',
+        'open',
+        '--json',
+        'number,title,labels',
+        '--limit',
+        '1000',
+      ],
+      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
+    ).trim();
+  } catch {
+    return [];
+  }
+
+  if (!output) return [];
+
+  let issues: { number: number; title: string; labels: { name: string }[] }[];
+  try {
+    issues = JSON.parse(output) as { number: number; title: string; labels: { name: string }[] }[];
+  } catch {
+    return [];
+  }
+
+  // Sort by stage priority — issues with higher-priority stage labels come first
+  issues.sort((a, b) => {
+    const aLabels = new Set(a.labels.map((l) => l.name));
+    const bLabels = new Set(b.labels.map((l) => l.name));
+    let aIdx = AUTO_PRIORITY_LABELS.length;
+    let bIdx = AUTO_PRIORITY_LABELS.length;
+    for (let i = 0; i < AUTO_PRIORITY_LABELS.length; i++) {
+      if (aLabels.has(AUTO_PRIORITY_LABELS[i]!) && aIdx === AUTO_PRIORITY_LABELS.length) aIdx = i;
+      if (bLabels.has(AUTO_PRIORITY_LABELS[i]!) && bIdx === AUTO_PRIORITY_LABELS.length) bIdx = i;
+    }
+    return aIdx - bIdx;
+  });
+
+  return issues.map((i) => ({ number: i.number, title: i.title }));
+}
+
+function attemptUnblock(issueStr: string): boolean {
+  withIssueLock(issueStr, () => runPrompt('unblock', { issueRef: issueStr }));
+
+  // Check whether shipper:blocked was removed — this is the only reliable signal
+  let output: string;
+  try {
+    output = execFileSync(
+      'gh',
+      ['issue', 'view', issueStr, '--json', 'labels', '--jq', '.labels[].name'],
+      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
+    ).trim();
+  } catch {
+    return false;
+  }
+
+  const labels = output.split(/\r?\n/).filter(Boolean);
+  return !labels.includes('shipper:blocked');
+}
+
+export function printUnblockSummary(attempts: UnblockAttempt[]): void {
+  console.log('\n  Unblock attempts:\n');
+  console.log('  #    Issue                                          Outcome');
+  for (const a of attempts) {
+    const num = String(a.issue).padEnd(5);
+    const titleChars = Array.from(a.title);
+    const title =
+      titleChars.length > 45 ? titleChars.slice(0, 42).join('') + '...' : a.title.padEnd(45);
+    const outcome = a.outcome === 'unblocked' ? '✓ unblocked' : '— still blocked';
+    console.log(`  ${num}${title} ${outcome}`);
+  }
+}
+
 export function shipCommand(
   issue: string | undefined,
   options: ShipOptions = { merge: false, auto: false }
@@ -371,28 +458,54 @@ export function shipCommand(
   if (options.auto) {
     const skippedIssues = new Set<number>();
     const results: AutoResult[] = [];
+    const allUnblockAttempts: UnblockAttempt[] = [];
 
     for (;;) {
-      const candidate = selectNextCandidate(skippedIssues);
-      if (!candidate) break;
+      // Inner loop: process all available candidates
+      for (;;) {
+        const candidate = selectNextCandidate(skippedIssues);
+        if (!candidate) break;
 
-      console.log(`\nAuto: advancing issue #${candidate.number} — ${candidate.title}`);
-      const result = shipOneIssue(String(candidate.number), true);
+        console.log(`\nAuto: advancing issue #${candidate.number} — ${candidate.title}`);
+        const result = shipOneIssue(String(candidate.number), true);
 
-      if (result.success) {
-        results.push({ issue: candidate.number, title: candidate.title, outcome: 'pass' });
-      } else {
-        skippedIssues.add(candidate.number);
-        results.push({
-          issue: candidate.number,
-          title: candidate.title,
-          outcome: 'fail',
-          error: result.error,
-        });
+        if (result.success) {
+          results.push({ issue: candidate.number, title: candidate.title, outcome: 'pass' });
+        } else {
+          skippedIssues.add(candidate.number);
+          results.push({
+            issue: candidate.number,
+            title: candidate.title,
+            outcome: 'fail',
+            error: result.error,
+          });
+        }
       }
+
+      // Unblock pass
+      const blocked = selectBlockedIssues();
+      if (blocked.length === 0) break;
+
+      let progress = false;
+      for (const issue of blocked) {
+        console.log(`\nAuto: attempting unblock of #${issue.number} — ${issue.title}`);
+        const unblocked = attemptUnblock(String(issue.number));
+        allUnblockAttempts.push({
+          issue: issue.number,
+          title: issue.title,
+          outcome: unblocked ? 'unblocked' : 'still blocked',
+        });
+        if (unblocked) progress = true;
+      }
+
+      if (!progress) break;
+      // Loop back — newly unblocked issues are now eligible candidates
     }
 
     printAutoSummary(results);
+    if (allUnblockAttempts.length > 0) {
+      printUnblockSummary(allUnblockAttempts);
+    }
     process.exit(0);
   }
 
