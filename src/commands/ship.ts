@@ -26,7 +26,6 @@ export const AUTO_PRIORITY_LABELS: string[] = [
   'shipper:planned',
   'shipper:designed',
   'shipper:groomed',
-  'shipper:new',
 ];
 
 interface StageResult {
