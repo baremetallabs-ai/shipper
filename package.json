@@ -1,7 +1,15 @@
 {
-  "name": "shipper-cli",
+  "name": "@dnsquared/shipper-cli",
   "version": "0.1.0",
   "description": "CLI workflow orchestrator for GitHub issues using coding agents",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dnsquared/shipper-cli.git"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "restricted"
+  },
   "type": "module",
   "bin": {
     "shipper": "./dist/index.js"
