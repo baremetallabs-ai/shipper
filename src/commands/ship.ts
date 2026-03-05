@@ -1,7 +1,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { getRepoNwo, selectIssuesForStage } from '../lib/github.js';
 import { withStageHooks } from '../lib/hooks.js';
-import { withIssueLock } from '../lib/lock.js';
+import { releaseIssueLock, withIssueLock } from '../lib/lock.js';
 import { postMerge } from './merge.js';
 import type { QueuedPR } from './merge.js';
 
@@ -353,9 +353,16 @@ export function selectNextCandidate(
   skippedIssues: Set<number>
 ): { number: number; title: string } | null {
   for (const label of AUTO_PRIORITY_LABELS) {
-    const issues = selectIssuesForStage(label);
+    const staleLocked = new Set<number>();
+    const issues = selectIssuesForStage(label, staleLocked);
     const candidate = issues.find((i) => !skippedIssues.has(i.number));
-    if (candidate) return candidate;
+    if (candidate) {
+      if (staleLocked.has(candidate.number)) {
+        console.error(`Issue #${candidate.number} lock is stale — clearing.`);
+        releaseIssueLock(String(candidate.number));
+      }
+      return candidate;
+    }
   }
   return null;
 }

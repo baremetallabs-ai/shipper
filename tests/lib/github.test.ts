@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
 import {
+  autoSelectIssue,
   formatIssue,
   formatPR,
   resolveBaseBranch,
+  selectIssuesForStage,
   sortIssuesByLabelTime,
   tryResolvePrForIssue,
   type TimelineLabelEvent,
@@ -12,6 +14,11 @@ vi.mock('node:child_process', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return { ...actual, execFileSync: vi.fn() };
 });
+
+vi.mock('../../src/lib/lock.js', () => ({
+  isLockStale: vi.fn(() => false),
+  releaseIssueLock: vi.fn(),
+}));
 
 describe('formatIssue', () => {
   it('formats a basic issue with comments', () => {
@@ -311,5 +318,148 @@ describe('resolveBaseBranch', () => {
   it('auto-detects non-main default branches', () => {
     execFileSync.mockReturnValueOnce('master\n');
     expect(resolveBaseBranch(undefined)).toBe('master');
+  });
+});
+
+describe('selectIssuesForStage', () => {
+  let execFileSync: ReturnType<typeof vi.fn>;
+  let mockIsLockStale: ReturnType<typeof vi.fn>;
+
+  beforeAll(async () => {
+    const cp = await import('node:child_process');
+    execFileSync = vi.mocked(cp.execFileSync);
+    const lock = await import('../../src/lib/lock.js');
+    mockIsLockStale = vi.mocked(lock.isLockStale);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('includes stale-locked issues in results', () => {
+    // First call: normal issues query
+    execFileSync.mockReturnValueOnce(JSON.stringify([{ number: 1, title: 'Normal' }]));
+    // Second call: locked issues query
+    execFileSync.mockReturnValueOnce(JSON.stringify([{ number: 2, title: 'Stale locked' }]));
+    mockIsLockStale.mockReturnValueOnce(true);
+    // Third call: getRepoNwo (triggered because issues.length > 1)
+    execFileSync.mockReturnValueOnce('owner/repo\n');
+    // Fourth + fifth calls: timeline for each issue
+    execFileSync.mockReturnValueOnce('');
+    execFileSync.mockReturnValueOnce('');
+
+    const staleLocked = new Set<number>();
+    const result = selectIssuesForStage('shipper:new', staleLocked);
+
+    expect(result).toEqual(
+      expect.arrayContaining([
+        { number: 1, title: 'Normal' },
+        { number: 2, title: 'Stale locked' },
+      ])
+    );
+    expect(staleLocked.has(2)).toBe(true);
+    expect(staleLocked.has(1)).toBe(false);
+  });
+
+  it('excludes actively-locked issues', () => {
+    execFileSync.mockReturnValueOnce(JSON.stringify([{ number: 1, title: 'Normal' }]));
+    execFileSync.mockReturnValueOnce(JSON.stringify([{ number: 2, title: 'Active locked' }]));
+    mockIsLockStale.mockReturnValueOnce(false);
+
+    const staleLocked = new Set<number>();
+    const result = selectIssuesForStage('shipper:new', staleLocked);
+
+    expect(result).toEqual([{ number: 1, title: 'Normal' }]);
+    expect(staleLocked.size).toBe(0);
+  });
+
+  it('works when no locked issues exist', () => {
+    execFileSync.mockReturnValueOnce(JSON.stringify([{ number: 1, title: 'Normal' }]));
+    execFileSync.mockReturnValueOnce(JSON.stringify([]));
+
+    const result = selectIssuesForStage('shipper:new');
+
+    expect(result).toEqual([{ number: 1, title: 'Normal' }]);
+  });
+
+  it('works without staleLocked parameter', () => {
+    execFileSync.mockReturnValueOnce(JSON.stringify([{ number: 1, title: 'Normal' }]));
+    execFileSync.mockReturnValueOnce(JSON.stringify([{ number: 2, title: 'Stale locked' }]));
+    mockIsLockStale.mockReturnValueOnce(true);
+    // getRepoNwo + timelines (2 issues triggers sorting path)
+    execFileSync.mockReturnValueOnce('owner/repo\n');
+    execFileSync.mockReturnValueOnce('');
+    execFileSync.mockReturnValueOnce('');
+
+    const result = selectIssuesForStage('shipper:new');
+
+    expect(result).toEqual(
+      expect.arrayContaining([
+        { number: 1, title: 'Normal' },
+        { number: 2, title: 'Stale locked' },
+      ])
+    );
+  });
+
+  it('handles locked issues query failure gracefully', () => {
+    execFileSync.mockReturnValueOnce(JSON.stringify([{ number: 1, title: 'Normal' }]));
+    execFileSync.mockImplementationOnce(() => {
+      throw new Error('gh failed');
+    });
+
+    const result = selectIssuesForStage('shipper:new');
+
+    expect(result).toEqual([{ number: 1, title: 'Normal' }]);
+  });
+});
+
+describe('autoSelectIssue', () => {
+  let execFileSync: ReturnType<typeof vi.fn>;
+  let mockIsLockStale: ReturnType<typeof vi.fn>;
+  let mockReleaseIssueLock: ReturnType<typeof vi.fn>;
+
+  beforeAll(async () => {
+    const cp = await import('node:child_process');
+    execFileSync = vi.mocked(cp.execFileSync);
+    const lock = await import('../../src/lib/lock.js');
+    mockIsLockStale = vi.mocked(lock.isLockStale);
+    mockReleaseIssueLock = vi.mocked(lock.releaseIssueLock);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('clears stale lock on selected issue and prints message', () => {
+    execFileSync.mockReturnValueOnce(JSON.stringify([]));
+    execFileSync.mockReturnValueOnce(JSON.stringify([{ number: 42, title: 'Stale issue' }]));
+    mockIsLockStale.mockReturnValueOnce(true);
+    const stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const result = autoSelectIssue('shipper:new');
+
+    expect(result).toEqual({ number: 42, title: 'Stale issue' });
+    expect(mockReleaseIssueLock).toHaveBeenCalledWith('42');
+    expect(stderrSpy).toHaveBeenCalledWith('Issue #42 lock is stale \u2014 clearing.');
+  });
+
+  it('does not clear lock for non-stale selected issue', () => {
+    execFileSync.mockReturnValueOnce(JSON.stringify([{ number: 10, title: 'Normal issue' }]));
+    execFileSync.mockReturnValueOnce(JSON.stringify([]));
+
+    const result = autoSelectIssue('shipper:new');
+
+    expect(result).toEqual({ number: 10, title: 'Normal issue' });
+    expect(mockReleaseIssueLock).not.toHaveBeenCalled();
+  });
+
+  it('returns null when no candidates exist', () => {
+    execFileSync.mockReturnValueOnce(JSON.stringify([]));
+    execFileSync.mockReturnValueOnce(JSON.stringify([]));
+
+    const result = autoSelectIssue('shipper:new');
+
+    expect(result).toBeNull();
+    expect(mockReleaseIssueLock).not.toHaveBeenCalled();
   });
 });
