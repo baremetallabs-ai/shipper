@@ -1,6 +1,10 @@
 {
   "prReviewWaitMinutes": 15,
   "lockTimeoutMinutes": 30,
-  "agent": "claude",
-  "hooks": {}
+  "agents": {
+    "default": "claude"
+  },
+  "hooks": {
+    "worktreeSetup": "npm install"
+  }
 }
