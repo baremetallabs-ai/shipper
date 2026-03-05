@@ -138,7 +138,11 @@ export async function initCommand(options: { agent?: string }) {
     console.log(`Switching agent from ${existingAgent} to ${agent} — overwriting prompt files`);
   }
 
-  merged.agents = { ...merged.agents, default: agent as 'claude' | 'codex' };
+  const existingAgentsObj =
+    typeof merged.agents === 'object' && merged.agents !== null && !Array.isArray(merged.agents)
+      ? merged.agents
+      : {};
+  merged.agents = { ...existingAgentsObj, default: agent as 'claude' | 'codex' };
   delete (merged as Record<string, unknown>).agent;
   writeFileSync(settingsPath, JSON.stringify(merged, null, 2) + '\n');
   console.log('Wrote .shipper/settings.json with default settings:');
