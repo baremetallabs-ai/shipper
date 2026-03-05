@@ -66,6 +66,8 @@ git rebase origin/<base_branch>
 ./.shipper/scripts/safe-push.sh --force-with-lease
 ```
 
+If the force-push fails, retry a few times. If it continues to fail after a few attempts, **do not keep retrying.** Stop and proceed directly to Phase 4 with a **RETRY** verdict, noting that the rebase succeeded locally but the push failed. Include the push error output in the RETRY comment.
+
 If conflicts cannot be resolved:
 
 1. Abort the in-progress rebase and restore a clean working tree:
@@ -202,6 +204,8 @@ Make the targeted changes needed to satisfy the unmet criteria.
 ./.shipper/scripts/safe-push.sh
 ```
 
+If push fails, retry a few times. If push continues to fail after a few attempts, **do not keep retrying.** Stop and proceed directly to Phase 4 with a **RETRY** verdict, noting that changes were committed locally but could not be pushed. Include the push error output in the RETRY comment.
+
 ### Respond to reviewers
 
 For every review thread you addressed or discussed, post a reply:
@@ -264,7 +268,7 @@ All checks passing. All review feedback addressed. PR is ready for final review 
 
 ---
 
-**RETRY** — You made changes and pushed them, but the situation is not yet fully resolved. CI is still running, a new failure appeared, or you need to see if the reviewer accepts your response before proceeding.
+**RETRY** — You made changes and pushed them, but the situation is not yet fully resolved (CI is still running, a new failure appeared, awaiting reviewer response). **Also use RETRY if you committed changes locally but push failed persistently** — include the push error output in the comment so the operator can diagnose the failure.
 
 Actions:
 
@@ -273,13 +277,22 @@ Actions:
 ```markdown
 ## Remediation Pass (retry needed)
 
-### Changes pushed
+### Changes made
 
 - [What was fixed or responded to in this pass]
 
+### Push failure (include only if push failed)
+
+- Push failed after [N] attempts
+- Error output:
+
+```
+[paste the push error output here]
+```
+
 ### Still open
 
-- [What remains: pending CI, awaiting reviewer response, etc.]
+- [What remains: pending CI, awaiting reviewer response, push failure, etc.]
 
 ### Next step
 
