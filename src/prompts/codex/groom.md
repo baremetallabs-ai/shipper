@@ -157,7 +157,7 @@ If your decomposition recommendation includes additional issues, you must create
    - Rewrite the parent issue body in the standard groomed format (`Summary`, `Requirements`, `Acceptance Criteria`, `Related Issues`, `Out of Scope`, `Open Questions`) so it reflects only the remaining scope not covered by child issues.
    - Then follow the earlier issue-body update steps for the parent.
    - If the parent is not blocked after grooming, it stays open with the `shipper:groomed` label.
-   - If the parent is still blocked (for example, because of a hard dependency/conflict or because a sibling must be completed first), add both `shipper:groomed` and `shipper:blocked`, and remove `shipper:new`.
+   - If the parent is still blocked (for example, because of a hard dependency/conflict or because a sibling must be completed first), it stays open with both `shipper:groomed` and `shipper:blocked` labels, and `shipper:new` is removed.
 
    Use your judgment to determine which scenario applies based on whether the created child issues collectively cover the parent's entire original scope.
 
