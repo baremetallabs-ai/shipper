@@ -2,8 +2,7 @@
 cmd: codex
 args:
   - exec
-  - --ask-for-approval
-  - never
+  - --full-auto
   - --sandbox
   - read-only
 append-issue: true
