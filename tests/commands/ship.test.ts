@@ -43,7 +43,8 @@ vi.mock('../../src/lib/prompts.js', () => ({
   agentPrompts: { claude: {} },
 }));
 
-vi.mock('node:fs', async () => {
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
   const { PassThrough } = await import('node:stream');
 
   fsMockState.mockCreateWriteStream.mockImplementation((filePath: string) => {
@@ -59,14 +60,19 @@ vi.mock('node:fs', async () => {
   });
 
   return {
+    ...actual,
     createWriteStream: fsMockState.mockCreateWriteStream,
     mkdirSync: fsMockState.mockMkdirSync,
   };
 });
 
-vi.mock('node:os', () => ({
-  homedir: osMockState.mockHomedir,
-}));
+vi.mock('node:os', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    homedir: osMockState.mockHomedir,
+  };
+});
 
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
@@ -530,7 +536,10 @@ describe('shipCommand parallel auto runner', () => {
     const logFile1 = '/mock-home/.shipper/logs/ship-1-20260306T023000.log';
     const logFile2 = '/mock-home/.shipper/logs/ship-2-20260306T023000.log';
 
-    expect(mockMkdirSync).toHaveBeenCalledWith('/mock-home/.shipper/logs', { recursive: true });
+    expect(mockMkdirSync).toHaveBeenCalledWith('/mock-home/.shipper/logs', {
+      recursive: true,
+      mode: 0o700,
+    });
     expect(mockSpawn.mock.calls[0]?.[2]).toMatchObject({ stdio: ['ignore', 'pipe', 'pipe'] });
     expect(mockSpawn.mock.calls[1]?.[2]).toMatchObject({ stdio: ['ignore', 'pipe', 'pipe'] });
     expect(mockCreateWriteStream).toHaveBeenCalledWith(logFile1);
@@ -664,6 +673,65 @@ describe('shipCommand parallel auto runner', () => {
     expect(mockMkdirSync).not.toHaveBeenCalled();
     expect(mockSelectIssuesForStage).toHaveBeenCalled();
     expect(logSpy.mock.calls.map((call) => call[0]).join('\n')).not.toContain('[#');
+    expect(exitSpy).toHaveBeenCalledWith(0);
+
+    logSpy.mockRestore();
+  });
+
+  it('uses the sequential helper when parallel is 1', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    mockSelectIssuesForStage.mockReturnValue([]);
+
+    await shipCommand(undefined, { auto: true, merge: false, parallel: 1 });
+
+    expect(mockSpawn).not.toHaveBeenCalled();
+    expect(mockCreateWriteStream).not.toHaveBeenCalled();
+    expect(mockMkdirSync).not.toHaveBeenCalled();
+    expect(mockSelectIssuesForStage).toHaveBeenCalled();
+    expect(logSpy.mock.calls.map((call) => call[0]).join('\n')).not.toContain('[#');
+    expect(exitSpy).toHaveBeenCalledWith(0);
+
+    logSpy.mockRestore();
+  });
+
+  it('fails the issue instead of crashing when the log stream errors before child exit', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    mockSelectIssuesForStage.mockImplementation((label: string) => {
+      if (label === 'shipper:planned') {
+        return [{ number: 1, title: 'Issue one' }];
+      }
+      return [];
+    });
+
+    const child = new FakeChildProcess();
+    mockSpawn.mockReturnValueOnce(child as never);
+    mockCreateWriteStream.mockImplementationOnce((filePath: string) => {
+      const stream = new PassThrough();
+      fsMockState.capturedLogs.set(filePath, '');
+      stream.on('data', (chunk: Buffer | string) => {
+        fsMockState.capturedLogs.set(
+          filePath,
+          `${fsMockState.capturedLogs.get(filePath) ?? ''}${chunk.toString()}`
+        );
+      });
+      process.nextTick(() => {
+        stream.emit('error', new Error('disk full'));
+      });
+      return stream;
+    });
+
+    const runPromise = shipCommand(undefined, { auto: true, merge: false, parallel: 2 });
+
+    await flushMicrotasks();
+    expect(child.kill).toHaveBeenCalled();
+
+    child.finish(null, 'SIGTERM');
+    await runPromise;
+
+    const output = logSpy.mock.calls.map((call) => call[0]).join('\n');
+    expect(output).toContain('✗ fail — failed to write log file');
+    expect(output).toContain('disk full');
     expect(exitSpy).toHaveBeenCalledWith(0);
 
     logSpy.mockRestore();
