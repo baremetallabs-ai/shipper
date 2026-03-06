@@ -44,10 +44,10 @@ program
   });
 
 program
-  .command('setup')
+  .command('setup [words...]')
   .description('Configure repository settings with an agent')
-  .action(() => {
-    setupCommand();
+  .action((words: string[]) => {
+    setupCommand(words);
   });
 
 program
