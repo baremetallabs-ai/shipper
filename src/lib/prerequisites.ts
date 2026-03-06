@@ -59,11 +59,11 @@ export function checkGitHubRemote(): CheckResult {
 }
 
 export function checkShipperDir(): CheckResult {
-  const shipperDir = path.resolve('.shipper', 'prompts');
+  const shipperDir = path.resolve('.shipper');
   if (existsSync(shipperDir)) {
-    return { ok: true, message: '.shipper/prompts directory exists' };
+    return { ok: true, message: '.shipper directory exists' };
   }
-  return { ok: false, message: '.shipper/prompts directory not found. Run: shipper init' };
+  return { ok: false, message: '.shipper directory not found. Run: shipper init' };
 }
 
 const REQUIRED_LABELS = [
