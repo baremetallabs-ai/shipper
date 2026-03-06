@@ -377,7 +377,7 @@ function shipOneIssue(issue: string, merge: boolean): { success: boolean; error?
 function shipOneIssueAsync(issue: string): AsyncIssueRun {
   const stderr: string[] = [];
   const child = spawn(process.execPath, [process.argv[1]!, 'ship', issue, '--merge'], {
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['ignore', 'ignore', 'pipe'],
     env: process.env,
   });
 
@@ -392,7 +392,7 @@ function shipOneIssueAsync(issue: string): AsyncIssueRun {
       resolve({ success: false, error: error.message });
     });
 
-    child.on('exit', (code, signal) => {
+    child.on('close', (code, signal) => {
       if (code === 0) {
         resolve({ success: true });
         return;
@@ -570,7 +570,7 @@ function shipAutoSequential(): void {
   process.exit(0);
 }
 
-async function shipAutoParallel(_parallel: number): Promise<void> {
+async function shipAutoParallel(parallel: number): Promise<void> {
   const skippedIssues = new Set<number>();
   const results: AutoResult[] = [];
   const allUnblockAttempts: UnblockAttempt[] = [];
@@ -610,7 +610,9 @@ async function shipAutoParallel(_parallel: number): Promise<void> {
 
   try {
     for (;;) {
-      while (activeRuns.size < _parallel) {
+      if (shuttingDown) break;
+
+      while (!shuttingDown && activeRuns.size < parallel) {
         const candidate = selectNextCandidate(skippedIssues, new Set(activeRuns.keys()));
         if (!candidate) break;
 
@@ -622,6 +624,8 @@ async function shipAutoParallel(_parallel: number): Promise<void> {
           completion: run.result.then((result) => ({ issue: candidate, result })),
         });
       }
+
+      if (shuttingDown) break;
 
       if (activeRuns.size === 0) {
         const blocked = selectBlockedIssues();

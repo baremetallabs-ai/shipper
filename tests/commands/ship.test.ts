@@ -71,6 +71,7 @@ class FakeChildProcess extends EventEmitter {
     this.exitCode = code;
     this.signalCode = signal;
     this.emit('exit', code, signal);
+    this.emit('close', code, signal);
   }
 }
 
@@ -529,6 +530,7 @@ describe('shipCommand parallel auto runner', () => {
       let plannedIssues = [
         { number: 1, title: 'Issue one' },
         { number: 2, title: 'Issue two' },
+        { number: 3, title: 'Issue three' },
       ];
       mockSelectIssuesForStage.mockImplementation((label: string) => {
         if (label === 'shipper:planned') {
@@ -545,17 +547,21 @@ describe('shipCommand parallel auto runner', () => {
 
       await flushMicrotasks();
       process.emit(signal, signal);
+      plannedIssues = plannedIssues.filter((issue) => issue.number !== 1);
+      child1.finish(null, signal);
+      await flushMicrotasks();
+
+      expect(mockSpawn).toHaveBeenCalledTimes(2);
+
+      plannedIssues = plannedIssues.filter((issue) => issue.number !== 2);
       await vi.advanceTimersByTimeAsync(3000);
 
       expect(child1.kill).toHaveBeenCalledWith(signal);
       expect(child2.kill).toHaveBeenCalledWith(signal);
-      expect(child1.kill).toHaveBeenCalledWith('SIGKILL');
+      expect(child1.kill).not.toHaveBeenCalledWith('SIGKILL');
       expect(child2.kill).toHaveBeenCalledWith('SIGKILL');
-      expect(mockReleaseIssueLock).toHaveBeenCalledWith('1');
+      expect(mockReleaseIssueLock).not.toHaveBeenCalledWith('1');
       expect(mockReleaseIssueLock).toHaveBeenCalledWith('2');
-
-      plannedIssues = [];
-      child1.finish(null, 'SIGKILL');
       child2.finish(null, 'SIGKILL');
       await flushMicrotasks();
       await runPromise;

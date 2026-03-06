@@ -135,5 +135,13 @@ describe('shipper-cli', () => {
         parallel: 3,
       });
     });
+
+    it('keeps non-ship commands on normal unknown-option handling', async () => {
+      process.argv = ['node', 'src/index.ts', 'groom', '--parallel'];
+
+      await expect(importEntrypoint()).rejects.toThrow('process.exit:1');
+      expect(errorSpy).not.toHaveBeenCalledWith('Error: --parallel requires a number');
+      expect(mockShipCommand).not.toHaveBeenCalled();
+    });
   });
 });
