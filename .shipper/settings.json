@@ -7,7 +7,8 @@
   "agents": {
     "default": "claude",
     "implement": "codex",
-    "pr_remediate": "codex"
+    "pr_remediate": "codex",
+    "plan": "codex"
   },
   "hooks": {
     "worktreeSetup": "npm install"
