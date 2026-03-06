@@ -6,5 +6,6 @@
   },
   "hooks": {
     "worktreeSetup": "npm install"
-  }
+  },
+  "cliVersion": "0.1.0"
 }
