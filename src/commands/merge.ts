@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { openSync, closeSync, readFileSync, writeFileSync, unlinkSync, constants } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fetchChecks, classifyChecks } from '../lib/checks.js';
 import { tryResolvePrForIssue } from '../lib/github.js';
 import { getRepoNwo } from '../lib/repo.js';
 import { withStageHooks } from '../lib/hooks.js';
@@ -49,12 +50,6 @@ interface GraphQLResponse {
 
 interface PRViewData {
   mergeStateStatus: string;
-}
-
-interface PRChecksLine {
-  name: string;
-  state: string;
-  conclusion: string;
 }
 
 function resolveRepo(override?: string): string {
@@ -406,26 +401,16 @@ function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): boolean {
 
   if (mergeState === 'BLOCKED') {
     // Could be blocked by required checks still running — check CI status
-    let checksOutput: string;
+    let checks;
     try {
-      checksOutput = execFileSync(
-        'gh',
-        ['pr', 'checks', String(pr.number), '-R', nwo, '--json', 'name,state,conclusion'],
-        { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }
-      );
+      checks = fetchChecks(String(pr.number), nwo);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       failPR(pr, `Could not fetch CI checks: ${msg}`, nwo, dryRun);
       return false;
     }
 
-    const checks: PRChecksLine[] = JSON.parse(checksOutput);
-    const pending = checks.filter(
-      (c) => c.state === 'PENDING' || c.state === 'QUEUED' || c.state === 'IN_PROGRESS'
-    );
-    const failed = checks.filter(
-      (c) => c.conclusion === 'FAILURE' || c.conclusion === 'ERROR' || c.conclusion === 'CANCELLED'
-    );
+    const { pending, failed } = classifyChecks(checks);
 
     if (failed.length > 0) {
       const names = failed.map((c) => c.name).join(', ');

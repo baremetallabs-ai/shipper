@@ -37,7 +37,10 @@ beforeEach(() => {
   logMock.mockClear();
   warnMock.mockClear();
   errorMock.mockClear();
-  getSettingsMock.mockReturnValue({ prReviewWaitMinutes: 30, hooks: {} });
+  getSettingsMock.mockReturnValue({
+    prReviewWait: { mode: 'checks', timeoutMinutes: 30 },
+    hooks: {},
+  });
 });
 
 const { getLinkedIssueNumber, postMerge, lookupPR } = await import('../../src/commands/merge.js');

@@ -60,7 +60,7 @@ Running `shipper init` again will overwrite prompt files with the latest default
 
 **`settings.json`** — Team-wide configuration, committed to version control:
 
-- `prReviewWaitMinutes` — Minimum wait time (minutes) before PR review remediation (default: `15`)
+- `prReviewWait` — PR review wait strategy (default: `{ "mode": "checks", "timeoutMinutes": 15 }`). In `"checks"` mode, polls CI checks until all complete. In `"timer"` mode, waits a fixed duration based on PR age. Legacy `prReviewWaitMinutes` values auto-migrate to `"timer"` mode.
 - `hooks.postMerge` — Shell command to run after a PR is merged
 
 **`settings.local.json`** — Local overrides that apply only to your machine. This file is gitignored and will not be committed. Any key set here takes precedence over `settings.json`.

@@ -1,8 +1,13 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
+export interface PrReviewWait {
+  mode: 'checks' | 'timer';
+  timeoutMinutes: number;
+}
+
 export interface Settings {
-  prReviewWaitMinutes: number;
+  prReviewWait: PrReviewWait;
   lockTimeoutMinutes: number;
   agents: {
     default: 'claude' | 'codex';
@@ -18,14 +23,14 @@ export interface Settings {
 }
 
 export const DEFAULTS: Settings = {
-  prReviewWaitMinutes: 15,
+  prReviewWait: { mode: 'checks', timeoutMinutes: 15 },
   lockTimeoutMinutes: 30,
   agents: { default: 'claude' as const },
   hooks: {},
 };
 
 export const SETTING_DESCRIPTIONS: Record<string, string> = {
-  prReviewWaitMinutes: 'minimum wait (minutes) before PR review remediation',
+  prReviewWait: 'PR review wait strategy: { mode: "checks" | "timer", timeoutMinutes: number }',
   lockTimeoutMinutes: 'stale lock timeout (minutes) before auto-clearing shipper:locked',
   'agents.default':
     'default coding agent for all steps (supports per-step overrides via agents.<step>)',
@@ -98,6 +103,11 @@ function readSettingsFile(filepath: string): Partial<Settings> {
     if (typeof parsed.agent === 'string' && !parsed.agents) {
       parsed.agents = { default: parsed.agent };
       delete parsed.agent;
+    }
+    // Auto-migrate legacy "prReviewWaitMinutes" to "prReviewWait"
+    if (typeof parsed.prReviewWaitMinutes === 'number' && !parsed.prReviewWait) {
+      parsed.prReviewWait = { mode: 'timer', timeoutMinutes: parsed.prReviewWaitMinutes };
+      delete parsed.prReviewWaitMinutes;
     }
     return parsed as Partial<Settings>;
   } catch (err: unknown) {

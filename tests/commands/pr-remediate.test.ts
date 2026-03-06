@@ -31,9 +31,24 @@ vi.mock('../../src/lib/branch.js', () => ({
   getRepoRoot: vi.fn(() => '/tmp/fake-repo'),
 }));
 
-vi.mock('../../src/lib/settings.js', () => ({
-  getSettings: vi.fn(() => ({ prReviewWaitMinutes: 0, hooks: {} })),
+vi.mock('../../src/lib/sleep.js', () => ({
+  sleepMs: vi.fn(),
 }));
+
+const getSettingsMock = vi.fn();
+vi.mock('../../src/lib/settings.js', () => ({
+  getSettings: () => getSettingsMock(),
+}));
+
+const fetchChecksMock = vi.fn();
+vi.mock('../../src/lib/checks.js', async () => {
+  const actual =
+    await vi.importActual<typeof import('../../src/lib/checks.js')>('../../src/lib/checks.js');
+  return {
+    ...actual,
+    fetchChecks: (...args: unknown[]) => fetchChecksMock(...args),
+  };
+});
 
 import { resolveRef } from '../../src/lib/github.js';
 import { runPrompt } from '../../src/lib/prompt-runner.js';
@@ -48,6 +63,10 @@ describe('prRemediateCommand', () => {
     vi.clearAllMocks();
     mockResolveRef.mockReturnValue({ prNumber: '42', issueNumber: '10' });
     mockRunPrompt.mockReturnValue(0);
+    getSettingsMock.mockReturnValue({
+      prReviewWait: { mode: 'timer', timeoutMinutes: 0 },
+      hooks: {},
+    });
     exitSpy = vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
       throw new Error(`exit:${code}`);
     });
@@ -69,5 +88,53 @@ describe('prRemediateCommand', () => {
         prRef: '42',
       })
     );
+  });
+
+  it('in timer mode with timeoutMinutes 0, skips wait and runs prompt', async () => {
+    getSettingsMock.mockReturnValue({
+      prReviewWait: { mode: 'timer', timeoutMinutes: 0 },
+      hooks: {},
+    });
+    const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
+
+    expect(() => prRemediateCommand('42')).toThrow('exit:0');
+    expect(mockRunPrompt).toHaveBeenCalled();
+    expect(fetchChecksMock).not.toHaveBeenCalled();
+  });
+
+  it('in checks mode, polls and proceeds when all checks complete', async () => {
+    getSettingsMock.mockReturnValue({
+      prReviewWait: { mode: 'checks', timeoutMinutes: 1 },
+      hooks: {},
+    });
+    fetchChecksMock.mockReturnValue([
+      { name: 'build', state: 'COMPLETED', conclusion: 'SUCCESS' },
+      { name: 'test', state: 'COMPLETED', conclusion: 'SUCCESS' },
+    ]);
+
+    const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
+
+    expect(() => prRemediateCommand('42')).toThrow('exit:0');
+    expect(mockRunPrompt).toHaveBeenCalled();
+    expect(fetchChecksMock).toHaveBeenCalled();
+  });
+
+  it('in checks mode with zero checks, retries then proceeds', async () => {
+    getSettingsMock.mockReturnValue({
+      prReviewWait: { mode: 'checks', timeoutMinutes: 1 },
+      hooks: {},
+    });
+    // Return empty array for all calls (initial + 3 grace retries)
+    fetchChecksMock.mockReturnValue([]);
+
+    const logMock = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
+
+    expect(() => prRemediateCommand('42')).toThrow('exit:0');
+    expect(mockRunPrompt).toHaveBeenCalled();
+    // Initial call + 3 grace retries = 4 calls
+    expect(fetchChecksMock).toHaveBeenCalledTimes(4);
+    expect(logMock).toHaveBeenCalledWith('No CI checks found. Proceeding.');
+    logMock.mockRestore();
   });
 });
