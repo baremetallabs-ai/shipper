@@ -1,5 +1,8 @@
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
+import { createWriteStream, mkdirSync } from 'node:fs';
+import { homedir } from 'node:os';
+import path from 'node:path';
 import { clearStaleLockIfNeeded, selectIssuesForStage } from '../lib/github.js';
 import { getRepoNwo } from '../lib/repo.js';
 import { withStageHooks } from '../lib/hooks.js';
@@ -57,6 +60,7 @@ export interface ShipOptions {
 interface AsyncIssueRun {
   child: ChildProcess;
   result: Promise<{ success: boolean; error?: string }>;
+  logFile?: string;
 }
 
 interface ActiveIssueRun {
@@ -69,6 +73,19 @@ interface ActiveIssueRun {
 }
 
 type ShipSignal = 'SIGINT' | 'SIGTERM' | 'SIGKILL';
+
+function formatLogTimestamp(date = new Date()): string {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate()),
+    'T',
+    pad(date.getHours()),
+    pad(date.getMinutes()),
+    pad(date.getSeconds()),
+  ].join('');
+}
 
 function getCurrentLabel(issueStr: string): string | undefined {
   let output: string;
@@ -374,12 +391,18 @@ function shipOneIssue(issue: string, merge: boolean): { success: boolean; error?
   });
 }
 
-function shipOneIssueAsync(issue: string): AsyncIssueRun {
+function shipOneIssueAsync(issue: string, logFile?: string): AsyncIssueRun {
   const stderr: string[] = [];
+  const logStream = logFile ? createWriteStream(logFile) : undefined;
   const child = spawn(process.execPath, [process.argv[1]!, 'ship', issue, '--merge'], {
-    stdio: ['ignore', 'ignore', 'pipe'],
+    stdio: logFile ? ['ignore', 'pipe', 'pipe'] : ['ignore', 'ignore', 'pipe'],
     env: process.env,
   });
+
+  if (logStream) {
+    child.stdout?.pipe(logStream, { end: false });
+    child.stderr?.pipe(logStream, { end: false });
+  }
 
   if (child.stderr) {
     child.stderr.on('data', (chunk: Buffer | string) => {
@@ -388,32 +411,70 @@ function shipOneIssueAsync(issue: string): AsyncIssueRun {
   }
 
   const result = new Promise<{ success: boolean; error?: string }>((resolve) => {
+    let settled = false;
+    let logStreamClosed = false;
+
+    const resolveResult = (value: { success: boolean; error?: string }) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+
+    const closeLogStream = (destroy = false): Promise<void> => {
+      if (!logStream || logStreamClosed) return Promise.resolve();
+      logStreamClosed = true;
+
+      return new Promise<void>((streamResolved) => {
+        let streamSettled = false;
+        const finish = () => {
+          if (streamSettled) return;
+          streamSettled = true;
+          streamResolved();
+        };
+
+        logStream.once('finish', finish);
+        logStream.once('close', finish);
+        logStream.once('error', finish);
+
+        if (destroy) {
+          logStream.destroy();
+          return;
+        }
+
+        logStream.end();
+      });
+    };
+
     child.on('error', (error) => {
-      resolve({ success: false, error: error.message });
+      void closeLogStream(true).finally(() => {
+        resolveResult({ success: false, error: error.message });
+      });
     });
 
     child.on('close', (code, signal) => {
-      if (code === 0) {
-        resolve({ success: true });
-        return;
-      }
+      void closeLogStream().finally(() => {
+        if (code === 0) {
+          resolveResult({ success: true });
+          return;
+        }
 
-      const stderrOutput = stderr.join('').trim();
-      if (stderrOutput) {
-        resolve({ success: false, error: stderrOutput });
-        return;
-      }
+        const stderrOutput = stderr.join('').trim();
+        if (stderrOutput) {
+          resolveResult({ success: false, error: stderrOutput });
+          return;
+        }
 
-      if (signal) {
-        resolve({ success: false, error: `child exited from signal ${signal}` });
-        return;
-      }
+        if (signal) {
+          resolveResult({ success: false, error: `child exited from signal ${signal}` });
+          return;
+        }
 
-      resolve({ success: false, error: `child exited with code ${code ?? 'unknown'}` });
+        resolveResult({ success: false, error: `child exited with code ${code ?? 'unknown'}` });
+      });
     });
   });
 
-  return { child, result };
+  return { child, result, logFile };
 }
 
 export function selectNextCandidate(
@@ -575,8 +636,13 @@ async function shipAutoParallel(parallel: number): Promise<void> {
   const results: AutoResult[] = [];
   const allUnblockAttempts: UnblockAttempt[] = [];
   const activeRuns = new Map<number, ActiveIssueRun>();
+  const homeDir = homedir();
+  const logsDir = path.join(homeDir, '.shipper', 'logs');
+  const logFiles = new Map<number, string>();
 
   let shuttingDown = false;
+
+  mkdirSync(logsDir, { recursive: true });
 
   const wait = (ms: number) =>
     new Promise<void>((resolve) => {
@@ -616,8 +682,12 @@ async function shipAutoParallel(parallel: number): Promise<void> {
         const candidate = selectNextCandidate(skippedIssues, new Set(activeRuns.keys()));
         if (!candidate) break;
 
-        console.log(`\nAuto: advancing issue #${candidate.number} — ${candidate.title}`);
-        const run = shipOneIssueAsync(String(candidate.number));
+        const logFile = path.join(logsDir, `ship-${candidate.number}-${formatLogTimestamp()}.log`);
+        console.log(
+          `\n[#${candidate.number}] Auto: advancing issue #${candidate.number} — ${candidate.title}`
+        );
+        const run = shipOneIssueAsync(String(candidate.number), logFile);
+        logFiles.set(candidate.number, logFile);
         activeRuns.set(candidate.number, {
           issue: candidate,
           child: run.child,
@@ -633,7 +703,9 @@ async function shipAutoParallel(parallel: number): Promise<void> {
 
         let progress = false;
         for (const issue of blocked) {
-          console.log(`\nAuto: attempting unblock of #${issue.number} — ${issue.title}`);
+          console.log(
+            `\n[#${issue.number}] Auto: attempting unblock of #${issue.number} — ${issue.title}`
+          );
           const unblocked = attemptUnblock(String(issue.number));
           allUnblockAttempts.push({
             issue: issue.number,
@@ -651,6 +723,7 @@ async function shipAutoParallel(parallel: number): Promise<void> {
         Array.from(activeRuns.values(), (run) => run.completion)
       );
       activeRuns.delete(completed.issue.number);
+      console.log(`[#${completed.issue.number}] ${completed.result.success ? '✓ pass' : '✗ fail'}`);
 
       if (completed.result.success) {
         results.push({
@@ -676,6 +749,17 @@ async function shipAutoParallel(parallel: number): Promise<void> {
   printAutoSummary(results);
   if (allUnblockAttempts.length > 0) {
     printUnblockSummary(allUnblockAttempts);
+  }
+  if (results.length > 0) {
+    console.log('\n  Log files:');
+    for (const result of results) {
+      const logFile = logFiles.get(result.issue);
+      if (!logFile) continue;
+      const displayPath = logFile.startsWith(homeDir)
+        ? `~${logFile.slice(homeDir.length)}`
+        : logFile;
+      console.log(`  #${result.issue}   ${displayPath}`);
+    }
   }
   process.exit(0);
 }

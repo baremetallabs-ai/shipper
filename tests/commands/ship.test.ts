@@ -1,6 +1,16 @@
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { afterAll, describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+const fsMockState = vi.hoisted(() => ({
+  capturedLogs: new Map<string, string>(),
+  mockCreateWriteStream: vi.fn(),
+  mockMkdirSync: vi.fn(),
+}));
+
+const osMockState = vi.hoisted(() => ({
+  mockHomedir: vi.fn(() => '/mock-home'),
+}));
 import {
   STAGE_NAME,
   AUTO_PRIORITY_LABELS,
@@ -33,6 +43,31 @@ vi.mock('../../src/lib/prompts.js', () => ({
   agentPrompts: { claude: {} },
 }));
 
+vi.mock('node:fs', async () => {
+  const { PassThrough } = await import('node:stream');
+
+  fsMockState.mockCreateWriteStream.mockImplementation((filePath: string) => {
+    const stream = new PassThrough();
+    fsMockState.capturedLogs.set(filePath, '');
+    stream.on('data', (chunk: Buffer | string) => {
+      fsMockState.capturedLogs.set(
+        filePath,
+        `${fsMockState.capturedLogs.get(filePath) ?? ''}${chunk.toString()}`
+      );
+    });
+    return stream;
+  });
+
+  return {
+    createWriteStream: fsMockState.mockCreateWriteStream,
+    mkdirSync: fsMockState.mockMkdirSync,
+  };
+});
+
+vi.mock('node:os', () => ({
+  homedir: osMockState.mockHomedir,
+}));
+
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
@@ -52,6 +87,9 @@ const mockClearStaleLockIfNeeded = vi.mocked(clearStaleLockIfNeeded);
 const mockReleaseIssueLock = vi.mocked(releaseIssueLock);
 const mockExecFileSync = vi.mocked(execFileSync);
 const mockSpawn = vi.mocked(spawn);
+const mockCreateWriteStream = fsMockState.mockCreateWriteStream;
+const mockMkdirSync = fsMockState.mockMkdirSync;
+const mockHomedir = osMockState.mockHomedir;
 
 type ShipSignal = 'SIGINT' | 'SIGTERM' | 'SIGKILL';
 
@@ -77,6 +115,9 @@ class FakeChildProcess extends EventEmitter {
 
 async function flushMicrotasks(): Promise<void> {
   await Promise.resolve();
+  await new Promise<void>((resolve) => {
+    process.nextTick(resolve);
+  });
   await Promise.resolve();
 }
 
@@ -383,6 +424,11 @@ describe('shipCommand parallel auto runner', () => {
     mockExecFileSync.mockReturnValue('[]');
     mockSpawn.mockReset();
     mockReleaseIssueLock.mockReset();
+    mockCreateWriteStream.mockClear();
+    mockMkdirSync.mockClear();
+    mockHomedir.mockClear();
+    mockHomedir.mockReturnValue('/mock-home');
+    fsMockState.capturedLogs.clear();
     exitSpy.mockClear();
   });
 
@@ -420,6 +466,9 @@ describe('shipCommand parallel auto runner', () => {
     plannedIssues = plannedIssues.filter((issue) => issue.number !== 1);
     child1.finish(0);
     await flushMicrotasks();
+    await new Promise<void>((resolve) => {
+      process.nextTick(resolve);
+    });
 
     expect(mockSpawn).toHaveBeenCalledTimes(3);
     expect(mockSpawn.mock.calls[2]?.[1]).toEqual([process.argv[1]!, 'ship', '3', '--merge']);
@@ -435,6 +484,94 @@ describe('shipCommand parallel auto runner', () => {
     await runPromise;
 
     expect(exitSpy).toHaveBeenCalledWith(0);
+  });
+
+  it('captures combined child output in per-issue log files and prints prefixed parallel status lines', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-06T02:30:00'));
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    let plannedIssues = [
+      { number: 1, title: 'Issue one' },
+      { number: 2, title: 'Issue two' },
+    ];
+    mockSelectIssuesForStage.mockImplementation((label: string) => {
+      if (label === 'shipper:planned') return plannedIssues;
+      return [];
+    });
+    mockExecFileSync.mockImplementation((cmd, args) => {
+      const argList = args as string[];
+      if (cmd === 'gh' && argList.includes('list')) {
+        return JSON.stringify([
+          {
+            number: 7,
+            title: 'Blocked issue',
+            labels: [{ name: 'shipper:planned' }, { name: 'shipper:blocked' }],
+          },
+        ]);
+      }
+
+      if (cmd === 'gh' && argList.includes('view')) {
+        return 'shipper:planned\nshipper:blocked';
+      }
+
+      return '[]';
+    });
+
+    const child1 = new FakeChildProcess();
+    const child2 = new FakeChildProcess();
+    mockSpawn.mockReturnValueOnce(child1 as never).mockReturnValueOnce(child2 as never);
+
+    const runPromise = shipCommand(undefined, { auto: true, merge: false, parallel: 2 });
+
+    await flushMicrotasks();
+
+    const logFile1 = '/mock-home/.shipper/logs/ship-1-20260306T023000.log';
+    const logFile2 = '/mock-home/.shipper/logs/ship-2-20260306T023000.log';
+
+    expect(mockMkdirSync).toHaveBeenCalledWith('/mock-home/.shipper/logs', { recursive: true });
+    expect(mockSpawn.mock.calls[0]?.[2]).toMatchObject({ stdio: ['ignore', 'pipe', 'pipe'] });
+    expect(mockSpawn.mock.calls[1]?.[2]).toMatchObject({ stdio: ['ignore', 'pipe', 'pipe'] });
+    expect(mockCreateWriteStream).toHaveBeenCalledWith(logFile1);
+    expect(mockCreateWriteStream).toHaveBeenCalledWith(logFile2);
+
+    plannedIssues = plannedIssues.filter((issue) => issue.number !== 1);
+    child1.stdout.write('Running stage: implement\n');
+    child1.stderr.write('lock acquired\n');
+    child1.finish(0);
+    await flushMicrotasks();
+
+    plannedIssues = plannedIssues.filter((issue) => issue.number !== 2);
+    child2.stdout.write('Running stage: merge\n');
+    child2.stderr.write('boom\n');
+    child2.finish(1);
+    await runPromise;
+
+    const output = logSpy.mock.calls.map((call) => call[0]).join('\n');
+
+    expect(output).toContain('[#1] Auto: advancing issue #1 — Issue one');
+    expect(output).toContain('[#2] Auto: advancing issue #2 — Issue two');
+    expect(output).toContain('[#1] ✓ pass');
+    expect(output).toContain('[#2] ✗ fail');
+    expect(output).toContain('[#7] Auto: attempting unblock of #7 — Blocked issue');
+    expect(output).toContain('Auto run complete.');
+    expect(output).toContain('  #    Issue                                          Outcome');
+    expect(output).toContain('✗ fail — boom');
+    expect(output).toContain('  Unblock attempts:');
+    expect(output).toContain('  Log files:');
+    expect(output).toContain('  #1   ~/.shipper/logs/ship-1-20260306T023000.log');
+    expect(output).toContain('  #2   ~/.shipper/logs/ship-2-20260306T023000.log');
+    expect(output).not.toContain('[#1] Auto run complete.');
+    expect(output).not.toContain('[#7] Unblock attempts:');
+    expect(output).not.toContain('lock acquired');
+
+    expect(fsMockState.capturedLogs.get(logFile1)).toContain('Running stage: implement');
+    expect(fsMockState.capturedLogs.get(logFile1)).toContain('lock acquired');
+    expect(fsMockState.capturedLogs.get(logFile2)).toContain('Running stage: merge');
+    expect(fsMockState.capturedLogs.get(logFile2)).toContain('boom');
+
+    logSpy.mockRestore();
   });
 
   it('reuses a failed slot for the next candidate and skips the failed issue afterwards', async () => {
@@ -462,6 +599,9 @@ describe('shipCommand parallel auto runner', () => {
     plannedIssues = plannedIssues.filter((issue) => issue.number !== 1);
     child1.finish(1, null, 'boom');
     await flushMicrotasks();
+    await new Promise<void>((resolve) => {
+      process.nextTick(resolve);
+    });
 
     expect(mockSpawn).toHaveBeenCalledTimes(3);
     expect(mockSpawn.mock.calls.map(([, args]) => (args as string[])[2])).toEqual(['1', '2', '3']);
@@ -513,13 +653,20 @@ describe('shipCommand parallel auto runner', () => {
   });
 
   it('uses the sequential helper when parallel is not enabled', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
     mockSelectIssuesForStage.mockReturnValue([]);
 
     await shipCommand(undefined, { auto: true, merge: false, parallel: undefined });
 
     expect(mockSpawn).not.toHaveBeenCalled();
+    expect(mockCreateWriteStream).not.toHaveBeenCalled();
+    expect(mockMkdirSync).not.toHaveBeenCalled();
     expect(mockSelectIssuesForStage).toHaveBeenCalled();
+    expect(logSpy.mock.calls.map((call) => call[0]).join('\n')).not.toContain('[#');
     expect(exitSpy).toHaveBeenCalledWith(0);
+
+    logSpy.mockRestore();
   });
 
   it.each(['SIGINT', 'SIGTERM'] as const)(
