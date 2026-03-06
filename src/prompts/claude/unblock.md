@@ -1,6 +1,7 @@
 ---
 cmd: claude
 args:
+  - -p
   - --model
   - sonnet
   - --permission-mode
