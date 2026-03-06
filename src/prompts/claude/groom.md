@@ -151,6 +151,18 @@ If your decomposition recommendation includes additional issues, you must create
    - For each blocked issue, post a comment starting with `## Blocked` that explains the unblock condition in natural language. Example: `## Blocked\n\nBlocked until #35 is merged — reset's branch cleanup depends on the shipper/ prefix convention being in place.`
    - The original issue can also receive `shipper:blocked` if grooming determines a sibling should go first. In that case, add the label and post the blocking-condition comment on the original issue too.
 3. After creating them, include the created URLs in your final response, and (optionally) add them as links in the original issue comment if appropriate.
+4. **Handle the parent issue** after creating child issues:
+
+   **If the child issues collectively cover the parent's entire original scope (full replacement):**
+   - Post a comment on the parent issue listing and linking to all created child issues (e.g., "Decomposed into #X, #Y, #Z."). Save to `./.shipper/tmp/decomposition_comment-<number>.md` and post with `gh issue comment <ISSUE> --body-file ./.shipper/tmp/decomposition_comment-<number>.md`.
+   - Close the parent issue: `gh issue close <ISSUE>`
+   - Do NOT rewrite the parent issue body. The closing comment serves as the decomposition record.
+
+   **If the child issues cover only part of the parent's scope (partial replacement):**
+   - Rewrite the parent issue body in the standard groomed format (`Summary`, `Requirements`, `Acceptance Criteria`, `Related Issues`, `Out of Scope`, `Open Questions`) so it reflects only the remaining scope not covered by child issues.
+   - The parent stays open with the `shipper:groomed` label.
+
+   Use your judgment to determine which scenario applies based on whether the created child issues collectively cover the parent's entire original scope.
 
 ---
 
