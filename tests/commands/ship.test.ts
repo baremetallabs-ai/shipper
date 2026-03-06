@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { afterAll, describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   STAGE_NAME,
   AUTO_PRIORITY_LABELS,
@@ -366,6 +366,15 @@ describe('shipCommand parallel auto runner', () => {
   const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((_code?: number) => {
     return undefined as never;
   }) as typeof process.exit);
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  afterAll(() => {
+    exitSpy.mockRestore();
+  });
+
   beforeEach(() => {
     mockSelectIssuesForStage.mockReset();
     mockClearStaleLockIfNeeded.mockReset();
@@ -374,7 +383,6 @@ describe('shipCommand parallel auto runner', () => {
     mockSpawn.mockReset();
     mockReleaseIssueLock.mockReset();
     exitSpy.mockClear();
-    vi.useRealTimers();
   });
 
   afterEach(() => {

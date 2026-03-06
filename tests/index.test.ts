@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../src/lib/prerequisites.js', () => ({
   runPreflight: vi.fn(),
@@ -74,6 +74,11 @@ describe('shipper-cli', () => {
 
     afterEach(() => {
       process.argv = [...originalArgv];
+    });
+
+    afterAll(() => {
+      exitSpy.mockRestore();
+      errorSpy.mockRestore();
     });
 
     async function importEntrypoint() {
