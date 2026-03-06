@@ -247,11 +247,14 @@ describe('runPostHook', () => {
 });
 
 describe('runWorktreeHook', () => {
-  const setupHookPath = path.resolve('.shipper', 'hooks', 'worktree-setup');
-  const teardownHookPath = path.resolve('.shipper', 'hooks', 'worktree-teardown');
+  const worktreeCwd = '/tmp/worktree';
+  const setupHookPath = path.join(worktreeCwd, '.shipper', 'hooks', 'worktree-setup');
+  const teardownHookPath = path.join(worktreeCwd, '.shipper', 'hooks', 'worktree-teardown');
+  const setupHookDisplayPath = path.join('.shipper', 'hooks', 'worktree-setup');
+  const teardownHookDisplayPath = path.join('.shipper', 'hooks', 'worktree-teardown');
   const env = {
     SHIPPER_STAGE: 'implement',
-    SHIPPER_WORKTREE_PATH: '/tmp/worktree',
+    SHIPPER_WORKTREE_PATH: worktreeCwd,
     SHIPPER_ISSUE_NUMBER: '42',
     SHIPPER_BRANCH_NAME: 'shipper/42-branch',
   };
@@ -260,7 +263,7 @@ describe('runWorktreeHook', () => {
     statSyncMock.mockReturnValue({});
     accessSyncMock.mockReturnValue(undefined);
 
-    runWorktreeHook('worktree-setup', env, undefined, '/tmp/worktree');
+    runWorktreeHook('worktree-setup', env, undefined, worktreeCwd);
 
     expect(execFileSyncMock).toHaveBeenCalledWith(
       setupHookPath,
@@ -268,7 +271,7 @@ describe('runWorktreeHook', () => {
       expect.objectContaining({
         stdio: ['inherit', 'inherit', 'pipe'],
         env: expect.objectContaining(env),
-        cwd: '/tmp/worktree',
+        cwd: worktreeCwd,
       })
     );
     expect(logMock).toHaveBeenCalledWith('  Worktree setup hook completed.');
@@ -281,12 +284,12 @@ describe('runWorktreeHook', () => {
       throw new Error('EACCES');
     });
 
-    runWorktreeHook('worktree-setup', env, undefined, '/tmp/worktree');
+    runWorktreeHook('worktree-setup', env, undefined, worktreeCwd);
 
     expect(execFileSyncMock).not.toHaveBeenCalled();
     expect(execSyncMock).not.toHaveBeenCalled();
     expect(warnMock).toHaveBeenCalledWith(
-      `  Warning: Found ${setupHookPath} but it is not executable — skipping. Run \`chmod +x ${setupHookPath}\` to enable.`
+      `  Warning: Found ${setupHookDisplayPath} but it is not executable — skipping. Run \`chmod +x ${setupHookDisplayPath}\` to enable.`
     );
   });
 
@@ -295,17 +298,17 @@ describe('runWorktreeHook', () => {
       throw new Error('ENOENT');
     });
 
-    runWorktreeHook('worktree-setup', env, 'echo setup', '/tmp/worktree');
+    runWorktreeHook('worktree-setup', env, 'echo setup', worktreeCwd);
 
     expect(warnMock).toHaveBeenCalledWith(
-      `  Warning: settings-based hooks.worktreeSetup is deprecated. Move your command to ${setupHookPath} and make it executable.`
+      `  Warning: settings-based hooks.worktreeSetup is deprecated. Move your command to ${setupHookDisplayPath} and make it executable.`
     );
     expect(execSyncMock).toHaveBeenCalledWith(
       'echo setup',
       expect.objectContaining({
         stdio: ['inherit', 'inherit', 'pipe'],
         env: expect.objectContaining(env),
-        cwd: '/tmp/worktree',
+        cwd: worktreeCwd,
       })
     );
     expect(execFileSyncMock).not.toHaveBeenCalled();
@@ -315,20 +318,46 @@ describe('runWorktreeHook', () => {
     statSyncMock.mockReturnValue({});
     accessSyncMock.mockReturnValue(undefined);
 
-    runWorktreeHook('worktree-teardown', env, 'echo teardown', '/tmp/worktree');
+    runWorktreeHook('worktree-teardown', env, 'echo teardown', worktreeCwd);
 
     expect(warnMock).toHaveBeenCalledWith(
-      `  Warning: Both ${teardownHookPath} and settings-based hooks.worktreeTeardown found. Using file-based hook; settings-based hook skipped.`
+      `  Warning: Both ${teardownHookDisplayPath} and settings-based hooks.worktreeTeardown found. Using file-based hook; settings-based hook skipped.`
     );
     expect(execFileSyncMock).toHaveBeenCalledWith(
       teardownHookPath,
       [],
       expect.objectContaining({
         env: expect.objectContaining(env),
-        cwd: '/tmp/worktree',
+        cwd: worktreeCwd,
       })
     );
     expect(execSyncMock).not.toHaveBeenCalled();
+  });
+
+  it('falls back to deprecated settings-based hooks when the file-based hook is not executable', () => {
+    statSyncMock.mockReturnValue({});
+    accessSyncMock.mockImplementation(() => {
+      throw new Error('EACCES');
+    });
+
+    runWorktreeHook('worktree-setup', env, 'echo setup', worktreeCwd);
+
+    expect(warnMock).toHaveBeenNthCalledWith(
+      1,
+      `  Warning: Found ${setupHookDisplayPath} but it is not executable — skipping. Run \`chmod +x ${setupHookDisplayPath}\` to enable.`
+    );
+    expect(warnMock).toHaveBeenNthCalledWith(
+      2,
+      `  Warning: settings-based hooks.worktreeSetup is deprecated. Move your command to ${setupHookDisplayPath} and make it executable.`
+    );
+    expect(execFileSyncMock).not.toHaveBeenCalled();
+    expect(execSyncMock).toHaveBeenCalledWith(
+      'echo setup',
+      expect.objectContaining({
+        env: expect.objectContaining(env),
+        cwd: worktreeCwd,
+      })
+    );
   });
 
   it('warns without throwing when a file-based worktree hook exits non-zero', () => {
@@ -342,7 +371,7 @@ describe('runWorktreeHook', () => {
       throw err;
     });
 
-    runWorktreeHook('worktree-setup', env, undefined, '/tmp/worktree');
+    runWorktreeHook('worktree-setup', env, undefined, worktreeCwd);
 
     expect(warnMock).toHaveBeenCalledWith(
       '  Warning: Worktree setup hook exited with code 3: setup failed'
@@ -354,7 +383,7 @@ describe('runWorktreeHook', () => {
       throw new Error('ENOENT');
     });
 
-    runWorktreeHook('worktree-setup', env, undefined, '/tmp/worktree');
+    runWorktreeHook('worktree-setup', env, undefined, worktreeCwd);
 
     expect(execFileSyncMock).not.toHaveBeenCalled();
     expect(execSyncMock).not.toHaveBeenCalled();
