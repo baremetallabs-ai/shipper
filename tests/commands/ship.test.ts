@@ -1,10 +1,13 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   STAGE_NAME,
   AUTO_PRIORITY_LABELS,
   selectNextCandidate,
   selectBlockedIssues,
   printUnblockSummary,
+  shipCommand,
 } from '../../src/commands/ship.js';
 import type { UnblockAttempt } from '../../src/commands/ship.js';
 
@@ -17,6 +20,15 @@ vi.mock('../../src/lib/repo.js', () => ({
   getRepoNwo: vi.fn(() => 'owner/repo'),
 }));
 
+vi.mock('../../src/lib/lock.js', () => ({
+  withIssueLock: vi.fn((_issue: string, fn: () => unknown) => fn()),
+  releaseIssueLock: vi.fn(),
+}));
+
+vi.mock('../../src/lib/prompt-runner.js', () => ({
+  runPrompt: vi.fn(() => 0),
+}));
+
 vi.mock('../../src/lib/prompts.js', () => ({
   agentPrompts: { claude: {} },
 }));
@@ -26,16 +38,46 @@ vi.mock('node:child_process', async (importOriginal) => {
   return {
     ...actual,
     execFileSync: vi.fn(),
+    spawn: vi.fn(),
     spawnSync: vi.fn(),
   };
 });
 
 import { selectIssuesForStage, clearStaleLockIfNeeded } from '../../src/lib/github.js';
-import { execFileSync } from 'node:child_process';
+import { releaseIssueLock } from '../../src/lib/lock.js';
+import { execFileSync, spawn } from 'node:child_process';
 
 const mockSelectIssuesForStage = vi.mocked(selectIssuesForStage);
 const mockClearStaleLockIfNeeded = vi.mocked(clearStaleLockIfNeeded);
+const mockReleaseIssueLock = vi.mocked(releaseIssueLock);
 const mockExecFileSync = vi.mocked(execFileSync);
+const mockSpawn = vi.mocked(spawn);
+
+type ShipSignal = 'SIGINT' | 'SIGTERM' | 'SIGKILL';
+
+class FakeChildProcess extends EventEmitter {
+  stdout = new PassThrough();
+  stderr = new PassThrough();
+  exitCode: number | null = null;
+  signalCode: ShipSignal | null = null;
+  kill = vi.fn((_signal?: ShipSignal | number) => true);
+
+  finish(code: number | null, signal: ShipSignal | null = null, stderrText?: string): void {
+    if (stderrText) {
+      this.stderr.write(stderrText);
+    }
+    this.stderr.end();
+    this.stdout.end();
+    this.exitCode = code;
+    this.signalCode = signal;
+    this.emit('exit', code, signal);
+  }
+}
+
+async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
 
 describe('STAGE_NAME', () => {
   it('contains all expected workflow labels', () => {
@@ -180,6 +222,20 @@ describe('selectNextCandidate', () => {
     expect(result).toEqual({ number: 7, title: 'Normal issue' });
     expect(mockClearStaleLockIfNeeded).toHaveBeenCalledWith(7, new Set());
   });
+
+  it('skips issues already active in parallel slots', () => {
+    mockSelectIssuesForStage.mockImplementation((label: string) => {
+      if (label === 'shipper:planned')
+        return [
+          { number: 7, title: 'Active issue' },
+          { number: 8, title: 'Available issue' },
+        ];
+      return [];
+    });
+
+    const result = selectNextCandidate(new Set(), new Set([7]));
+    expect(result).toEqual({ number: 8, title: 'Available issue' });
+  });
 });
 
 describe('selectBlockedIssues', () => {
@@ -304,4 +360,197 @@ describe('printUnblockSummary', () => {
 
     logSpy.mockRestore();
   });
+});
+
+describe('shipCommand parallel auto runner', () => {
+  const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((_code?: number) => {
+    return undefined as never;
+  }) as typeof process.exit);
+  beforeEach(() => {
+    mockSelectIssuesForStage.mockReset();
+    mockClearStaleLockIfNeeded.mockReset();
+    mockExecFileSync.mockReset();
+    mockExecFileSync.mockReturnValue('[]');
+    mockSpawn.mockReset();
+    mockReleaseIssueLock.mockReset();
+    exitSpy.mockClear();
+    vi.useRealTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('fills slots immediately and refills on the first completion', async () => {
+    let plannedIssues = [
+      { number: 1, title: 'Issue one' },
+      { number: 2, title: 'Issue two' },
+      { number: 3, title: 'Issue three' },
+    ];
+    mockSelectIssuesForStage.mockImplementation((label: string) => {
+      if (label === 'shipper:planned') return plannedIssues;
+      return [];
+    });
+
+    const child1 = new FakeChildProcess();
+    const child2 = new FakeChildProcess();
+    const child3 = new FakeChildProcess();
+    mockSpawn
+      .mockReturnValueOnce(child1 as never)
+      .mockReturnValueOnce(child2 as never)
+      .mockReturnValueOnce(child3 as never);
+
+    const runPromise = shipCommand(undefined, { auto: true, merge: false, parallel: 2 });
+
+    await flushMicrotasks();
+
+    expect(mockSpawn).toHaveBeenCalledTimes(2);
+    expect(mockSpawn.mock.calls[0]?.[1]).toEqual([process.argv[1]!, 'ship', '1', '--merge']);
+    expect(mockSpawn.mock.calls[1]?.[1]).toEqual([process.argv[1]!, 'ship', '2', '--merge']);
+
+    plannedIssues = plannedIssues.filter((issue) => issue.number !== 1);
+    child1.finish(0);
+    await flushMicrotasks();
+
+    expect(mockSpawn).toHaveBeenCalledTimes(3);
+    expect(mockSpawn.mock.calls[2]?.[1]).toEqual([process.argv[1]!, 'ship', '3', '--merge']);
+    expect(
+      mockSelectIssuesForStage.mock.calls.filter(([label]) => label === 'shipper:planned').length
+    ).toBeGreaterThanOrEqual(3);
+
+    plannedIssues = plannedIssues.filter((issue) => issue.number !== 2);
+    child2.finish(0);
+    await flushMicrotasks();
+    plannedIssues = plannedIssues.filter((issue) => issue.number !== 3);
+    child3.finish(0);
+    await runPromise;
+
+    expect(exitSpy).toHaveBeenCalledWith(0);
+  });
+
+  it('reuses a failed slot for the next candidate and skips the failed issue afterwards', async () => {
+    let plannedIssues = [
+      { number: 1, title: 'Issue one' },
+      { number: 2, title: 'Issue two' },
+      { number: 3, title: 'Issue three' },
+    ];
+    mockSelectIssuesForStage.mockImplementation((label: string) => {
+      if (label === 'shipper:planned') return plannedIssues;
+      return [];
+    });
+
+    const child1 = new FakeChildProcess();
+    const child2 = new FakeChildProcess();
+    const child3 = new FakeChildProcess();
+    mockSpawn
+      .mockReturnValueOnce(child1 as never)
+      .mockReturnValueOnce(child2 as never)
+      .mockReturnValueOnce(child3 as never);
+
+    const runPromise = shipCommand(undefined, { auto: true, merge: false, parallel: 2 });
+
+    await flushMicrotasks();
+    plannedIssues = plannedIssues.filter((issue) => issue.number !== 1);
+    child1.finish(1, null, 'boom');
+    await flushMicrotasks();
+
+    expect(mockSpawn).toHaveBeenCalledTimes(3);
+    expect(mockSpawn.mock.calls.map(([, args]) => (args as string[])[2])).toEqual(['1', '2', '3']);
+
+    plannedIssues = plannedIssues.filter((issue) => issue.number !== 2);
+    child2.finish(0);
+    await flushMicrotasks();
+    plannedIssues = plannedIssues.filter((issue) => issue.number !== 3);
+    child3.finish(0);
+    await runPromise;
+    expect(exitSpy).toHaveBeenCalledWith(0);
+  });
+
+  it('waits for all active slots to drain before running the unblock pass', async () => {
+    let plannedIssues = [
+      { number: 1, title: 'Issue one' },
+      { number: 2, title: 'Issue two' },
+    ];
+    mockSelectIssuesForStage.mockImplementation((label: string) => {
+      if (label === 'shipper:planned') {
+        return plannedIssues;
+      }
+      return [];
+    });
+
+    const child1 = new FakeChildProcess();
+    const child2 = new FakeChildProcess();
+    mockSpawn.mockReturnValueOnce(child1 as never).mockReturnValueOnce(child2 as never);
+
+    const runPromise = shipCommand(undefined, { auto: true, merge: false, parallel: 2 });
+
+    await flushMicrotasks();
+    plannedIssues = plannedIssues.filter((issue) => issue.number !== 1);
+    child1.finish(0);
+    await flushMicrotasks();
+
+    expect(mockExecFileSync).not.toHaveBeenCalled();
+
+    plannedIssues = plannedIssues.filter((issue) => issue.number !== 2);
+    child2.finish(0);
+    await runPromise;
+
+    expect(mockExecFileSync).toHaveBeenCalledTimes(1);
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      'gh',
+      expect.arrayContaining(['issue', 'list', '--label', 'shipper:blocked']),
+      expect.any(Object)
+    );
+  });
+
+  it('uses the sequential helper when parallel is not enabled', async () => {
+    mockSelectIssuesForStage.mockReturnValue([]);
+
+    await shipCommand(undefined, { auto: true, merge: false, parallel: undefined });
+
+    expect(mockSpawn).not.toHaveBeenCalled();
+    expect(mockSelectIssuesForStage).toHaveBeenCalled();
+    expect(exitSpy).toHaveBeenCalledWith(0);
+  });
+
+  it.each(['SIGINT', 'SIGTERM'] as const)(
+    'forwards %s to active children and releases locks for survivors',
+    async (signal) => {
+      vi.useFakeTimers();
+
+      let plannedIssues = [
+        { number: 1, title: 'Issue one' },
+        { number: 2, title: 'Issue two' },
+      ];
+      mockSelectIssuesForStage.mockImplementation((label: string) => {
+        if (label === 'shipper:planned') {
+          return plannedIssues;
+        }
+        return [];
+      });
+
+      const child1 = new FakeChildProcess();
+      const child2 = new FakeChildProcess();
+      mockSpawn.mockReturnValueOnce(child1 as never).mockReturnValueOnce(child2 as never);
+
+      const runPromise = shipCommand(undefined, { auto: true, merge: false, parallel: 2 });
+
+      await flushMicrotasks();
+      process.emit(signal, signal);
+      await vi.advanceTimersByTimeAsync(3000);
+
+      expect(child1.kill).toHaveBeenCalledWith(signal);
+      expect(child2.kill).toHaveBeenCalledWith(signal);
+      expect(child1.kill).toHaveBeenCalledWith('SIGKILL');
+      expect(child2.kill).toHaveBeenCalledWith('SIGKILL');
+      expect(mockReleaseIssueLock).toHaveBeenCalledWith('1');
+      expect(mockReleaseIssueLock).toHaveBeenCalledWith('2');
+
+      plannedIssues = [];
+      child1.finish(null, 'SIGKILL');
+      child2.finish(null, 'SIGKILL');
+      await flushMicrotasks();
+      await runPromise;
+    }
+  );
 });

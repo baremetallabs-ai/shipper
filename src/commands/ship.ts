@@ -1,8 +1,9 @@
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { clearStaleLockIfNeeded, selectIssuesForStage } from '../lib/github.js';
 import { getRepoNwo } from '../lib/repo.js';
 import { withStageHooks } from '../lib/hooks.js';
-import { withIssueLock } from '../lib/lock.js';
+import { releaseIssueLock, withIssueLock } from '../lib/lock.js';
 import { runPrompt } from '../lib/prompt-runner.js';
 import { postMerge } from './merge.js';
 import type { QueuedPR } from './merge.js';
@@ -50,7 +51,24 @@ export interface UnblockAttempt {
 export interface ShipOptions {
   merge: boolean;
   auto: boolean;
+  parallel?: number;
 }
+
+interface AsyncIssueRun {
+  child: ChildProcess;
+  result: Promise<{ success: boolean; error?: string }>;
+}
+
+interface ActiveIssueRun {
+  issue: { number: number; title: string };
+  child: ChildProcess;
+  completion: Promise<{
+    issue: { number: number; title: string };
+    result: { success: boolean; error?: string };
+  }>;
+}
+
+type ShipSignal = 'SIGINT' | 'SIGTERM' | 'SIGKILL';
 
 function getCurrentLabel(issueStr: string): string | undefined {
   let output: string;
@@ -356,13 +374,58 @@ function shipOneIssue(issue: string, merge: boolean): { success: boolean; error?
   });
 }
 
+function shipOneIssueAsync(issue: string): AsyncIssueRun {
+  const stderr: string[] = [];
+  const child = spawn(process.execPath, [process.argv[1]!, 'ship', issue, '--merge'], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: process.env,
+  });
+
+  if (child.stderr) {
+    child.stderr.on('data', (chunk: Buffer | string) => {
+      stderr.push(chunk.toString());
+    });
+  }
+
+  const result = new Promise<{ success: boolean; error?: string }>((resolve) => {
+    child.on('error', (error) => {
+      resolve({ success: false, error: error.message });
+    });
+
+    child.on('exit', (code, signal) => {
+      if (code === 0) {
+        resolve({ success: true });
+        return;
+      }
+
+      const stderrOutput = stderr.join('').trim();
+      if (stderrOutput) {
+        resolve({ success: false, error: stderrOutput });
+        return;
+      }
+
+      if (signal) {
+        resolve({ success: false, error: `child exited from signal ${signal}` });
+        return;
+      }
+
+      resolve({ success: false, error: `child exited with code ${code ?? 'unknown'}` });
+    });
+  });
+
+  return { child, result };
+}
+
 export function selectNextCandidate(
-  skippedIssues: Set<number>
+  skippedIssues: Set<number>,
+  activeIssues: ReadonlySet<number> = new Set<number>()
 ): { number: number; title: string } | null {
   for (const label of AUTO_PRIORITY_LABELS) {
     const staleLocked = new Set<number>();
     const issues = selectIssuesForStage(label, staleLocked);
-    const candidate = issues.find((i) => !skippedIssues.has(i.number));
+    const candidate = issues.find(
+      (i) => !skippedIssues.has(i.number) && !activeIssues.has(i.number)
+    );
     if (candidate) {
       clearStaleLockIfNeeded(candidate.number, staleLocked);
       return candidate;
@@ -453,62 +516,178 @@ export function printUnblockSummary(attempts: UnblockAttempt[]): void {
   }
 }
 
-export function shipCommand(
-  issue: string | undefined,
-  options: ShipOptions = { merge: false, auto: false }
-): void {
-  if (options.auto) {
-    const skippedIssues = new Set<number>();
-    const results: AutoResult[] = [];
-    const allUnblockAttempts: UnblockAttempt[] = [];
+function shipAutoSequential(): void {
+  const skippedIssues = new Set<number>();
+  const results: AutoResult[] = [];
+  const allUnblockAttempts: UnblockAttempt[] = [];
 
+  for (;;) {
+    // Inner loop: process all available candidates
     for (;;) {
-      // Inner loop: process all available candidates
-      for (;;) {
-        const candidate = selectNextCandidate(skippedIssues);
+      const candidate = selectNextCandidate(skippedIssues);
+      if (!candidate) break;
+
+      console.log(`\nAuto: advancing issue #${candidate.number} — ${candidate.title}`);
+      const result = shipOneIssue(String(candidate.number), true);
+
+      if (result.success) {
+        results.push({ issue: candidate.number, title: candidate.title, outcome: 'pass' });
+      } else {
+        skippedIssues.add(candidate.number);
+        results.push({
+          issue: candidate.number,
+          title: candidate.title,
+          outcome: 'fail',
+          error: result.error,
+        });
+      }
+    }
+
+    // Unblock pass
+    const blocked = selectBlockedIssues();
+    if (blocked.length === 0) break;
+
+    let progress = false;
+    for (const issue of blocked) {
+      console.log(`\nAuto: attempting unblock of #${issue.number} — ${issue.title}`);
+      const unblocked = attemptUnblock(String(issue.number));
+      allUnblockAttempts.push({
+        issue: issue.number,
+        title: issue.title,
+        outcome: unblocked ? 'unblocked' : 'still blocked',
+      });
+      if (unblocked) progress = true;
+    }
+
+    if (!progress) break;
+    // Loop back — newly unblocked issues are now eligible candidates
+  }
+
+  printAutoSummary(results);
+  if (allUnblockAttempts.length > 0) {
+    printUnblockSummary(allUnblockAttempts);
+  }
+  process.exit(0);
+}
+
+async function shipAutoParallel(_parallel: number): Promise<void> {
+  const skippedIssues = new Set<number>();
+  const results: AutoResult[] = [];
+  const allUnblockAttempts: UnblockAttempt[] = [];
+  const activeRuns = new Map<number, ActiveIssueRun>();
+
+  let shuttingDown = false;
+
+  const wait = (ms: number) =>
+    new Promise<void>((resolve) => {
+      setTimeout(resolve, ms);
+    });
+
+  const onSignal = (signal: ShipSignal) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+
+    void (async () => {
+      for (const run of activeRuns.values()) {
+        run.child.kill(signal);
+      }
+
+      await wait(3000);
+
+      for (const [issueNumber, run] of activeRuns) {
+        if (run.child.exitCode === null && run.child.signalCode === null) {
+          run.child.kill('SIGKILL');
+        }
+        releaseIssueLock(String(issueNumber));
+      }
+
+      process.exit(1);
+    })();
+  };
+
+  process.on('SIGINT', onSignal);
+  process.on('SIGTERM', onSignal);
+
+  try {
+    for (;;) {
+      while (activeRuns.size < _parallel) {
+        const candidate = selectNextCandidate(skippedIssues, new Set(activeRuns.keys()));
         if (!candidate) break;
 
         console.log(`\nAuto: advancing issue #${candidate.number} — ${candidate.title}`);
-        const result = shipOneIssue(String(candidate.number), true);
-
-        if (result.success) {
-          results.push({ issue: candidate.number, title: candidate.title, outcome: 'pass' });
-        } else {
-          skippedIssues.add(candidate.number);
-          results.push({
-            issue: candidate.number,
-            title: candidate.title,
-            outcome: 'fail',
-            error: result.error,
-          });
-        }
-      }
-
-      // Unblock pass
-      const blocked = selectBlockedIssues();
-      if (blocked.length === 0) break;
-
-      let progress = false;
-      for (const issue of blocked) {
-        console.log(`\nAuto: attempting unblock of #${issue.number} — ${issue.title}`);
-        const unblocked = attemptUnblock(String(issue.number));
-        allUnblockAttempts.push({
-          issue: issue.number,
-          title: issue.title,
-          outcome: unblocked ? 'unblocked' : 'still blocked',
+        const run = shipOneIssueAsync(String(candidate.number));
+        activeRuns.set(candidate.number, {
+          issue: candidate,
+          child: run.child,
+          completion: run.result.then((result) => ({ issue: candidate, result })),
         });
-        if (unblocked) progress = true;
       }
 
-      if (!progress) break;
-      // Loop back — newly unblocked issues are now eligible candidates
+      if (activeRuns.size === 0) {
+        const blocked = selectBlockedIssues();
+        if (blocked.length === 0) break;
+
+        let progress = false;
+        for (const issue of blocked) {
+          console.log(`\nAuto: attempting unblock of #${issue.number} — ${issue.title}`);
+          const unblocked = attemptUnblock(String(issue.number));
+          allUnblockAttempts.push({
+            issue: issue.number,
+            title: issue.title,
+            outcome: unblocked ? 'unblocked' : 'still blocked',
+          });
+          if (unblocked) progress = true;
+        }
+
+        if (!progress) break;
+        continue;
+      }
+
+      const completed = await Promise.race(
+        Array.from(activeRuns.values(), (run) => run.completion)
+      );
+      activeRuns.delete(completed.issue.number);
+
+      if (completed.result.success) {
+        results.push({
+          issue: completed.issue.number,
+          title: completed.issue.title,
+          outcome: 'pass',
+        });
+      } else {
+        skippedIssues.add(completed.issue.number);
+        results.push({
+          issue: completed.issue.number,
+          title: completed.issue.title,
+          outcome: 'fail',
+          error: completed.result.error,
+        });
+      }
+    }
+  } finally {
+    process.removeListener('SIGINT', onSignal);
+    process.removeListener('SIGTERM', onSignal);
+  }
+
+  printAutoSummary(results);
+  if (allUnblockAttempts.length > 0) {
+    printUnblockSummary(allUnblockAttempts);
+  }
+  process.exit(0);
+}
+
+export async function shipCommand(
+  issue: string | undefined,
+  options: ShipOptions = { merge: false, auto: false }
+): Promise<void> {
+  if (options.auto) {
+    if (options.parallel) {
+      await shipAutoParallel(options.parallel);
+      return;
     }
 
-    printAutoSummary(results);
-    if (allUnblockAttempts.length > 0) {
-      printUnblockSummary(allUnblockAttempts);
-    }
-    process.exit(0);
+    shipAutoSequential();
+    return;
   }
 
   // Non-auto path: issue is required (validated in index.ts)
