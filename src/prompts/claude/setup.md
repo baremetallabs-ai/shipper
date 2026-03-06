@@ -32,6 +32,7 @@ Create or update the project's agent configuration file so that coding agents kn
 - **Discover CI checks:** Read `.github/workflows/` to find the exact commands CI runs (e.g., lint, format check, type check, build, test commands). These are the source of truth — do not guess or use generic equivalents.
 - **If the file already exists:** Read it first. Add a "Commands" or equivalent section with the CI check commands if one doesn't exist. If it already has a commands section, verify it matches CI and update if needed. Preserve all other content.
 - **If the file doesn't exist:** Create it with at minimum a "Commands" section listing every CI check command, and a brief project description based on what you can infer from the repo structure.
+- **If no CI configuration exists:** Skip CI check discovery. If creating a new file, omit the Commands section. If updating an existing file, leave any existing commands section unchanged.
 - **Do not hardcode commands in this prompt.** The agent must discover them from the actual CI configuration.
 
 ### 3. Settings health check
