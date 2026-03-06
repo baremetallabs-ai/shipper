@@ -31,10 +31,12 @@ describe('gh-api-get-review-threads.sh', () => {
   });
 
   it('prints expected usage on wrong arg count', () => {
+    const scriptPath = path.join(scriptsDir, 'gh-api-get-review-threads.sh');
     try {
-      execFileSync('bash', [path.join(scriptsDir, 'gh-api-get-review-threads.sh')], {
+      execFileSync('bash', [scriptPath], {
         stdio: 'pipe',
       });
+      expect.unreachable('expected the usage guard to exit non-zero');
     } catch (err: unknown) {
       const stderr = (err as { stderr?: Buffer }).stderr?.toString().trim() ?? '';
       expect(stderr).toBe('Usage: gh-api-get-review-threads.sh <owner/repo> <pr-number>');
