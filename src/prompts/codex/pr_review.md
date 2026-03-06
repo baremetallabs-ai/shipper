@@ -3,8 +3,8 @@ cmd: codex
 args:
   - exec
   - --full-auto
-  - --sandbox
-  - read-only
+  - -c
+  - sandbox_workspace_write.network_access=true
 append-issue: true
 append-pr: true
 ---
