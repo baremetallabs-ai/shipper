@@ -18,9 +18,10 @@ export function ejectCommand(name?: string) {
     console.error(`Error: No bundled prompts found for agent "${agent}".`);
     process.exit(1);
   }
-  const filenames = Object.keys(promptSet).filter((filename) => filename !== 'setup.md');
-  const cliNames = filenames.map(filenameToCliName);
+  const allFilenames = Object.keys(promptSet).filter((filename) => filename !== 'setup.md');
+  const cliNames = allFilenames.map(filenameToCliName);
   const targetDir = path.resolve('.shipper', 'prompts', agent);
+  const filenamesToEject = name ? [cliNameToFilename(name)] : allFilenames;
 
   if (name) {
     if (!cliNames.includes(name)) {
@@ -29,19 +30,6 @@ export function ejectCommand(name?: string) {
       );
       process.exit(1);
     }
-
-    const filename = cliNameToFilename(name);
-    const targetPath = path.resolve('.shipper', 'prompts', agent, filename);
-
-    mkdirSync(targetDir, { recursive: true });
-    if (existsSync(targetPath)) {
-      console.log(`Skipping ${name} — already exists at ${targetPath}`);
-      return;
-    }
-
-    writeFileSync(targetPath, promptSet[filename]!);
-    console.log(`Wrote ${targetPath}`);
-    return;
   }
 
   mkdirSync(targetDir, { recursive: true });
@@ -49,9 +37,10 @@ export function ejectCommand(name?: string) {
   let wroteCount = 0;
   let skippedCount = 0;
 
-  for (const filename of filenames) {
+  for (const filename of filenamesToEject) {
     const cliName = filenameToCliName(filename);
     const targetPath = path.resolve('.shipper', 'prompts', agent, filename);
+    const prompt = promptSet[filename];
 
     if (existsSync(targetPath)) {
       skippedCount += 1;
@@ -59,10 +48,17 @@ export function ejectCommand(name?: string) {
       continue;
     }
 
-    writeFileSync(targetPath, promptSet[filename]!);
+    if (prompt === undefined) {
+      console.error(`Error: No bundled prompt found for "${cliName}".`);
+      process.exit(1);
+    }
+
+    writeFileSync(targetPath, prompt);
     wroteCount += 1;
     console.log(`Wrote ${targetPath}`);
   }
 
-  console.log(`Summary: wrote ${wroteCount}, skipped ${skippedCount}`);
+  if (!name) {
+    console.log(`Summary: wrote ${wroteCount}, skipped ${skippedCount}`);
+  }
 }
