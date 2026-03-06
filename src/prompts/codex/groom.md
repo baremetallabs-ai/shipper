@@ -122,8 +122,8 @@ After producing the final artifacts, you must update GitHub using repo-local tem
    - Use `gh issue edit <ISSUE> --add-label "shipper:groomed" --remove-label "shipper:new" --remove-label "shipper:blocked"`
 
    **If the parent is still blocked by a hard conflict, dependency, or sibling-ordering constraint:**
-   - Do NOT add `shipper:groomed` — keep the parent at `shipper:new` with `shipper:blocked`
-   - Add `shipper:blocked`: `gh issue edit <ISSUE> --add-label "shipper:blocked"`
+   - Add both `shipper:groomed` and `shipper:blocked`, remove `shipper:new`
+   - Use `gh issue edit <ISSUE> --add-label "shipper:groomed" --add-label "shipper:blocked" --remove-label "shipper:new"`
    - Post a separate `## Blocked` comment after the grooming summary comment, referencing the conflicting/dependent issue number(s) and stating the unblock condition. Save it to `.shipper/tmp/blocked_comment-<number>.md` and post with `gh issue comment <ISSUE> --body-file ./.shipper/tmp/blocked_comment-<number>.md`. Example format:
      ```
      ## Blocked
@@ -157,7 +157,7 @@ If your decomposition recommendation includes additional issues, you must create
    - Rewrite the parent issue body in the standard groomed format (`Summary`, `Requirements`, `Acceptance Criteria`, `Related Issues`, `Out of Scope`, `Open Questions`) so it reflects only the remaining scope not covered by child issues.
    - Then follow the earlier issue-body update steps for the parent.
    - If the parent is not blocked after grooming, it stays open with the `shipper:groomed` label.
-   - If the parent is still blocked (for example, because of a hard dependency/conflict or because a sibling must be completed first), keep it at `shipper:new` with `shipper:blocked` instead.
+   - If the parent is still blocked (for example, because of a hard dependency/conflict or because a sibling must be completed first), add both `shipper:groomed` and `shipper:blocked`, and remove `shipper:new`.
 
    Use your judgment to determine which scenario applies based on whether the created child issues collectively cover the parent's entire original scope.
 
