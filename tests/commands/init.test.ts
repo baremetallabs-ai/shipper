@@ -23,10 +23,6 @@ vi.mock('node:child_process', () => ({
   execFileSync: vi.fn(),
 }));
 
-vi.mock('../../src/lib/prompts.js', () => ({
-  agentPrompts: { claude: { 'test.md': '# test' } },
-}));
-
 vi.mock('../../src/lib/scripts.js', () => ({
   scripts: {},
 }));
@@ -98,12 +94,12 @@ describe('initCommand directories', () => {
     expect(scriptsDirCall).toBeDefined();
   });
 
-  it('creates .shipper/prompts/claude directory', async () => {
+  it('does not create .shipper/prompts directory', async () => {
     await initCommand({ agent: 'claude' });
     const promptDirCall = mkdirSyncMock.mock.calls.find(
-      (call: unknown[]) => call[0] === path.resolve('.shipper', 'prompts', 'claude')
+      (call: unknown[]) => typeof call[0] === 'string' && (call[0] as string).includes('prompts')
     );
-    expect(promptDirCall).toBeDefined();
+    expect(promptDirCall).toBeUndefined();
   });
 });
 
@@ -230,7 +226,7 @@ describe('initCommand stored agent', () => {
 });
 
 describe('initCommand agent selection', () => {
-  it('--agent claude installs prompts to agent subdirectory and writes agents to settings', async () => {
+  it('--agent claude writes agents to settings but does not write prompt files', async () => {
     await initCommand({ agent: 'claude' });
     const settingsCall = writeFileSyncMock.mock.calls.find(
       (call: unknown[]) => call[0] === settingsPath
@@ -240,10 +236,9 @@ describe('initCommand agent selection', () => {
     expect(written.agent).toBeUndefined();
 
     const promptCall = writeFileSyncMock.mock.calls.find(
-      (call: unknown[]) => call[0] === path.resolve('.shipper', 'prompts', 'claude', 'test.md')
+      (call: unknown[]) => typeof call[0] === 'string' && (call[0] as string).includes('prompts')
     );
-    expect(promptCall).toBeDefined();
-    expect(promptCall![1]).toBe('# test');
+    expect(promptCall).toBeUndefined();
   });
 
   it('--agent codex prints not yet available error and exits', async () => {
@@ -267,9 +262,7 @@ describe('initCommand agent selection', () => {
       return '';
     });
     await initCommand({ agent: 'claude' });
-    expect(console.log).toHaveBeenCalledWith(
-      'Switching agent from codex to claude — overwriting prompt files'
-    );
+    expect(console.log).toHaveBeenCalledWith('Switching agent from codex to claude');
   });
 
   it('re-init migrates legacy agent key to agents', async () => {

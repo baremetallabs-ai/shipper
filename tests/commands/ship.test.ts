@@ -17,6 +17,10 @@ vi.mock('../../src/lib/repo.js', () => ({
   getRepoNwo: vi.fn(() => 'owner/repo'),
 }));
 
+vi.mock('../../src/lib/prompts.js', () => ({
+  agentPrompts: { claude: {} },
+}));
+
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
