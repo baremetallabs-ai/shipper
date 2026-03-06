@@ -9,6 +9,17 @@ import prRemediatePrompt from '../prompts/claude/pr_remediate.md';
 import unblockPrompt from '../prompts/claude/unblock.md';
 import setupPrompt from '../prompts/claude/setup.md';
 
+import codexNewPrompt from '../prompts/codex/new.md';
+import codexGroomPrompt from '../prompts/codex/groom.md';
+import codexDesignPrompt from '../prompts/codex/design.md';
+import codexPlanPrompt from '../prompts/codex/plan.md';
+import codexImplementPrompt from '../prompts/codex/implement.md';
+import codexPrOpenPrompt from '../prompts/codex/pr_open.md';
+import codexPrReviewPrompt from '../prompts/codex/pr_review.md';
+import codexPrRemediatePrompt from '../prompts/codex/pr_remediate.md';
+import codexUnblockPrompt from '../prompts/codex/unblock.md';
+import codexSetupPrompt from '../prompts/codex/setup.md';
+
 export const agentPrompts: Record<string, Record<string, string>> = {
   claude: {
     'new.md': newPrompt,
@@ -21,5 +32,17 @@ export const agentPrompts: Record<string, Record<string, string>> = {
     'pr_remediate.md': prRemediatePrompt,
     'unblock.md': unblockPrompt,
     'setup.md': setupPrompt,
+  },
+  codex: {
+    'new.md': codexNewPrompt,
+    'groom.md': codexGroomPrompt,
+    'design.md': codexDesignPrompt,
+    'plan.md': codexPlanPrompt,
+    'implement.md': codexImplementPrompt,
+    'pr_open.md': codexPrOpenPrompt,
+    'pr_review.md': codexPrReviewPrompt,
+    'pr_remediate.md': codexPrRemediatePrompt,
+    'unblock.md': codexUnblockPrompt,
+    'setup.md': codexSetupPrompt,
   },
 };
