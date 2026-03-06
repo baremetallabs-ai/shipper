@@ -1,6 +1,6 @@
 {
   "prReviewWait": {
-    "mode": "checks",
+    "mode": "timer",
     "timeoutMinutes": 15
   },
   "lockTimeoutMinutes": 30,
@@ -12,6 +12,5 @@
   "hooks": {
     "worktreeSetup": "npm install"
   },
-  "prReviewWaitMinutes": 10,
   "cliVersion": "0.1.0"
 }
