@@ -26,6 +26,7 @@ vi.mock('../src/commands/plan.js', () => ({ planCommand: vi.fn() }));
 vi.mock('../src/commands/next.js', () => ({ nextCommand: vi.fn() }));
 vi.mock('../src/commands/ship.js', () => ({ shipCommand: vi.fn(async () => {}) }));
 vi.mock('../src/commands/implement.js', () => ({ implementCommand: vi.fn() }));
+vi.mock('../src/commands/eject.js', () => ({ ejectCommand: vi.fn() }));
 vi.mock('../src/commands/pr-review.js', () => ({ prReviewCommand: vi.fn() }));
 vi.mock('../src/commands/pr-open.js', () => ({ prOpenCommand: vi.fn() }));
 vi.mock('../src/commands/pr-remediate.js', () => ({ prRemediateCommand: vi.fn() }));
@@ -37,8 +38,14 @@ vi.mock('../src/commands/issue-list.js', () => ({ issueListCommand: vi.fn() }));
 vi.mock('../src/commands/setup.js', () => ({ setupCommand: vi.fn() }));
 
 import { shipCommand } from '../src/commands/ship.js';
+import { ejectCommand } from '../src/commands/eject.js';
+import { runPreflight } from '../src/lib/prerequisites.js';
+import { loadSettings } from '../src/lib/settings.js';
 
 const mockShipCommand = vi.mocked(shipCommand);
+const mockEjectCommand = vi.mocked(ejectCommand);
+const mockRunPreflight = vi.mocked(runPreflight);
+const mockLoadSettings = vi.mocked(loadSettings);
 
 describe('shipper-cli', () => {
   beforeAll(() => {
@@ -54,7 +61,37 @@ describe('shipper-cli', () => {
     expect(output).toContain('groom');
     expect(output).toContain('design');
     expect(output).toContain('plan');
+    expect(output).toContain('eject');
     expect(output).toContain('pr');
+  });
+
+  describe('eject command wiring', () => {
+    const originalArgv = [...process.argv];
+
+    beforeEach(() => {
+      vi.resetModules();
+      mockEjectCommand.mockReset();
+      mockRunPreflight.mockClear();
+      mockLoadSettings.mockClear();
+    });
+
+    afterEach(() => {
+      process.argv = [...originalArgv];
+    });
+
+    async function importEntrypoint() {
+      await import('../src/index.ts');
+    }
+
+    it('registers the eject command and runs preflight before invoking it', async () => {
+      process.argv = ['node', 'src/index.ts', 'eject', 'groom'];
+
+      await importEntrypoint();
+
+      expect(mockEjectCommand).toHaveBeenCalledWith('groom');
+      expect(mockLoadSettings).toHaveBeenCalled();
+      expect(mockRunPreflight).toHaveBeenCalled();
+    });
   });
 
   describe('ship command parallel validation', () => {
