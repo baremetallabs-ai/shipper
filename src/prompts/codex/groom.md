@@ -139,9 +139,10 @@ After producing the final artifacts, you must update GitHub using repo-local tem
 If your decomposition recommendation includes additional issues, you must create them:
 
 1. For each new issue, write its body to its own file under `./.shipper/tmp/` (e.g. `split_issue-<number>-1.md`, `split_issue-<number>-2.md`), where `<number>` is the parent issue number.
-2. Create each new issue using `gh issue create --title "<TITLE>" --body-file <FILE> --label "shipper:new"`.
-   - These new issues must start in the **new** status (not groomed).
-   - If this issue depends on another sibling being completed first, also add `shipper:blocked`: `--label "shipper:new" --label "shipper:blocked"`.
+2. Create each new issue using `gh issue create --title "<TITLE>" --body-file <FILE> --label "shipper:groomed"`.
+   - These child issues must start in the **groomed** status, since they are written with full groomed-quality content during decomposition.
+   - Each child issue body **must** include all groomed-format sections (`Summary`, `Requirements`, `Acceptance Criteria`, `Related Issues`, `Out of Scope`, `Open Questions`) and must not be a placeholder, because child issues will skip the grooming stage.
+   - If this issue depends on another sibling being completed first, also add `shipper:blocked`: `--label "shipper:groomed" --label "shipper:blocked"`.
    - For each blocked issue, post a comment starting with `## Blocked` that explains the unblock condition in natural language. Example: `## Blocked\n\nBlocked until #35 is merged — reset's branch cleanup depends on the shipper/ prefix convention being in place.`
    - The original issue can also receive `shipper:blocked` if grooming determines a sibling should go first. In that case, add the label and post the blocking-condition comment on the original issue too.
 3. After creating them, include the created URLs in your final response, and (optionally) add them as links in the original issue comment if appropriate.
