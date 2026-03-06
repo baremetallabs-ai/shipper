@@ -1,11 +1,13 @@
 import { execFileSync } from 'node:child_process';
 import { confirm, promptChoice } from '../lib/confirm.js';
-import { getRepoNwo } from '../lib/repo.js';
 import { isLockStale } from '../lib/lock.js';
+import { getRepoNwo } from '../lib/repo.js';
 
-type ResetMode = 'full' | 'partial';
+const WORKFLOW_STAGES = ['new', 'groomed', 'designed', 'planned', 'implemented'] as const;
+const PR_STAGE_LABELS = ['shipper:pr-open', 'shipper:pr-reviewed', 'shipper:ready'] as const;
+const NON_WORKFLOW_STAGE_NAMES = new Set(['blocked', 'locked', 'pr-open', 'pr-reviewed', 'ready']);
 
-const PR_STAGE_LABELS = ['shipper:pr-open', 'shipper:pr-reviewed', 'shipper:ready'];
+type WorkflowStage = (typeof WORKFLOW_STAGES)[number];
 
 interface IssueViewData {
   number: number;
@@ -21,14 +23,53 @@ interface PREntry {
 interface ArtifactScan {
   labelsToRemove: string[];
   addTarget: boolean;
+  targetStage: WorkflowStage;
   targetLabel: string;
-  mode: ResetMode;
   commentIds: number[];
   prs: PREntry[];
   branchesToDelete: string[];
 }
 
-function getImplementedTimestamp(issueNum: number, nwo: string): string | null {
+interface CurrentStage {
+  stage: WorkflowStage;
+  hasPrLabels: boolean;
+}
+
+function getStageLabel(stage: WorkflowStage): string {
+  return `shipper:${stage}`;
+}
+
+function getStageIndex(stage: WorkflowStage): number {
+  return WORKFLOW_STAGES.indexOf(stage);
+}
+
+function parseStage(input: string): WorkflowStage | null {
+  const normalized = input.replace(/^shipper:/, '');
+  return WORKFLOW_STAGES.includes(normalized as WorkflowStage)
+    ? (normalized as WorkflowStage)
+    : null;
+}
+
+function getCurrentStage(labels: string[]): CurrentStage {
+  const hasPrLabels = labels.some((label) =>
+    PR_STAGE_LABELS.includes(label as (typeof PR_STAGE_LABELS)[number])
+  );
+
+  for (let i = WORKFLOW_STAGES.length - 1; i >= 0; i -= 1) {
+    const stage = WORKFLOW_STAGES[i]!;
+    if (labels.includes(getStageLabel(stage))) {
+      return { stage, hasPrLabels };
+    }
+  }
+
+  if (hasPrLabels) {
+    return { stage: 'implemented', hasPrLabels: true };
+  }
+
+  return { stage: 'new', hasPrLabels: false };
+}
+
+function getStageTimestamp(issueNum: number, nwo: string, stage: WorkflowStage): string | null {
   try {
     const output = execFileSync(
       'gh',
@@ -37,7 +78,7 @@ function getImplementedTimestamp(issueNum: number, nwo: string): string | null {
         `repos/${nwo}/issues/${issueNum}/timeline`,
         '--paginate',
         '--jq',
-        '.[] | select(.event == "labeled" and .label.name? == "shipper:implemented") | .created_at',
+        `.[] | select(.event == "labeled" and .label.name? == "${getStageLabel(stage)}") | .created_at`,
       ],
       { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
     ).trim();
@@ -53,66 +94,52 @@ function getImplementedTimestamp(issueNum: number, nwo: string): string | null {
   }
 }
 
+function getInvalidStageError(input: string): string {
+  const normalized = input.replace(/^shipper:/, '');
+  const validStages = WORKFLOW_STAGES.join(', ');
+
+  if (NON_WORKFLOW_STAGE_NAMES.has(normalized)) {
+    return `Error: ${input} is not a valid workflow stage. Valid stages: ${validStages}.`;
+  }
+
+  return `Error: ${input} is not a valid stage name. Valid stages: ${validStages}.`;
+}
+
+function getValidTargets(currentStage: CurrentStage): WorkflowStage[] {
+  const currentIndex = getStageIndex(currentStage.stage);
+  const targets = WORKFLOW_STAGES.slice(0, currentIndex);
+
+  if (currentStage.hasPrLabels) {
+    targets.push('implemented');
+  }
+
+  return targets;
+}
+
 function scanArtifacts(
   issueNum: number,
   nwo: string,
-  mode: ResetMode,
+  targetStage: WorkflowStage,
   labels: string[]
 ): ArtifactScan {
-  const shipperLabels = labels.filter((n) => n.startsWith('shipper:'));
-
-  // Labels
-  let labelsToRemove: string[];
-  let targetLabel: string;
-  let addTarget: boolean;
-
-  if (mode === 'partial') {
-    labelsToRemove = labels.filter((l) => PR_STAGE_LABELS.includes(l));
-    targetLabel = 'shipper:implemented';
-    addTarget = !labels.includes('shipper:implemented');
-  } else {
-    labelsToRemove = shipperLabels.filter((n) => n !== 'shipper:new');
-    targetLabel = 'shipper:new';
-    addTarget = !shipperLabels.includes('shipper:new');
-  }
-
-  // Comments
-  let commentIds: number[] = [];
-  if (mode === 'partial') {
-    const implementedAt = getImplementedTimestamp(issueNum, nwo);
-    if (implementedAt) {
-      try {
-        const raw = execFileSync(
-          'gh',
-          [
-            'api',
-            `repos/${nwo}/issues/${issueNum}/comments`,
-            '--paginate',
-            '--jq',
-            '.[] | {id, created_at}',
-          ],
-          { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
-        );
-        const lines = raw
-          .trim()
-          .split('\n')
-          .filter((s) => s !== '');
-        for (const line of lines) {
-          const comment = JSON.parse(line) as { id: number; created_at: string };
-          if (comment.created_at > implementedAt) {
-            commentIds.push(comment.id);
-          }
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.warn(`Warning: Could not fetch comments for issue #${issueNum}: ${msg}`);
-      }
-    } else {
-      console.warn(
-        'Warning: Could not determine when shipper:implemented was applied. Skipping comment cleanup.'
-      );
+  const targetIndex = getStageIndex(targetStage);
+  const targetLabel = getStageLabel(targetStage);
+  const labelsToRemove = labels.filter((label) => {
+    if (PR_STAGE_LABELS.includes(label as (typeof PR_STAGE_LABELS)[number])) {
+      return true;
     }
-  } else {
+
+    if (!label.startsWith('shipper:')) {
+      return false;
+    }
+
+    const labelStage = parseStage(label);
+    return labelStage !== null && getStageIndex(labelStage) > targetIndex;
+  });
+  const addTarget = !labels.includes(targetLabel);
+
+  let commentIds: number[] = [];
+  if (targetStage === 'new') {
     try {
       const raw = execFileSync(
         'gh',
@@ -122,15 +149,56 @@ function scanArtifacts(
       commentIds = raw
         .trim()
         .split('\n')
-        .filter((s) => s !== '')
+        .filter((line) => line !== '')
         .map(Number);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(`Warning: Could not fetch comments for issue #${issueNum}: ${msg}`);
     }
+  } else {
+    const stageTimestamp = getStageTimestamp(issueNum, nwo, targetStage);
+    if (stageTimestamp) {
+      const cutoffDate = new Date(stageTimestamp);
+      if (Number.isNaN(cutoffDate.getTime())) {
+        console.warn(
+          `Warning: Could not determine when ${targetLabel} was applied. Skipping comment cleanup.`
+        );
+      } else {
+        const cutoff = cutoffDate.getTime() - 60_000;
+        try {
+          const raw = execFileSync(
+            'gh',
+            [
+              'api',
+              `repos/${nwo}/issues/${issueNum}/comments`,
+              '--paginate',
+              '--jq',
+              '.[] | {id, created_at}',
+            ],
+            { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
+          );
+          const lines = raw
+            .trim()
+            .split('\n')
+            .filter((line) => line !== '');
+          for (const line of lines) {
+            const comment = JSON.parse(line) as { id: number; created_at: string };
+            if (Date.parse(comment.created_at) > cutoff) {
+              commentIds.push(comment.id);
+            }
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.warn(`Warning: Could not fetch comments for issue #${issueNum}: ${msg}`);
+        }
+      }
+    } else {
+      console.warn(
+        `Warning: Could not determine when ${targetLabel} was applied. Skipping comment cleanup.`
+      );
+    }
   }
 
-  // PRs
   let prs: PREntry[] = [];
   try {
     const prJson = execFileSync(
@@ -160,12 +228,19 @@ function scanArtifacts(
     console.warn(`Warning: Could not fetch PRs for issue #${issueNum}: ${msg}`);
   }
 
-  // Branches to delete (only shipper/-prefixed)
   const branchesToDelete = prs
     .map((pr) => pr.headRefName)
-    .filter((name) => name.startsWith('shipper/'));
+    .filter((branchName) => branchName.startsWith('shipper/'));
 
-  return { labelsToRemove, addTarget, targetLabel, mode, commentIds, prs, branchesToDelete };
+  return {
+    labelsToRemove,
+    addTarget,
+    targetStage,
+    targetLabel,
+    commentIds,
+    prs,
+    branchesToDelete,
+  };
 }
 
 function isClean(scan: ArtifactScan): boolean {
@@ -202,7 +277,6 @@ function printDryRun(issueNum: number, scan: ArtifactScan): void {
 function executeReset(issueNum: number, scan: ArtifactScan, nwo: string): void {
   const actions: string[] = [];
 
-  // 1. Close PRs and track which ones succeeded for branch deletion
   const closedPrBranches = new Set<string>();
   for (const pr of scan.prs) {
     try {
@@ -219,8 +293,9 @@ function executeReset(issueNum: number, scan: ArtifactScan, nwo: string): void {
     actions.push(`Closed PRs: ${scan.prs.map((pr) => `#${pr.number}`).join(', ')}`);
   }
 
-  // 2. Delete branches (only for PRs that were successfully closed)
-  const deletableBranches = scan.branchesToDelete.filter((b) => closedPrBranches.has(b));
+  const deletableBranches = scan.branchesToDelete.filter((branchName) =>
+    closedPrBranches.has(branchName)
+  );
   for (const branch of deletableBranches) {
     try {
       execFileSync('git', ['push', 'origin', '--delete', branch], {
@@ -235,7 +310,6 @@ function executeReset(issueNum: number, scan: ArtifactScan, nwo: string): void {
     actions.push(`Deleted branches: ${deletableBranches.join(', ')}`);
   }
 
-  // 3. Delete comments
   for (const id of scan.commentIds) {
     try {
       execFileSync('gh', ['api', '-X', 'DELETE', `repos/${nwo}/issues/comments/${id}`], {
@@ -250,7 +324,6 @@ function executeReset(issueNum: number, scan: ArtifactScan, nwo: string): void {
     actions.push(`Deleted ${scan.commentIds.length} comment(s)`);
   }
 
-  // 4. Reset labels
   if (scan.labelsToRemove.length > 0 || scan.addTarget) {
     const args = ['issue', 'edit', String(issueNum)];
     if (scan.labelsToRemove.length > 0) {
@@ -273,18 +346,15 @@ function executeReset(issueNum: number, scan: ArtifactScan, nwo: string): void {
     actions.push(`Added label: ${scan.targetLabel}`);
   }
 
-  // 5. Post reset comment
-  let resetBody: string;
-  if (scan.mode === 'partial') {
-    resetBody =
-      '**This issue has been reset to `shipper:implemented`.** ' +
-      'PR artifacts have been cleaned up. Grooming, design, and planning content is preserved.';
-  } else {
-    resetBody =
-      '**This issue has been reset to `shipper:new`.**\n\n' +
-      'Any remaining content in the issue body is from a previous workflow run ' +
+  let resetBody =
+    `**This issue has been reset to \`${scan.targetLabel}\`.** ` +
+    'Artifacts after this stage have been cleaned up.';
+  if (scan.targetStage === 'new') {
+    resetBody +=
+      '\n\nAny remaining content in the issue body is from a previous workflow run ' +
       'and should be treated as a suggestion for the next grooming attempt, not as groomed or approved content.';
   }
+
   try {
     execFileSync('gh', ['issue', 'comment', String(issueNum), '--body', resetBody], {
       stdio: ['ignore', 'ignore', 'ignore'],
@@ -295,25 +365,26 @@ function executeReset(issueNum: number, scan: ArtifactScan, nwo: string): void {
     console.warn(`  Warning: Failed to post reset comment: ${msg}`);
   }
 
-  // Print summary
   console.log(`\nReset complete for issue #${issueNum}:`);
   for (const action of actions) {
     console.log(`  ✓ ${action}`);
   }
 }
 
-export async function resetCommand(issue: string, opts: { force: boolean }): Promise<void> {
+export async function resetCommand(
+  issue: string,
+  opts: { force: boolean; to?: string }
+): Promise<void> {
   const cleaned = issue.replace(/^#/, '');
   if (!/^\d+$/.test(cleaned)) {
     console.error('Error: Please provide a valid issue number.');
-    console.error('Usage: shipper reset <issue>');
+    console.error('Usage: shipper reset <issue> [--to <stage>]');
     process.exit(1);
   }
   const issueNum = Number(cleaned);
 
   const nwo = getRepoNwo();
 
-  // Fetch issue data
   let issueJson: string;
   try {
     issueJson = execFileSync(
@@ -334,9 +405,8 @@ export async function resetCommand(issue: string, opts: { force: boolean }): Pro
     process.exit(1);
   }
 
-  const labels = issueData.labels.map((l) => l.name);
+  const labels = issueData.labels.map((label) => label.name);
 
-  // Lock check
   if (!opts.force && labels.includes('shipper:locked')) {
     if (!isLockStale(String(issueNum))) {
       console.error(
@@ -346,20 +416,58 @@ export async function resetCommand(issue: string, opts: { force: boolean }): Pro
     }
   }
 
-  // Mode selection
-  const isPastImplemented = labels.some((l) => PR_STAGE_LABELS.includes(l));
-  let mode: ResetMode = 'full';
-  if (isPastImplemented && !opts.force) {
-    console.log('\nReset options:');
-    console.log('  1) Reset to shipper:implemented (PR cleanup only)');
-    console.log('  2) Reset to shipper:new (full reset)');
-    mode = (await promptChoice('Select [1-2]: ', ['1', '2'])) === '1' ? 'partial' : 'full';
+  const currentStage = getCurrentStage(labels);
+  const currentIndex = getStageIndex(currentStage.stage);
+
+  let targetStage: WorkflowStage;
+  if (opts.to) {
+    const parsedStage = parseStage(opts.to);
+    if (!parsedStage) {
+      console.error(getInvalidStageError(opts.to));
+      process.exit(1);
+    }
+
+    const targetIndex = getStageIndex(parsedStage);
+    const sameImplementedStage = currentStage.hasPrLabels && parsedStage === 'implemented';
+    if (targetIndex === currentIndex && !sameImplementedStage) {
+      console.error(
+        `Error: Issue #${issueNum} is already at ${getStageLabel(parsedStage)}. Reset only works backward.`
+      );
+      process.exit(1);
+    }
+    if (targetIndex > currentIndex) {
+      console.error(
+        `Error: ${getStageLabel(parsedStage)} is ahead of the current stage ${getStageLabel(currentStage.stage)}. Reset only works backward.`
+      );
+      process.exit(1);
+    }
+
+    targetStage = parsedStage;
+  } else {
+    const validTargets = getValidTargets(currentStage);
+    if (validTargets.length === 0) {
+      console.error(
+        `Error: Issue #${issueNum} is already at ${getStageLabel(currentStage.stage)}. Reset only works backward.`
+      );
+      process.exit(1);
+    }
+
+    console.log('\nReset targets:');
+    for (const [index, stage] of validTargets.entries()) {
+      console.log(`  ${index + 1}) ${stage}`);
+    }
+
+    const choiceNumbers = validTargets.map((_, index) => String(index + 1));
+    const selection = await promptChoice(`Select [1-${validTargets.length}]: `, choiceNumbers);
+    targetStage = validTargets[Number(selection) - 1]!;
   }
 
-  const scan = scanArtifacts(issueNum, nwo, mode, labels);
+  const scan = scanArtifacts(issueNum, nwo, targetStage, labels);
 
   if (isClean(scan)) {
-    console.log(`Issue #${issueNum} is already clean. Nothing to reset.`);
+    console.log(
+      `Issue #${issueNum} is already clean for target ${scan.targetLabel}. Nothing to reset.`
+    );
     return;
   }
 

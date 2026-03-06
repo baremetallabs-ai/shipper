@@ -187,10 +187,11 @@ program
 
 program
   .command('reset')
-  .description('Reset an issue back to shipper:new status')
+  .description('Reset an issue back to an earlier workflow stage')
   .argument('<issue>', 'issue number')
   .option('-f, --force', 'skip confirmation prompt')
-  .action((issue: string, opts: { force: boolean }) => {
+  .option('--to <stage>', 'reset to a specific workflow stage')
+  .action((issue: string, opts: { force: boolean; to?: string }) => {
     resetCommand(issue, opts);
   });
 
