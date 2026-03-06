@@ -14,14 +14,14 @@ beforeEach(() => {
 
 describe('fetchChecks', () => {
   it('calls gh pr checks with --json and parses output', () => {
-    const checks = [{ name: 'build', state: 'COMPLETED', conclusion: 'SUCCESS' }];
+    const checks = [{ name: 'build', state: 'COMPLETED', bucket: 'pass' }];
     execFileSyncMock.mockReturnValue(JSON.stringify(checks));
 
     const result = fetchChecks('42');
 
     expect(execFileSyncMock).toHaveBeenCalledWith(
       'gh',
-      ['pr', 'checks', '42', '--json', 'name,state,conclusion'],
+      ['pr', 'checks', '42', '--json', 'name,state,bucket'],
       expect.objectContaining({ encoding: 'utf-8' })
     );
     expect(result).toEqual(checks);
@@ -34,7 +34,7 @@ describe('fetchChecks', () => {
 
     expect(execFileSyncMock).toHaveBeenCalledWith(
       'gh',
-      ['pr', 'checks', '42', '--json', 'name,state,conclusion', '-R', 'owner/repo'],
+      ['pr', 'checks', '42', '--json', 'name,state,bucket', '-R', 'owner/repo'],
       expect.objectContaining({ encoding: 'utf-8' })
     );
   });
@@ -52,8 +52,8 @@ describe('fetchChecks', () => {
 describe('classifyChecks', () => {
   it('classifies all passing checks', () => {
     const checks: PRChecksLine[] = [
-      { name: 'build', state: 'COMPLETED', conclusion: 'SUCCESS' },
-      { name: 'lint', state: 'COMPLETED', conclusion: 'SUCCESS' },
+      { name: 'build', state: 'COMPLETED', bucket: 'pass' },
+      { name: 'lint', state: 'COMPLETED', bucket: 'pass' },
     ];
 
     const result = classifyChecks(checks);
@@ -66,10 +66,10 @@ describe('classifyChecks', () => {
 
   it('classifies pending checks', () => {
     const checks: PRChecksLine[] = [
-      { name: 'build', state: 'COMPLETED', conclusion: 'SUCCESS' },
-      { name: 'test', state: 'PENDING', conclusion: '' },
-      { name: 'lint', state: 'IN_PROGRESS', conclusion: '' },
-      { name: 'deploy', state: 'QUEUED', conclusion: '' },
+      { name: 'build', state: 'COMPLETED', bucket: 'pass' },
+      { name: 'test', state: 'PENDING', bucket: 'pending' },
+      { name: 'lint', state: 'IN_PROGRESS', bucket: 'pending' },
+      { name: 'deploy', state: 'QUEUED', bucket: 'pending' },
     ];
 
     const result = classifyChecks(checks);
@@ -82,9 +82,9 @@ describe('classifyChecks', () => {
 
   it('classifies failed checks', () => {
     const checks: PRChecksLine[] = [
-      { name: 'build', state: 'COMPLETED', conclusion: 'FAILURE' },
-      { name: 'test', state: 'COMPLETED', conclusion: 'ERROR' },
-      { name: 'lint', state: 'COMPLETED', conclusion: 'CANCELLED' },
+      { name: 'build', state: 'COMPLETED', bucket: 'fail' },
+      { name: 'test', state: 'COMPLETED', bucket: 'fail' },
+      { name: 'lint', state: 'COMPLETED', bucket: 'cancel' },
     ];
 
     const result = classifyChecks(checks);
@@ -103,8 +103,8 @@ describe('classifyChecks', () => {
 
   it('classifies skipped checks as passed', () => {
     const checks: PRChecksLine[] = [
-      { name: 'optional', state: 'COMPLETED', conclusion: 'SKIPPED' },
-      { name: 'neutral', state: 'COMPLETED', conclusion: 'NEUTRAL' },
+      { name: 'optional', state: 'COMPLETED', bucket: 'skipping' },
+      { name: 'neutral', state: 'COMPLETED', bucket: 'pass' },
     ];
 
     const result = classifyChecks(checks);
@@ -116,10 +116,10 @@ describe('classifyChecks', () => {
 
   it('handles mixed states correctly', () => {
     const checks: PRChecksLine[] = [
-      { name: 'build', state: 'COMPLETED', conclusion: 'SUCCESS' },
-      { name: 'test', state: 'IN_PROGRESS', conclusion: '' },
-      { name: 'lint', state: 'COMPLETED', conclusion: 'FAILURE' },
-      { name: 'deploy', state: 'COMPLETED', conclusion: 'SKIPPED' },
+      { name: 'build', state: 'COMPLETED', bucket: 'pass' },
+      { name: 'test', state: 'IN_PROGRESS', bucket: 'pending' },
+      { name: 'lint', state: 'COMPLETED', bucket: 'fail' },
+      { name: 'deploy', state: 'COMPLETED', bucket: 'skipping' },
     ];
 
     const result = classifyChecks(checks);

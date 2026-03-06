@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 export interface PRChecksLine {
   name: string;
   state: string;
-  conclusion: string;
+  bucket: string;
 }
 
 export interface CheckClassification {
@@ -14,7 +14,7 @@ export interface CheckClassification {
 }
 
 export function fetchChecks(prNumber: string, nwo?: string): PRChecksLine[] {
-  const args = ['pr', 'checks', prNumber, '--json', 'name,state,conclusion'];
+  const args = ['pr', 'checks', prNumber, '--json', 'name,state,bucket'];
   if (nwo) {
     args.push('-R', nwo);
   }
@@ -31,13 +31,9 @@ export function classifyChecks(checks: PRChecksLine[]): CheckClassification {
   const passed: PRChecksLine[] = [];
 
   for (const check of checks) {
-    if (check.state === 'PENDING' || check.state === 'QUEUED' || check.state === 'IN_PROGRESS') {
+    if (check.bucket === 'pending') {
       pending.push(check);
-    } else if (
-      check.conclusion === 'FAILURE' ||
-      check.conclusion === 'ERROR' ||
-      check.conclusion === 'CANCELLED'
-    ) {
+    } else if (check.bucket === 'fail' || check.bucket === 'cancel') {
       failed.push(check);
     } else {
       passed.push(check);

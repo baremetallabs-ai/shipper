@@ -108,8 +108,8 @@ describe('prRemediateCommand', () => {
       hooks: {},
     });
     fetchChecksMock.mockReturnValue([
-      { name: 'build', state: 'COMPLETED', conclusion: 'SUCCESS' },
-      { name: 'test', state: 'COMPLETED', conclusion: 'SUCCESS' },
+      { name: 'build', state: 'COMPLETED', bucket: 'pass' },
+      { name: 'test', state: 'COMPLETED', bucket: 'pass' },
     ]);
 
     const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
