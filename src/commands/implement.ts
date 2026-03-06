@@ -21,9 +21,12 @@ export function implementCommand(issue?: string) {
     const branch = generateBranchName(issue);
 
     const code = withStageHooks('implement', { issueNumber: issue, branchName: branch }, () =>
-      withWorktree({ repoRoot, branch, createBranch: true, issueNumber: issue }, (wtPath) => {
-        return runPrompt('implement', { issueRef: issue, cwd: wtPath });
-      })
+      withWorktree(
+        { repoRoot, branch, createBranch: true, issueNumber: issue, stage: 'implement' },
+        (wtPath) => {
+          return runPrompt('implement', { issueRef: issue, cwd: wtPath });
+        }
+      )
     );
 
     process.exit(code);

@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const execSyncMock = vi.fn();
@@ -34,7 +35,7 @@ beforeEach(() => {
   warnMock.mockClear();
 });
 
-const { runAdvisoryHook, runPreHook, runPostHook, withStageHooks } =
+const { runAdvisoryHook, runPreHook, runPostHook, runWorktreeHook, withStageHooks } =
   await import('../../src/lib/hooks.js');
 
 describe('runAdvisoryHook', () => {
@@ -97,6 +98,8 @@ describe('runAdvisoryHook', () => {
 });
 
 describe('runPreHook', () => {
+  const preHookPath = path.resolve('.shipper', 'hooks', 'pre-groom');
+
   it('skips silently when hook file does not exist', () => {
     statSyncMock.mockImplementation(() => {
       const err = new Error('ENOENT') as Error & { code: string };
@@ -110,7 +113,7 @@ describe('runPreHook', () => {
     expect(logMock).not.toHaveBeenCalled();
   });
 
-  it('skips silently when hook file is not executable', () => {
+  it('warns when hook file is not executable', () => {
     statSyncMock.mockReturnValue({});
     accessSyncMock.mockImplementation(() => {
       throw new Error('EACCES');
@@ -119,7 +122,9 @@ describe('runPreHook', () => {
     runPreHook('groom', { SHIPPER_STAGE: 'groom' });
 
     expect(execFileSyncMock).not.toHaveBeenCalled();
-    expect(logMock).not.toHaveBeenCalled();
+    expect(warnMock).toHaveBeenCalledWith(
+      `  Warning: Found ${preHookPath} but it is not executable — skipping. Run \`chmod +x ${preHookPath}\` to enable.`
+    );
   });
 
   it('calls execFileSync with correct hook path and env', () => {
@@ -178,6 +183,8 @@ describe('runPreHook', () => {
 });
 
 describe('runPostHook', () => {
+  const postHookPath = path.resolve('.shipper', 'hooks', 'post-groom');
+
   it('skips silently when hook file does not exist', () => {
     statSyncMock.mockImplementation(() => {
       throw new Error('ENOENT');
@@ -189,7 +196,7 @@ describe('runPostHook', () => {
     expect(logMock).not.toHaveBeenCalled();
   });
 
-  it('skips silently when hook file is not executable', () => {
+  it('warns when hook file is not executable', () => {
     statSyncMock.mockReturnValue({});
     accessSyncMock.mockImplementation(() => {
       throw new Error('EACCES');
@@ -198,7 +205,9 @@ describe('runPostHook', () => {
     runPostHook('groom', { SHIPPER_STAGE: 'groom' });
 
     expect(execFileSyncMock).not.toHaveBeenCalled();
-    expect(logMock).not.toHaveBeenCalled();
+    expect(warnMock).toHaveBeenCalledWith(
+      `  Warning: Found ${postHookPath} but it is not executable — skipping. Run \`chmod +x ${postHookPath}\` to enable.`
+    );
   });
 
   it('calls execFileSync with correct hook path and logs on success', () => {
@@ -234,6 +243,123 @@ describe('runPostHook', () => {
     expect(warnMock).toHaveBeenCalledWith(
       '  Warning: post-groom hook exited with code 1: post hook failed'
     );
+  });
+});
+
+describe('runWorktreeHook', () => {
+  const setupHookPath = path.resolve('.shipper', 'hooks', 'worktree-setup');
+  const teardownHookPath = path.resolve('.shipper', 'hooks', 'worktree-teardown');
+  const env = {
+    SHIPPER_STAGE: 'implement',
+    SHIPPER_WORKTREE_PATH: '/tmp/worktree',
+    SHIPPER_ISSUE_NUMBER: '42',
+    SHIPPER_BRANCH_NAME: 'shipper/42-branch',
+  };
+
+  it('runs executable file-based worktree hooks with execFileSync', () => {
+    statSyncMock.mockReturnValue({});
+    accessSyncMock.mockReturnValue(undefined);
+
+    runWorktreeHook('worktree-setup', env, undefined, '/tmp/worktree');
+
+    expect(execFileSyncMock).toHaveBeenCalledWith(
+      setupHookPath,
+      [],
+      expect.objectContaining({
+        stdio: ['inherit', 'inherit', 'pipe'],
+        env: expect.objectContaining(env),
+        cwd: '/tmp/worktree',
+      })
+    );
+    expect(logMock).toHaveBeenCalledWith('  Worktree setup hook completed.');
+    expect(execSyncMock).not.toHaveBeenCalled();
+  });
+
+  it('warns and skips non-executable file-based worktree hooks', () => {
+    statSyncMock.mockReturnValue({});
+    accessSyncMock.mockImplementation(() => {
+      throw new Error('EACCES');
+    });
+
+    runWorktreeHook('worktree-setup', env, undefined, '/tmp/worktree');
+
+    expect(execFileSyncMock).not.toHaveBeenCalled();
+    expect(execSyncMock).not.toHaveBeenCalled();
+    expect(warnMock).toHaveBeenCalledWith(
+      `  Warning: Found ${setupHookPath} but it is not executable — skipping. Run \`chmod +x ${setupHookPath}\` to enable.`
+    );
+  });
+
+  it('runs deprecated settings-based worktree hooks when no file exists', () => {
+    statSyncMock.mockImplementation(() => {
+      throw new Error('ENOENT');
+    });
+
+    runWorktreeHook('worktree-setup', env, 'echo setup', '/tmp/worktree');
+
+    expect(warnMock).toHaveBeenCalledWith(
+      `  Warning: settings-based hooks.worktreeSetup is deprecated. Move your command to ${setupHookPath} and make it executable.`
+    );
+    expect(execSyncMock).toHaveBeenCalledWith(
+      'echo setup',
+      expect.objectContaining({
+        stdio: ['inherit', 'inherit', 'pipe'],
+        env: expect.objectContaining(env),
+        cwd: '/tmp/worktree',
+      })
+    );
+    expect(execFileSyncMock).not.toHaveBeenCalled();
+  });
+
+  it('prefers file-based worktree hooks over deprecated settings hooks', () => {
+    statSyncMock.mockReturnValue({});
+    accessSyncMock.mockReturnValue(undefined);
+
+    runWorktreeHook('worktree-teardown', env, 'echo teardown', '/tmp/worktree');
+
+    expect(warnMock).toHaveBeenCalledWith(
+      `  Warning: Both ${teardownHookPath} and settings-based hooks.worktreeTeardown found. Using file-based hook; settings-based hook skipped.`
+    );
+    expect(execFileSyncMock).toHaveBeenCalledWith(
+      teardownHookPath,
+      [],
+      expect.objectContaining({
+        env: expect.objectContaining(env),
+        cwd: '/tmp/worktree',
+      })
+    );
+    expect(execSyncMock).not.toHaveBeenCalled();
+  });
+
+  it('warns without throwing when a file-based worktree hook exits non-zero', () => {
+    statSyncMock.mockReturnValue({});
+    accessSyncMock.mockReturnValue(undefined);
+
+    const err = new Error('Command failed') as Error & { status: number; stderr: Buffer };
+    err.status = 3;
+    err.stderr = Buffer.from('setup failed');
+    execFileSyncMock.mockImplementation(() => {
+      throw err;
+    });
+
+    runWorktreeHook('worktree-setup', env, undefined, '/tmp/worktree');
+
+    expect(warnMock).toHaveBeenCalledWith(
+      '  Warning: Worktree setup hook exited with code 3: setup failed'
+    );
+  });
+
+  it('no-ops when neither file-based nor settings-based worktree hooks exist', () => {
+    statSyncMock.mockImplementation(() => {
+      throw new Error('ENOENT');
+    });
+
+    runWorktreeHook('worktree-setup', env, undefined, '/tmp/worktree');
+
+    expect(execFileSyncMock).not.toHaveBeenCalled();
+    expect(execSyncMock).not.toHaveBeenCalled();
+    expect(warnMock).not.toHaveBeenCalled();
+    expect(logMock).not.toHaveBeenCalled();
   });
 });
 
