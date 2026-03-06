@@ -26,6 +26,7 @@ function waitForChecks(pr: string, timeoutMinutes: number): void {
     let checks = fetchChecksGraceful(pr);
     if (checks !== null && checks.length === 0) {
       for (let retry = 0; retry < 3 && !interrupted; retry++) {
+        if (Date.now() >= deadline) break;
         sleepMs(10_000);
         if (interrupted) break;
         checks = fetchChecksGraceful(pr);
@@ -57,10 +58,6 @@ function waitForChecks(pr: string, timeoutMinutes: number): void {
           console.log(`Waiting for checks... ${completed}/${total} complete`);
           previousCompleted = completed;
         }
-
-        if (pending.length === 0) {
-          break;
-        }
       }
 
       sleepMs(20_000);
@@ -70,7 +67,7 @@ function waitForChecks(pr: string, timeoutMinutes: number): void {
   }
 
   if (interrupted) {
-    process.kill(process.pid, 'SIGINT');
+    process.exit(130);
   }
 }
 
@@ -125,7 +122,7 @@ export function prRemediateCommand(pr?: string) {
               `PR #${pr} is ${Math.floor(elapsedMs / 60_000)} minutes old. ` +
                 `Waiting ${remainingMin} more minute(s) for reviewers (prReviewWait.timeoutMinutes: ${prReviewWait.timeoutMinutes})...`
             );
-            Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, remainingMs);
+            sleepMs(remainingMs);
           }
         }
       } else {
