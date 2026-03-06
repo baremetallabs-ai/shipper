@@ -60,7 +60,6 @@ export interface ShipOptions {
 interface AsyncIssueRun {
   child: ChildProcess;
   result: Promise<{ success: boolean; error?: string }>;
-  logFile?: string;
 }
 
 interface ActiveIssueRun {
@@ -394,12 +393,22 @@ function shipOneIssue(issue: string, merge: boolean): { success: boolean; error?
 function shipOneIssueAsync(issue: string, logFile?: string): AsyncIssueRun {
   const stderr: string[] = [];
   const logStream = logFile ? createWriteStream(logFile) : undefined;
+  let logStreamError: string | undefined;
   const child = spawn(process.execPath, [process.argv[1]!, 'ship', issue, '--merge'], {
     stdio: logFile ? ['ignore', 'pipe', 'pipe'] : ['ignore', 'ignore', 'pipe'],
     env: process.env,
   });
 
   if (logStream) {
+    logStream.on('error', (error) => {
+      if (logStreamError) return;
+      logStreamError = `failed to write log file "${logFile}": ${error.message}`;
+      child.stdout?.unpipe(logStream);
+      child.stderr?.unpipe(logStream);
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill();
+      }
+    });
     child.stdout?.pipe(logStream, { end: false });
     child.stderr?.pipe(logStream, { end: false });
   }
@@ -421,7 +430,9 @@ function shipOneIssueAsync(issue: string, logFile?: string): AsyncIssueRun {
     };
 
     const closeLogStream = (destroy = false): Promise<void> => {
-      if (!logStream || logStreamClosed) return Promise.resolve();
+      if (!logStream || logStreamClosed || logStream.destroyed || logStreamError) {
+        return Promise.resolve();
+      }
       logStreamClosed = true;
 
       return new Promise<void>((streamResolved) => {
@@ -454,7 +465,16 @@ function shipOneIssueAsync(issue: string, logFile?: string): AsyncIssueRun {
     child.on('close', (code, signal) => {
       void closeLogStream().finally(() => {
         if (code === 0) {
+          if (logStreamError) {
+            resolveResult({ success: false, error: logStreamError });
+            return;
+          }
           resolveResult({ success: true });
+          return;
+        }
+
+        if (logStreamError) {
+          resolveResult({ success: false, error: logStreamError });
           return;
         }
 
@@ -474,7 +494,7 @@ function shipOneIssueAsync(issue: string, logFile?: string): AsyncIssueRun {
     });
   });
 
-  return { child, result, logFile };
+  return { child, result };
 }
 
 export function selectNextCandidate(
@@ -642,7 +662,7 @@ async function shipAutoParallel(parallel: number): Promise<void> {
 
   let shuttingDown = false;
 
-  mkdirSync(logsDir, { recursive: true });
+  mkdirSync(logsDir, { recursive: true, mode: 0o700 });
 
   const wait = (ms: number) =>
     new Promise<void>((resolve) => {
@@ -769,8 +789,9 @@ export async function shipCommand(
   options: ShipOptions = { merge: false, auto: false }
 ): Promise<void> {
   if (options.auto) {
-    if (options.parallel) {
-      await shipAutoParallel(options.parallel);
+    const parallel = options.parallel ?? 0;
+    if (parallel >= 2) {
+      await shipAutoParallel(parallel);
       return;
     }
 
