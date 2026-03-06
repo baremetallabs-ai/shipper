@@ -32,6 +32,14 @@ export function generateBranchName(issueRef: string): string {
 export function findBranchForIssue(issueRef: string): string {
   const num = issueRef.replace(/^#/, '');
 
+  // Fetch to ensure local remote-tracking refs are up to date (e.g. after a
+  // push from a sandboxed agent that couldn't update local tracking metadata).
+  try {
+    execFileSync('git', ['fetch', 'origin', '--prune'], { stdio: 'ignore' });
+  } catch {
+    // Best-effort — fall through to branch lookup with stale refs
+  }
+
   const output = execFileSync('git', ['branch', '-r', '--list', `origin/shipper/${num}-*`], {
     encoding: 'utf-8',
   }).trim();

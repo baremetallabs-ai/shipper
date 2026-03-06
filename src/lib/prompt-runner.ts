@@ -74,7 +74,16 @@ export function runPrompt(name: string, opts: RunPromptOpts): number {
 
   const userMessage = messageParts.join('\n\n---\n\n');
   if (userMessage) {
-    args.push(userMessage);
+    if (agent === 'codex') {
+      // Codex exec accepts only one positional [PROMPT] arg — no separate user
+      // message mechanism. Replace the prompt arg with prompt + user message combined.
+      const promptIdx = args.indexOf(promptBody);
+      if (promptIdx !== -1) {
+        args[promptIdx] = promptBody + '\n\n---\n\n' + userMessage;
+      }
+    } else {
+      args.push(userMessage);
+    }
   }
 
   const result = spawnSync(agent, args, {
