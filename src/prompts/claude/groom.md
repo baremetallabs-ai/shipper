@@ -6,7 +6,7 @@ args:
   - --permission-mode
   - acceptEdits
   - --allowedTools
-  - Bash(gh label list *),Bash(gh issue list *),Bash(gh issue view *),Bash(gh issue edit *),Bash(gh issue comment *),Bash(gh issue create *),Bash(gh issue close *),WebSearch
+  - Task,Bash(gh label list *),Bash(gh issue list *),Bash(gh issue view *),Bash(gh issue edit *),Bash(gh issue comment *),Bash(gh issue create *),Bash(gh issue close *),WebSearch
 append-issue: true
 ---
 
@@ -40,10 +40,12 @@ The **next user message** contains the full GitHub issue including title, labels
 Scan all other open issues in the repo for relevance to the current issue. This surfaces dependencies, overlaps, conflicts, and scope impacts before product questioning begins, but the scan itself must be delegated so the main context window stays focused on the grooming conversation.
 
 1. Spawn exactly one Task tool subagent to perform the entire cross-issue scan. Do not execute the scan inline in the main context window.
-2. Pass the subagent an inline prompt with the current issue number and title and instructions equivalent to:
+2. Pass the subagent an inline prompt with the current issue number, title, body, and any comments that materially clarify scope, requirements, or constraints, plus instructions equivalent to:
 
    ```text
    Scan all other open GitHub issues for relevance to issue #<CURRENT_ISSUE_NUMBER>: <CURRENT_ISSUE_TITLE>.
+   Use the current issue details below as the source of truth for scope, requirements, acceptance criteria, and constraints when judging relevance:
+   <CURRENT_ISSUE_BODY_AND_RELEVANT_COMMENTS>
 
    Use this workflow:
    1. Run `gh issue list --state open --limit 500 --json number,title,labels,state`.
@@ -71,7 +73,7 @@ Scan all other open issues in the repo for relevance to the current issue. This 
    - If blocked, include the blocking issue number(s) and a brief reason
 
    Exclusion rationale:
-   - For every scanned issue not classified as relevant, include a one-line note explaining why it was excluded
+   - For every scanned issue not classified as relevant, include a terse one-line note explaining why it was excluded
    - Include borderline issues as well as clearly unrelated issues
    ```
 
