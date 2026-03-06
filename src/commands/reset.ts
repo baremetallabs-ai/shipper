@@ -55,15 +55,15 @@ function getCurrentStage(labels: string[]): CurrentStage {
     PR_STAGE_LABELS.includes(label as (typeof PR_STAGE_LABELS)[number])
   );
 
+  if (hasPrLabels) {
+    return { stage: 'implemented', hasPrLabels: true };
+  }
+
   for (let i = WORKFLOW_STAGES.length - 1; i >= 0; i -= 1) {
     const stage = WORKFLOW_STAGES[i]!;
     if (labels.includes(getStageLabel(stage))) {
       return { stage, hasPrLabels };
     }
-  }
-
-  if (hasPrLabels) {
-    return { stage: 'implemented', hasPrLabels: true };
   }
 
   return { stage: 'new', hasPrLabels: false };
@@ -125,6 +125,10 @@ function scanArtifacts(
   const targetIndex = getStageIndex(targetStage);
   const targetLabel = getStageLabel(targetStage);
   const labelsToRemove = labels.filter((label) => {
+    if (targetStage === 'new') {
+      return label.startsWith('shipper:') && label !== 'shipper:new';
+    }
+
     if (PR_STAGE_LABELS.includes(label as (typeof PR_STAGE_LABELS)[number])) {
       return true;
     }

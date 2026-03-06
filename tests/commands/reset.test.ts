@@ -278,6 +278,24 @@ describe('resetCommand', () => {
     expect(mockPromptChoice).toHaveBeenCalledWith('Select [1-5]: ', ['1', '2', '3', '4', '5']);
   });
 
+  it('treats PR-stage labels as post-implemented even when implemented is missing', async () => {
+    setupExecMock({
+      issueJson: mockIssueView('OPEN', ['shipper:planned', 'shipper:pr-open']),
+      timelineByStage: { implemented: '2024-01-15T12:00:00Z\n' },
+      commentsWithDates: '',
+    });
+    mockPromptChoice.mockResolvedValue('5');
+
+    await resetCommand('18', { force: false });
+
+    expect(mockConsoleLog).toHaveBeenCalledWith('  1) new');
+    expect(mockConsoleLog).toHaveBeenCalledWith('  2) groomed');
+    expect(mockConsoleLog).toHaveBeenCalledWith('  3) designed');
+    expect(mockConsoleLog).toHaveBeenCalledWith('  4) planned');
+    expect(mockConsoleLog).toHaveBeenCalledWith('  5) implemented');
+    expect(mockPromptChoice).toHaveBeenCalledWith('Select [1-5]: ', ['1', '2', '3', '4', '5']);
+  });
+
   it('still prompts for target selection with --force when --to is absent', async () => {
     setupExecMock({
       issueJson: mockIssueView('OPEN', ['shipper:planned']),
@@ -356,6 +374,39 @@ describe('resetCommand', () => {
     expect(mockConsoleLog).toHaveBeenCalledWith('  Comments to delete: 2');
     expect(mockConsoleLog).toHaveBeenCalledWith('  PRs to close: #42');
     expect(mockConsoleLog).toHaveBeenCalledWith('  Branches to delete: shipper/18-add-reset');
+  });
+
+  it('executes cleanup in the expected order', async () => {
+    setupExecMock({
+      issueJson: mockIssueView('OPEN', [
+        'shipper:groomed',
+        'shipper:implemented',
+        'shipper:pr-open',
+        'shipper:locked',
+      ]),
+      commentIds: '101\n',
+      prJson: JSON.stringify([{ number: 42, headRefName: 'shipper/18-add-reset' }]),
+    });
+
+    await resetCommand('18', { force: true, to: 'new' });
+
+    const cleanupCalls = mockExecFileSync.mock.calls.filter((entry: unknown[]) => {
+      const args = entry[1] as string[];
+      return (
+        (entry[0] === 'gh' && args[0] === 'pr' && args[1] === 'close') ||
+        (entry[0] === 'git' && args.includes('--delete')) ||
+        (entry[0] === 'gh' && args.includes('DELETE')) ||
+        (entry[0] === 'gh' && args[0] === 'issue' && args[1] === 'edit') ||
+        (entry[0] === 'gh' && args[0] === 'issue' && args[1] === 'comment')
+      );
+    });
+
+    expect((cleanupCalls[0]![1] as string[])[1]).toBe('close');
+    expect(cleanupCalls[1]![0]).toBe('git');
+    expect((cleanupCalls[2]![1] as string[]).includes('DELETE')).toBe(true);
+    expect((cleanupCalls[2]![1] as string[])[3]).toBe('repos/owner/repo/issues/comments/101');
+    expect((cleanupCalls[3]![1] as string[])[1]).toBe('edit');
+    expect((cleanupCalls[4]![1] as string[])[1]).toBe('comment');
   });
 
   it('rejects resetting to the current stage', async () => {
@@ -482,6 +533,25 @@ describe('resetCommand', () => {
       (entry: unknown[]) => entry[0] === 'gh' && (entry[1] as string[]).includes('DELETE')
     );
     expect(deleteCalls).toHaveLength(3);
+  });
+
+  it('removes blocked and locked labels when resetting to new', async () => {
+    setupExecMock({
+      issueJson: mockIssueView('OPEN', [
+        'shipper:new',
+        'shipper:groomed',
+        'shipper:blocked',
+        'shipper:locked',
+      ]),
+      commentIds: '',
+    });
+
+    await resetCommand('18', { force: true, to: 'new' });
+
+    const editArgs = getIssueEditArgs();
+    expect(editArgs[editArgs.indexOf('--remove-label') + 1]).toBe(
+      'shipper:groomed,shipper:blocked,shipper:locked'
+    );
   });
 
   it('matches implemented-target cleanup to the old partial reset behavior', async () => {
