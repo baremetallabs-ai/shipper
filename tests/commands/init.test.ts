@@ -130,7 +130,7 @@ describe('initCommand settings', () => {
     expect(written.prReviewWaitMinutes).toBe(10);
   });
 
-  it('gitignore includes settings.local.json', async () => {
+  it('gitignore includes expected generated entries', async () => {
     await initCommand({ agent: 'claude' });
     const gitignoreCall = writeFileSyncMock.mock.calls.find(
       (call: unknown[]) => call[0] === gitignorePath
@@ -138,6 +138,8 @@ describe('initCommand settings', () => {
     expect(gitignoreCall).toBeDefined();
     expect(gitignoreCall![1]).toContain('settings.local.json');
     expect(gitignoreCall![1]).toContain('tmp/');
+    expect(gitignoreCall![1]).toContain('README.md');
+    expect(gitignoreCall![1]).toContain('scripts/');
   });
 
   it('writes cliVersion to settings.json', async () => {
