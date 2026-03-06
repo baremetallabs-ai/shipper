@@ -110,6 +110,12 @@ Categorize every check as **passing**, **failing**, or **pending**.
 ./.shipper/scripts/gh-api-get-reviews.sh {owner}/{repo} <PR>
 ```
 
+```bash
+./.shipper/scripts/gh-api-get-review-threads.sh {owner}/{repo} <PR>
+```
+
+This second call returns inline thread details, including `isResolved` and `isOutdated`, so you can separate unresolved threads from already-resolved ones.
+
 Identify:
 
 - **Reviews requesting changes** — these block merge.

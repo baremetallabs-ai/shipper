@@ -21,6 +21,27 @@ describe('gh-api-get-reviews.sh', () => {
   });
 });
 
+describe('gh-api-get-review-threads.sh', () => {
+  it('rejects wrong arg count', () => {
+    expect(() => {
+      execFileSync('bash', [path.join(scriptsDir, 'gh-api-get-review-threads.sh')], {
+        stdio: 'pipe',
+      });
+    }).toThrow();
+  });
+
+  it('prints expected usage on wrong arg count', () => {
+    try {
+      execFileSync('bash', [path.join(scriptsDir, 'gh-api-get-review-threads.sh')], {
+        stdio: 'pipe',
+      });
+    } catch (err: unknown) {
+      const stderr = (err as { stderr?: Buffer }).stderr?.toString().trim() ?? '';
+      expect(stderr).toBe('Usage: gh-api-get-review-threads.sh <owner/repo> <pr-number>');
+    }
+  });
+});
+
 describe('gh-api-reply-thread.sh', () => {
   it('rejects wrong arg count', () => {
     expect(() => {
