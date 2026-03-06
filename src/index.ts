@@ -12,6 +12,7 @@ import { planCommand } from './commands/plan.js';
 import { nextCommand } from './commands/next.js';
 import { shipCommand } from './commands/ship.js';
 import { implementCommand } from './commands/implement.js';
+import { ejectCommand } from './commands/eject.js';
 import { prReviewCommand } from './commands/pr-review.js';
 import { prOpenCommand } from './commands/pr-open.js';
 import { prRemediateCommand } from './commands/pr-remediate.js';
@@ -174,6 +175,14 @@ program
   .argument('[issue]', 'issue number or URL')
   .action((issue?: string) => {
     implementCommand(issue);
+  });
+
+program
+  .command('eject')
+  .description('Scaffold prompt overrides for customization')
+  .argument('[name]', 'prompt name to eject (e.g. groom, pr-open)')
+  .action((name?: string) => {
+    ejectCommand(name);
   });
 
 program
