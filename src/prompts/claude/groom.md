@@ -37,25 +37,47 @@ The **next user message** contains the full GitHub issue including title, labels
 
 ### Phase 2: Cross-issue scan
 
-Scan all other open issues in the repo for relevance to the current issue. This surfaces dependencies, overlaps, conflicts, and scope impacts before product questioning begins.
+Scan all other open issues in the repo for relevance to the current issue. This surfaces dependencies, overlaps, conflicts, and scope impacts before product questioning begins, but the scan itself must be delegated so the main context window stays focused on the grooming conversation.
 
-1. Fetch all open issue titles: `gh issue list --state open --limit 500 --json number,title`. Exclude the current issue number from consideration.
-2. From the title list, identify candidate issues that might relate to the current issue. Look for:
-   - **Same feature area** — issues touching the same commands, files, or user-facing behavior
-   - **Conflicting approaches** — issues proposing changes that would be incompatible with this one
-   - **Prerequisite work** — issues that must land first for this issue to make sense
-   - **Overlapping acceptance criteria** — issues that already cover part of what this issue proposes
-3. For each candidate, fetch the full body: `gh issue view <N> --json number,title,body,labels`. Assess whether the issue is genuinely relevant after reading the details.
-4. For issues that still seem potentially relevant after reading the body, optionally fetch comments for additional context: `gh issue view <N> --json comments`.
-5. Classify each relevant issue by relationship type:
-   - **Dependency** — must be done first
-   - **Overlap** — partially covers same ground
-   - **Conflict** — incompatible approach
-   - **Scope impact** — changes assumptions this issue relies on
-6. If no issues are relevant, note "No relevant issues found" and proceed.
-7. If a **hard dependency or conflict** is found (the current issue cannot proceed without the other being resolved), flag it internally for the blocking logic in Phase 4.
+1. Spawn exactly one Task tool subagent to perform the entire cross-issue scan. Do not execute the scan inline in the main context window.
+2. Pass the subagent an inline prompt with the current issue number and title and instructions equivalent to:
 
-**Start broad and narrow progressively.** Do not fetch full bodies for obviously unrelated issues. This manages token usage on repos with many open issues.
+   ```text
+   Scan all other open GitHub issues for relevance to issue #<CURRENT_ISSUE_NUMBER>: <CURRENT_ISSUE_TITLE>.
+
+   Use this workflow:
+   1. Run `gh issue list --state open --limit 500 --json number,title,labels,state`.
+   2. Exclude issue #<CURRENT_ISSUE_NUMBER> from consideration.
+   3. Start broad and narrow progressively:
+      - First, scan titles to identify candidate issues that might relate to the current issue.
+      - Look for same feature area, conflicting approaches, prerequisite work, overlapping acceptance criteria, and scope impacts.
+      - Do not fetch full bodies for obviously unrelated issues.
+   4. For each candidate issue, run `gh issue view <N> --json number,title,body,labels,state`.
+   5. Only if body inspection is still insufficient, run `gh issue view <N> --json comments` for deeper context.
+   6. Classify each relevant issue using exactly one of these relationship types:
+      - Dependency
+      - Overlap
+      - Conflict
+      - Scope impact
+
+   Return only a structured text summary with these sections:
+
+   Relevant issues:
+   - For each relevant issue: number, title, relationship type, brief explanation, labels, status
+   - If none are relevant, state "No relevant issues found."
+
+   Hard dependency/conflict flag:
+   - State whether any hard dependency or conflict exists that should block this issue
+   - If blocked, include the blocking issue number(s) and a brief reason
+
+   Exclusion rationale:
+   - For every scanned issue not classified as relevant, include a one-line note explaining why it was excluded
+   - Include borderline issues as well as clearly unrelated issues
+   ```
+
+3. The main agent should receive and retain only the subagent's structured summary, not raw issue bodies/comments, unless it intentionally performs a spot-check.
+4. After the subagent returns, parse that structured summary and use it as the Phase 2 input for later phases. The relevant-issues list and hard dependency/conflict flag should feed the existing Phase 4 Related Issues section, grooming summary, and blocking logic without changing those downstream output formats.
+5. If a finding seems surprising or critical, the main agent MAY fetch a specific issue with `gh issue view` to spot-check it, but this is optional rather than required.
 
 ### Phase 3: Groom
 
