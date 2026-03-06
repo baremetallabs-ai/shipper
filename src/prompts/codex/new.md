@@ -54,7 +54,7 @@ Brief pointers to relevant files or modules. Keep it to 2-3 bullets max. Omit th
 ## Constraints
 
 - Do NOT edit, create, or modify any files outside `.shipper/tmp/`. Your only action on the codebase is reading it.
-- Do NOT include technical design, file paths, line numbers, or step-by-step implementation.
+- Do NOT include technical design, line numbers, or step-by-step implementation. File paths or module names are allowed only in the optional Starting Point section.
 - Do NOT ask questions just to be thorough. If a reasonable default exists, use it.
 - Keep the issue body concise.
 
