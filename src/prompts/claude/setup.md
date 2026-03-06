@@ -22,6 +22,7 @@ Inspect the repository to determine the correct dependency install command:
 - Read `.shipper/settings.json` to check if `installCommand` is already configured.
 - Determine the appropriate install command (e.g., `npm ci`, `pnpm install --frozen-lockfile`, `yarn install --frozen-lockfile`, `bun install --frozen-lockfile`, `cargo build`, `pip install -r requirements.txt`).
 - Write the `installCommand` to `.shipper/settings.json`, preserving all other existing settings.
+- Always invoke `.shipper/scripts/` using the relative path (`./`). Sandbox permission patterns are matched against relative paths — using an absolute path will be denied.
 - Verify the command works by running `./.shipper/scripts/install-deps.sh`.
 - Report what you configured and why.
 
