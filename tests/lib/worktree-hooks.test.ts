@@ -25,8 +25,10 @@ vi.mock('node:os', async () => {
 });
 
 const runAdvisoryHookMock = vi.fn();
+const runWorktreeHookMock = vi.fn();
 vi.mock('../../src/lib/hooks.js', () => ({
   runAdvisoryHook: (...args: unknown[]) => runAdvisoryHookMock(...args),
+  runWorktreeHook: (...args: unknown[]) => runWorktreeHookMock(...args),
 }));
 
 const getSettingsMock = vi.fn();
@@ -37,6 +39,7 @@ vi.mock('../../src/lib/settings.js', () => ({
 beforeEach(() => {
   execFileSyncMock.mockReset();
   runAdvisoryHookMock.mockReset();
+  runWorktreeHookMock.mockReset();
   getSettingsMock.mockReset();
   getSettingsMock.mockReturnValue({ hooks: {} });
 });
@@ -50,6 +53,7 @@ const defaultOpts = {
   branch: 'shipper/42-add-feature',
   createBranch: true,
   issueNumber: '42',
+  stage: 'implement',
 };
 
 const expectedWtPath = path.join(WORKTREES_DIR, 'my-repo--wt--shipper-42-add-feature');
@@ -61,25 +65,26 @@ describe('withWorktree hooks', () => {
     });
 
     const callOrder: string[] = [];
-    runAdvisoryHookMock.mockImplementation(() => {
-      callOrder.push('setup-hook');
+    runWorktreeHookMock.mockImplementation((event: string) => {
+      callOrder.push(event);
     });
 
     withWorktree(defaultOpts, () => {
       callOrder.push('callback');
     });
 
-    expect(runAdvisoryHookMock).toHaveBeenCalledWith(
-      'Worktree setup',
-      'npm install',
+    expect(runWorktreeHookMock).toHaveBeenCalledWith(
+      'worktree-setup',
       {
+        SHIPPER_STAGE: 'implement',
         SHIPPER_WORKTREE_PATH: expectedWtPath,
         SHIPPER_ISSUE_NUMBER: '42',
         SHIPPER_BRANCH_NAME: 'shipper/42-add-feature',
       },
+      'npm install',
       expectedWtPath
     );
-    expect(callOrder.indexOf('setup-hook')).toBeLessThan(callOrder.indexOf('callback'));
+    expect(callOrder.indexOf('worktree-setup')).toBeLessThan(callOrder.indexOf('callback'));
   });
 
   it('runs teardown hook before removeWorktree', () => {
@@ -88,8 +93,8 @@ describe('withWorktree hooks', () => {
     });
 
     const callOrder: string[] = [];
-    runAdvisoryHookMock.mockImplementation(() => {
-      callOrder.push('teardown-hook');
+    runWorktreeHookMock.mockImplementation((event: string) => {
+      callOrder.push(event);
     });
     execFileSyncMock.mockImplementation((_cmd: string, args: string[]) => {
       if (args[0] === 'worktree' && args[1] === 'remove') {
@@ -99,26 +104,53 @@ describe('withWorktree hooks', () => {
 
     withWorktree(defaultOpts, () => {});
 
-    expect(runAdvisoryHookMock).toHaveBeenCalledWith(
-      'Worktree teardown',
-      'rm -rf node_modules',
+    expect(runWorktreeHookMock).toHaveBeenCalledWith(
+      'worktree-teardown',
       {
+        SHIPPER_STAGE: 'implement',
         SHIPPER_WORKTREE_PATH: expectedWtPath,
         SHIPPER_ISSUE_NUMBER: '42',
         SHIPPER_BRANCH_NAME: 'shipper/42-add-feature',
       },
+      'rm -rf node_modules',
       expectedWtPath
     );
-    expect(callOrder.indexOf('teardown-hook')).toBeLessThan(callOrder.indexOf('remove-worktree'));
+    expect(callOrder.indexOf('worktree-teardown')).toBeLessThan(
+      callOrder.indexOf('remove-worktree')
+    );
   });
 
-  it('does not call runAdvisoryHook when no hooks are configured', () => {
+  it('calls runWorktreeHook for setup and teardown even when no hooks are configured', () => {
     getSettingsMock.mockReturnValue({ hooks: {} });
 
     const result = withWorktree(defaultOpts, () => 'ok');
 
     expect(result).toBe('ok');
     expect(runAdvisoryHookMock).not.toHaveBeenCalled();
+    expect(runWorktreeHookMock).toHaveBeenNthCalledWith(
+      1,
+      'worktree-setup',
+      expect.objectContaining({
+        SHIPPER_STAGE: 'implement',
+        SHIPPER_WORKTREE_PATH: expectedWtPath,
+        SHIPPER_ISSUE_NUMBER: '42',
+        SHIPPER_BRANCH_NAME: 'shipper/42-add-feature',
+      }),
+      undefined,
+      expectedWtPath
+    );
+    expect(runWorktreeHookMock).toHaveBeenNthCalledWith(
+      2,
+      'worktree-teardown',
+      expect.objectContaining({
+        SHIPPER_STAGE: 'implement',
+        SHIPPER_WORKTREE_PATH: expectedWtPath,
+        SHIPPER_ISSUE_NUMBER: '42',
+        SHIPPER_BRANCH_NAME: 'shipper/42-add-feature',
+      }),
+      undefined,
+      expectedWtPath
+    );
   });
 
   it('runs teardown hook exactly once when signal fires during callback', () => {
@@ -142,17 +174,18 @@ describe('withWorktree hooks', () => {
       sigintListener!();
     });
 
-    // The teardown hook should run exactly once — from the signal handler.
-    // The finally block's cleanup call is short-circuited by the idempotent guard.
-    expect(runAdvisoryHookMock).toHaveBeenCalledTimes(1);
-    expect(runAdvisoryHookMock).toHaveBeenCalledWith(
-      'Worktree teardown',
-      'cleanup-cmd',
+    expect(
+      runWorktreeHookMock.mock.calls.filter(([event]) => event === 'worktree-teardown')
+    ).toHaveLength(1);
+    expect(runWorktreeHookMock).toHaveBeenCalledWith(
+      'worktree-teardown',
       expect.objectContaining({
+        SHIPPER_STAGE: 'implement',
         SHIPPER_WORKTREE_PATH: expectedWtPath,
         SHIPPER_ISSUE_NUMBER: '42',
         SHIPPER_BRANCH_NAME: 'shipper/42-add-feature',
       }),
+      'cleanup-cmd',
       expectedWtPath
     );
 
@@ -160,7 +193,7 @@ describe('withWorktree hooks', () => {
     removeListenerSpy.mockRestore();
   });
 
-  it('defaults issueNumber to empty string when not provided', () => {
+  it('defaults issueNumber and stage to empty strings when not provided', () => {
     getSettingsMock.mockReturnValue({
       hooks: { worktreeSetup: 'echo test' },
     });
@@ -173,10 +206,13 @@ describe('withWorktree hooks', () => {
 
     withWorktree(optsWithoutIssue, () => {});
 
-    expect(runAdvisoryHookMock).toHaveBeenCalledWith(
-      'Worktree setup',
+    expect(runWorktreeHookMock).toHaveBeenCalledWith(
+      'worktree-setup',
+      expect.objectContaining({
+        SHIPPER_STAGE: '',
+        SHIPPER_ISSUE_NUMBER: '',
+      }),
       'echo test',
-      expect.objectContaining({ SHIPPER_ISSUE_NUMBER: '' }),
       expectedWtPath
     );
   });
@@ -193,18 +229,21 @@ describe('installCommand in withWorktree', () => {
     runAdvisoryHookMock.mockImplementation((label: string) => {
       callOrder.push(label);
     });
+    runWorktreeHookMock.mockImplementation((event: string) => {
+      callOrder.push(event);
+    });
 
     withWorktree(defaultOpts, () => {
       callOrder.push('callback');
     });
 
     expect(callOrder.indexOf('Install dependencies')).toBeLessThan(
-      callOrder.indexOf('Worktree setup')
+      callOrder.indexOf('worktree-setup')
     );
-    expect(callOrder.indexOf('Worktree setup')).toBeLessThan(callOrder.indexOf('callback'));
+    expect(callOrder.indexOf('worktree-setup')).toBeLessThan(callOrder.indexOf('callback'));
   });
 
-  it('runs installCommand before callback when no worktreeSetup hook', () => {
+  it('runs installCommand before runWorktreeHook setup when no worktreeSetup hook is configured', () => {
     getSettingsMock.mockReturnValue({
       installCommand: 'npm ci',
       hooks: {},
@@ -214,12 +253,18 @@ describe('installCommand in withWorktree', () => {
     runAdvisoryHookMock.mockImplementation((label: string) => {
       callOrder.push(label);
     });
+    runWorktreeHookMock.mockImplementation((event: string) => {
+      callOrder.push(event);
+    });
 
     withWorktree(defaultOpts, () => {
       callOrder.push('callback');
     });
 
-    expect(callOrder).toEqual(['Install dependencies', 'callback']);
+    expect(callOrder.indexOf('Install dependencies')).toBeLessThan(
+      callOrder.indexOf('worktree-setup')
+    );
+    expect(callOrder.indexOf('worktree-setup')).toBeLessThan(callOrder.indexOf('callback'));
   });
 
   it('passes correct arguments to runAdvisoryHook for installCommand', () => {
@@ -234,6 +279,7 @@ describe('installCommand in withWorktree', () => {
       'Install dependencies',
       'pnpm install --frozen-lockfile',
       {
+        SHIPPER_STAGE: 'implement',
         SHIPPER_WORKTREE_PATH: expectedWtPath,
         SHIPPER_ISSUE_NUMBER: '42',
         SHIPPER_BRANCH_NAME: 'shipper/42-add-feature',
@@ -250,5 +296,6 @@ describe('installCommand in withWorktree', () => {
     withWorktree(defaultOpts, () => 'ok');
 
     expect(runAdvisoryHookMock).not.toHaveBeenCalled();
+    expect(runWorktreeHookMock).toHaveBeenCalledTimes(2);
   });
 });

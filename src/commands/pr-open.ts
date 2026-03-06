@@ -28,9 +28,12 @@ export function prOpenCommand(issue?: string) {
     const branch = findBranchForIssue(issue);
 
     const code = withStageHooks('pr-open', { issueNumber: issue, branchName: branch }, () =>
-      withWorktree({ repoRoot, branch, createBranch: false, issueNumber: issue }, (wtPath) => {
-        return runPrompt('pr_open', { issueRef: issue, cwd: wtPath, baseBranch });
-      })
+      withWorktree(
+        { repoRoot, branch, createBranch: false, issueNumber: issue, stage: 'pr-open' },
+        (wtPath) => {
+          return runPrompt('pr_open', { issueRef: issue, cwd: wtPath, baseBranch });
+        }
+      )
     );
 
     process.exit(code);

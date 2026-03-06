@@ -131,9 +131,12 @@ export function prRemediateCommand(pr?: string) {
 
       const repoRoot = getRepoRoot();
 
-      return withWorktree({ repoRoot, branch, createBranch: false, issueNumber }, (wtPath) => {
-        return runPrompt('pr_remediate', { issueRef: issueNumber, prRef: pr, cwd: wtPath });
-      });
+      return withWorktree(
+        { repoRoot, branch, createBranch: false, issueNumber, stage: 'pr-remediate' },
+        (wtPath) => {
+          return runPrompt('pr_remediate', { issueRef: issueNumber, prRef: pr, cwd: wtPath });
+        }
+      );
     });
 
     process.exit(code);
