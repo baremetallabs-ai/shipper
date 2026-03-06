@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseFrontmatter } from './frontmatter.js';
 import { fetchIssue, fetchPR } from './github.js';
+import { agentPrompts } from './prompts.js';
 import { resolveAgent } from './settings.js';
 
 export interface RunPromptOpts {
@@ -21,11 +22,13 @@ export function runPrompt(name: string, opts: RunPromptOpts): number {
   try {
     raw = readFileSync(promptPath, 'utf-8');
   } catch {
-    console.error(`Error: Could not read prompt file at ${promptPath}`);
-    console.error(
-      `Run 'shipper init --agent ${agent}' to generate prompts, or change agents.${name} in settings.`
-    );
-    return 1;
+    const bundled = agentPrompts[agent]?.[`${name}.md`];
+    if (!bundled) {
+      console.error(`Error: No prompt found for step "${name}" (agent: ${agent}).`);
+      console.error(`No local file at ${promptPath} and no bundled default available.`);
+      return 1;
+    }
+    raw = bundled;
   }
 
   const { frontmatter, body } = parseFrontmatter(raw);

@@ -2,7 +2,6 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync } from 'n
 import { createInterface } from 'node:readline/promises';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { agentPrompts } from '../lib/prompts.js';
 import { scripts } from '../lib/scripts.js';
 import { DEFAULTS, SETTING_DESCRIPTIONS } from '../lib/settings.js';
 import { CLI_VERSION } from '../lib/version.js';
@@ -95,7 +94,7 @@ export async function initCommand(options: { agent?: string }) {
   }
 
   // Codex guard
-  if (!agentPrompts[agent]) {
+  if (agent !== 'claude') {
     console.error('Codex CLI prompts are not yet available. Use Claude Code or check for updates.');
     process.exit(1);
     return;
@@ -103,7 +102,6 @@ export async function initCommand(options: { agent?: string }) {
 
   // Create directories
   const dirs = [
-    path.resolve('.shipper', 'prompts'),
     path.resolve('.shipper', 'scripts'),
     path.resolve('.shipper', 'tmp'),
     path.resolve('.shipper', 'hooks'),
@@ -136,7 +134,7 @@ export async function initCommand(options: { agent?: string }) {
 
   // Re-init warning
   if (existingAgent && existingAgent !== agent) {
-    console.log(`Switching agent from ${existingAgent} to ${agent} — overwriting prompt files`);
+    console.log(`Switching agent from ${existingAgent} to ${agent}`);
   }
 
   const existingAgentsObj =
@@ -172,18 +170,6 @@ export async function initCommand(options: { agent?: string }) {
       console.log(`  ${key}: (not set)  — ${desc}`);
     }
   }
-
-  // Write prompt files
-  const promptDir = path.resolve('.shipper', 'prompts', agent);
-  mkdirSync(promptDir, { recursive: true });
-  const selectedPrompts = agentPrompts[agent]!;
-  let promptCount = 0;
-  for (const [filename, content] of Object.entries(selectedPrompts)) {
-    const dest = path.resolve(promptDir, filename);
-    writeFileSync(dest, content);
-    promptCount++;
-  }
-  console.log(`Wrote ${promptCount} prompt files to .shipper/prompts/${agent}/`);
 
   // Write script files
   let scriptCount = 0;
@@ -227,7 +213,6 @@ export async function initCommand(options: { agent?: string }) {
     const content = readGitignore(rootGitignore);
     if (!content.includes('.shipper/tmp')) {
       console.log('\nTip: .shipper/tmp/ is gitignored within .shipper/.');
-      console.log('You may want to commit .shipper/prompts/ to your repo.');
     }
   }
 

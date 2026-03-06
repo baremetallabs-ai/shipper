@@ -18,6 +18,12 @@ vi.mock('../../src/lib/settings.js', () => ({
   resolveAgent: (...args: unknown[]) => resolveAgentMock(...args),
 }));
 
+vi.mock('../../src/lib/prompts.js', () => ({
+  agentPrompts: {
+    claude: { 'test.md': '---\ncmd: claude\n---\n\nbundled body' },
+  },
+}));
+
 import { runPrompt } from '../../src/lib/prompt-runner.js';
 
 afterEach(() => {
@@ -133,5 +139,61 @@ describe('runPrompt baseBranch replacement', () => {
       (_: string, i: number, arr: string[]) => arr[i - 1] === '--append-system-prompt'
     );
     expect(appendSystemPromptArg).toContain('{{BASE_BRANCH}}');
+  });
+});
+
+describe('runPrompt bundled fallback', () => {
+  it('uses bundled default when no local file exists', () => {
+    readFileSyncMock.mockImplementation(() => {
+      throw new Error('ENOENT');
+    });
+    spawnSyncMock.mockReturnValueOnce({ status: 0, error: null });
+
+    const result = runPrompt('test', {});
+
+    expect(result).toBe(0);
+    expect(spawnSyncMock).toHaveBeenCalled();
+    const args = spawnSyncMock.mock.calls[0][1] as string[];
+    expect(args).toContain('bundled body');
+  });
+
+  it('returns 1 when no local file and no bundled default exists', () => {
+    readFileSyncMock.mockImplementation(() => {
+      throw new Error('ENOENT');
+    });
+
+    const result = runPrompt('nonexistent', {});
+
+    expect(result).toBe(1);
+    expect(spawnSyncMock).not.toHaveBeenCalled();
+  });
+
+  it('uses local file when it exists (not bundled)', () => {
+    const localPrompt = ['---', 'cmd: claude', '---', '', 'local body'].join('\n');
+    readFileSyncMock.mockReturnValueOnce(localPrompt);
+    spawnSyncMock.mockReturnValueOnce({ status: 0, error: null });
+
+    runPrompt('test', {});
+
+    const args = spawnSyncMock.mock.calls[0][1] as string[];
+    expect(args).toContain('local body');
+    expect(args).not.toContain('bundled body');
+  });
+
+  it('errors on local file with wrong cmd (does not fall back to bundled)', () => {
+    const badPrompt = ['---', 'cmd: codex', '---', '', 'local body'].join('\n');
+    readFileSyncMock.mockReturnValueOnce(badPrompt);
+
+    const result = runPrompt('test', {});
+
+    expect(result).toBe(1);
+    expect(spawnSyncMock).not.toHaveBeenCalled();
+  });
+
+  it('throws on local file with malformed frontmatter (does not fall back to bundled)', () => {
+    readFileSyncMock.mockReturnValueOnce('no frontmatter here');
+
+    expect(() => runPrompt('test', {})).toThrow();
+    expect(spawnSyncMock).not.toHaveBeenCalled();
   });
 });
