@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 [[ $# -eq 2 ]] || { echo "Usage: gh-api-get-review-threads.sh <owner/repo> <pr-number>" >&2; exit 1; }
+[[ "$1" == */* ]] || { echo "Usage: gh-api-get-review-threads.sh <owner/repo> <pr-number>" >&2; exit 1; }
 owner="${1%%/*}"
 repo="${1##*/}"
+rest_after_first_slash="${1#*/}"
+[[ -n "$owner" && -n "$repo" && "$rest_after_first_slash" != */* ]] || {
+  echo "Usage: gh-api-get-review-threads.sh <owner/repo> <pr-number>" >&2
+  exit 1
+}
 
 exec gh api graphql \
   -f owner="$owner" \

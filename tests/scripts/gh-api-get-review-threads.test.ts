@@ -5,6 +5,26 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 const script = path.resolve('src/scripts/gh-api-get-review-threads.sh');
+const expectedOutput = JSON.stringify([
+  {
+    path: 'src/example.ts',
+    line: 42,
+    isResolved: false,
+    isOutdated: true,
+    comments: [
+      {
+        author: 'reviewer-one',
+        body: 'Please rename this.',
+        createdAt: '2026-03-06T12:00:00Z',
+      },
+      {
+        author: 'author-two',
+        body: 'Done.',
+        createdAt: '2026-03-06T13:00:00Z',
+      },
+    ],
+  },
+]);
 
 let tempDir: string;
 let mockBinDir: string;
@@ -88,8 +108,24 @@ const response = JSON.stringify({
   },
 });
 
-const output = execFileSync('jq', [jqValues[0]], { input: response, encoding: 'utf8' });
-process.stdout.write(output);
+const normalizedFilter = jqValues[0].replace(/\\s+/g, '');
+const expectedFilter = [
+  '.data.repository.pullRequest.reviewThreads.nodes',
+  '|map({',
+  'path,',
+  'line,',
+  'isResolved,',
+  'isOutdated,',
+  'comments:(.comments.nodes|map({author:.author.login,body,createdAt}))',
+  '})',
+].join('');
+
+if (normalizedFilter !== expectedFilter) {
+  console.error('unexpected --jq filter');
+  process.exit(1);
+}
+
+process.stdout.write('${expectedOutput}');
 `
   );
   chmodSync(mockGh, 0o755);
