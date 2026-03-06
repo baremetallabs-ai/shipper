@@ -105,7 +105,7 @@ export async function initCommand(options: { agent?: string }) {
 
   // Write .gitignore
   const gitignorePath = path.resolve('.shipper', '.gitignore');
-  writeFileSync(gitignorePath, 'tmp/\nsettings.local.json\n');
+  writeFileSync(gitignorePath, 'tmp/\nsettings.local.json\nREADME.md\nscripts/\n');
 
   // Write settings.json (merge with existing if present)
   const settingsPath = path.resolve('.shipper', 'settings.json');
