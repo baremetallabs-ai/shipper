@@ -1,4 +1,4 @@
-import { Command } from 'commander';
+import { Command, CommanderError } from 'commander';
 import { runPreflight } from './lib/prerequisites.js';
 import { loadSettings } from './lib/settings.js';
 import { CLI_VERSION, checkVersionFreshness } from './lib/version.js';
@@ -22,6 +22,15 @@ import { issueListCommand } from './commands/issue-list.js';
 import { setupCommand } from './commands/setup.js';
 
 const program = new Command();
+
+program.configureOutput({
+  outputError: (str, write) => {
+    if (str.includes("option '--parallel <n>' argument missing")) {
+      return;
+    }
+    write(str);
+  },
+});
 
 program
   .name('shipper')
@@ -93,17 +102,41 @@ program
   .argument('[issue]', 'issue number')
   .option('--merge', 'auto-merge the PR after reaching shipper:ready', false)
   .option('--auto', 'run autonomous continuous shipping loop', false)
-  .action((issue: string | undefined, options: { merge: boolean; auto: boolean }) => {
-    if (options.auto && issue) {
-      console.error('Error: --auto and an explicit issue number are mutually exclusive.');
-      process.exit(1);
+  .option('--parallel <n>', 'number of parallel slots (requires --auto)')
+  .action(
+    async (
+      issue: string | undefined,
+      options: { merge: boolean; auto: boolean; parallel?: string }
+    ) => {
+      if (options.auto && issue) {
+        console.error('Error: --auto and an explicit issue number are mutually exclusive.');
+        process.exit(1);
+      }
+      if (!options.auto && !issue) {
+        console.error('Error: an issue number is required unless --auto is used.');
+        process.exit(1);
+      }
+
+      if (options.parallel !== undefined && !options.auto) {
+        console.error('Error: --parallel requires --auto');
+        process.exit(1);
+      }
+
+      let parallel: number | undefined;
+      if (options.parallel !== undefined) {
+        parallel = Number(options.parallel);
+        if (!Number.isInteger(parallel) || parallel < 1) {
+          console.error('Error: --parallel requires a number');
+          process.exit(1);
+        }
+        if (parallel === 1) {
+          parallel = undefined;
+        }
+      }
+
+      await shipCommand(issue, { merge: options.merge, auto: options.auto, parallel });
     }
-    if (!options.auto && !issue) {
-      console.error('Error: an issue number is required unless --auto is used.');
-      process.exit(1);
-    }
-    shipCommand(issue, options);
-  });
+  );
 
 program
   .command('groom')
@@ -217,4 +250,30 @@ program
     }
   );
 
-program.parse();
+program.exitOverride();
+
+const argv = process.argv.slice(2);
+for (let i = 0; i < argv.length; i++) {
+  if (argv[i] !== '--parallel') continue;
+
+  const next = argv[i + 1];
+  if (!next || next.startsWith('-')) {
+    console.error('Error: --parallel requires a number');
+    process.exit(1);
+  }
+}
+
+try {
+  await program.parseAsync();
+} catch (error) {
+  if (error instanceof CommanderError) {
+    if (error.code === 'commander.optionMissingArgument' && error.message.includes('--parallel')) {
+      console.error('Error: --parallel requires a number');
+      process.exit(1);
+    }
+
+    process.exit(error.exitCode);
+  }
+
+  throw error;
+}
