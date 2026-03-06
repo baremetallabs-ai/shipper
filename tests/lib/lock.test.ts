@@ -74,7 +74,11 @@ describe('isLockStale', () => {
   });
 
   it('uses custom lockTimeoutMinutes from settings', () => {
-    mockGetSettings.mockReturnValue({ lockTimeoutMinutes: 5, prReviewWaitMinutes: 15, hooks: {} });
+    mockGetSettings.mockReturnValueOnce({
+      lockTimeoutMinutes: 5,
+      prReviewWaitMinutes: 15,
+      hooks: {},
+    });
     const sixMinAgo = new Date(Date.now() - 6 * 60_000).toISOString();
     mockExecFileSync.mockReturnValue(sixMinAgo);
     expect(isLockStale('42')).toBe(true);
