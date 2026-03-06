@@ -1,4 +1,5 @@
 import { Command, CommanderError } from 'commander';
+import { writeSync } from 'node:fs';
 import { runPreflight } from './lib/prerequisites.js';
 import { loadSettings } from './lib/settings.js';
 import { CLI_VERSION, checkVersionFreshness } from './lib/version.js';
@@ -253,13 +254,15 @@ program
 program.exitOverride();
 
 const argv = process.argv.slice(2);
-for (let i = 0; i < argv.length; i++) {
-  if (argv[i] !== '--parallel') continue;
+if (argv[0] === 'ship') {
+  for (let i = 1; i < argv.length; i++) {
+    if (argv[i] !== '--parallel') continue;
 
-  const next = argv[i + 1];
-  if (!next || next.startsWith('-')) {
-    console.error('Error: --parallel requires a number');
-    process.exit(1);
+    const next = argv[i + 1];
+    if (!next || next.startsWith('-')) {
+      console.error('Error: --parallel requires a number');
+      process.exit(1);
+    }
   }
 }
 
@@ -268,7 +271,7 @@ try {
 } catch (error) {
   if (error instanceof CommanderError) {
     if (error.code === 'commander.optionMissingArgument' && error.message.includes('--parallel')) {
-      console.error('Error: --parallel requires a number');
+      writeSync(process.stderr.fd, 'Error: --parallel requires a number\n');
       process.exit(1);
     }
 
