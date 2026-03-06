@@ -112,29 +112,34 @@ describe('nextCommand', () => {
     expect(mockPrRemediateCommand).not.toHaveBeenCalled();
   });
 
-  it.each(['shipper:groomed', 'shipper:planned'])(
-    'exits for blocked %s issues before dispatch',
-    (stageLabel) => {
-      mockExecFileSync.mockReturnValueOnce(
-        JSON.stringify({
-          number: 159,
-          labels: [{ name: stageLabel }, { name: 'shipper:blocked' }],
-        })
-      );
+  it.each([
+    'shipper:groomed',
+    'shipper:designed',
+    'shipper:planned',
+    'shipper:implemented',
+    'shipper:pr-open',
+    'shipper:pr-reviewed',
+    'shipper:ready',
+  ])('exits for blocked %s issues before dispatch', (stageLabel) => {
+    mockExecFileSync.mockReturnValueOnce(
+      JSON.stringify({
+        number: 159,
+        labels: [{ name: stageLabel }, { name: 'shipper:blocked' }],
+      })
+    );
 
-      expect(() => nextCommand('159')).toThrow('exit:1');
+    expect(() => nextCommand('159')).toThrow('exit:1');
 
-      expect(errorSpy).toHaveBeenCalledWith(
-        "Issue #159 is blocked. Run 'shipper unblock 159' to check if it can proceed."
-      );
-      expect(mockWithIssueLock).not.toHaveBeenCalled();
-      expect(mockGroomCommand).not.toHaveBeenCalled();
-      expect(mockDesignCommand).not.toHaveBeenCalled();
-      expect(mockPlanCommand).not.toHaveBeenCalled();
-      expect(mockImplementCommand).not.toHaveBeenCalled();
-      expect(mockPrOpenCommand).not.toHaveBeenCalled();
-      expect(mockPrReviewCommand).not.toHaveBeenCalled();
-      expect(mockPrRemediateCommand).not.toHaveBeenCalled();
-    }
-  );
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Issue #159 is blocked. Run 'shipper unblock 159' to check if it can proceed."
+    );
+    expect(mockWithIssueLock).not.toHaveBeenCalled();
+    expect(mockGroomCommand).not.toHaveBeenCalled();
+    expect(mockDesignCommand).not.toHaveBeenCalled();
+    expect(mockPlanCommand).not.toHaveBeenCalled();
+    expect(mockImplementCommand).not.toHaveBeenCalled();
+    expect(mockPrOpenCommand).not.toHaveBeenCalled();
+    expect(mockPrReviewCommand).not.toHaveBeenCalled();
+    expect(mockPrRemediateCommand).not.toHaveBeenCalled();
+  });
 });
