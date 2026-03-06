@@ -93,13 +93,6 @@ export async function initCommand(options: { agent?: string }) {
     }
   }
 
-  // Codex guard
-  if (agent !== 'claude') {
-    console.error('Codex CLI prompts are not yet available. Use Claude Code or check for updates.');
-    process.exit(1);
-    return;
-  }
-
   // Create directories
   const dirs = [
     path.resolve('.shipper', 'scripts'),

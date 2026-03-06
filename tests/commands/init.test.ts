@@ -194,9 +194,13 @@ describe('initCommand stored agent', () => {
     });
     await initCommand({});
     expect(questionMock).not.toHaveBeenCalled();
-    expect(console.error).toHaveBeenCalledWith(
-      'Codex CLI prompts are not yet available. Use Claude Code or check for updates.'
+    expect(console.log).toHaveBeenCalledWith('Using agent: codex (from settings)');
+    const settingsCall = writeFileSyncMock.mock.calls.find(
+      (call: unknown[]) => call[0] === settingsPath
     );
+    expect(settingsCall).toBeDefined();
+    const written = JSON.parse(settingsCall![1] as string);
+    expect(written.agents).toEqual({ default: 'codex' });
   });
 
   it('invalid stored agent falls through to interactive prompt', async () => {
@@ -241,12 +245,14 @@ describe('initCommand agent selection', () => {
     expect(promptCall).toBeUndefined();
   });
 
-  it('--agent codex prints not yet available error and exits', async () => {
+  it('--agent codex writes codex agent to settings', async () => {
     await initCommand({ agent: 'codex' });
-    expect(console.error).toHaveBeenCalledWith(
-      'Codex CLI prompts are not yet available. Use Claude Code or check for updates.'
+    const settingsCall = writeFileSyncMock.mock.calls.find(
+      (call: unknown[]) => call[0] === settingsPath
     );
-    expect(exitMock).toHaveBeenCalledWith(1);
+    const written = JSON.parse(settingsCall![1] as string);
+    expect(written.agents).toEqual({ default: 'codex' });
+    expect(exitMock).not.toHaveBeenCalledWith(1);
   });
 
   it('--agent invalid prints validation error and exits', async () => {
@@ -301,12 +307,14 @@ describe('initCommand agent selection', () => {
     expect(written.agents).toEqual({ default: 'claude' });
   });
 
-  it('interactive prompt accepts "Codex CLI" and prints not available', async () => {
+  it('interactive prompt accepts "Codex CLI" and writes codex agent to settings', async () => {
     questionMock.mockResolvedValueOnce('Codex CLI');
     await initCommand({});
-    expect(console.error).toHaveBeenCalledWith(
-      'Codex CLI prompts are not yet available. Use Claude Code or check for updates.'
+    const settingsCall = writeFileSyncMock.mock.calls.find(
+      (call: unknown[]) => call[0] === settingsPath
     );
-    expect(exitMock).toHaveBeenCalledWith(1);
+    const written = JSON.parse(settingsCall![1] as string);
+    expect(written.agents).toEqual({ default: 'codex' });
+    expect(exitMock).not.toHaveBeenCalledWith(1);
   });
 });
