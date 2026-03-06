@@ -2,6 +2,7 @@ import { execFileSync, execSync } from 'node:child_process';
 import { accessSync, constants, statSync } from 'node:fs';
 import path from 'node:path';
 
+const HOOKS_DIR = path.join('.shipper', 'hooks');
 const WORKTREE_HOOK_META = {
   'worktree-setup': {
     label: 'Worktree setup',
@@ -65,6 +66,12 @@ function hookIsExecutable(hookPath: string): boolean {
   }
 }
 
+function warnNonExecutableHook(foundPath: string, chmodPath = foundPath): void {
+  console.warn(
+    `  Warning: Found ${foundPath} but it is not executable — skipping. Run \`chmod +x ${chmodPath}\` to enable.`
+  );
+}
+
 function runFileHook(
   hookPath: string,
   label: string,
@@ -74,9 +81,7 @@ function runFileHook(
   if (!hookExists(hookPath)) return;
 
   if (!hookIsExecutable(hookPath)) {
-    console.warn(
-      `  Warning: Found ${hookPath} but it is not executable — skipping. Run \`chmod +x ${hookPath}\` to enable.`
-    );
+    warnNonExecutableHook(hookPath);
     return;
   }
 
@@ -101,14 +106,14 @@ function runFileHook(
 }
 
 export function runPreHook(stage: string, env: Record<string, string>): void {
-  runFileHook(path.resolve('.shipper', 'hooks', `pre-${stage}`), `Pre-${stage}`, env, {
+  runFileHook(path.resolve(HOOKS_DIR, `pre-${stage}`), `Pre-${stage}`, env, {
     blocking: true,
     resultLabel: `pre-${stage}`,
   });
 }
 
 export function runPostHook(stage: string, env: Record<string, string>): void {
-  runFileHook(path.resolve('.shipper', 'hooks', `post-${stage}`), `Post-${stage}`, env, {
+  runFileHook(path.resolve(HOOKS_DIR, `post-${stage}`), `Post-${stage}`, env, {
     blocking: false,
     resultLabel: `post-${stage}`,
   });
@@ -121,27 +126,32 @@ export function runWorktreeHook(
   cwd?: string
 ): void {
   const meta = WORKTREE_HOOK_META[event];
-  const hookPath = path.resolve('.shipper', 'hooks', event);
+  const displayPath = path.join(HOOKS_DIR, event);
+  const hookPath = path.join(cwd ?? process.cwd(), HOOKS_DIR, event);
 
   if (hookExists(hookPath)) {
-    if (settingsHookCommand) {
-      console.warn(
-        `  Warning: Both ${hookPath} and settings-based hooks.${meta.settingsKey} found. Using file-based hook; settings-based hook skipped.`
-      );
-    }
+    if (!hookIsExecutable(hookPath)) {
+      warnNonExecutableHook(displayPath);
+    } else {
+      if (settingsHookCommand) {
+        console.warn(
+          `  Warning: Both ${displayPath} and settings-based hooks.${meta.settingsKey} found. Using file-based hook; settings-based hook skipped.`
+        );
+      }
 
-    runFileHook(hookPath, meta.label, env, {
-      blocking: false,
-      cwd,
-      resultLabel: meta.label,
-    });
-    return;
+      runFileHook(hookPath, meta.label, env, {
+        blocking: false,
+        cwd,
+        resultLabel: meta.label,
+      });
+      return;
+    }
   }
 
   if (!settingsHookCommand) return;
 
   console.warn(
-    `  Warning: settings-based hooks.${meta.settingsKey} is deprecated. Move your command to ${hookPath} and make it executable.`
+    `  Warning: settings-based hooks.${meta.settingsKey} is deprecated. Move your command to ${displayPath} and make it executable.`
   );
   runAdvisoryHook(meta.label, settingsHookCommand, env, cwd);
 }
