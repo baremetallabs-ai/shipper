@@ -121,6 +121,8 @@ When you stop for a scope guard issue (other than scope creep), you must:
 
 After all plan steps are complete, work through the verification tasks:
 
+> **Check the project's agent configuration file (CLAUDE.md or AGENTS.md at the repo root) for the specific verification commands to run.** If no agent config file exists, fall back to the commands specified in the plan.
+
 1. Mark each verification task `in_progress`.
 2. Execute the verification check exactly as described in the plan (e.g., run the test suite, confirm a specific behavior, check a specific output).
 3. If a check fails, fix the issue. If the fix is within the scope of the plan, make the fix and re-verify. If the fix requires changes outside the plan's scope, stop and flag it.

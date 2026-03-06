@@ -214,6 +214,7 @@ Make the targeted changes needed to satisfy the unmet criteria.
 
 1. If you modified any dependency files (package.json, Cargo.toml, requirements.txt, etc.), run `./.shipper/scripts/install-deps.sh` to install dependencies.
 2. Run all project quality checks (lint, type check, build, tests). Fix any failures introduced by your remediation.
+   > **Check the project's agent configuration file (CLAUDE.md or AGENTS.md at the repo root) for the specific verification commands to run.** If no agent config file exists, use the commands from the PR's previous check runs.
 3. Commit changes with a clear message referencing the issue number (e.g., `fix(#<ISSUE>): address review feedback and fix e2e timeout`).
 4. Push:
 

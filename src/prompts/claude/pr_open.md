@@ -101,6 +101,8 @@ Run `./.shipper/scripts/install-deps.sh` to install project dependencies. If no 
 
 ### Step 2: Run checks in parallel
 
+> **Check the project's agent configuration file (CLAUDE.md or AGENTS.md at the repo root) for the specific verification commands to run.** If no agent config file exists, fall back to ecosystem-based detection below.
+
 Inspect the project's configuration to determine which quality checks are available. Run whatever the project provides for:
 
 - **Lint** (if available)

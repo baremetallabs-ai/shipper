@@ -24,7 +24,17 @@ Inspect the repository to determine the correct dependency install command:
 - Verify the command works by running `./.shipper/scripts/install-deps.sh`.
 - Report what you configured and why.
 
-### 2. Settings health check
+### 2. Generate agent configuration file
+
+Create or update the project's agent configuration file so that coding agents know what verification commands to run.
+
+- **Which file:** If the configured agent is Claude Code, write `CLAUDE.md` at the repo root. If Codex, write `AGENTS.md`.
+- **Discover CI checks:** Read `.github/workflows/` to find the exact commands CI runs (e.g., lint, format check, type check, build, test commands). These are the source of truth — do not guess or use generic equivalents.
+- **If the file already exists:** Read it first. Add a "Commands" or equivalent section with the CI check commands if one doesn't exist. If it already has a commands section, verify it matches CI and update if needed. Preserve all other content.
+- **If the file doesn't exist:** Create it with at minimum a "Commands" section listing every CI check command, and a brief project description based on what you can infer from the repo structure.
+- **Do not hardcode commands in this prompt.** The agent must discover them from the actual CI configuration.
+
+### 3. Settings health check
 
 Read `.shipper/settings.json` and verify:
 
@@ -32,7 +42,7 @@ Read `.shipper/settings.json` and verify:
 - The `agent` field matches the installed coding agent.
 - Report any issues or suggestions.
 
-### 3. Verify labels
+### 4. Verify labels
 
 Run `gh label list` and confirm that the Shipper workflow labels exist:
 
@@ -40,7 +50,7 @@ Run `gh label list` and confirm that the Shipper workflow labels exist:
 
 If any are missing, suggest running `shipper init` to create them.
 
-### 4. Explain the workflow
+### 5. Explain the workflow
 
 Provide a brief overview of the Shipper workflow:
 
@@ -56,6 +66,6 @@ Provide a brief overview of the Shipper workflow:
 
 Or use **`shipper next`** to auto-advance, or **`shipper ship`** to run end-to-end.
 
-### 5. Suggest next steps
+### 6. Suggest next steps
 
 Based on the repository state, suggest what the user should do next (e.g., create their first issue, adopt existing issues, etc.).
