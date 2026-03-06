@@ -110,19 +110,19 @@ After producing the final artifacts, you must update GitHub using repo-local tem
 
 ### Update the existing issue
 
-1. Save the updated issue body to `.shipper/tmp/issue_body-<number>.md` (using the issue number).
-2. Update the issue: `gh issue edit <ISSUE> --body-file ./.shipper/tmp/issue_body-<number>.md`
+1. Unless the parent will be fully replaced by child issues later in Phase 4, save the updated issue body to `.shipper/tmp/issue_body-<number>.md` (using the issue number).
+2. Unless the parent will be fully replaced by child issues later in Phase 4, update the issue: `gh issue edit <ISSUE> --body-file ./.shipper/tmp/issue_body-<number>.md`
 3. Save the grooming summary comment to `.shipper/tmp/grooming_comment-<number>.md` (using the issue number).
 4. Post the comment: `gh issue comment <ISSUE> --body-file ./.shipper/tmp/grooming_comment-<number>.md`
 
-5. Update labels — **conditional on Phase 2 cross-issue scan results:**
+5. If the parent remains open after grooming, update labels — **conditional on whether it is still blocked after Phase 2 and decomposition decisions:**
 
-   **If no hard conflicts or dependencies were found in Phase 2:**
-   - Add `shipper:groomed`, remove `shipper:new` (if present)
-   - Use `gh issue edit <ISSUE> --add-label "shipper:groomed" --remove-label "shipper:new"`
+   **If the parent is not blocked by any hard conflict, dependency, or sibling-ordering constraint:**
+   - Add `shipper:groomed`, remove `shipper:new` / `shipper:blocked` (if present)
+   - Use `gh issue edit <ISSUE> --add-label "shipper:groomed" --remove-label "shipper:new" --remove-label "shipper:blocked"`
 
-   **If a hard conflict or dependency was found in Phase 2:**
-   - Do NOT add `shipper:groomed` — the label stays at `shipper:new`
+   **If the parent is still blocked by a hard conflict, dependency, or sibling-ordering constraint:**
+   - Do NOT add `shipper:groomed` — keep the parent at `shipper:new` with `shipper:blocked`
    - Add `shipper:blocked`: `gh issue edit <ISSUE> --add-label "shipper:blocked"`
    - Post a separate `## Blocked` comment after the grooming summary comment, referencing the conflicting/dependent issue number(s) and stating the unblock condition. Save it to `.shipper/tmp/blocked_comment-<number>.md` and post with `gh issue comment <ISSUE> --body-file ./.shipper/tmp/blocked_comment-<number>.md`. Example format:
      ```
@@ -151,10 +151,13 @@ If your decomposition recommendation includes additional issues, you must create
    - Post a comment on the parent issue listing and linking to all created child issues (e.g., "Decomposed into #X, #Y, #Z."). Save to `./.shipper/tmp/decomposition_comment-<number>.md` and post with `gh issue comment <ISSUE> --body-file ./.shipper/tmp/decomposition_comment-<number>.md`.
    - Close the parent issue: `gh issue close <ISSUE>`
    - Do NOT rewrite the parent issue body. The closing comment serves as the decomposition record.
+   - In this full-replacement path, do NOT generate `.shipper/tmp/issue_body-<number>.md`, do NOT run `gh issue edit` on the parent, and skip the parent-label update step above.
 
    **If the child issues cover only part of the parent's scope (partial replacement):**
    - Rewrite the parent issue body in the standard groomed format (`Summary`, `Requirements`, `Acceptance Criteria`, `Related Issues`, `Out of Scope`, `Open Questions`) so it reflects only the remaining scope not covered by child issues.
-   - The parent stays open with the `shipper:groomed` label.
+   - Then follow the earlier issue-body update steps for the parent.
+   - If the parent is not blocked after grooming, it stays open with the `shipper:groomed` label.
+   - If the parent is still blocked (for example, because of a hard dependency/conflict or because a sibling must be completed first), keep it at `shipper:new` with `shipper:blocked` instead.
 
    Use your judgment to determine which scenario applies based on whether the created child issues collectively cover the parent's entire original scope.
 
