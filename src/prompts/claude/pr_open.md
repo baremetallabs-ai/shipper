@@ -7,7 +7,7 @@ args:
   - --permission-mode
   - acceptEdits
   - --settings
-  - {"permissions":{"allow":["Bash(git branch *)","Bash(git log *)","Bash(git fetch *)","Bash(git rebase *)","Bash(git diff *)","Bash(./.shipper/scripts/safe-push.sh *)","Bash(./.shipper/scripts/safe-push.sh)","Bash(./.shipper/scripts/install-deps.sh)","Bash(gh pr list *)","Bash(gh pr create *)","Bash(gh pr checks *)","Bash(gh issue view *)","Bash(gh issue comment *)","Bash(gh issue edit *)","WebSearch"]},"sandbox":{"enabled":true,"autoAllowBashIfSandboxed":true,"excludedCommands":["git branch *","git log *","git fetch *","git rebase *","git diff *","./.shipper/scripts/safe-push.sh *","./.shipper/scripts/safe-push.sh","./.shipper/scripts/install-deps.sh","gh pr list *","gh pr create *","gh pr checks *","gh issue view *","gh issue comment *","gh issue edit *"]},"network":{"allowedDomains":["github.com","api.github.com","uploads.github.com","registry.npmjs.org"]}}
+  - {"permissions":{"allow":["Bash(git branch *)","Bash(git log *)","Bash(git fetch *)","Bash(git rebase *)","Bash(git diff *)","Bash(./.shipper/scripts/safe-push.sh *)","Bash(./.shipper/scripts/safe-push.sh)","Bash(./.shipper/scripts/install-deps.sh)","Bash(gh pr list *)","Bash(gh pr create *)","Bash(gh pr checks *)","Bash(gh pr view *)","Bash(gh issue view *)","Bash(gh issue comment *)","Bash(gh issue edit *)","WebSearch"]},"sandbox":{"enabled":true,"autoAllowBashIfSandboxed":true,"excludedCommands":["git branch *","git log *","git fetch *","git rebase *","git diff *","./.shipper/scripts/safe-push.sh *","./.shipper/scripts/safe-push.sh","./.shipper/scripts/install-deps.sh","gh pr list *","gh pr create *","gh pr checks *","gh pr view *","gh issue view *","gh issue comment *","gh issue edit *"]},"network":{"allowedDomains":["github.com","api.github.com","uploads.github.com","registry.npmjs.org"]}}
 append-issue: true
 ---
 
@@ -20,6 +20,7 @@ The **next user message** contains the full GitHub issue including title, labels
 - **You are operating inside an ephemeral worktree** that Shipper created on the implementation branch. You do not need to create or switch branches — you are already on the correct branch.
 - The user may or may not have run the full shipper workflow (groom → design → plan → implement). Work with whatever context is available on the issue.
 - Your job is to validate the implementation, remediate any issues, and open the PR. You are not here to re-implement — if the implementation is fundamentally broken, stop and explain the problem.
+- **You are running inside a sandbox.** Some shell commands are restricted. If a `gh` command returns a 403/Forbidden error or a keyring/credential error, it means the sandbox blocked that specific command — it does **not** mean your GitHub authentication is broken. Do not attempt to re-authenticate or diagnose auth issues. Other `gh` commands on the allowed list will still work normally.
 
 ---
 
