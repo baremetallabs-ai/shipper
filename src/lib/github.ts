@@ -245,6 +245,11 @@ export function selectIssuesForStage(
   label: string,
   staleLocked?: Set<number>
 ): { number: number; title: string }[] {
+  const issueSearchFilter =
+    label === 'shipper:new'
+      ? '-label:shipper:locked'
+      : '-label:shipper:blocked -label:shipper:locked';
+  const lockedSearchFilter = label === 'shipper:new' ? null : '-label:shipper:blocked';
   let issues: { number: number; title: string }[];
   try {
     const output = execFileSync(
@@ -259,7 +264,7 @@ export function selectIssuesForStage(
         '--limit',
         '1000',
         '--search',
-        '-label:shipper:blocked -label:shipper:locked',
+        issueSearchFilter,
         '--json',
         'number,title',
       ],
@@ -285,8 +290,7 @@ export function selectIssuesForStage(
         'open',
         '--limit',
         '1000',
-        '--search',
-        '-label:shipper:blocked',
+        ...(lockedSearchFilter ? ['--search', lockedSearchFilter] : []),
         '--json',
         'number,title',
       ],

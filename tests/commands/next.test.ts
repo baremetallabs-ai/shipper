@@ -1,0 +1,140 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { resolveRef, tryResolvePrForIssue } from '../../src/lib/github.js';
+import { withIssueLock } from '../../src/lib/lock.js';
+import { groomCommand } from '../../src/commands/groom.js';
+import { designCommand } from '../../src/commands/design.js';
+import { planCommand } from '../../src/commands/plan.js';
+import { implementCommand } from '../../src/commands/implement.js';
+import { prOpenCommand } from '../../src/commands/pr-open.js';
+import { prReviewCommand } from '../../src/commands/pr-review.js';
+import { prRemediateCommand } from '../../src/commands/pr-remediate.js';
+
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return { ...actual, execFileSync: vi.fn() };
+});
+
+vi.mock('../../src/lib/github.js', () => ({
+  resolveRef: vi.fn(),
+  tryResolvePrForIssue: vi.fn(),
+}));
+
+vi.mock('../../src/lib/lock.js', () => ({
+  withIssueLock: vi.fn((_issue: string, fn: () => void) => fn()),
+}));
+
+vi.mock('../../src/commands/groom.js', () => ({
+  groomCommand: vi.fn(),
+}));
+
+vi.mock('../../src/commands/design.js', () => ({
+  designCommand: vi.fn(),
+}));
+
+vi.mock('../../src/commands/plan.js', () => ({
+  planCommand: vi.fn(),
+}));
+
+vi.mock('../../src/commands/implement.js', () => ({
+  implementCommand: vi.fn(),
+}));
+
+vi.mock('../../src/commands/pr-open.js', () => ({
+  prOpenCommand: vi.fn(),
+}));
+
+vi.mock('../../src/commands/pr-review.js', () => ({
+  prReviewCommand: vi.fn(),
+}));
+
+vi.mock('../../src/commands/pr-remediate.js', () => ({
+  prRemediateCommand: vi.fn(),
+}));
+
+import { nextCommand } from '../../src/commands/next.js';
+
+const mockExecFileSync = vi.mocked(execFileSync);
+const mockResolveRef = vi.mocked(resolveRef);
+const mockTryResolvePrForIssue = vi.mocked(tryResolvePrForIssue);
+const mockWithIssueLock = vi.mocked(withIssueLock);
+const mockGroomCommand = vi.mocked(groomCommand);
+const mockDesignCommand = vi.mocked(designCommand);
+const mockPlanCommand = vi.mocked(planCommand);
+const mockImplementCommand = vi.mocked(implementCommand);
+const mockPrOpenCommand = vi.mocked(prOpenCommand);
+const mockPrReviewCommand = vi.mocked(prReviewCommand);
+const mockPrRemediateCommand = vi.mocked(prRemediateCommand);
+
+describe('nextCommand', () => {
+  let exitSpy: ReturnType<typeof vi.spyOn>;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+  let logSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockResolveRef.mockReturnValue({ issueNumber: '159' });
+    mockTryResolvePrForIssue.mockReturnValue('200');
+    mockWithIssueLock.mockImplementation((_issue: string, fn: () => void) => fn());
+    exitSpy = vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
+      throw new Error(`exit:${code}`);
+    });
+    errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    exitSpy.mockRestore();
+    errorSpy.mockRestore();
+    logSpy.mockRestore();
+  });
+
+  it('dispatches to grooming for blocked shipper:new issues', () => {
+    mockExecFileSync.mockReturnValueOnce(
+      JSON.stringify({
+        number: 159,
+        labels: [{ name: 'shipper:new' }, { name: 'shipper:blocked' }],
+      })
+    );
+
+    nextCommand('159');
+
+    expect(mockResolveRef).toHaveBeenCalledWith('159', 'issue');
+    expect(mockWithIssueLock).toHaveBeenCalledWith('159', expect.any(Function));
+    expect(mockGroomCommand).toHaveBeenCalledWith('159');
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(mockDesignCommand).not.toHaveBeenCalled();
+    expect(mockPlanCommand).not.toHaveBeenCalled();
+    expect(mockImplementCommand).not.toHaveBeenCalled();
+    expect(mockPrOpenCommand).not.toHaveBeenCalled();
+    expect(mockPrReviewCommand).not.toHaveBeenCalled();
+    expect(mockPrRemediateCommand).not.toHaveBeenCalled();
+  });
+
+  it.each(['shipper:groomed', 'shipper:planned'])(
+    'exits for blocked %s issues before dispatch',
+    (stageLabel) => {
+      mockExecFileSync.mockReturnValueOnce(
+        JSON.stringify({
+          number: 159,
+          labels: [{ name: stageLabel }, { name: 'shipper:blocked' }],
+        })
+      );
+
+      expect(() => nextCommand('159')).toThrow('exit:1');
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        "Issue #159 is blocked. Run 'shipper unblock 159' to check if it can proceed."
+      );
+      expect(mockWithIssueLock).not.toHaveBeenCalled();
+      expect(mockGroomCommand).not.toHaveBeenCalled();
+      expect(mockDesignCommand).not.toHaveBeenCalled();
+      expect(mockPlanCommand).not.toHaveBeenCalled();
+      expect(mockImplementCommand).not.toHaveBeenCalled();
+      expect(mockPrOpenCommand).not.toHaveBeenCalled();
+      expect(mockPrReviewCommand).not.toHaveBeenCalled();
+      expect(mockPrRemediateCommand).not.toHaveBeenCalled();
+    }
+  );
+});

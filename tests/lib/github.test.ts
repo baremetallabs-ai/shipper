@@ -402,6 +402,100 @@ describe('selectIssuesForStage', () => {
     );
   });
 
+  it('omits blocked exclusion from both queries for shipper:new', () => {
+    execFileSync.mockReturnValueOnce(JSON.stringify([]));
+    execFileSync.mockReturnValueOnce(JSON.stringify([]));
+
+    selectIssuesForStage('shipper:new');
+
+    expect(execFileSync).toHaveBeenNthCalledWith(
+      1,
+      'gh',
+      [
+        'issue',
+        'list',
+        '--label',
+        'shipper:new',
+        '--state',
+        'open',
+        '--limit',
+        '1000',
+        '--search',
+        '-label:shipper:locked',
+        '--json',
+        'number,title',
+      ],
+      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
+    );
+    expect(execFileSync).toHaveBeenNthCalledWith(
+      2,
+      'gh',
+      [
+        'issue',
+        'list',
+        '--label',
+        'shipper:new',
+        '--label',
+        'shipper:locked',
+        '--state',
+        'open',
+        '--limit',
+        '1000',
+        '--json',
+        'number,title',
+      ],
+      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
+    );
+  });
+
+  it('keeps blocked exclusion in both queries for later stages', () => {
+    execFileSync.mockReturnValueOnce(JSON.stringify([]));
+    execFileSync.mockReturnValueOnce(JSON.stringify([]));
+
+    selectIssuesForStage('shipper:groomed');
+
+    expect(execFileSync).toHaveBeenNthCalledWith(
+      1,
+      'gh',
+      [
+        'issue',
+        'list',
+        '--label',
+        'shipper:groomed',
+        '--state',
+        'open',
+        '--limit',
+        '1000',
+        '--search',
+        '-label:shipper:blocked -label:shipper:locked',
+        '--json',
+        'number,title',
+      ],
+      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
+    );
+    expect(execFileSync).toHaveBeenNthCalledWith(
+      2,
+      'gh',
+      [
+        'issue',
+        'list',
+        '--label',
+        'shipper:groomed',
+        '--label',
+        'shipper:locked',
+        '--state',
+        'open',
+        '--limit',
+        '1000',
+        '--search',
+        '-label:shipper:blocked',
+        '--json',
+        'number,title',
+      ],
+      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
+    );
+  });
+
   it('handles locked issues query failure gracefully', () => {
     execFileSync.mockReturnValueOnce(JSON.stringify([{ number: 1, title: 'Normal' }]));
     execFileSync.mockImplementationOnce(() => {
@@ -467,5 +561,33 @@ describe('autoSelectIssue', () => {
 
     expect(result).toBeNull();
     expect(mockReleaseIssueLock).not.toHaveBeenCalled();
+  });
+
+  it('selects blocked and non-blocked shipper:new candidates from one time-ordered pool', () => {
+    execFileSync.mockReturnValueOnce(
+      JSON.stringify([
+        { number: 20, title: 'Blocked issue' },
+        { number: 10, title: 'Normal issue' },
+      ])
+    );
+    execFileSync.mockReturnValueOnce(JSON.stringify([]));
+    execFileSync.mockReturnValueOnce(
+      JSON.stringify({
+        event: 'labeled',
+        label: { name: 'shipper:new' },
+        created_at: '2025-01-02T00:00:00Z',
+      })
+    );
+    execFileSync.mockReturnValueOnce(
+      JSON.stringify({
+        event: 'labeled',
+        label: { name: 'shipper:new' },
+        created_at: '2025-01-01T00:00:00Z',
+      })
+    );
+
+    const result = autoSelectIssue('shipper:new');
+
+    expect(result).toEqual({ number: 10, title: 'Normal issue' });
   });
 });

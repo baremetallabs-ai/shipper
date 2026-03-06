@@ -79,14 +79,14 @@ export function nextCommand(ref: string) {
     process.exit(1);
   }
 
-  if (isBlocked) {
+  const label = shipperLabels[0]!;
+
+  if (isBlocked && label !== 'shipper:new') {
     console.error(
       `Issue #${issueNumber} is blocked. Run 'shipper unblock ${issueNumber}' to check if it can proceed.`
     );
     process.exit(1);
   }
-
-  const label = shipperLabels[0]!;
   const issueStr = String(issueNumber);
 
   // Dispatch (wrapped in lock so inner commands become passthroughs)
