@@ -1,11 +1,17 @@
 {
-  "prReviewWaitMinutes": 15,
+  "prReviewWait": {
+    "mode": "checks",
+    "timeoutMinutes": 15
+  },
   "lockTimeoutMinutes": 30,
   "agents": {
-    "default": "claude"
+    "default": "claude",
+    "implement": "codex",
+    "pr_remediate": "codex"
   },
   "hooks": {
     "worktreeSetup": "npm install"
   },
+  "prReviewWaitMinutes": 10,
   "cliVersion": "0.1.0"
 }
