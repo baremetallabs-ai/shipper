@@ -44,7 +44,19 @@ Read `.shipper/settings.json` and verify:
 - The `agent` field matches the installed coding agent.
 - Report any issues or suggestions.
 
-### 4. Verify labels
+### 4. Hooks configuration
+
+Explain Shipper's file-based hook system:
+
+- Hooks are executable scripts in `.shipper/hooks/` that run automatically at stage boundaries. Supported filenames are `pre-<stage>`, `post-<stage>`, `worktree-setup`, and `worktree-teardown`.
+- Pre-stage hooks (blocking — abort on non-zero exit): `pre-groom`, `pre-design`, `pre-plan`, `pre-implement`, `pre-pr-open`, `pre-pr-review`, `pre-pr-remediate`, `pre-merge`
+- Post-stage hooks (advisory — warn on failure, continue): `post-groom`, `post-design`, `post-plan`, `post-implement`, `post-pr-open`, `post-pr-review`, `post-pr-remediate`, `post-merge`
+- Worktree lifecycle hooks (advisory): `worktree-setup`, `worktree-teardown`
+- Stage hooks receive `SHIPPER_STAGE`, `SHIPPER_ISSUE_NUMBER`, and `SHIPPER_BRANCH_NAME`. Worktree hooks receive those variables plus `SHIPPER_WORKTREE_PATH`.
+- Inspect `.shipper/hooks/` and report any executable hooks that are already configured. If any exist, surface them clearly before asking whether the user wants to configure more.
+- Ask whether the user wants to configure any hooks. Explain how to create scripts only if they opt in. Do not proactively generate templates or example scripts.
+
+### 5. Verify labels
 
 Run `gh label list` and confirm that the Shipper workflow labels exist:
 
@@ -52,7 +64,7 @@ Run `gh label list` and confirm that the Shipper workflow labels exist:
 
 If any are missing, suggest running `shipper init` to create them.
 
-### 5. Explain the workflow
+### 6. Explain the workflow
 
 Provide a brief overview of the Shipper workflow:
 
@@ -68,6 +80,6 @@ Provide a brief overview of the Shipper workflow:
 
 Or use **`shipper next`** to auto-advance, or **`shipper ship`** to run end-to-end.
 
-### 6. Suggest next steps
+### 7. Suggest next steps
 
 Based on the repository state, suggest what the user should do next (e.g., create their first issue, adopt existing issues, etc.).
