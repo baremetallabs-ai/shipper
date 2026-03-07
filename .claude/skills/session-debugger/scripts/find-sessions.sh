@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Find Claude Code session transcripts for a given GitHub issue number.
+# Find Claude Code and Codex CLI session transcripts for a given GitHub issue number.
 # Usage: find-sessions.sh <issue-number>
 set -euo pipefail
 
@@ -10,9 +10,11 @@ fi
 
 ISSUE_NUM="$1"
 PROJECTS_DIR="$HOME/.claude/projects"
+CODEX_DIR="$HOME/.codex/sessions"
+MATCH_BYTES=40000
 
-if [[ ! -d "$PROJECTS_DIR" ]]; then
-  echo "Error: $PROJECTS_DIR does not exist" >&2
+if ! [[ "$ISSUE_NUM" =~ ^[0-9]+$ ]]; then
+  echo "Error: issue number must be numeric" >&2
   exit 1
 fi
 
@@ -27,78 +29,119 @@ if [[ -z "$REPO_NAME" ]]; then
   exit 1
 fi
 
-# Collect matching project directories
-matching_dirs=()
+if [[ ! -d "$PROJECTS_DIR" ]] && [[ ! -d "$CODEX_DIR" ]]; then
+  echo "Error: neither $PROJECTS_DIR nor $CODEX_DIR exists" >&2
+  exit 1
+fi
 
-for dir in "$PROJECTS_DIR"/*/; do
-  [[ -d "$dir" ]] || continue
-  dirname=$(basename "$dir")
+issue_pattern="(# Issue #${ISSUE_NUM}:|Issue #${ISSUE_NUM}([^0-9]|$)|shipper/${ISSUE_NUM}-|issues/${ISSUE_NUM}([^0-9]|$)|#${ISSUE_NUM}([^0-9]|$))"
+results=()
 
-  # Match worktree directories containing the repo name and issue number
-  # Pattern: *shipper-worktrees-<repo>--wt--*<N>-* or *shipper-<N>-*
-  if [[ "$dirname" == *"$REPO_NAME"* ]]; then
-    # Check if directory name contains the issue number in a branch-like pattern
-    # e.g., shipper-42-some-slug or just contains -42- in worktree name
-    if [[ "$dirname" =~ (shipper-|--wt--).*(-|/)${ISSUE_NUM}(-|$) ]] ||
-       [[ "$dirname" =~ [-/]${ISSUE_NUM}[-/] ]]; then
-      matching_dirs+=("$dir")
-    fi
-  fi
-done
+get_mtime() {
+  local file="$1"
+  stat -f '%m' "$file" 2>/dev/null || stat -c '%Y' "$file" 2>/dev/null
+}
 
-# Also collect main repo project directories (need per-file filtering)
-main_repo_dirs=()
-for dir in "$PROJECTS_DIR"/*/; do
-  dirname=$(basename "$dir")
-  if [[ "$dirname" == *"repos-$REPO_NAME" ]] || [[ "$dirname" == *"repos-$REPO_NAME-"* ]]; then
-    # Only add if not already in a worktree match
-    already_added=false
-    for existing in "${matching_dirs[@]+"${matching_dirs[@]}"}"; do
-      if [[ "$existing" == "$dir" ]]; then
-        already_added=true
-        break
+is_issue_worktree_path() {
+  local path="$1"
+  [[ "$path" =~ (shipper-|--wt--).*(-|/)${ISSUE_NUM}(-|$) ]] || [[ "$path" =~ (^|[-/])${ISSUE_NUM}([-/.]|$) ]]
+}
+
+append_result() {
+  local agent="$1"
+  local file="$2"
+  local mtime
+
+  mtime=$(get_mtime "$file")
+  [[ -n "$mtime" ]] || return 0
+
+  results+=("[$agent]  $mtime  $file")
+}
+
+collect_claude_sessions() {
+  local matching_dirs=()
+  local main_repo_dirs=()
+  local dir
+  local dirname
+  local file
+  local already_added
+  local existing
+
+  [[ -d "$PROJECTS_DIR" ]] || return 0
+
+  for dir in "$PROJECTS_DIR"/*/; do
+    [[ -d "$dir" ]] || continue
+    dirname=$(basename "$dir")
+
+    if [[ "$dirname" == *"$REPO_NAME"* ]]; then
+      if is_issue_worktree_path "$dirname"; then
+        matching_dirs+=("$dir")
       fi
-    done
-    if [[ "$already_added" == false ]]; then
-      main_repo_dirs+=("$dir")
     fi
-  fi
-done
+  done
 
-if [[ ${#matching_dirs[@]} -eq 0 ]] && [[ ${#main_repo_dirs[@]} -eq 0 ]]; then
-  echo "No project directories found for repo '$REPO_NAME' issue #$ISSUE_NUM" >&2
+  for dir in "$PROJECTS_DIR"/*/; do
+    [[ -d "$dir" ]] || continue
+    dirname=$(basename "$dir")
+
+    if [[ "$dirname" == *"repos-$REPO_NAME" ]] || [[ "$dirname" == *"repos-$REPO_NAME-"* ]]; then
+      already_added=false
+      for existing in "${matching_dirs[@]+"${matching_dirs[@]}"}"; do
+        if [[ "$existing" == "$dir" ]]; then
+          already_added=true
+          break
+        fi
+      done
+
+      if [[ "$already_added" == false ]]; then
+        main_repo_dirs+=("$dir")
+      fi
+    fi
+  done
+
+  for dir in "${matching_dirs[@]+"${matching_dirs[@]}"}"; do
+    [[ -n "$dir" ]] || continue
+    while IFS= read -r -d '' file; do
+      append_result "claude" "$file"
+    done < <(find "$dir" -maxdepth 1 -name '*.jsonl' -print0 2>/dev/null)
+  done
+
+  for dir in "${main_repo_dirs[@]+"${main_repo_dirs[@]}"}"; do
+    [[ -n "$dir" ]] || continue
+    while IFS= read -r -d '' file; do
+      if head -c "$MATCH_BYTES" "$file" | grep -qE "$issue_pattern" 2>/dev/null; then
+        append_result "claude" "$file"
+      fi
+    done < <(find "$dir" -maxdepth 1 -name '*.jsonl' -print0 2>/dev/null)
+  done
+}
+
+collect_codex_sessions() {
+  local file
+  local cwd
+
+  [[ -d "$CODEX_DIR" ]] || return 0
+
+  while IFS= read -r -d '' file; do
+    cwd=$(head -n 1 "$file" | jq -r 'select(.type == "session_meta") | .payload.cwd // ""' 2>/dev/null || true)
+
+    if [[ -n "$cwd" ]] && is_issue_worktree_path "$cwd"; then
+      append_result "codex" "$file"
+      continue
+    fi
+
+    if head -c "$MATCH_BYTES" "$file" | grep -qE "$issue_pattern" 2>/dev/null; then
+      append_result "codex" "$file"
+    fi
+  done < <(find "$CODEX_DIR" -type f -name '*.jsonl' -print0 2>/dev/null)
+}
+
+collect_claude_sessions
+collect_codex_sessions
+
+if [[ ${#results[@]} -eq 0 ]]; then
+  echo "No session files found for repo '$REPO_NAME' issue #$ISSUE_NUM" >&2
   exit 1
 fi
 
-# Issue reference patterns to grep for in JSONL content
-issue_pattern="(# Issue #${ISSUE_NUM}:|shipper/${ISSUE_NUM}-|issues/${ISSUE_NUM}([^0-9]|$)|#${ISSUE_NUM}[^0-9])"
-
-# List all JSONL files sorted by mtime descending
-output=""
-
-# Worktree dirs: include all JSONL files (directory name already matched)
-for dir in "${matching_dirs[@]+"${matching_dirs[@]}"}"; do
-  [[ -n "$dir" ]] || continue
-  while IFS= read -r -d '' file; do
-    mtime=$(stat -f '%Sm' -t '%Y-%m-%d %H:%M:%S' "$file" 2>/dev/null || stat -c '%y' "$file" 2>/dev/null | cut -d. -f1)
-    output+="$mtime  $file"$'\n'
-  done < <(find "$dir" -maxdepth 1 -name '*.jsonl' -print0 2>/dev/null)
-done
-
-# Main repo dirs: individually filter each JSONL by content
-for dir in "${main_repo_dirs[@]+"${main_repo_dirs[@]}"}"; do
-  [[ -n "$dir" ]] || continue
-  while IFS= read -r -d '' file; do
-    if head -c 20000 "$file" | grep -qE "$issue_pattern" 2>/dev/null; then
-      mtime=$(stat -f '%Sm' -t '%Y-%m-%d %H:%M:%S' "$file" 2>/dev/null || stat -c '%y' "$file" 2>/dev/null | cut -d. -f1)
-      output+="$mtime  $file"$'\n'
-    fi
-  done < <(find "$dir" -maxdepth 1 -name '*.jsonl' -print0 2>/dev/null)
-done
-
-if [[ -z "$output" ]]; then
-  echo "No JSONL session files found in matched directories" >&2
-  exit 1
-fi
-
-echo "$output" | sort -r
+printf '%s\n' "${results[@]}" | sort -k2,2nr -k3,3

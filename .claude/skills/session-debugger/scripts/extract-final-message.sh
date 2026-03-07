@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Extract the last assistant message from a Claude Code session transcript.
+# Extract the last assistant message from a Claude Code or Codex CLI session transcript.
 # Usage: extract-final-message.sh <jsonl-file-path>
 set -euo pipefail
 
@@ -20,8 +20,37 @@ if ! command -v jq &>/dev/null; then
   exit 1
 fi
 
-# Get the last assistant record and extract all text blocks
-last_assistant=$(jq -c 'select(.type == "assistant")' "$FILE" 2>/dev/null | tail -1)
+detect_agent() {
+  local first_type
+
+  first_type=$(head -n 1 "$1" | jq -r '.type // ""' 2>/dev/null)
+  if [[ "$first_type" == "session_meta" ]]; then
+    echo "codex"
+  else
+    echo "claude"
+  fi
+}
+
+agent=$(detect_agent "$FILE")
+
+if [[ "$agent" == "claude" ]]; then
+  last_assistant=$(jq -c 'select(.type == "assistant")' "$FILE" 2>/dev/null | tail -1)
+
+  if [[ -z "$last_assistant" ]]; then
+    echo "No assistant messages found." >&2
+    exit 1
+  fi
+
+  echo "$last_assistant" | jq -r '
+    [.message.content[]? | select(type == "object" and .type == "text") | .text] | join("\n")
+  '
+
+  exit 0
+fi
+
+last_assistant=$(jq -c '
+  select(.type == "response_item" and .payload.type == "message" and .payload.role == "assistant")
+' "$FILE" 2>/dev/null | tail -1)
 
 if [[ -z "$last_assistant" ]]; then
   echo "No assistant messages found." >&2
@@ -29,5 +58,5 @@ if [[ -z "$last_assistant" ]]; then
 fi
 
 echo "$last_assistant" | jq -r '
-  [.message.content[]? | select(type == "object" and .type == "text") | .text] | join("\n")
+  [.payload.content[]? | select(.type == "output_text") | .text] | join("\n")
 '

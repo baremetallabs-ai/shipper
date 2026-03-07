@@ -183,3 +183,205 @@ Also check for `gh issue edit` calls that change labels (label transitions) and 
 | Identity confusion       | Agent addresses wrong issue or repo                           | First user message content vs. actual tool call targets |
 | Label-change parse error | `gh issue edit` called with malformed label args              | Bash tool calls containing `gh issue edit`              |
 | Hook rejection           | Pre-tool-use hook blocks a tool call                          | `progress` records with `hook_progress` type            |
+
+# Codex CLI Transcript Format
+
+Codex saves session transcripts as JSONL files under `~/.codex/sessions/YYYY/MM/DD/`. Each line is a self-contained event, but the record families differ from Claude Code.
+
+## Where Transcripts Live
+
+Codex uses date-based storage with one file per rollout:
+
+```
+~/.codex/sessions/YYYY/MM/DD/rollout-<datetime>-<uuid>.jsonl
+```
+
+Unlike Claude's project-directory layout, Codex does not group sessions by repo path. Session discovery relies on transcript content:
+
+- `session_meta.payload.cwd` identifies the repo or worktree path
+- the initial user messages contain the wrapped prompt text, including `Issue #<N>` for main-repo stages
+
+## JSONL Record Types
+
+The current shipper Codex sessions use these top-level record types:
+
+### `session_meta`
+
+The first line contains session metadata:
+
+```json
+{
+  "type": "session_meta",
+  "payload": {
+    "cwd": "/Users/dan/.shipper/worktrees/repo--wt--shipper-150-some-slug",
+    "git": { "branch": "shipper/150-some-slug" },
+    "timestamp": "2026-03-06T22:44:14.000Z",
+    "model_provider": "openai"
+  }
+}
+```
+
+Useful fields:
+
+- `payload.cwd` — repo/worktree path
+- `payload.git.branch` — current branch name
+- `payload.timestamp` — session start time
+- `payload.model_provider` — provider name
+
+### `response_item`
+
+Most meaningful transcript content appears here. The `payload.type` field distinguishes the subtype.
+
+#### User and assistant messages
+
+Codex message records use `payload.type == "message"`:
+
+```json
+{
+  "type": "response_item",
+  "payload": {
+    "type": "message",
+    "role": "assistant",
+    "content": [{ "type": "output_text", "text": "I’m checking the issue state first." }]
+  }
+}
+```
+
+- `payload.role == "user"` contains setup text plus the wrapped shipper prompt
+- `payload.role == "assistant"` contains the visible assistant output
+- assistant text lives in `payload.content[]` entries with `type == "output_text"`
+- user prompt text lives in `payload.content[]` entries with `type == "input_text"`
+
+Shipper Codex runs usually start with multiple user/setup messages. The actual shipper prompt is the last initial user message before the first assistant reply, not a fixed record number.
+
+#### Standard tool calls
+
+Developer tools such as `exec_command`, `write_stdin`, and `update_plan` use `function_call` / `function_call_output` pairs:
+
+```json
+{
+  "type": "response_item",
+  "payload": {
+    "type": "function_call",
+    "name": "exec_command",
+    "call_id": "call_abc123",
+    "arguments": "{\"cmd\":\"git status --short\"}"
+  }
+}
+```
+
+```json
+{
+  "type": "response_item",
+  "payload": {
+    "type": "function_call_output",
+    "call_id": "call_abc123",
+    "output": "Chunk ID: ...\nProcess exited with code 0\nOutput:\n..."
+  }
+}
+```
+
+Notes:
+
+- `payload.call_id` joins the call to its result
+- `payload.name` is the tool name
+- `payload.arguments` is currently a JSON string, but scripts should also tolerate an already-decoded object
+
+#### Custom tool calls
+
+Some tools, notably `apply_patch`, use `custom_tool_call` / `custom_tool_call_output`:
+
+```json
+{
+  "type": "response_item",
+  "payload": {
+    "type": "custom_tool_call",
+    "name": "apply_patch",
+    "call_id": "call_xyz789",
+    "input": "*** Begin Patch\n..."
+  }
+}
+```
+
+```json
+{
+  "type": "response_item",
+  "payload": {
+    "type": "custom_tool_call_output",
+    "call_id": "call_xyz789",
+    "output": "{\"output\":\"Success. Updated the following files...\"}"
+  }
+}
+```
+
+These records use the same `call_id` join pattern as standard function calls, but the input is stored in `payload.input` instead of `payload.arguments`.
+
+#### Reasoning records
+
+Codex may also emit `response_item` entries with `payload.type == "reasoning"`. These are not part of the debugging workflow and can usually be ignored.
+
+### `event_msg`
+
+Lifecycle and telemetry events, including session completion:
+
+```json
+{
+  "type": "event_msg",
+  "payload": {
+    "type": "task_complete",
+    "last_agent_message": "..."
+  }
+}
+```
+
+The important session end marker is `payload.type == "task_complete"`.
+
+Codex also mirrors commentary and token accounting in `event_msg` records, but assistant-facing text should be read from `response_item` assistant messages rather than these duplicates.
+
+### `turn_context`
+
+Turn-level environment metadata such as the cwd, sandbox mode, and current date.
+
+## Matching Sessions to Shipper Stages
+
+The same stage heuristics used for Claude apply, but the selectors differ:
+
+| Stage            | Codex evidence                                                               |
+| ---------------- | ---------------------------------------------------------------------------- |
+| **implement**    | tool-call command contains `shipper:implemented`                             |
+| **pr-open**      | tool-call command contains `gh pr create`                                    |
+| **pr-review**    | tool-call command contains `gh pr review`                                    |
+| **pr-remediate** | assistant `output_text` contains `READY`, `RETRY`, or `NEEDS UPSTREAM`       |
+| **plan/design**  | prompt preview contains `shipper:designed` / `shipper:groomed` label context |
+
+For Codex sessions, prompt previews should be taken from the last initial user message before the first assistant message.
+
+## Extracting Tool Calls and Results
+
+To reconstruct the tool timeline:
+
+1. Read `response_item` records in file order
+2. Select both `function_call` and `custom_tool_call`
+3. Join each call to `function_call_output` or `custom_tool_call_output` using `payload.call_id`
+
+Key fields:
+
+| Record family      | Name field     | Input field         | Result field     |
+| ------------------ | -------------- | ------------------- | ---------------- |
+| `function_call`    | `payload.name` | `payload.arguments` | `payload.output` |
+| `custom_tool_call` | `payload.name` | `payload.input`     | `payload.output` |
+
+Unlike Claude, Codex has no `is_error` flag on tool results. Error detection is content-based.
+
+## Common Codex Error Patterns
+
+Real shipper Codex failures seen in transcripts include:
+
+- `could not lock config file`
+- `unable to write upstream branch configuration`
+- `cannot lock ref`
+- `cannot create temp file for here document`
+- `not allowed in sandbox`
+- `execution not permitted`
+
+Pitfall: successful Codex command output can include Homebrew wrapper noise such as `/bin/ps: Operation not permitted`. That line alone is not a failure and should be ignored unless the surrounding output also contains a real error signal.
