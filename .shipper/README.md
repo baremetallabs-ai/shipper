@@ -23,7 +23,7 @@ This folder is managed by [Shipper CLI](https://github.com/anthropics/shipper-cl
 | Path                  | Description                                                         |
 | --------------------- | ------------------------------------------------------------------- |
 | `prompts/`            | Markdown prompt files used by each stage command (committed to VCS) |
-| `hooks/`              | For executable hook scripts (a future capability)                   |
+| `hooks/`              | Executable hook scripts that run at stage boundaries and worktrees  |
 | `tmp/`                | Temporary working files (gitignored)                                |
 | `settings.json`       | Team-wide settings (committed to VCS)                               |
 | `settings.local.json` | Local overrides — not committed (gitignored)                        |
@@ -61,27 +61,59 @@ Running `shipper init` again will overwrite prompt files with the latest default
 **`settings.json`** — Team-wide configuration, committed to version control:
 
 - `prReviewWait` — PR review wait strategy (default: `{ "mode": "checks", "timeoutMinutes": 15 }`). In `"checks"` mode, polls CI checks until all complete. In `"timer"` mode, waits a fixed duration based on PR age. Legacy `prReviewWaitMinutes` values auto-migrate to `"timer"` mode.
-- `hooks.postMerge` — Shell command to run after a PR is merged
 
 **`settings.local.json`** — Local overrides that apply only to your machine. This file is gitignored and will not be committed. Any key set here takes precedence over `settings.json`.
 
 ## Hooks
 
-Shipper supports a `postMerge` hook that runs a shell command after a PR is merged. Configure it in `settings.json`:
+Shipper supports executable hook scripts in `.shipper/hooks/`. Hook filenames determine when they run.
 
-```json
-{
-  "hooks": {
-    "postMerge": "echo 'PR merged!'"
-  }
-}
-```
+### Pre-stage hooks (blocking)
 
-The following environment variables are available to hook commands:
+- `pre-groom`
+- `pre-design`
+- `pre-plan`
+- `pre-implement`
+- `pre-pr-open`
+- `pre-pr-review`
+- `pre-pr-remediate`
+- `pre-merge`
 
-- `SHIPPER_PR_NUMBER` — The merged PR number
-- `SHIPPER_ISSUE_NUMBER` — The associated issue number
-- `SHIPPER_BRANCH_NAME` — The branch that was merged
+These run before the corresponding stage. If a pre-hook exits non-zero, Shipper aborts that stage.
+
+### Post-stage hooks (advisory)
+
+- `post-groom`
+- `post-design`
+- `post-plan`
+- `post-implement`
+- `post-pr-open`
+- `post-pr-review`
+- `post-pr-remediate`
+- `post-merge`
+
+These run after the corresponding stage. If a post-hook exits non-zero, Shipper logs a warning and continues.
+
+### Worktree lifecycle hooks (advisory)
+
+- `worktree-setup`
+- `worktree-teardown`
+
+These run when Shipper creates or tears down a worktree. If a worktree hook exits non-zero, Shipper logs a warning and continues.
+
+### Environment variables
+
+Stage hooks receive:
+
+- `SHIPPER_STAGE`
+- `SHIPPER_ISSUE_NUMBER`
+- `SHIPPER_BRANCH_NAME`
+
+Worktree hooks receive the same variables plus:
+
+- `SHIPPER_WORKTREE_PATH`
+
+Hook scripts must be executable. Run `chmod +x .shipper/hooks/<hook-name>` after creating or updating a script.
 
 ## Further Help
 

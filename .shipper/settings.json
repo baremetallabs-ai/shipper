@@ -10,6 +10,7 @@
     "pr_remediate": "codex",
     "plan": "codex"
   },
+  "headless": {},
   "hooks": {
     "worktreeSetup": "npm install"
   },
