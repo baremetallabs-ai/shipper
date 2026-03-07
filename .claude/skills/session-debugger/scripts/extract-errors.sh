@@ -77,12 +77,7 @@ if [[ "$agent" == "claude" ]]; then
 
   found_errors=false
   index=0
-  jq -c '
-    select(.type == "assistant") |
-    .message.content[]? |
-    select(.type == "tool_use") |
-    {id, name, input}
-  ' "$FILE" 2>/dev/null | while IFS= read -r tool; do
+  while IFS= read -r tool; do
     index=$((index + 1))
     name=$(echo "$tool" | jq -r '.name')
     tool_id=$(echo "$tool" | jq -r '.id')
@@ -126,19 +121,14 @@ if [[ "$agent" == "claude" ]]; then
       printf "[%3d] %-12s | %-13s | %s\n" "$index" "$name" "$error_type" "$input_summary"
       printf "      %s\n" "$error_line"
     fi
-  done
+  done < <(jq -c '
+    select(.type == "assistant") |
+    .message.content[]? |
+    select(.type == "tool_use") |
+    {id, name, input}
+  ' "$FILE" 2>/dev/null)
 
-  if ! jq -c '
-    select(.type == "user" and .message.content and (.message.content | type) == "array") |
-    .message.content[] |
-    select(.type == "tool_result") |
-    select(.is_error == true or (
-      (if (.content | type) == "string" then .content
-       elif (.content | type) == "array" then ([.content[] | select(.type == "text") | .text] | join("\n"))
-       else "" end) |
-      test("fatal:|[Ee]rror:|EACCES|ENOENT|EPERM|Permission denied|command not found|No such file|403 Forbidden|404 Not Found|401 Unauthorized|exit code [1-9]|exit status [1-9]|[Ff]ailed to|FAILED|panic:|Traceback|SyntaxError|TypeError|ReferenceError|ModuleNotFoundError")
-    ))
-  ' "$FILE" 2>/dev/null | head -1 | grep -q .; then
+  if [[ "$found_errors" == false ]]; then
     echo "No errors found."
   fi
 
