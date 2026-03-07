@@ -41,10 +41,28 @@ Read `.shipper/settings.json` and verify:
 
 Explain Shipper's file-based hook system:
 
-- Hooks are executable scripts in `.shipper/hooks/` that run automatically at stage boundaries. Supported filenames are `pre-<stage>`, `post-<stage>`, `worktree-setup`, and `worktree-teardown`.
-- Pre-stage hooks (blocking — abort on non-zero exit): `pre-groom`, `pre-design`, `pre-plan`, `pre-implement`, `pre-pr-open`, `pre-pr-review`, `pre-pr-remediate`, `pre-merge`
-- Post-stage hooks (advisory — warn on failure, continue): `post-groom`, `post-design`, `post-plan`, `post-implement`, `post-pr-open`, `post-pr-review`, `post-pr-remediate`, `post-merge`
-- Worktree lifecycle hooks (advisory): `worktree-setup`, `worktree-teardown`
+- Hooks are executable scripts in `.shipper/hooks/` that run automatically at stage boundaries and during worktree lifecycle events. Supported filenames are `pre-<stage>`, `post-<stage>`, `worktree-setup`, and `worktree-teardown`.
+- Pre-stage hooks (blocking — abort on non-zero exit):
+  - `pre-groom`
+  - `pre-design`
+  - `pre-plan`
+  - `pre-implement`
+  - `pre-pr-open`
+  - `pre-pr-review`
+  - `pre-pr-remediate`
+  - `pre-merge`
+- Post-stage hooks (advisory — warn on failure, continue):
+  - `post-groom`
+  - `post-design`
+  - `post-plan`
+  - `post-implement`
+  - `post-pr-open`
+  - `post-pr-review`
+  - `post-pr-remediate`
+  - `post-merge`
+- Worktree lifecycle hooks (advisory):
+  - `worktree-setup`
+  - `worktree-teardown`
 - Stage hooks receive `SHIPPER_STAGE`, `SHIPPER_ISSUE_NUMBER`, and `SHIPPER_BRANCH_NAME`. Worktree hooks receive those variables plus `SHIPPER_WORKTREE_PATH`.
 - Inspect `.shipper/hooks/` and report any executable hooks that are already configured. If any exist, surface them clearly before asking whether the user wants to configure more.
 - Ask whether the user wants to configure any hooks. Explain how to create scripts only if they opt in. Do not proactively generate templates or example scripts.
