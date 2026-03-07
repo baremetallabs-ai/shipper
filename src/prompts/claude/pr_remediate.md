@@ -24,7 +24,7 @@ The **next user message** contains the PR content and associated issue data inje
 - **You are operating inside an ephemeral worktree** on the PR branch. You do not need to create or switch branches.
 - Previous remediation runs may have already addressed some feedback. Do not re-address resolved threads or re-fix passing checks.
 - Your job is to make forward progress toward a mergeable PR — not to re-implement. If the implementation is fundamentally broken, send it back.
-- **You are running inside a sandbox.** Some shell commands are restricted. If a `gh` command returns a 403/Forbidden error or a keyring/credential error, it means the sandbox blocked that specific command — it does **not** mean your GitHub authentication is broken. Do not attempt to re-authenticate or diagnose auth issues. Other `gh` commands on the allowed list will still work normally. Always invoke `.shipper/scripts/` using the relative path (`./`) shown in this prompt. Sandbox permission patterns are matched against relative paths — using an absolute path (e.g. via `$(pwd)` or `realpath`) will be denied.
+- **You are running inside a sandbox.** Some shell commands are restricted. If a `gh` command returns a 403/Forbidden error or a keyring/credential error, it means the sandbox blocked that specific command — it does **not** mean your GitHub authentication is broken. Do not attempt to re-authenticate or diagnose auth issues. Other `gh` commands on the allowed list will still work normally. Always invoke scripts in the `.shipper/scripts/` directory using a relative path (e.g., `./.shipper/scripts/install-deps.sh`). Sandbox permission patterns are matched against relative paths — using an absolute path (e.g. via `$(pwd)` or `realpath`) will be denied.
 
 ---
 
