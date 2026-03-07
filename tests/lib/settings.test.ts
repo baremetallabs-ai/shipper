@@ -9,12 +9,14 @@ vi.mock('node:fs', async () => {
 
 const exitMock = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
 const stderrMock = vi.spyOn(console, 'error').mockImplementation(() => {});
+const warnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
 beforeEach(() => {
   vi.resetModules();
   readFileSyncMock.mockReset();
   exitMock.mockClear();
   stderrMock.mockClear();
+  warnMock.mockClear();
 });
 
 function enoent(filepath: string): Error {
@@ -43,6 +45,7 @@ describe('loadSettings', () => {
       prReviewWait: { mode: 'checks', timeoutMinutes: 15 },
       lockTimeoutMinutes: 30,
       agents: { default: 'claude' },
+      headless: {},
       hooks: {},
     });
   });
@@ -113,6 +116,7 @@ describe('getSettings', () => {
       prReviewWait: { mode: 'checks', timeoutMinutes: 15 },
       lockTimeoutMinutes: 30,
       agents: { default: 'claude' },
+      headless: {},
       hooks: {},
     });
   });
@@ -240,6 +244,41 @@ describe('agents settings', () => {
     loadSettings();
     expect(getSettings().agents.default).toBe('claude');
     expect(getSettings().agents.implement).toBe('codex');
+  });
+});
+
+describe('headless settings', () => {
+  it('deep-merges headless settings from base and local', async () => {
+    readFileSyncMock.mockImplementation((p: string) => {
+      if (p === settingsPath) return '{"headless": {"new": true, "plan": false}}';
+      if (p === localPath) return '{"headless": {"implement": true, "new": false}}';
+      throw enoent(p);
+    });
+    const { loadSettings, getSettings } = await loadModule();
+    loadSettings();
+    expect(getSettings().headless).toEqual({ new: false, plan: false, implement: true });
+  });
+
+  it('warns on unknown headless command keys', async () => {
+    readFileSyncMock.mockImplementation((p: string) => {
+      if (p === settingsPath) return '{"headless": {"banana": true}}';
+      throw enoent(p);
+    });
+    const { loadSettings } = await loadModule();
+    loadSettings();
+    expect(warnMock).toHaveBeenCalledWith(
+      'Warning: Unknown command "banana" in settings.headless.'
+    );
+  });
+
+  it('does not warn for known headless command keys', async () => {
+    readFileSyncMock.mockImplementation((p: string) => {
+      if (p === settingsPath) return '{"headless": {"new": true, "pr_open": false}}';
+      throw enoent(p);
+    });
+    const { loadSettings } = await loadModule();
+    loadSettings();
+    expect(warnMock).not.toHaveBeenCalled();
   });
 });
 
