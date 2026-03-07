@@ -1,7 +1,7 @@
 ---
 name: session-debugger
 description: |
-  Investigate Claude Code session transcripts from shipper runs.
+  Investigate Claude Code and Codex CLI session transcripts from shipper runs.
   Use for: "investigate session", "debug shipper run", "what went wrong",
   "transcript", "remediation agent", "session failure", "why did the agent fail",
   "check session logs", "find agent sessions for issue".
@@ -9,7 +9,7 @@ description: |
 
 # Session Debugger
 
-Skill for investigating Claude Code session transcripts produced by `ship --auto` runs. Provides scripts to find, classify, and extract data from JSONL transcript files under `~/.claude/projects/`.
+Skill for investigating Claude Code and Codex CLI session transcripts produced by `ship --auto` runs. Provides scripts to find, classify, and extract data from JSONL transcript files under `~/.claude/projects/` and `~/.codex/sessions/`.
 
 ## Skill Location
 
@@ -31,35 +31,40 @@ SKILL_DIR="$(git rev-parse --show-toplevel)/.claude/skills/session-debugger"
 | **Get agent's final message**       | `./scripts/extract-final-message.sh <jsonl-path>`          |
 | **Extract verdict/labels/comments** | `./scripts/extract-verdict.sh <jsonl-path>`                |
 
+Notes:
+
+- `find-sessions.sh` returns a mixed timeline with `[claude]` / `[codex]` prefixes
+- `classify-session.sh` prints `Agent: claude` or `Agent: codex`
+
 ## Prerequisites
 
 - `jq` must be installed (`brew install jq` on macOS)
-- Session transcripts must exist under `~/.claude/projects/`
+- Session transcripts must exist under `~/.claude/projects/` or `~/.codex/sessions/`
 
 ## Reference Docs
 
-- [Transcript Format](references/transcript-format.md) — JSONL schema, directory layout, matching sessions to shipper stages
+- [Transcript Format](references/transcript-format.md) — Claude Code and Codex CLI JSONL schema, directory layout, matching sessions to shipper stages
 
 ## Task Workflows
 
 ### Investigate a specific stage run
 
-1. `find-sessions.sh <issue>` — list all session files for the issue
+1. `find-sessions.sh <issue>` — list all session files for the issue across Claude and Codex, using the `[claude]` / `[codex]` prefix to identify the agent
 2. Pick the session matching the timeframe or stage of interest
-3. `classify-session.sh <file>` — confirm the stage type (implement, pr-open, pr-review, pr-remediate)
+3. `classify-session.sh <file>` — confirm the agent type and stage (implement, pr-open, pr-review, pr-remediate)
 4. `extract-tool-calls.sh <file>` — get numbered list of tool calls with error status
 5. Read the JSONL file directly to inspect interesting spans (e.g., around ERROR entries)
 
 ### Find all sessions for an issue
 
-1. `find-sessions.sh <issue>` — get all session files
-2. For each file, run `classify-session.sh <file>` to identify the stage
+1. `find-sessions.sh <issue>` — get all session files from both transcript stores
+2. For each file, run `classify-session.sh <file>` to identify the agent and stage
 3. Build a timeline of what ran and when
 
 ### Extract what went wrong
 
 1. `find-sessions.sh <issue>` — locate the failing session
-2. `extract-errors.sh <file>` — find all errors (both `is_error` and content-level)
+2. `extract-errors.sh <file>` — find all errors (`is_error` for Claude, content-level matching for Codex)
 3. `show-tool-result.sh <file> <N>` — drill into specific error tool calls for full context
 4. `extract-final-message.sh <file>` — see what the agent concluded
 5. `extract-verdict.sh <file>` — check if a remediation agent left a verdict (READY/RETRY/NEEDS UPSTREAM)
