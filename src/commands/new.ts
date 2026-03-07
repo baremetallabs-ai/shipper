@@ -19,7 +19,7 @@ export function newCommand(
     process.env.SHIPPER_HEADLESS = 'true';
   }
 
-  let exitCode: number;
+  let exitCode = 1;
   try {
     exitCode = runPrompt('new', { userInput: pitch });
   } finally {

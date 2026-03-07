@@ -56,6 +56,7 @@ afterAll(() => {
 
 describe('newCommand', () => {
   it('sets SHIPPER_HEADLESS for the prompt when the flag is enabled and clears it afterward', () => {
+    const previousHeadless = process.env.SHIPPER_HEADLESS;
     let envDuringPrompt: string | undefined;
     mockRunPrompt.mockImplementation(() => {
       envDuringPrompt = process.env.SHIPPER_HEADLESS;
@@ -65,7 +66,7 @@ describe('newCommand', () => {
     expect(() => newCommand(['my', 'pitch'], { headless: true })).toThrow('process.exit:0');
 
     expect(envDuringPrompt).toBe('true');
-    expect(process.env.SHIPPER_HEADLESS).toBeUndefined();
+    expect(process.env.SHIPPER_HEADLESS).toBe(previousHeadless);
     expect(mockRunPrompt).toHaveBeenCalledWith('new', { userInput: 'my pitch' });
   });
 
