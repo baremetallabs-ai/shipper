@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { parseFrontmatter } from '../../src/lib/frontmatter.js';
 
@@ -175,5 +177,28 @@ You are helping a developer turn a rough idea into a lightweight GitHub issue.`;
     expect(result.frontmatter.args).toEqual(['--model', 'opus']);
     expect(result.frontmatter['append-user-input']).toBe(true);
     expect(result.frontmatter['append-issue']).toBeUndefined();
+  });
+
+  it('parses every prompt that passes --settings as valid JSON', () => {
+    const promptPaths = [
+      'src/prompts/claude/implement.md',
+      'src/prompts/claude/pr_open.md',
+      'src/prompts/claude/pr_remediate.md',
+      'src/prompts/claude/setup.md',
+    ];
+
+    for (const promptPath of promptPaths) {
+      const input = readFileSync(resolve(promptPath), 'utf8');
+      const result = parseFrontmatter(input);
+      const settingsIndex = result.frontmatter.args.indexOf('--settings');
+      expect(settingsIndex, `${promptPath} is missing --settings`).toBeGreaterThanOrEqual(0);
+
+      const settingsArg = result.frontmatter.args[settingsIndex + 1];
+      expect(settingsArg, `${promptPath} is missing the settings payload`).toBeDefined();
+      if (settingsArg === undefined) {
+        throw new Error(`${promptPath} is missing the settings payload`);
+      }
+      expect(() => JSON.parse(settingsArg)).not.toThrow();
+    }
   });
 });
