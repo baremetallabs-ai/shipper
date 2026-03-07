@@ -1,48 +1,19 @@
 {
-  "name": "@dnsquared/shipper-cli",
-  "version": "1.0.0",
-  "description": "CLI workflow orchestrator for GitHub issues using coding agents",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/dnsquared/shipper-cli.git"
-  },
-  "publishConfig": {
-    "registry": "https://npm.pkg.github.com",
-    "access": "restricted"
-  },
-  "type": "module",
-  "bin": {
-    "shipper": "./dist/index.js"
-  },
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
-    "dev": "tsx src/index.ts",
-    "build": "tsup",
-    "clean": "rm -rf dist",
-    "type-check": "tsc --noEmit",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "type-check": "npm run type-check --workspaces --if-present",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
+    "dev": "npm run dev --workspace=packages/cli --",
     "prepare": "husky"
   },
-  "keywords": [
-    "cli",
-    "github",
-    "workflow",
-    "coding-agents",
-    "issue-lifecycle",
-    "developer-tools"
-  ],
-  "license": "MIT",
-  "engines": {
-    "node": ">=18.0.0"
-  },
-  "files": [
-    "dist"
-  ],
   "lint-staged": {
     "*.ts": [
       "eslint --fix",
@@ -52,23 +23,15 @@
       "prettier --write"
     ]
   },
-  "dependencies": {
-    "commander": "^13.1.0"
-  },
   "devDependencies": {
     "@commitlint/cli": "^19.6.1",
     "@commitlint/config-conventional": "^19.6.0",
-    "@types/node": "^22.12.0",
     "@typescript-eslint/eslint-plugin": "^8.21.0",
     "@typescript-eslint/parser": "^8.21.0",
-    "@vitest/coverage-v8": "^3.0.5",
     "eslint": "^9.18.0",
     "husky": "^9.1.7",
     "lint-staged": "^15.4.3",
     "prettier": "^3.4.2",
-    "tsup": "^8.3.6",
-    "tsx": "^4.19.2",
-    "typescript": "^5.7.3",
-    "vitest": "^3.0.5"
+    "typescript": "^5.7.3"
   }
 }

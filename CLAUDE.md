@@ -9,7 +9,7 @@ A CLI workflow orchestrator for GitHub-hosted repos. Each command launches a cod
 ## Commands
 
 ```bash
-npm run build          # Bundle with tsup → dist/
+npm run build          # Bundle with tsup → packages/cli/dist/
 npm run dev            # Run via tsx (no build needed)
 npm run type-check     # tsc --noEmit
 npm run lint           # eslint .
@@ -17,18 +17,18 @@ npm run lint:fix       # eslint . --fix
 npm run format         # prettier --write .
 npm run test           # vitest run
 npm run test:watch     # vitest (watch mode)
-npx vitest run tests/lib/branch.test.ts   # Run a single test file
+npx vitest run packages/cli/tests/lib/branch.test.ts   # Run a single test file
 ```
 
 ## Architecture
 
-**Command pattern:** Each CLI command lives in `src/commands/<name>.ts` and exports a single async function. Commands follow: validate input → check prerequisites → execute action (usually `runPrompt()`).
+**Command pattern:** Each CLI command lives in `packages/cli/src/commands/<name>.ts` and exports a single async function. Commands follow: validate input → check prerequisites → execute action (usually `runPrompt()`).
 
-**Prompt-driven execution:** Commands map to Markdown files in `src/prompts/`. Prompts have YAML frontmatter (`cmd`, `args`, `append-issue`, etc.). `runPrompt()` in `src/lib/prompt-runner.ts` spawns the configured agent CLI with the prompt as system message.
+**Prompt-driven execution:** Commands map to Markdown files in `packages/cli/src/prompts/`. Prompts have YAML frontmatter (`cmd`, `args`, `append-issue`, etc.). `runPrompt()` in `packages/cli/src/lib/prompt-runner.ts` spawns the configured agent CLI with the prompt as system message.
 
-**Ephemeral worktrees:** Implementation/PR commands use temporary git worktrees stored in `~/.shipper/worktrees/`. `withWorktree()` in `src/lib/worktree.ts` handles create → callback → cleanup with signal handler support (SIGINT/SIGTERM).
+**Ephemeral worktrees:** Implementation/PR commands use temporary git worktrees stored in `~/.shipper/worktrees/`. `withWorktree()` in `packages/cli/src/lib/worktree.ts` handles create → callback → cleanup with signal handler support (SIGINT/SIGTERM).
 
-**GitHub integration:** All GitHub interaction goes through the `gh` CLI (no REST API). See `src/lib/github.ts`.
+**GitHub integration:** All GitHub interaction goes through the `gh` CLI (no REST API). See `packages/cli/src/lib/github.ts`.
 
 **Workflow state machine via labels:** `shipper:new` → `shipper:groomed` → `shipper:designed` → `shipper:planned` → `shipper:implemented` → `shipper:pr-open` → `shipper:pr-reviewed` → `shipper:ready`. Control labels: `shipper:blocked` (dependency block), `shipper:locked` (active instance lock). The `next` command auto-advances based on current label.
 

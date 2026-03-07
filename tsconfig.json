@@ -4,8 +4,6 @@
     "lib": ["ES2023"],
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "outDir": "./dist",
-    "rootDir": "./src",
     "declaration": true,
     "sourceMap": true,
     "strict": true,
@@ -22,7 +20,5 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "moduleDetection": "force"
-  },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "**/*.test.ts"]
+  }
 }
