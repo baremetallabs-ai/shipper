@@ -45,11 +45,13 @@ The `shipper:blocked` label is present but no blocking-condition comment was fou
 
 1. Remove the label: `gh issue edit <ISSUE> --remove-label "shipper:blocked"`
 2. Post a comment:
+
    ```
    ## Unblocked (stale)
 
    The `shipper:blocked` label was present but no blocking-condition comment (starting with `## Blocked`) was found. Treating the block as stale and removing the label.
    ```
+
 3. Report to the user that the stale block was removed and the issue can proceed.
 4. Stop.
 
@@ -57,11 +59,13 @@ The `shipper:blocked` label is present but no blocking-condition comment was fou
 
 1. Remove the label: `gh issue edit <ISSUE> --remove-label "shipper:blocked"`
 2. Post a comment citing the evidence:
+
    ```
    ## Unblocked
 
    <Evidence of why the condition is satisfied. Be specific — cite issue numbers, PR numbers, merge dates, etc.>
    ```
+
 3. Report to the user that the issue has been unblocked and can proceed via `shipper next`.
 4. Stop.
 

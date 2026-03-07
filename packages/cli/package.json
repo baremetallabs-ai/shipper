@@ -1,0 +1,51 @@
+{
+  "name": "@dnsquared/shipper-cli",
+  "version": "1.0.0",
+  "description": "CLI workflow orchestrator for GitHub issues using coding agents",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dnsquared/shipper-cli.git"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "restricted"
+  },
+  "type": "module",
+  "bin": {
+    "shipper": "./dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsx --loader ./raw-text-loader.mjs src/index.ts",
+    "build": "tsup",
+    "clean": "rm -rf dist",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "keywords": [
+    "cli",
+    "github",
+    "workflow",
+    "coding-agents",
+    "issue-lifecycle",
+    "developer-tools"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "commander": "^13.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.12.0",
+    "@vitest/coverage-v8": "^3.0.5",
+    "tsup": "^8.3.6",
+    "tsx": "^4.19.2",
+    "vitest": "^3.0.5"
+  }
+}

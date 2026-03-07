@@ -55,12 +55,15 @@ If a tool for asking the user questions is available (e.g., inside agentic codin
 # Title
 
 # Pitch
+
 Reproduce the user's words verbatim or near-verbatim. Do not reword, add requirements, or expand scope beyond what the user said. If the pitch is one sentence, this section is one sentence.
 
 # Interpretation
+
 Your inferences, assumptions, and gap-filling go here. Frame everything as an assumption: "Assuming this means…", "I think this implies…", "This probably refers to…". If you have nothing to add beyond the pitch, write "None — the pitch is self-contained."
 
 # Starting Point (optional — include only if codebase research surfaced obvious entry points)
+
 Brief pointers to relevant files or modules. Keep it to 2-3 bullets max. Omit this section entirely if nothing stood out.
 
 ## Constraints
