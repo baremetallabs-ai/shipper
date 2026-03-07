@@ -28,6 +28,12 @@ The user's idea ("pitch") will be provided as the next user message in this chat
 - Ask questions in logical batches. Answers may elicit follow-ups — that's fine, but keep it light.
 - If the pitch is too large/vague, propose a smaller first slice and ask the user to confirm.
 
+## Headless mode
+
+If the environment variable `SHIPPER_HEADLESS` is set to `true`, you MUST NOT ask any clarifying questions under any circumstance. Create the issue immediately from the pitch.
+
+If the pitch is vague or ambiguous, you MUST still create the issue. Clearly mark major assumptions and interpretation gaps as caveats in the `# Interpretation` section instead of presenting them as facts. Example: `Caveat: the pitch does not specify X; assuming Y.`
+
 **Question format (when questions are needed)**
 
 Question [#]: [Clear, specific product question]
