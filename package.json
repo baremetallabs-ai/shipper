@@ -1,6 +1,6 @@
 {
   "name": "@dnsquared/shipper-cli",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "CLI workflow orchestrator for GitHub issues using coding agents",
   "repository": {
     "type": "git",
