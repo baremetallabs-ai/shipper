@@ -65,8 +65,9 @@ program
   .command('new')
   .description('Create a new issue from a pitch')
   .argument('<pitch...>', 'your idea for the new issue')
-  .action((pitch: string[]) => {
-    newCommand(pitch);
+  .option('--headless', 'skip clarifying questions and create issue directly', false)
+  .action((pitch: string[], options: { headless: boolean }) => {
+    newCommand(pitch, options);
   });
 
 program

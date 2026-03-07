@@ -13,6 +13,9 @@ export interface Settings {
     default: 'claude' | 'codex';
     [step: string]: 'claude' | 'codex' | undefined;
   };
+  headless?: {
+    [command: string]: boolean;
+  };
   defaultBaseBranch?: string;
   installCommand?: string;
   hooks: {
@@ -26,6 +29,7 @@ export const DEFAULTS: Settings = {
   prReviewWait: { mode: 'checks', timeoutMinutes: 15 },
   lockTimeoutMinutes: 30,
   agents: { default: 'claude' as const },
+  headless: {},
   hooks: {},
 };
 
@@ -34,6 +38,8 @@ export const SETTING_DESCRIPTIONS: Record<string, string> = {
   lockTimeoutMinutes: 'stale lock timeout (minutes) before auto-clearing shipper:locked',
   'agents.default':
     'default coding agent for all steps (supports per-step overrides via agents.<step>)',
+  headless:
+    'per-command map enabling headless mode by default for specific commands (e.g. { "new": true })',
   defaultBaseBranch: 'target branch for PRs (auto-detected from GitHub if not set)',
   installCommand:
     'shell command to install project dependencies (e.g. npm ci, pnpm install --frozen-lockfile)',
@@ -43,6 +49,19 @@ export const SETTING_DESCRIPTIONS: Record<string, string> = {
 };
 
 let settings: Settings | undefined;
+
+const KNOWN_PROMPT_COMMANDS = new Set([
+  'new',
+  'groom',
+  'design',
+  'plan',
+  'implement',
+  'pr_open',
+  'pr_review',
+  'pr_remediate',
+  'unblock',
+  'setup',
+]);
 
 export function loadSettings(): void {
   const basePath = path.resolve('.shipper', 'settings.json');
@@ -56,6 +75,8 @@ export function loadSettings(): void {
 
   const baseAgents = isPlainObject(base?.agents) ? base.agents : {};
   const localAgents = isPlainObject(local?.agents) ? local.agents : {};
+  const baseHeadless = isPlainObject(base?.headless) ? base.headless : {};
+  const localHeadless = isPlainObject(local?.headless) ? local.headless : {};
 
   settings = {
     ...DEFAULTS,
@@ -63,7 +84,14 @@ export function loadSettings(): void {
     ...local,
     hooks: { ...DEFAULTS.hooks, ...base?.hooks, ...local?.hooks },
     agents: { ...DEFAULTS.agents, ...baseAgents, ...localAgents },
+    headless: { ...DEFAULTS.headless, ...baseHeadless, ...localHeadless },
   };
+
+  for (const command of Object.keys(settings.headless ?? {})) {
+    if (!KNOWN_PROMPT_COMMANDS.has(command)) {
+      console.warn(`Warning: Unknown command "${command}" in settings.headless.`);
+    }
+  }
 }
 
 export function getSettings(): Settings {
