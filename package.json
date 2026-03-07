@@ -1,4 +1,5 @@
 {
+  "name": "shipper-monorepo",
   "private": true,
   "workspaces": [
     "packages/*"
