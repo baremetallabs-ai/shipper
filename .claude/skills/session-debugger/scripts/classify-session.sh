@@ -35,7 +35,7 @@ extract_issue_num() {
   local branch="$1"
   local prompt="$2"
 
-  if [[ "$branch" =~ ([0-9]+) ]]; then
+  if [[ "$branch" =~ [/-]([0-9]+)([-/]|$) ]]; then
     echo "${BASH_REMATCH[1]}"
     return
   fi
