@@ -31,22 +31,20 @@ detect_agent() {
   fi
 }
 
+CODEX_ERROR_PATTERN='fatal:|[Ee]rror:|EACCES|ENOENT|EPERM|Permission denied|command not found|No such file|403 Forbidden|404 Not Found|401 Unauthorized|exit code [1-9]|exit status [1-9]|[Ff]ailed to|FAILED|panic:|Traceback|SyntaxError|TypeError|ReferenceError|ModuleNotFoundError|Process exited with code [1-9]|Exit code: [1-9]|could not lock config file|unable to write upstream branch configuration|cannot lock ref|cannot create temp file for here document|sandbox.*denied|not allowed in sandbox|execution not permitted|unable to create .+\.lock'
+
 strip_codex_noise() {
   printf '%s\n' "$1" | grep -vE '^/opt/homebrew/.*/bin/ps: Operation not permitted$' || true
 }
 
 codex_error_match() {
   local cleaned="$1"
-  if printf '%s\n' "$cleaned" | grep -qE '^(Process exited with code [1-9]|Exit code: [1-9]|error:|fatal:|Traceback|panic:)' 2>/dev/null; then
-    return 0
-  fi
-
-  printf '%s\n' "$cleaned" | grep -qE 'command not found|403 Forbidden|404 Not Found|401 Unauthorized|could not lock config file|unable to write upstream branch configuration|cannot lock ref|cannot create temp file for here document|sandbox.*denied|not allowed in sandbox|execution not permitted|unable to create .+\.lock' 2>/dev/null
+  printf '%s\n' "$cleaned" | grep -qE "$CODEX_ERROR_PATTERN" 2>/dev/null
 }
 
 find_error_line() {
   printf '%s\n' "$1" |
-    grep -E '^(Process exited with code [1-9]|Exit code: [1-9]|error:|fatal:|Traceback|panic:)|command not found|403 Forbidden|404 Not Found|401 Unauthorized|could not lock config file|unable to write upstream branch configuration|cannot lock ref|cannot create temp file for here document|sandbox.*denied|not allowed in sandbox|execution not permitted|unable to create .+\.lock' |
+    grep -E "$CODEX_ERROR_PATTERN" |
     head -1 |
     cut -c1-160
 }

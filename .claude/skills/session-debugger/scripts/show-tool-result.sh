@@ -16,6 +16,11 @@ if [[ ! -f "$FILE" ]]; then
   exit 1
 fi
 
+if ! [[ "$TOOL_NUM" =~ ^[1-9][0-9]*$ ]]; then
+  echo "Error: tool call number must be a positive integer" >&2
+  exit 1
+fi
+
 if ! command -v jq &>/dev/null; then
   echo "Error: jq is required (brew install jq)" >&2
   exit 1
@@ -154,4 +159,10 @@ if [[ -z "$tool_result" ]]; then
   exit 0
 fi
 
-echo "$tool_result" | jq -r '.output // "(empty)"'
+echo "$tool_result" | jq -r '
+  if (.output | type) == "string" then
+    ((.output | fromjson? | .output) // .output)
+  else
+    (.output // "(empty)")
+  end
+'

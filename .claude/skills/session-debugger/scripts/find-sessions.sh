@@ -44,7 +44,12 @@ get_mtime() {
 
 is_issue_worktree_path() {
   local path="$1"
-  [[ "$path" =~ (shipper-|--wt--).*(-|/)${ISSUE_NUM}(-|$) ]] || [[ "$path" =~ (^|[-/])${ISSUE_NUM}([-/.]|$) ]]
+  [[ "$path" =~ (shipper-|--wt--).*(-|/)${ISSUE_NUM}(-|$) ]]
+}
+
+is_repo_path() {
+  local path="$1"
+  [[ "$path" == *"$REPO_NAME"* ]]
 }
 
 append_result() {
@@ -125,12 +130,12 @@ collect_codex_sessions() {
   while IFS= read -r -d '' file; do
     cwd=$(head -n 1 "$file" | jq -r 'select(.type == "session_meta") | .payload.cwd // ""' 2>/dev/null || true)
 
-    if [[ -n "$cwd" ]] && is_issue_worktree_path "$cwd"; then
+    if [[ -n "$cwd" ]] && is_repo_path "$cwd" && is_issue_worktree_path "$cwd"; then
       append_result "codex" "$file"
       continue
     fi
 
-    if head -c "$MATCH_BYTES" "$file" | grep -qE "$issue_pattern" 2>/dev/null; then
+    if [[ -n "$cwd" ]] && is_repo_path "$cwd" && head -c "$MATCH_BYTES" "$file" | grep -qE "$issue_pattern" 2>/dev/null; then
       append_result "codex" "$file"
     fi
   done < <(find "$CODEX_DIR" -type f -name '*.jsonl' -print0 2>/dev/null)
