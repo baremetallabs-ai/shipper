@@ -2,6 +2,10 @@
   "name": "@dnsquared/shipper-core",
   "version": "0.1.0",
   "description": "Core domain logic for Shipper workflow orchestration",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "restricted"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

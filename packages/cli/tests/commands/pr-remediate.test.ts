@@ -7,15 +7,11 @@ vi.mock('node:child_process', async () => {
 
 const getSettingsMock = vi.fn();
 const fetchChecksMock = vi.fn();
-vi.mock('@dnsquared/shipper-core', () => {
-  const classifyChecks = (
-    checks: Array<{ state: string; bucket: string }>
-  ): { pending: Array<{ state: string; bucket: string }>; total: number } => ({
-    pending: checks.filter((check) => check.state !== 'COMPLETED' || check.bucket === 'pending'),
-    total: checks.length,
-  });
-
+vi.mock('@dnsquared/shipper-core', async () => {
+  const actual =
+    await vi.importActual<typeof import('@dnsquared/shipper-core')>('@dnsquared/shipper-core');
   return {
+    ...actual,
     resolveRef: vi.fn(),
     autoSelectPrForStage: vi.fn(),
     runPrompt: vi.fn(),
@@ -27,7 +23,6 @@ vi.mock('@dnsquared/shipper-core', () => {
     sleepMs: vi.fn(),
     getSettings: () => getSettingsMock(),
     fetchChecks: (...args: unknown[]) => fetchChecksMock(...args),
-    classifyChecks,
   };
 });
 
