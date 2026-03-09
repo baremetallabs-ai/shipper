@@ -4,11 +4,24 @@
     "timeoutMinutes": 15
   },
   "lockTimeoutMinutes": 30,
+  "agents": {
+    "default": "claude"
+  },
+  "headless": {},
+  "hooks": {},
   "commands": {
-    "default": { "agent": "claude" },
-    "implement": { "agent": "codex" },
-    "pr_remediate": { "agent": "codex" },
-    "plan": { "agent": "codex" }
+    "default": {
+      "agent": "claude"
+    },
+    "implement": {
+      "agent": "codex"
+    },
+    "pr_remediate": {
+      "agent": "codex"
+    },
+    "plan": {
+      "agent": "codex"
+    }
   },
   "cliVersion": "1.0.0"
 }
