@@ -39,7 +39,15 @@ export async function nextCommand(repo: string, ref: string): Promise<void> {
   const cleanRef = ref.replace(/^#/, '');
 
   const resolved = await resolveRef(repo, cleanRef, 'issue');
-  const { stdout } = await gh(['issue', 'view', resolved.issueNumber, '--json', 'number,labels']);
+  const { stdout } = await gh([
+    'issue',
+    'view',
+    resolved.issueNumber,
+    '-R',
+    repo,
+    '--json',
+    'number,labels',
+  ]);
   const issueData = JSON.parse(stdout.trim()) as IssueData;
   const issueNumber = issueData.number;
   const allLabels = issueData.labels
