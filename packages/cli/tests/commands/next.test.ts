@@ -17,7 +17,7 @@ vi.mock('node:child_process', async (importOriginal) => {
 vi.mock('@dnsquared/shipper-core', () => ({
   resolveRef: vi.fn(),
   tryResolvePrForIssue: vi.fn(),
-  withIssueLock: vi.fn((_issue: string, fn: () => void) => fn()),
+  withIssueLock: vi.fn(async (_issue: string, fn: () => Promise<void>) => await fn()),
 }));
 
 vi.mock('../../src/commands/groom.js', () => ({
@@ -69,9 +69,11 @@ describe('nextCommand', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockResolveRef.mockReturnValue({ issueNumber: '159' });
-    mockTryResolvePrForIssue.mockReturnValue('200');
-    mockWithIssueLock.mockImplementation((_issue: string, fn: () => void) => fn());
+    mockResolveRef.mockResolvedValue({ issueNumber: '159' });
+    mockTryResolvePrForIssue.mockResolvedValue('200');
+    mockWithIssueLock.mockImplementation(
+      async (_issue: string, fn: () => Promise<void>) => await fn()
+    );
     exitSpy = vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
       throw new Error(`exit:${code}`);
     });
@@ -85,7 +87,7 @@ describe('nextCommand', () => {
     logSpy.mockRestore();
   });
 
-  it('dispatches to grooming for blocked shipper:new issues', () => {
+  it('dispatches to grooming for blocked shipper:new issues', async () => {
     mockExecFileSync.mockReturnValueOnce(
       JSON.stringify({
         number: 159,
@@ -93,7 +95,7 @@ describe('nextCommand', () => {
       })
     );
 
-    nextCommand('159');
+    await nextCommand('159');
 
     expect(mockResolveRef).toHaveBeenCalledWith('159', 'issue');
     expect(mockWithIssueLock).toHaveBeenCalledWith('159', expect.any(Function));
@@ -116,7 +118,7 @@ describe('nextCommand', () => {
     'shipper:pr-open',
     'shipper:pr-reviewed',
     'shipper:ready',
-  ])('exits for blocked %s issues before dispatch', (stageLabel) => {
+  ])('exits for blocked %s issues before dispatch', async (stageLabel) => {
     mockExecFileSync.mockReturnValueOnce(
       JSON.stringify({
         number: 159,
@@ -124,7 +126,7 @@ describe('nextCommand', () => {
       })
     );
 
-    expect(() => nextCommand('159')).toThrow('exit:1');
+    await expect(nextCommand('159')).rejects.toThrow('exit:1');
 
     expect(errorSpy).toHaveBeenCalledWith(
       "Issue #159 is blocked. Run 'shipper unblock 159' to check if it can proceed."

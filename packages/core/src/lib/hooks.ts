@@ -1,5 +1,5 @@
-import { execFileSync, execSync } from 'node:child_process';
-import { accessSync, constants, statSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { access, constants, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 const HOOKS_DIR = path.join('.shipper', 'hooks');
@@ -29,18 +29,54 @@ function extractExecError(err: unknown): { code: number | 'unknown'; stderr: str
   return { code, stderr };
 }
 
-export function runAdvisoryHook(
+function spawnAsync(
+  command: string,
+  args: string[],
+  options: {
+    cwd?: string;
+    env: Record<string, string>;
+    shell?: boolean;
+  }
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const stderrChunks: string[] = [];
+    const child = spawn(command, args, {
+      stdio: ['inherit', 'inherit', 'pipe'],
+      env: { ...process.env, ...options.env },
+      cwd: options.cwd,
+      shell: options.shell,
+    });
+
+    child.stderr?.on('data', (chunk: Buffer | string) => {
+      stderrChunks.push(chunk.toString());
+    });
+
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+
+      const err = new Error(`Process exited with code ${code ?? 'unknown'}`) as Error & {
+        status: number | 'unknown';
+        stderr: string;
+      };
+      err.status = code ?? 'unknown';
+      err.stderr = stderrChunks.join('').trim();
+      reject(err);
+    });
+  });
+}
+
+export async function runAdvisoryHook(
   label: string,
   command: string,
   env: Record<string, string>,
   cwd?: string
-): void {
+): Promise<void> {
   try {
-    execSync(command, {
-      stdio: ['inherit', 'inherit', 'pipe'],
-      env: { ...process.env, ...env },
-      cwd,
-    });
+    await spawnAsync(command, [], { env, cwd, shell: true });
     console.log(`  ${label} hook completed.`);
   } catch (err) {
     const { code, stderr } = extractExecError(err);
@@ -48,18 +84,18 @@ export function runAdvisoryHook(
   }
 }
 
-function hookExists(hookPath: string): boolean {
+async function hookExists(hookPath: string): Promise<boolean> {
   try {
-    statSync(hookPath);
+    await stat(hookPath);
     return true;
   } catch {
     return false;
   }
 }
 
-function hookIsExecutable(hookPath: string): boolean {
+async function hookIsExecutable(hookPath: string): Promise<boolean> {
   try {
-    accessSync(hookPath, constants.X_OK);
+    await access(hookPath, constants.X_OK);
     return true;
   } catch {
     return false;
@@ -77,20 +113,25 @@ function runFileHook(
   label: string,
   env: Record<string, string>,
   options: { blocking: boolean; cwd?: string; resultLabel?: string }
-): void {
-  if (!hookExists(hookPath)) return;
+): Promise<void> {
+  return runFileHookImpl(hookPath, label, env, options);
+}
 
-  if (!hookIsExecutable(hookPath)) {
+async function runFileHookImpl(
+  hookPath: string,
+  label: string,
+  env: Record<string, string>,
+  options: { blocking: boolean; cwd?: string; resultLabel?: string }
+): Promise<void> {
+  if (!(await hookExists(hookPath))) return;
+
+  if (!(await hookIsExecutable(hookPath))) {
     warnNonExecutableHook(hookPath);
     return;
   }
 
   try {
-    execFileSync(hookPath, [], {
-      stdio: ['inherit', 'inherit', 'pipe'],
-      env: { ...process.env, ...env },
-      cwd: options.cwd,
-    });
+    await spawnAsync(hookPath, [], { env, cwd: options.cwd });
     console.log(`  ${label} hook completed.`);
   } catch (err) {
     const { code, stderr } = extractExecError(err);
@@ -105,32 +146,32 @@ function runFileHook(
   }
 }
 
-export function runPreHook(stage: string, env: Record<string, string>): void {
-  runFileHook(path.resolve(HOOKS_DIR, `pre-${stage}`), `Pre-${stage}`, env, {
+export async function runPreHook(stage: string, env: Record<string, string>): Promise<void> {
+  await runFileHook(path.resolve(HOOKS_DIR, `pre-${stage}`), `Pre-${stage}`, env, {
     blocking: true,
     resultLabel: `pre-${stage}`,
   });
 }
 
-export function runPostHook(stage: string, env: Record<string, string>): void {
-  runFileHook(path.resolve(HOOKS_DIR, `post-${stage}`), `Post-${stage}`, env, {
+export async function runPostHook(stage: string, env: Record<string, string>): Promise<void> {
+  await runFileHook(path.resolve(HOOKS_DIR, `post-${stage}`), `Post-${stage}`, env, {
     blocking: false,
     resultLabel: `post-${stage}`,
   });
 }
 
-export function runWorktreeHook(
+export async function runWorktreeHook(
   event: WorktreeHookEvent,
   env: Record<string, string>,
   settingsHookCommand: string | undefined,
   cwd?: string
-): void {
+): Promise<void> {
   const meta = WORKTREE_HOOK_META[event];
   const displayPath = path.join(HOOKS_DIR, event);
   const hookPath = path.join(cwd ?? process.cwd(), HOOKS_DIR, event);
 
-  if (hookExists(hookPath)) {
-    if (!hookIsExecutable(hookPath)) {
+  if (await hookExists(hookPath)) {
+    if (!(await hookIsExecutable(hookPath))) {
       warnNonExecutableHook(displayPath);
     } else {
       if (settingsHookCommand) {
@@ -139,7 +180,7 @@ export function runWorktreeHook(
         );
       }
 
-      runFileHook(hookPath, meta.label, env, {
+      await runFileHook(hookPath, meta.label, env, {
         blocking: false,
         cwd,
         resultLabel: meta.label,
@@ -153,21 +194,21 @@ export function runWorktreeHook(
   console.warn(
     `  Warning: settings-based hooks.${meta.settingsKey} is deprecated. Move your command to ${displayPath} and make it executable.`
   );
-  runAdvisoryHook(meta.label, settingsHookCommand, env, cwd);
+  await runAdvisoryHook(meta.label, settingsHookCommand, env, cwd);
 }
 
-export function withStageHooks<T>(
+export async function withStageHooks<T>(
   stage: string,
   env: { issueNumber?: string; branchName?: string },
-  fn: () => T
-): T {
+  fn: () => Promise<T>
+): Promise<T> {
   const hookEnv = {
     SHIPPER_STAGE: stage,
     SHIPPER_ISSUE_NUMBER: env.issueNumber ?? '',
     SHIPPER_BRANCH_NAME: env.branchName ?? '',
   };
-  runPreHook(stage, hookEnv);
-  const result = fn();
-  runPostHook(stage, hookEnv);
+  await runPreHook(stage, hookEnv);
+  const result = await fn();
+  await runPostHook(stage, hookEnv);
   return result;
 }

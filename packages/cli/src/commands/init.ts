@@ -50,7 +50,12 @@ function getStoredAgent(): string | undefined {
 
 export async function initCommand(options: { agent?: string }) {
   // Check prerequisites
-  const ok = runPrereqChecks([checkGitRepo, checkGhInstalled, checkGhAuth, checkGitHubRemote]);
+  const ok = await runPrereqChecks([
+    checkGitRepo,
+    checkGhInstalled,
+    checkGhAuth,
+    checkGitHubRemote,
+  ]);
   if (!ok) {
     process.exit(1);
   }

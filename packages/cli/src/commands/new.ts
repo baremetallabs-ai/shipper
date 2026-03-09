@@ -1,10 +1,10 @@
 import { runPrompt } from '@dnsquared/shipper-core';
 import { getSettings } from '@dnsquared/shipper-core';
 
-export function newCommand(
+export async function newCommand(
   pitchWords: string[],
   options: { headless: boolean } = { headless: false }
-) {
+): Promise<void> {
   const pitch = pitchWords.join(' ').trim();
   if (!pitch) {
     console.error('Error: Please provide a pitch for the new issue.');
@@ -21,7 +21,7 @@ export function newCommand(
 
   let exitCode = 1;
   try {
-    exitCode = runPrompt('new', { userInput: pitch });
+    exitCode = await runPrompt('new', { userInput: pitch });
   } finally {
     if (headless) {
       if (previousHeadless === undefined) {

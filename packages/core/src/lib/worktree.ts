@@ -1,11 +1,31 @@
-import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync } from 'node:fs';
+import { execFile, spawn } from 'node:child_process';
+import { access, mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { runAdvisoryHook, runWorktreeHook } from './hooks.js';
 import { getSettings } from './settings.js';
 
 const WORKTREES_DIR = path.join(homedir(), '.shipper', 'worktrees');
+const execFileAsync = promisify(execFile);
+
+function spawnAsync(command: string, args: string[], cwd?: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd,
+      stdio: 'inherit',
+    });
+
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`${command} exited with code ${code ?? 'unknown'}`));
+    });
+  });
+}
 
 export function getWorktreePath(repoRoot: string, branch: string): string {
   const repoName = path.basename(repoRoot);
@@ -21,31 +41,30 @@ export interface CreateWorktreeOpts {
   stage?: string;
 }
 
-export function createWorktree(opts: CreateWorktreeOpts): string {
+export async function createWorktree(opts: CreateWorktreeOpts): Promise<string> {
   const wtPath = getWorktreePath(opts.repoRoot, opts.branch);
 
-  if (existsSync(wtPath)) {
+  try {
+    await access(wtPath);
     // Clean up stale worktree from a previous crashed run
     try {
-      execFileSync('git', ['worktree', 'remove', '--force', wtPath], {
-        cwd: opts.repoRoot,
-        stdio: 'inherit',
-      });
+      await spawnAsync('git', ['worktree', 'remove', '--force', wtPath], opts.repoRoot);
     } catch {
       // If git worktree remove fails, try just deleting the directory
     }
+  } catch {
+    // Worktree doesn't exist
   }
 
-  mkdirSync(WORKTREES_DIR, { recursive: true });
+  await mkdir(WORKTREES_DIR, { recursive: true });
 
   const args = ['worktree', 'add'];
   if (opts.createBranch) {
     // Check if branch already exists (e.g. from a previous crashed run)
     let branchExists = false;
     try {
-      execFileSync('git', ['rev-parse', '--verify', opts.branch], {
+      await execFileAsync('git', ['rev-parse', '--verify', opts.branch], {
         cwd: opts.repoRoot,
-        stdio: 'ignore',
       });
       branchExists = true;
     } catch {
@@ -60,24 +79,24 @@ export function createWorktree(opts: CreateWorktreeOpts): string {
     args.push(wtPath, opts.branch);
   }
 
-  execFileSync('git', args, { cwd: opts.repoRoot, stdio: 'inherit' });
+  await spawnAsync('git', args, opts.repoRoot);
 
   return wtPath;
 }
 
-export function removeWorktree(repoRoot: string, wtPath: string): void {
+export async function removeWorktree(repoRoot: string, wtPath: string): Promise<void> {
   try {
-    execFileSync('git', ['worktree', 'remove', '--force', wtPath], {
-      cwd: repoRoot,
-      stdio: 'inherit',
-    });
+    await spawnAsync('git', ['worktree', 'remove', '--force', wtPath], repoRoot);
   } catch {
     // Idempotent — ignore errors if already removed
   }
 }
 
-export function withWorktree<T>(opts: CreateWorktreeOpts, fn: (wtPath: string) => T): T {
-  const wtPath = createWorktree(opts);
+export async function withWorktree<T>(
+  opts: CreateWorktreeOpts,
+  fn: (wtPath: string) => Promise<T>
+): Promise<T> {
+  const wtPath = await createWorktree(opts);
   const hookEnv = {
     SHIPPER_STAGE: opts.stage ?? '',
     SHIPPER_WORKTREE_PATH: wtPath,
@@ -88,29 +107,33 @@ export function withWorktree<T>(opts: CreateWorktreeOpts, fn: (wtPath: string) =
   const settings = getSettings();
   const { installCommand } = settings;
   if (installCommand) {
-    runAdvisoryHook('Install dependencies', installCommand, hookEnv, wtPath);
+    await runAdvisoryHook('Install dependencies', installCommand, hookEnv, wtPath);
   }
 
   const { worktreeSetup, worktreeTeardown } = settings.hooks;
 
-  runWorktreeHook('worktree-setup', hookEnv, worktreeSetup, wtPath);
+  await runWorktreeHook('worktree-setup', hookEnv, worktreeSetup, wtPath);
 
   let cleanedUp = false;
-  const cleanup = () => {
+  const cleanup = async () => {
     if (cleanedUp) return;
     cleanedUp = true;
-    runWorktreeHook('worktree-teardown', hookEnv, worktreeTeardown, wtPath);
-    removeWorktree(opts.repoRoot, wtPath);
+    await runWorktreeHook('worktree-teardown', hookEnv, worktreeTeardown, wtPath);
+    await removeWorktree(opts.repoRoot, wtPath);
   };
 
-  process.on('SIGINT', cleanup);
-  process.on('SIGTERM', cleanup);
+  const cleanupWithoutAwait = () => {
+    void cleanup();
+  };
+
+  process.on('SIGINT', cleanupWithoutAwait);
+  process.on('SIGTERM', cleanupWithoutAwait);
 
   try {
-    return fn(wtPath);
+    return await fn(wtPath);
   } finally {
-    process.removeListener('SIGINT', cleanup);
-    process.removeListener('SIGTERM', cleanup);
-    cleanup();
+    process.removeListener('SIGINT', cleanupWithoutAwait);
+    process.removeListener('SIGTERM', cleanupWithoutAwait);
+    await cleanup();
   }
 }

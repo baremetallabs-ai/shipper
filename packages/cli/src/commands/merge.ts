@@ -52,9 +52,9 @@ interface PRViewData {
   mergeStateStatus: string;
 }
 
-function resolveRepo(override?: string): string {
+async function resolveRepo(override?: string): Promise<string> {
   if (override) return override;
-  return getRepoNwo();
+  return await getRepoNwo();
 }
 
 interface PRViewResult {
@@ -75,14 +75,14 @@ function fetchPRView(ref: string, nwo: string): PRViewResult {
   return JSON.parse(json) as PRViewResult;
 }
 
-export function lookupPR(ref: string, nwo: string): QueuedPR {
+export async function lookupPR(ref: string, nwo: string): Promise<QueuedPR> {
   let data: PRViewResult;
 
   try {
     data = fetchPRView(ref, nwo);
   } catch {
     // Not a PR — try resolving as an issue number
-    const resolved = tryResolvePrForIssue(Number(ref));
+    const resolved = await tryResolvePrForIssue(Number(ref));
     if (!resolved) {
       console.error(`Error: #${ref} is not a PR and no linked PR was found.`);
       process.exit(1);
@@ -298,7 +298,7 @@ function failPR(pr: QueuedPR, reason: string, nwo: string, dryRun: boolean): voi
   }
 }
 
-export function getLinkedIssueNumber(prNumber: number, nwo: string): number | null {
+export async function getLinkedIssueNumber(prNumber: number, nwo: string): Promise<number | null> {
   try {
     const json = execFileSync('gh', ['pr', 'view', String(prNumber), '-R', nwo, '--json', 'body'], {
       encoding: 'utf-8',
@@ -344,8 +344,8 @@ export function postMerge(_pr: QueuedPR, issueNumber: number, nwo: string, dryRu
   }
 }
 
-function runPostMergeActions(pr: QueuedPR, nwo: string, dryRun: boolean): void {
-  const issueNumber = getLinkedIssueNumber(pr.number, nwo);
+async function runPostMergeActions(pr: QueuedPR, nwo: string, dryRun: boolean): Promise<void> {
+  const issueNumber = await getLinkedIssueNumber(pr.number, nwo);
   if (issueNumber == null) {
     console.warn(
       `  Warning: Could not determine linked issue for PR #${pr.number}. Skipping post-merge actions.`
@@ -355,7 +355,7 @@ function runPostMergeActions(pr: QueuedPR, nwo: string, dryRun: boolean): void {
   postMerge(pr, issueNumber, nwo, dryRun);
 }
 
-function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): boolean {
+async function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): Promise<boolean> {
   console.log(`  Processing PR #${pr.number}: ${pr.title}`);
 
   // Check merge state
@@ -403,7 +403,7 @@ function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): boolean {
     // Could be blocked by required checks still running — check CI status
     let checks;
     try {
-      checks = fetchChecks(String(pr.number), nwo);
+      checks = await fetchChecks(String(pr.number), nwo);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       failPR(pr, `Could not fetch CI checks: ${msg}`, nwo, dryRun);
@@ -442,7 +442,7 @@ function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): boolean {
   // Ready to merge
   if (dryRun) {
     console.log(`  [dry-run] Would merge PR #${pr.number} with --rebase --delete-branch`);
-    runPostMergeActions(pr, nwo, true);
+    await runPostMergeActions(pr, nwo, true);
     return true;
   }
 
@@ -453,7 +453,7 @@ function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): boolean {
       { stdio: 'inherit' }
     );
     console.log(`  PR #${pr.number} merged successfully.`);
-    runPostMergeActions(pr, nwo, false);
+    await runPostMergeActions(pr, nwo, false);
     return true;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -462,7 +462,7 @@ function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): boolean {
   }
 }
 
-function processQueue(nwo: string, dryRun: boolean): void {
+async function processQueue(nwo: string, dryRun: boolean): Promise<void> {
   const queue = getQueue(nwo);
 
   if (queue.length === 0) {
@@ -475,14 +475,18 @@ function processQueue(nwo: string, dryRun: boolean): void {
     console.log(`  #${pr.number} — ${pr.title} (labeled ${pr.labeledAt})`);
   }
 
-  const first = queue[0]!;
-  withStageHooks(
+  const first = queue[0];
+  if (!first) {
+    return;
+  }
+
+  await withStageHooks(
     'merge',
     {
-      issueNumber: String(getLinkedIssueNumber(first.number, nwo) ?? ''),
+      issueNumber: String((await getLinkedIssueNumber(first.number, nwo)) ?? ''),
       branchName: first.headRefName,
     },
-    () => processPR(first, nwo, dryRun)
+    async () => await processPR(first, nwo, dryRun)
   );
 }
 
@@ -491,7 +495,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 export async function mergeCommand(options: MergeOptions): Promise<void> {
-  const nwo = resolveRepo(options.repo);
+  const nwo = await resolveRepo(options.repo);
 
   if (options.number) {
     const cleaned = options.number.replace(/^#/, '');
@@ -501,15 +505,15 @@ export async function mergeCommand(options: MergeOptions): Promise<void> {
     }
     console.log(`Merge queue for ${nwo}`);
     if (options.dryRun) console.log('[dry-run mode]');
-    const pr = lookupPR(cleaned, nwo);
+    const pr = await lookupPR(cleaned, nwo);
     console.log(`Targeting PR #${pr.number}: ${pr.title}`);
-    const merged = withStageHooks(
+    const merged = await withStageHooks(
       'merge',
       {
-        issueNumber: String(getLinkedIssueNumber(pr.number, nwo) ?? ''),
+        issueNumber: String((await getLinkedIssueNumber(pr.number, nwo)) ?? ''),
         branchName: pr.headRefName,
       },
-      () => processPR(pr, nwo, options.dryRun)
+      async () => await processPR(pr, nwo, options.dryRun)
     );
     if (!merged) process.exit(1);
     return;
@@ -541,11 +545,11 @@ export async function mergeCommand(options: MergeOptions): Promise<void> {
 
   try {
     if (options.once) {
-      processQueue(nwo, options.dryRun);
+      await processQueue(nwo, options.dryRun);
     } else {
       console.log(`Polling every ${intervalSeconds}s. Press Ctrl+C to stop.`);
       while (true) {
-        processQueue(nwo, options.dryRun);
+        await processQueue(nwo, options.dryRun);
         await sleep(intervalSeconds * 1000);
       }
     }

@@ -5,9 +5,9 @@ import { withIssueLock } from '@dnsquared/shipper-core';
 import { withWorktree } from '@dnsquared/shipper-core';
 import { runPrompt } from '@dnsquared/shipper-core';
 
-export function implementCommand(issue?: string) {
+export async function implementCommand(issue?: string): Promise<void> {
   if (!issue) {
-    const selected = autoSelectIssue('shipper:planned');
+    const selected = await autoSelectIssue('shipper:planned');
     if (!selected) {
       console.error("No issues ready for implementation. Run 'shipper plan' first.");
       process.exit(1);
@@ -16,17 +16,20 @@ export function implementCommand(issue?: string) {
     issue = String(selected.number);
   }
 
-  withIssueLock(issue, () => {
-    const repoRoot = getRepoRoot();
-    const branch = generateBranchName(issue);
+  await withIssueLock(issue, async () => {
+    const repoRoot = await getRepoRoot();
+    const branch = await generateBranchName(issue);
 
-    const code = withStageHooks('implement', { issueNumber: issue, branchName: branch }, () =>
-      withWorktree(
-        { repoRoot, branch, createBranch: true, issueNumber: issue, stage: 'implement' },
-        (wtPath) => {
-          return runPrompt('implement', { issueRef: issue, cwd: wtPath });
-        }
-      )
+    const code = await withStageHooks(
+      'implement',
+      { issueNumber: issue, branchName: branch },
+      async () =>
+        await withWorktree(
+          { repoRoot, branch, createBranch: true, issueNumber: issue, stage: 'implement' },
+          async (wtPath) => {
+            return await runPrompt('implement', { issueRef: issue, cwd: wtPath });
+          }
+        )
     );
 
     process.exit(code);

@@ -1,50 +1,81 @@
+import { promisify } from 'node:util';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const execFileSyncMock = vi.fn();
-vi.mock('node:child_process', async () => {
-  const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
-  return { ...actual, execFileSync: (...args: unknown[]) => execFileSyncMock(...args) };
+const execFileMock = vi.fn();
+const execFile = Object.assign((...args: unknown[]) => execFileMock(...args), {
+  [promisify.custom]: (...args: unknown[]) =>
+    new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+      execFileMock(
+        ...args,
+        (err: unknown, stdout: string | Buffer = '', stderr: string | Buffer = '') => {
+          if (err) {
+            reject(err);
+            return;
+          }
+          resolve({ stdout: String(stdout), stderr: String(stderr) });
+        }
+      );
+    }),
 });
 
-import { fetchChecks, classifyChecks, type PRChecksLine } from '../../src/lib/checks.js';
+vi.mock('node:child_process', async () => {
+  const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+  return { ...actual, execFile };
+});
+
+const { fetchChecks, classifyChecks } = await import('../../src/lib/checks.js');
+type PRChecksLine = import('../../src/lib/checks.js').PRChecksLine;
 
 beforeEach(() => {
-  execFileSyncMock.mockReset();
+  execFileMock.mockReset();
 });
 
 describe('fetchChecks', () => {
-  it('calls gh pr checks with --json and parses output', () => {
+  it('calls gh pr checks with --json and parses output', async () => {
     const checks = [{ name: 'build', state: 'COMPLETED', bucket: 'pass' }];
-    execFileSyncMock.mockReturnValue(JSON.stringify(checks));
+    execFileMock.mockImplementation((_cmd: string, _args: string[], ...rest: unknown[]) => {
+      const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
+      cb(null, JSON.stringify(checks), '');
+    });
 
-    const result = fetchChecks('42');
+    const result = await fetchChecks('42');
 
-    expect(execFileSyncMock).toHaveBeenCalledWith(
+    expect(execFileMock).toHaveBeenCalledWith(
       'gh',
       ['pr', 'checks', '42', '--json', 'name,state,bucket'],
-      expect.objectContaining({ encoding: 'utf-8' })
+      expect.objectContaining({ encoding: 'utf-8' }),
+      expect.any(Function)
     );
     expect(result).toEqual(checks);
   });
 
-  it('includes -R flag when nwo is provided', () => {
-    execFileSyncMock.mockReturnValue('[]');
+  it('includes -R flag when nwo is provided', async () => {
+    execFileMock.mockImplementation((_cmd: string, _args: string[], ...rest: unknown[]) => {
+      const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
+      cb(null, '[]', '');
+    });
 
-    fetchChecks('42', 'owner/repo');
+    await fetchChecks('42', 'owner/repo');
 
-    expect(execFileSyncMock).toHaveBeenCalledWith(
+    expect(execFileMock).toHaveBeenCalledWith(
       'gh',
       ['pr', 'checks', '42', '--json', 'name,state,bucket', '-R', 'owner/repo'],
-      expect.objectContaining({ encoding: 'utf-8' })
+      expect.objectContaining({ encoding: 'utf-8' }),
+      expect.any(Function)
     );
   });
 
-  it('does not include -R flag when nwo is omitted', () => {
-    execFileSyncMock.mockReturnValue('[]');
+  it('does not include -R flag when nwo is omitted', async () => {
+    execFileMock.mockImplementation((_cmd: string, _args: string[], ...rest: unknown[]) => {
+      const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
+      cb(null, '[]', '');
+    });
 
-    fetchChecks('42');
+    await fetchChecks('42');
 
-    const args = execFileSyncMock.mock.calls[0]![1] as string[];
+    const firstCall = execFileMock.mock.calls[0];
+    expect(firstCall).toBeDefined();
+    const args = firstCall?.[1] as string[];
     expect(args).not.toContain('-R');
   });
 });

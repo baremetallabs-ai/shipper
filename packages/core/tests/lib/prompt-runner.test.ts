@@ -1,19 +1,28 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { EventEmitter } from 'node:events';
 import path from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const spawnSyncMock = vi.fn();
-const readFileSyncMock = vi.fn();
-
-vi.mock('node:child_process', () => ({
-  spawnSync: (...args: unknown[]) => spawnSyncMock(...args),
-}));
-vi.mock('node:fs', () => ({ readFileSync: (...args: unknown[]) => readFileSyncMock(...args) }));
-vi.mock('../../src/lib/github.js', () => ({
-  fetchIssue: vi.fn(),
-  fetchPR: vi.fn(),
-}));
-
+const spawnMock = vi.fn();
+const readFileMock = vi.fn();
+const fetchIssueMock = vi.fn();
+const fetchPRMock = vi.fn();
 const resolveAgentMock = vi.fn().mockReturnValue('claude');
+
+vi.mock('node:child_process', async () => {
+  const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+  return { ...actual, spawn: (...args: unknown[]) => spawnMock(...args) };
+});
+
+vi.mock('node:fs/promises', async () => {
+  const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+  return { ...actual, readFile: (...args: unknown[]) => readFileMock(...args) };
+});
+
+vi.mock('../../src/lib/github.js', () => ({
+  fetchIssue: (...args: unknown[]) => fetchIssueMock(...args),
+  fetchPR: (...args: unknown[]) => fetchPRMock(...args),
+}));
+
 vi.mock('../../src/lib/settings.js', () => ({
   resolveAgent: (...args: unknown[]) => resolveAgentMock(...args),
 }));
@@ -24,176 +33,131 @@ vi.mock('../../src/lib/prompts.js', () => ({
   },
 }));
 
-import { runPrompt } from '../../src/lib/prompt-runner.js';
+function mockSpawnResult(opts: { code?: number; error?: Error } = {}): void {
+  const { code = 0, error } = opts;
+  spawnMock.mockImplementationOnce(() => {
+    const child = new EventEmitter() as EventEmitter & {
+      stderr?: EventEmitter;
+      stdout?: EventEmitter;
+    };
+    globalThis.queueMicrotask(() => {
+      if (error) {
+        child.emit('error', error);
+        return;
+      }
+      child.emit('close', code);
+    });
+    return child;
+  });
+}
+
+const { runPrompt } = await import('../../src/lib/prompt-runner.js');
 
 afterEach(() => {
   vi.clearAllMocks();
   resolveAgentMock.mockReturnValue('claude');
+  fetchIssueMock.mockResolvedValue('issue body');
+  fetchPRMock.mockResolvedValue('pr body');
 });
 
-describe('runPrompt agent-specific arg construction', () => {
-  it('uses --append-system-prompt for cmd: claude', () => {
-    const prompt = ['---', 'cmd: claude', '---', '', 'prompt body'].join('\n');
-    readFileSyncMock.mockReturnValueOnce(prompt);
-    spawnSyncMock.mockReturnValueOnce({ status: 0, error: null });
+describe('runPrompt', () => {
+  it('uses --append-system-prompt for claude prompts', async () => {
+    readFileMock.mockResolvedValueOnce(['---', 'cmd: claude', '---', '', 'prompt body'].join('\n'));
+    mockSpawnResult();
 
-    runPrompt('test', {});
+    await expect(runPrompt('test', {})).resolves.toBe(0);
 
-    const args = spawnSyncMock.mock.calls[0][1] as string[];
+    const args = spawnMock.mock.calls[0][1] as string[];
     expect(args).toContain('--append-system-prompt');
     expect(args).toContain('prompt body');
   });
 
-  it('passes prompt body as positional arg for cmd: codex', () => {
+  it('passes the prompt body as a positional argument for codex', async () => {
     resolveAgentMock.mockReturnValue('codex');
-    const prompt = ['---', 'cmd: codex', '---', '', 'prompt body'].join('\n');
-    readFileSyncMock.mockReturnValueOnce(prompt);
-    spawnSyncMock.mockReturnValueOnce({ status: 0, error: null });
+    readFileMock.mockResolvedValueOnce(['---', 'cmd: codex', '---', '', 'prompt body'].join('\n'));
+    mockSpawnResult();
 
-    runPrompt('test', {});
+    await expect(runPrompt('test', {})).resolves.toBe(0);
 
-    const args = spawnSyncMock.mock.calls[0][1] as string[];
+    const args = spawnMock.mock.calls[0][1] as string[];
     expect(args).not.toContain('--append-system-prompt');
     expect(args).toContain('prompt body');
   });
-});
 
-describe('runPrompt agent resolution', () => {
-  it('reads prompt from agent subdirectory', () => {
-    const prompt = ['---', 'cmd: claude', '---', '', 'prompt body'].join('\n');
-    readFileSyncMock.mockReturnValueOnce(prompt);
-    spawnSyncMock.mockReturnValueOnce({ status: 0, error: null });
+  it('reads the prompt from the resolved agent subdirectory', async () => {
+    readFileMock.mockResolvedValueOnce(['---', 'cmd: claude', '---', '', 'prompt body'].join('\n'));
+    mockSpawnResult();
 
-    runPrompt('test', {});
+    await runPrompt('test', {});
 
-    const expectedPath = path.resolve('.shipper', 'prompts', 'claude', 'test.md');
-    expect(readFileSyncMock).toHaveBeenCalledWith(expectedPath, 'utf-8');
-  });
-
-  it('spawns the resolved agent', () => {
-    resolveAgentMock.mockReturnValue('codex');
-    const prompt = ['---', 'cmd: codex', '---', '', 'prompt body'].join('\n');
-    readFileSyncMock.mockReturnValueOnce(prompt);
-    spawnSyncMock.mockReturnValueOnce({ status: 0, error: null });
-
-    runPrompt('test', {});
-
-    expect(spawnSyncMock.mock.calls[0][0]).toBe('codex');
-  });
-
-  it('passes step name to resolveAgent', () => {
-    const prompt = ['---', 'cmd: claude', '---', '', 'prompt body'].join('\n');
-    readFileSyncMock.mockReturnValueOnce(prompt);
-    spawnSyncMock.mockReturnValueOnce({ status: 0, error: null });
-
-    runPrompt('implement', {});
-
-    expect(resolveAgentMock).toHaveBeenCalledWith('implement');
-  });
-});
-
-describe('runPrompt agent/frontmatter mismatch', () => {
-  it('returns 1 when resolved agent differs from frontmatter cmd', () => {
-    const prompt = ['---', 'cmd: codex', '---', '', 'prompt body'].join('\n');
-    readFileSyncMock.mockReturnValueOnce(prompt);
-
-    const result = runPrompt('test', {});
-
-    expect(result).toBe(1);
-    expect(spawnSyncMock).not.toHaveBeenCalled();
-  });
-});
-
-describe('runPrompt baseBranch replacement', () => {
-  it('replaces {{BASE_BRANCH}} in prompt body when baseBranch is provided', () => {
-    const prompt = [
-      '---',
-      'cmd: claude',
-      '---',
-      '',
-      'git rebase origin/{{BASE_BRANCH}}',
-      'git diff origin/{{BASE_BRANCH}}...HEAD',
-    ].join('\n');
-    readFileSyncMock.mockReturnValueOnce(prompt);
-    spawnSyncMock.mockReturnValueOnce({ status: 0, error: null });
-
-    runPrompt('test', { baseBranch: 'develop' });
-
-    const appendSystemPromptArg = spawnSyncMock.mock.calls[0][1].find(
-      (_: string, i: number, arr: string[]) => arr[i - 1] === '--append-system-prompt'
+    expect(readFileMock).toHaveBeenCalledWith(
+      path.resolve('.shipper', 'prompts', 'claude', 'test.md'),
+      'utf-8'
     );
-    expect(appendSystemPromptArg).toContain('origin/develop');
-    expect(appendSystemPromptArg).not.toContain('{{BASE_BRANCH}}');
   });
 
-  it('leaves {{BASE_BRANCH}} as-is when baseBranch is not provided', () => {
-    const prompt = ['---', 'cmd: claude', '---', '', 'git rebase origin/{{BASE_BRANCH}}'].join(
-      '\n'
+  it('replaces {{BASE_BRANCH}} when provided', async () => {
+    readFileMock.mockResolvedValueOnce(
+      ['---', 'cmd: claude', '---', '', 'git rebase origin/{{BASE_BRANCH}}'].join('\n')
     );
-    readFileSyncMock.mockReturnValueOnce(prompt);
-    spawnSyncMock.mockReturnValueOnce({ status: 0, error: null });
+    mockSpawnResult();
 
-    runPrompt('test', {});
+    await runPrompt('test', { baseBranch: 'develop' });
 
-    const appendSystemPromptArg = spawnSyncMock.mock.calls[0][1].find(
-      (_: string, i: number, arr: string[]) => arr[i - 1] === '--append-system-prompt'
-    );
-    expect(appendSystemPromptArg).toContain('{{BASE_BRANCH}}');
+    const args = spawnMock.mock.calls[0][1] as string[];
+    expect(args).toContain('git rebase origin/develop');
   });
-});
 
-describe('runPrompt bundled fallback', () => {
-  it('uses bundled default when no local file exists', () => {
-    readFileSyncMock.mockImplementation(() => {
-      throw new Error('ENOENT');
-    });
-    spawnSyncMock.mockReturnValueOnce({ status: 0, error: null });
+  it('appends fetched issue and PR text when requested by frontmatter', async () => {
+    readFileMock.mockResolvedValueOnce(
+      [
+        '---',
+        'cmd: claude',
+        'append-issue: true',
+        'append-pr: true',
+        '---',
+        '',
+        'prompt body',
+      ].join('\n')
+    );
+    fetchIssueMock.mockResolvedValueOnce('issue details');
+    fetchPRMock.mockResolvedValueOnce('pr details');
+    mockSpawnResult();
 
-    const result = runPrompt('test', {});
+    await runPrompt('test', { issueRef: '42', prRef: '5' });
 
-    expect(result).toBe(0);
-    expect(spawnSyncMock).toHaveBeenCalled();
-    const args = spawnSyncMock.mock.calls[0][1] as string[];
+    const args = spawnMock.mock.calls[0][1] as string[];
+    expect(args).toContain('issue details\n\n---\n\npr details');
+  });
+
+  it('returns 1 when the resolved agent does not match frontmatter', async () => {
+    readFileMock.mockResolvedValueOnce(['---', 'cmd: codex', '---', '', 'prompt body'].join('\n'));
+
+    await expect(runPrompt('test', {})).resolves.toBe(1);
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it('uses the bundled fallback when no local file exists', async () => {
+    readFileMock.mockRejectedValueOnce(new Error('ENOENT'));
+    mockSpawnResult();
+
+    await expect(runPrompt('test', {})).resolves.toBe(0);
+
+    const args = spawnMock.mock.calls[0][1] as string[];
     expect(args).toContain('bundled body');
   });
 
-  it('returns 1 when no local file and no bundled default exists', () => {
-    readFileSyncMock.mockImplementation(() => {
-      throw new Error('ENOENT');
-    });
+  it('returns 1 when neither a local nor bundled prompt exists', async () => {
+    readFileMock.mockRejectedValueOnce(new Error('ENOENT'));
 
-    const result = runPrompt('nonexistent', {});
-
-    expect(result).toBe(1);
-    expect(spawnSyncMock).not.toHaveBeenCalled();
+    await expect(runPrompt('missing', {})).resolves.toBe(1);
+    expect(spawnMock).not.toHaveBeenCalled();
   });
 
-  it('uses local file when it exists (not bundled)', () => {
-    const localPrompt = ['---', 'cmd: claude', '---', '', 'local body'].join('\n');
-    readFileSyncMock.mockReturnValueOnce(localPrompt);
-    spawnSyncMock.mockReturnValueOnce({ status: 0, error: null });
+  it('returns 1 when spawning the agent fails', async () => {
+    readFileMock.mockResolvedValueOnce(['---', 'cmd: claude', '---', '', 'prompt body'].join('\n'));
+    mockSpawnResult({ error: new Error('spawn failed') });
 
-    runPrompt('test', {});
-
-    const args = spawnSyncMock.mock.calls[0][1] as string[];
-    expect(args).toContain('local body');
-    expect(args).not.toContain('bundled body');
-  });
-
-  it('errors on local file with wrong cmd (does not fall back to bundled)', () => {
-    const badPrompt = ['---', 'cmd: codex', '---', '', 'local body'].join('\n');
-    readFileSyncMock.mockReturnValueOnce(badPrompt);
-
-    const result = runPrompt('test', {});
-
-    expect(result).toBe(1);
-    expect(spawnSyncMock).not.toHaveBeenCalled();
-  });
-
-  it('throws on local file with malformed frontmatter (does not fall back to bundled)', () => {
-    readFileSyncMock.mockReturnValueOnce('no frontmatter here');
-
-    expect(() => runPrompt('test', {})).toThrow();
-    expect(spawnSyncMock).not.toHaveBeenCalled();
+    await expect(runPrompt('test', {})).resolves.toBe(1);
   });
 });

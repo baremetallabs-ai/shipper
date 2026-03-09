@@ -1,5 +1,63 @@
-import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
-import {
+import { promisify } from 'node:util';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+
+const execFileMock = vi.fn();
+const execFile = Object.assign((...args: unknown[]) => execFileMock(...args), {
+  [promisify.custom]: (...args: unknown[]) =>
+    new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+      execFileMock(
+        ...args,
+        (err: unknown, stdout: string | Buffer = '', stderr: string | Buffer = '') => {
+          if (err) {
+            reject(err);
+            return;
+          }
+          resolve({ stdout: String(stdout), stderr: String(stderr) });
+        }
+      );
+    }),
+});
+
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    execFile,
+  };
+});
+
+vi.mock('../../src/lib/lock.js', () => ({
+  isLockStale: vi.fn(async () => false),
+  releaseIssueLock: vi.fn(async () => {}),
+}));
+
+vi.mock('../../src/lib/repo.js', () => ({
+  getRepoNwo: vi.fn(async () => 'owner/repo'),
+}));
+
+function queueExecFileResult(stdout: string): void {
+  execFileMock.mockImplementationOnce((_cmd: string, _args: string[], ...rest: unknown[]) => {
+    const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
+    cb(null, stdout, '');
+  });
+}
+
+function queueExecFileError(message: string): void {
+  execFileMock.mockImplementationOnce((_cmd: string, _args: string[], ...rest: unknown[]) => {
+    const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
+    cb(new Error(message));
+  });
+}
+
+beforeEach(() => {
+  execFileMock.mockReset();
+  execFileMock.mockImplementation((_cmd: string, _args: string[], ...rest: unknown[]) => {
+    const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
+    cb(null, '', '');
+  });
+});
+
+const {
   autoSelectIssue,
   formatIssue,
   formatPR,
@@ -7,22 +65,8 @@ import {
   selectIssuesForStage,
   sortIssuesByLabelTime,
   tryResolvePrForIssue,
-  type TimelineLabelEvent,
-} from '../../src/lib/github.js';
-
-vi.mock('node:child_process', async (importOriginal) => {
-  const actual = (await importOriginal()) as Record<string, unknown>;
-  return { ...actual, execFileSync: vi.fn() };
-});
-
-vi.mock('../../src/lib/lock.js', () => ({
-  isLockStale: vi.fn(() => false),
-  releaseIssueLock: vi.fn(),
-}));
-
-vi.mock('../../src/lib/repo.js', () => ({
-  getRepoNwo: vi.fn(() => 'owner/repo'),
-}));
+} = await import('../../src/lib/github.js');
+type TimelineLabelEvent = import('../../src/lib/github.js').TimelineLabelEvent;
 
 describe('formatIssue', () => {
   it('formats a basic issue with comments', () => {
@@ -228,110 +272,89 @@ describe('sortIssuesByLabelTime', () => {
 });
 
 describe('tryResolvePrForIssue', () => {
-  let execFileSync: ReturnType<typeof vi.fn>;
-
-  beforeAll(async () => {
-    const cp = await import('node:child_process');
-    execFileSync = vi.mocked(cp.execFileSync);
-  });
-
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it('matches exact branch shipper/12', () => {
-    execFileSync.mockReturnValueOnce(JSON.stringify([{ number: 99, headRefName: 'shipper/12' }]));
-    expect(tryResolvePrForIssue(12)).toBe('99');
+  it('matches exact branch shipper/12', async () => {
+    queueExecFileResult(JSON.stringify([{ number: 99, headRefName: 'shipper/12' }]));
+    expect(await tryResolvePrForIssue(12)).toBe('99');
   });
 
-  it('matches prefixed branch shipper/12-some-slug', () => {
-    execFileSync.mockReturnValueOnce(
-      JSON.stringify([{ number: 50, headRefName: 'shipper/12-some-slug' }])
-    );
-    expect(tryResolvePrForIssue(12)).toBe('50');
+  it('matches prefixed branch shipper/12-some-slug', async () => {
+    queueExecFileResult(JSON.stringify([{ number: 50, headRefName: 'shipper/12-some-slug' }]));
+    expect(await tryResolvePrForIssue(12)).toBe('50');
   });
 
-  it('does NOT match unrelated branch containing the number', () => {
-    execFileSync.mockReturnValueOnce(
-      JSON.stringify([{ number: 77, headRefName: 'fix/update-12-deps' }])
-    );
-    expect(tryResolvePrForIssue(12)).toBeUndefined();
+  it('does NOT match unrelated branch containing the number', async () => {
+    queueExecFileResult(JSON.stringify([{ number: 77, headRefName: 'fix/update-12-deps' }]));
+    expect(await tryResolvePrForIssue(12)).toBeUndefined();
   });
 
-  it('does NOT match partial prefix shipper/123 when searching for 12', () => {
-    execFileSync.mockReturnValueOnce(JSON.stringify([{ number: 88, headRefName: 'shipper/123' }]));
-    expect(tryResolvePrForIssue(12)).toBeUndefined();
+  it('does NOT match partial prefix shipper/123 when searching for 12', async () => {
+    queueExecFileResult(JSON.stringify([{ number: 88, headRefName: 'shipper/123' }]));
+    expect(await tryResolvePrForIssue(12)).toBeUndefined();
   });
 
-  it('returns undefined when no PRs exist', () => {
-    execFileSync.mockReturnValueOnce(JSON.stringify([]));
-    expect(tryResolvePrForIssue(12)).toBeUndefined();
+  it('returns undefined when no PRs exist', async () => {
+    queueExecFileResult(JSON.stringify([]));
+    expect(await tryResolvePrForIssue(12)).toBeUndefined();
   });
 
-  it('returns undefined when gh command fails', () => {
-    execFileSync.mockImplementationOnce(() => {
-      throw new Error('gh failed');
-    });
-    expect(tryResolvePrForIssue(12)).toBeUndefined();
+  it('returns undefined when gh command fails', async () => {
+    queueExecFileError('gh failed');
+    expect(await tryResolvePrForIssue(12)).toBeUndefined();
   });
 });
 
 describe('resolveBaseBranch', () => {
-  let execFileSync: ReturnType<typeof vi.fn>;
-
-  beforeAll(async () => {
-    const cp = await import('node:child_process');
-    execFileSync = vi.mocked(cp.execFileSync);
-  });
-
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it('returns configured value when branch exists on remote', () => {
-    execFileSync.mockReturnValueOnce('abc123\trefs/heads/develop\n');
-    expect(resolveBaseBranch('develop')).toBe('develop');
-    expect(execFileSync).toHaveBeenCalledWith(
+  it('returns configured value when branch exists on remote', async () => {
+    queueExecFileResult('abc123\trefs/heads/develop\n');
+    expect(await resolveBaseBranch('develop')).toBe('develop');
+    expect(execFileMock).toHaveBeenCalledWith(
       'git',
       ['ls-remote', '--heads', 'origin', 'develop'],
-      { encoding: 'utf-8' }
+      { encoding: 'utf-8' },
+      expect.any(Function)
     );
   });
 
-  it('exits with error when configured branch does not exist on remote', () => {
+  it('exits with error when configured branch does not exist on remote', async () => {
     const exitMock = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
     const stderrMock = vi.spyOn(console, 'error').mockImplementation(() => {});
-    execFileSync.mockReturnValueOnce('');
-    resolveBaseBranch('nonexistent');
+    queueExecFileResult('');
+    await resolveBaseBranch('nonexistent');
     expect(stderrMock).toHaveBeenCalledWith(
       "Error: configured defaultBaseBranch 'nonexistent' does not exist on remote."
     );
     expect(exitMock).toHaveBeenCalledWith(1);
   });
 
-  it('auto-detects via gh repo view when no value configured', () => {
-    execFileSync.mockReturnValueOnce('main\n');
-    expect(resolveBaseBranch()).toBe('main');
-    expect(execFileSync).toHaveBeenCalledWith(
+  it('auto-detects via gh repo view when no value configured', async () => {
+    queueExecFileResult('main\n');
+    expect(await resolveBaseBranch()).toBe('main');
+    expect(execFileMock).toHaveBeenCalledWith(
       'gh',
       ['repo', 'view', '--json', 'defaultBranchRef', '-q', '.defaultBranchRef.name'],
-      { encoding: 'utf-8' }
+      { encoding: 'utf-8' },
+      expect.any(Function)
     );
   });
 
-  it('auto-detects non-main default branches', () => {
-    execFileSync.mockReturnValueOnce('master\n');
-    expect(resolveBaseBranch(undefined)).toBe('master');
+  it('auto-detects non-main default branches', async () => {
+    queueExecFileResult('master\n');
+    expect(await resolveBaseBranch(undefined)).toBe('master');
   });
 });
 
 describe('selectIssuesForStage', () => {
-  let execFileSync: ReturnType<typeof vi.fn>;
   let mockIsLockStale: ReturnType<typeof vi.fn>;
 
-  beforeAll(async () => {
-    const cp = await import('node:child_process');
-    execFileSync = vi.mocked(cp.execFileSync);
+  beforeEach(async () => {
     const lock = await import('../../src/lib/lock.js');
     mockIsLockStale = vi.mocked(lock.isLockStale);
   });
@@ -340,18 +363,18 @@ describe('selectIssuesForStage', () => {
     vi.restoreAllMocks();
   });
 
-  it('includes stale-locked issues in results', () => {
+  it('includes stale-locked issues in results', async () => {
     // First call: normal issues query
-    execFileSync.mockReturnValueOnce(JSON.stringify([{ number: 1, title: 'Normal' }]));
+    queueExecFileResult(JSON.stringify([{ number: 1, title: 'Normal' }]));
     // Second call: locked issues query
-    execFileSync.mockReturnValueOnce(JSON.stringify([{ number: 2, title: 'Stale locked' }]));
-    mockIsLockStale.mockReturnValueOnce(true);
+    queueExecFileResult(JSON.stringify([{ number: 2, title: 'Stale locked' }]));
+    mockIsLockStale.mockResolvedValueOnce(true);
     // Third + fourth calls: timeline for each issue (getRepoNwo is mocked via repo.js)
-    execFileSync.mockReturnValueOnce('');
-    execFileSync.mockReturnValueOnce('');
+    queueExecFileResult('');
+    queueExecFileResult('');
 
     const staleLocked = new Set<number>();
-    const result = selectIssuesForStage('shipper:new', staleLocked);
+    const result = await selectIssuesForStage('shipper:new', staleLocked);
 
     expect(result).toEqual(
       expect.arrayContaining([
@@ -363,36 +386,36 @@ describe('selectIssuesForStage', () => {
     expect(staleLocked.has(1)).toBe(false);
   });
 
-  it('excludes actively-locked issues', () => {
-    execFileSync.mockReturnValueOnce(JSON.stringify([{ number: 1, title: 'Normal' }]));
-    execFileSync.mockReturnValueOnce(JSON.stringify([{ number: 2, title: 'Active locked' }]));
-    mockIsLockStale.mockReturnValueOnce(false);
+  it('excludes actively-locked issues', async () => {
+    queueExecFileResult(JSON.stringify([{ number: 1, title: 'Normal' }]));
+    queueExecFileResult(JSON.stringify([{ number: 2, title: 'Active locked' }]));
+    mockIsLockStale.mockResolvedValueOnce(false);
 
     const staleLocked = new Set<number>();
-    const result = selectIssuesForStage('shipper:new', staleLocked);
+    const result = await selectIssuesForStage('shipper:new', staleLocked);
 
     expect(result).toEqual([{ number: 1, title: 'Normal' }]);
     expect(staleLocked.size).toBe(0);
   });
 
-  it('works when no locked issues exist', () => {
-    execFileSync.mockReturnValueOnce(JSON.stringify([{ number: 1, title: 'Normal' }]));
-    execFileSync.mockReturnValueOnce(JSON.stringify([]));
+  it('works when no locked issues exist', async () => {
+    queueExecFileResult(JSON.stringify([{ number: 1, title: 'Normal' }]));
+    queueExecFileResult(JSON.stringify([]));
 
-    const result = selectIssuesForStage('shipper:new');
+    const result = await selectIssuesForStage('shipper:new');
 
     expect(result).toEqual([{ number: 1, title: 'Normal' }]);
   });
 
-  it('works without staleLocked parameter', () => {
-    execFileSync.mockReturnValueOnce(JSON.stringify([{ number: 1, title: 'Normal' }]));
-    execFileSync.mockReturnValueOnce(JSON.stringify([{ number: 2, title: 'Stale locked' }]));
-    mockIsLockStale.mockReturnValueOnce(true);
+  it('works without staleLocked parameter', async () => {
+    queueExecFileResult(JSON.stringify([{ number: 1, title: 'Normal' }]));
+    queueExecFileResult(JSON.stringify([{ number: 2, title: 'Stale locked' }]));
+    mockIsLockStale.mockResolvedValueOnce(true);
     // timelines (2 issues triggers sorting path; getRepoNwo is mocked via repo.js)
-    execFileSync.mockReturnValueOnce('');
-    execFileSync.mockReturnValueOnce('');
+    queueExecFileResult('');
+    queueExecFileResult('');
 
-    const result = selectIssuesForStage('shipper:new');
+    const result = await selectIssuesForStage('shipper:new');
 
     expect(result).toEqual(
       expect.arrayContaining([
@@ -402,13 +425,13 @@ describe('selectIssuesForStage', () => {
     );
   });
 
-  it('omits blocked exclusion from both queries for shipper:new', () => {
-    execFileSync.mockReturnValueOnce(JSON.stringify([]));
-    execFileSync.mockReturnValueOnce(JSON.stringify([]));
+  it('omits blocked exclusion from both queries for shipper:new', async () => {
+    queueExecFileResult(JSON.stringify([]));
+    queueExecFileResult(JSON.stringify([]));
 
-    selectIssuesForStage('shipper:new');
+    await selectIssuesForStage('shipper:new');
 
-    expect(execFileSync).toHaveBeenNthCalledWith(
+    expect(execFileMock).toHaveBeenNthCalledWith(
       1,
       'gh',
       [
@@ -425,9 +448,10 @@ describe('selectIssuesForStage', () => {
         '--json',
         'number,title',
       ],
-      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
+      { encoding: 'utf-8' },
+      expect.any(Function)
     );
-    expect(execFileSync).toHaveBeenNthCalledWith(
+    expect(execFileMock).toHaveBeenNthCalledWith(
       2,
       'gh',
       [
@@ -444,17 +468,18 @@ describe('selectIssuesForStage', () => {
         '--json',
         'number,title',
       ],
-      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
+      { encoding: 'utf-8' },
+      expect.any(Function)
     );
   });
 
-  it('keeps blocked exclusion in both queries for later stages', () => {
-    execFileSync.mockReturnValueOnce(JSON.stringify([]));
-    execFileSync.mockReturnValueOnce(JSON.stringify([]));
+  it('keeps blocked exclusion in both queries for later stages', async () => {
+    queueExecFileResult(JSON.stringify([]));
+    queueExecFileResult(JSON.stringify([]));
 
-    selectIssuesForStage('shipper:groomed');
+    await selectIssuesForStage('shipper:groomed');
 
-    expect(execFileSync).toHaveBeenNthCalledWith(
+    expect(execFileMock).toHaveBeenNthCalledWith(
       1,
       'gh',
       [
@@ -471,9 +496,10 @@ describe('selectIssuesForStage', () => {
         '--json',
         'number,title',
       ],
-      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
+      { encoding: 'utf-8' },
+      expect.any(Function)
     );
-    expect(execFileSync).toHaveBeenNthCalledWith(
+    expect(execFileMock).toHaveBeenNthCalledWith(
       2,
       'gh',
       [
@@ -492,18 +518,17 @@ describe('selectIssuesForStage', () => {
         '--json',
         'number,title',
       ],
-      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
+      { encoding: 'utf-8' },
+      expect.any(Function)
     );
   });
 
-  it('handles locked issues query failure gracefully', () => {
-    execFileSync.mockReturnValueOnce(JSON.stringify([{ number: 1, title: 'Normal' }]));
-    execFileSync.mockImplementationOnce(() => {
-      throw new Error('gh failed');
-    });
+  it('handles locked issues query failure gracefully', async () => {
+    queueExecFileResult(JSON.stringify([{ number: 1, title: 'Normal' }]));
+    queueExecFileError('gh failed');
     const stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    const result = selectIssuesForStage('shipper:new');
+    const result = await selectIssuesForStage('shipper:new');
 
     expect(result).toEqual([{ number: 1, title: 'Normal' }]);
     expect(stderrSpy).toHaveBeenCalledWith(
@@ -514,13 +539,10 @@ describe('selectIssuesForStage', () => {
 });
 
 describe('autoSelectIssue', () => {
-  let execFileSync: ReturnType<typeof vi.fn>;
   let mockIsLockStale: ReturnType<typeof vi.fn>;
   let mockReleaseIssueLock: ReturnType<typeof vi.fn>;
 
-  beforeAll(async () => {
-    const cp = await import('node:child_process');
-    execFileSync = vi.mocked(cp.execFileSync);
+  beforeEach(async () => {
     const lock = await import('../../src/lib/lock.js');
     mockIsLockStale = vi.mocked(lock.isLockStale);
     mockReleaseIssueLock = vi.mocked(lock.releaseIssueLock);
@@ -530,55 +552,55 @@ describe('autoSelectIssue', () => {
     vi.restoreAllMocks();
   });
 
-  it('clears stale lock on selected issue and prints message', () => {
-    execFileSync.mockReturnValueOnce(JSON.stringify([]));
-    execFileSync.mockReturnValueOnce(JSON.stringify([{ number: 42, title: 'Stale issue' }]));
-    mockIsLockStale.mockReturnValueOnce(true);
+  it('clears stale lock on selected issue and prints message', async () => {
+    queueExecFileResult(JSON.stringify([]));
+    queueExecFileResult(JSON.stringify([{ number: 42, title: 'Stale issue' }]));
+    mockIsLockStale.mockResolvedValueOnce(true);
     const stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    const result = autoSelectIssue('shipper:new');
+    const result = await autoSelectIssue('shipper:new');
 
     expect(result).toEqual({ number: 42, title: 'Stale issue' });
     expect(mockReleaseIssueLock).toHaveBeenCalledWith('42');
     expect(stderrSpy).toHaveBeenCalledWith('Issue #42 lock is stale \u2014 clearing.');
   });
 
-  it('does not clear lock for non-stale selected issue', () => {
-    execFileSync.mockReturnValueOnce(JSON.stringify([{ number: 10, title: 'Normal issue' }]));
-    execFileSync.mockReturnValueOnce(JSON.stringify([]));
+  it('does not clear lock for non-stale selected issue', async () => {
+    queueExecFileResult(JSON.stringify([{ number: 10, title: 'Normal issue' }]));
+    queueExecFileResult(JSON.stringify([]));
 
-    const result = autoSelectIssue('shipper:new');
+    const result = await autoSelectIssue('shipper:new');
 
     expect(result).toEqual({ number: 10, title: 'Normal issue' });
     expect(mockReleaseIssueLock).not.toHaveBeenCalled();
   });
 
-  it('returns null when no candidates exist', () => {
-    execFileSync.mockReturnValueOnce(JSON.stringify([]));
-    execFileSync.mockReturnValueOnce(JSON.stringify([]));
+  it('returns null when no candidates exist', async () => {
+    queueExecFileResult(JSON.stringify([]));
+    queueExecFileResult(JSON.stringify([]));
 
-    const result = autoSelectIssue('shipper:new');
+    const result = await autoSelectIssue('shipper:new');
 
     expect(result).toBeNull();
     expect(mockReleaseIssueLock).not.toHaveBeenCalled();
   });
 
-  it('selects blocked and non-blocked shipper:new candidates from one time-ordered pool', () => {
-    execFileSync.mockReturnValueOnce(
+  it('selects blocked and non-blocked shipper:new candidates from one time-ordered pool', async () => {
+    queueExecFileResult(
       JSON.stringify([
         { number: 20, title: 'Blocked issue' },
         { number: 10, title: 'Normal issue' },
       ])
     );
-    execFileSync.mockReturnValueOnce(JSON.stringify([]));
-    execFileSync.mockReturnValueOnce(
+    queueExecFileResult(JSON.stringify([]));
+    queueExecFileResult(
       JSON.stringify({
         event: 'labeled',
         label: { name: 'shipper:new' },
         created_at: '2025-01-02T00:00:00Z',
       })
     );
-    execFileSync.mockReturnValueOnce(
+    queueExecFileResult(
       JSON.stringify({
         event: 'labeled',
         label: { name: 'shipper:new' },
@@ -586,7 +608,7 @@ describe('autoSelectIssue', () => {
       })
     );
 
-    const result = autoSelectIssue('shipper:new');
+    const result = await autoSelectIssue('shipper:new');
 
     expect(result).toEqual({ number: 10, title: 'Normal issue' });
   });

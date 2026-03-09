@@ -39,11 +39,11 @@ program
   .description('CLI tool for automating development workflow with coding agents')
   .version(CLI_VERSION);
 
-program.hook('preAction', (_thisCommand, actionCommand) => {
+program.hook('preAction', async (_thisCommand, actionCommand) => {
   if (actionCommand.name() === 'init' || actionCommand.name() === 'setup') return;
-  loadSettings();
+  await loadSettings();
   checkVersionFreshness();
-  runPreflight();
+  await runPreflight();
 });
 
 program
@@ -57,8 +57,8 @@ program
 program
   .command('setup [words...]')
   .description('Configure repository settings with an agent')
-  .action((words: string[]) => {
-    setupCommand(words);
+  .action(async (words: string[]) => {
+    await setupCommand(words);
   });
 
 program
@@ -66,8 +66,8 @@ program
   .description('Create a new issue from a pitch')
   .argument('<pitch...>', 'your idea for the new issue')
   .option('--headless', 'skip clarifying questions and create issue directly', false)
-  .action((pitch: string[], options: { headless: boolean }) => {
-    newCommand(pitch, options);
+  .action(async (pitch: string[], options: { headless: boolean }) => {
+    await newCommand(pitch, options);
   });
 
 program
@@ -95,8 +95,8 @@ program
   .command('next')
   .description('Advance an issue to the next workflow step')
   .argument('<ref>', 'issue or PR number/URL')
-  .action((ref: string) => {
-    nextCommand(ref);
+  .action(async (ref: string) => {
+    await nextCommand(ref);
   });
 
 program
@@ -146,36 +146,36 @@ program
   .description('Groom an existing issue')
   .argument('[issue]', 'issue number or URL')
   .option('--auto', 'groom all eligible shipper:new issues in sequence', false)
-  .action((issue: string | undefined, options: { auto: boolean }) => {
+  .action(async (issue: string | undefined, options: { auto: boolean }) => {
     if (options.auto && issue) {
       console.error('Error: --auto and an explicit issue number are mutually exclusive.');
       process.exit(1);
     }
-    groomCommand(issue, options);
+    await groomCommand(issue, options);
   });
 
 program
   .command('design')
   .description('Run technical design review on an issue')
   .argument('[issue]', 'issue number or URL')
-  .action((issue?: string) => {
-    designCommand(issue);
+  .action(async (issue?: string) => {
+    await designCommand(issue);
   });
 
 program
   .command('plan')
   .description('Create an implementation plan for an issue')
   .argument('[issue]', 'issue number or URL')
-  .action((issue?: string) => {
-    planCommand(issue);
+  .action(async (issue?: string) => {
+    await planCommand(issue);
   });
 
 program
   .command('implement')
   .description('Implement an issue in a worktree')
   .argument('[issue]', 'issue number or URL')
-  .action((issue?: string) => {
-    implementCommand(issue);
+  .action(async (issue?: string) => {
+    await implementCommand(issue);
   });
 
 program
@@ -192,24 +192,24 @@ program
   .argument('<issue>', 'issue number')
   .option('-f, --force', 'skip confirmation prompt')
   .option('--to <stage>', 'reset to a specific workflow stage')
-  .action((issue: string, opts: { force: boolean; to?: string }) => {
-    resetCommand(issue, opts);
+  .action(async (issue: string, opts: { force: boolean; to?: string }) => {
+    await resetCommand(issue, opts);
   });
 
 program
   .command('unblock')
   .description('Check if a blocked issue can proceed')
   .argument('<issue>', 'issue number')
-  .action((issue: string) => {
-    unblockCommand(issue);
+  .action(async (issue: string) => {
+    await unblockCommand(issue);
   });
 
 program
   .command('unlock')
   .description('Force-release the lock on an issue')
   .argument('<issue>', 'issue number')
-  .action((issue: string) => {
-    unlockCommand(issue);
+  .action(async (issue: string) => {
+    await unlockCommand(issue);
   });
 
 const issue = program.command('issue').description('Issue commands');
@@ -227,22 +227,22 @@ const pr = program.command('pr').description('Pull request commands');
 pr.command('review')
   .description('Review a pull request')
   .argument('[pr]', 'PR number or URL')
-  .action((prArg?: string) => {
-    prReviewCommand(prArg);
+  .action(async (prArg?: string) => {
+    await prReviewCommand(prArg);
   });
 
 pr.command('open')
   .description('Open a pull request for an implemented issue')
   .argument('[issue]', 'issue number or URL')
-  .action((issue?: string) => {
-    prOpenCommand(issue);
+  .action(async (issue?: string) => {
+    await prOpenCommand(issue);
   });
 
 pr.command('remediate')
   .description('Remediate a pull request after review feedback')
   .argument('[pr]', 'PR number or URL')
-  .action((prArg?: string) => {
-    prRemediateCommand(prArg);
+  .action(async (prArg?: string) => {
+    await prRemediateCommand(prArg);
   });
 
 program
@@ -254,11 +254,11 @@ program
   .option('--dry-run', 'print actions without executing', false)
   .option('--repo <owner/repo>', 'repository (default: inferred from cwd)')
   .action(
-    (
+    async (
       number: string | undefined,
       options: { interval: string; once: boolean; dryRun: boolean; repo?: string }
     ) => {
-      mergeCommand({ ...options, number });
+      await mergeCommand({ ...options, number });
     }
   );
 

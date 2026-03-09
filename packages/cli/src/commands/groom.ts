@@ -8,10 +8,12 @@ export interface GroomOptions {
   auto: boolean;
 }
 
-function groomOneIssue(issueStr: string): { success: boolean; error?: string } {
-  const code = withIssueLock(issueStr, () =>
-    withStageHooks('groom', { issueNumber: issueStr }, () =>
-      runPrompt('groom', { issueRef: issueStr })
+async function groomOneIssue(issueStr: string): Promise<{ success: boolean; error?: string }> {
+  const code = await withIssueLock(issueStr, () =>
+    withStageHooks(
+      'groom',
+      { issueNumber: issueStr },
+      async () => await runPrompt('groom', { issueRef: issueStr })
     )
   );
   return code === 0
@@ -19,16 +21,19 @@ function groomOneIssue(issueStr: string): { success: boolean; error?: string } {
     : { success: false, error: 'agent exited with non-zero status' };
 }
 
-export function groomCommand(issue?: string, options: GroomOptions = { auto: false }) {
+export async function groomCommand(
+  issue?: string,
+  options: GroomOptions = { auto: false }
+): Promise<void> {
   if (options.auto) {
     const results: AutoResult[] = [];
 
     for (;;) {
-      const candidate = autoSelectIssue('shipper:new');
+      const candidate = await autoSelectIssue('shipper:new');
       if (!candidate) break;
 
       console.log(`\nAuto: grooming issue #${candidate.number} — ${candidate.title}`);
-      const result = groomOneIssue(String(candidate.number));
+      const result = await groomOneIssue(String(candidate.number));
 
       results.push({
         issue: candidate.number,
@@ -45,7 +50,7 @@ export function groomCommand(issue?: string, options: GroomOptions = { auto: fal
   }
 
   if (!issue) {
-    const selected = autoSelectIssue('shipper:new');
+    const selected = await autoSelectIssue('shipper:new');
     if (!selected) {
       console.error("No issues ready for grooming. Create one with 'shipper new'.");
       process.exit(1);
@@ -54,5 +59,5 @@ export function groomCommand(issue?: string, options: GroomOptions = { auto: fal
     issue = String(selected.number);
   }
 
-  process.exit(groomOneIssue(issue).success ? 0 : 1);
+  process.exit((await groomOneIssue(issue)).success ? 0 : 1);
 }

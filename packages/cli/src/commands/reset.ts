@@ -60,7 +60,8 @@ function getCurrentStage(labels: string[]): CurrentStage {
   }
 
   for (let i = WORKFLOW_STAGES.length - 1; i >= 0; i -= 1) {
-    const stage = WORKFLOW_STAGES[i]!;
+    const stage = WORKFLOW_STAGES[i];
+    if (!stage) continue;
     if (labels.includes(getStageLabel(stage))) {
       return { stage, hasPrLabels };
     }
@@ -88,7 +89,7 @@ function getStageTimestamp(issueNum: number, nwo: string, stage: WorkflowStage):
     const timestamps = output.split('\n').filter((line) => line.trim());
     if (timestamps.length === 0) return null;
 
-    return timestamps[timestamps.length - 1]!;
+    return timestamps[timestamps.length - 1] ?? null;
   } catch {
     return null;
   }
@@ -387,7 +388,7 @@ export async function resetCommand(
   }
   const issueNum = Number(cleaned);
 
-  const nwo = getRepoNwo();
+  const nwo = await getRepoNwo();
 
   let issueJson: string;
   try {
@@ -412,7 +413,7 @@ export async function resetCommand(
   const labels = issueData.labels.map((label) => label.name);
 
   if (!opts.force && labels.includes('shipper:locked')) {
-    if (!isLockStale(String(issueNum))) {
+    if (!(await isLockStale(String(issueNum)))) {
       console.error(
         `Issue #${issueNum} is locked by another shipper instance. Use --force to override.`
       );
@@ -463,7 +464,12 @@ export async function resetCommand(
 
     const choiceNumbers = validTargets.map((_, index) => String(index + 1));
     const selection = await promptChoice(`Select [1-${validTargets.length}]: `, choiceNumbers);
-    targetStage = validTargets[Number(selection) - 1]!;
+    const selectedStage = validTargets[Number(selection) - 1];
+    if (!selectedStage) {
+      console.error('Error: Invalid reset target selected.');
+      process.exit(1);
+    }
+    targetStage = selectedStage;
   }
 
   const scan = scanArtifacts(issueNum, nwo, targetStage, labels);

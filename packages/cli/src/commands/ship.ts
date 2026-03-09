@@ -185,7 +185,11 @@ function resolvePrForIssue(issueNumber: number, nwo: string): QueuedPR {
     );
   }
 
-  return { ...prs[0]!, labeledAt: '' };
+  const pr = prs[0];
+  if (!pr) {
+    throw new Error(`No open PR found for issue #${issueNumber}.`);
+  }
+  return { ...pr, labeledAt: '' };
 }
 
 function mergePr(pr: QueuedPR, issueNumber: number, nwo: string): boolean {
@@ -262,10 +266,13 @@ function mergePr(pr: QueuedPR, issueNumber: number, nwo: string): boolean {
   }
 }
 
-function shipOneIssue(issue: string, merge: boolean): { success: boolean; error?: string } {
+async function shipOneIssue(
+  issue: string,
+  merge: boolean
+): Promise<{ success: boolean; error?: string }> {
   const issueStr = issue.replace(/^#/, '');
 
-  return withIssueLock(issueStr, () => {
+  return await withIssueLock(issueStr, async () => {
     let label = getCurrentLabel(issueStr);
 
     if (!label) {
@@ -293,14 +300,24 @@ function shipOneIssue(issue: string, merge: boolean): { success: boolean; error?
     if (label !== 'shipper:ready') {
       let reviewCycles = 0;
       let seenPrReviewed = false;
+      const cliEntrypoint = process.argv[1];
+      if (!cliEntrypoint) {
+        throw new Error('Missing CLI entrypoint path.');
+      }
 
       for (;;) {
-        const stageName = STAGE_NAME[label]!;
+        const stageName = STAGE_NAME[label];
+        if (!stageName) {
+          const msg = `Unrecognized shipper label "${label}" on issue #${issueStr}.`;
+          console.error(msg);
+          printSummary(results);
+          return { success: false, error: msg };
+        }
         const previousLabel: string | undefined = label;
 
         console.log(`Running stage: ${stageName}`);
 
-        const result = spawnSync(process.execPath, [process.argv[1]!, 'next', issueStr], {
+        const result = spawnSync(process.execPath, [cliEntrypoint, 'next', issueStr], {
           stdio: 'inherit',
           env: process.env,
         });
@@ -357,7 +374,7 @@ function shipOneIssue(issue: string, merge: boolean): { success: boolean; error?
     if (merge) {
       console.log('Running stage: merge');
       const issueNumber = Number(issueStr);
-      const nwo = getRepoNwo();
+      const nwo = await getRepoNwo();
 
       let pr: QueuedPR;
       try {
@@ -370,10 +387,10 @@ function shipOneIssue(issue: string, merge: boolean): { success: boolean; error?
         return { success: false, error: msg };
       }
 
-      const merged = withStageHooks(
+      const merged = await withStageHooks(
         'merge',
         { issueNumber: issueStr, branchName: pr.headRefName },
-        () => mergePr(pr, issueNumber, nwo)
+        async () => mergePr(pr, issueNumber, nwo)
       );
 
       if (merged) {
@@ -391,10 +408,15 @@ function shipOneIssue(issue: string, merge: boolean): { success: boolean; error?
 }
 
 function shipOneIssueAsync(issue: string, logFile?: string): AsyncIssueRun {
+  const cliEntrypoint = process.argv[1];
+  if (!cliEntrypoint) {
+    throw new Error('Missing CLI entrypoint path.');
+  }
+
   const stderr: string[] = [];
   const logStream = logFile ? createWriteStream(logFile) : undefined;
   let logStreamError: string | undefined;
-  const child = spawn(process.execPath, [process.argv[1]!, 'ship', issue, '--merge'], {
+  const child = spawn(process.execPath, [cliEntrypoint, 'ship', issue, '--merge'], {
     stdio: logFile ? ['ignore', 'pipe', 'pipe'] : ['ignore', 'ignore', 'pipe'],
     env: process.env,
   });
@@ -497,18 +519,18 @@ function shipOneIssueAsync(issue: string, logFile?: string): AsyncIssueRun {
   return { child, result };
 }
 
-export function selectNextCandidate(
+export async function selectNextCandidate(
   skippedIssues: Set<number>,
   activeIssues: ReadonlySet<number> = new Set<number>()
-): { number: number; title: string } | null {
+): Promise<{ number: number; title: string } | null> {
   for (const label of AUTO_PRIORITY_LABELS) {
     const staleLocked = new Set<number>();
-    const issues = selectIssuesForStage(label, staleLocked);
+    const issues = await selectIssuesForStage(label, staleLocked);
     const candidate = issues.find(
       (i) => !skippedIssues.has(i.number) && !activeIssues.has(i.number)
     );
     if (candidate) {
-      clearStaleLockIfNeeded(candidate.number, staleLocked);
+      await clearStaleLockIfNeeded(candidate.number, staleLocked);
       return candidate;
     }
   }
@@ -556,8 +578,10 @@ export function selectBlockedIssues(): { number: number; title: string }[] {
     let aIdx = AUTO_PRIORITY_LABELS.length;
     let bIdx = AUTO_PRIORITY_LABELS.length;
     for (let i = 0; i < AUTO_PRIORITY_LABELS.length; i++) {
-      if (aLabels.has(AUTO_PRIORITY_LABELS[i]!) && aIdx === AUTO_PRIORITY_LABELS.length) aIdx = i;
-      if (bLabels.has(AUTO_PRIORITY_LABELS[i]!) && bIdx === AUTO_PRIORITY_LABELS.length) bIdx = i;
+      const label = AUTO_PRIORITY_LABELS[i];
+      if (!label) continue;
+      if (aLabels.has(label) && aIdx === AUTO_PRIORITY_LABELS.length) aIdx = i;
+      if (bLabels.has(label) && bIdx === AUTO_PRIORITY_LABELS.length) bIdx = i;
     }
     return aIdx - bIdx;
   });
@@ -565,8 +589,8 @@ export function selectBlockedIssues(): { number: number; title: string }[] {
   return issues.map((i) => ({ number: i.number, title: i.title }));
 }
 
-function attemptUnblock(issueStr: string): boolean {
-  withIssueLock(issueStr, () => runPrompt('unblock', { issueRef: issueStr }));
+async function attemptUnblock(issueStr: string): Promise<boolean> {
+  await withIssueLock(issueStr, async () => await runPrompt('unblock', { issueRef: issueStr }));
 
   // Check whether shipper:blocked was removed — this is the only reliable signal
   let output: string;
@@ -597,7 +621,7 @@ export function printUnblockSummary(attempts: UnblockAttempt[]): void {
   }
 }
 
-function shipAutoSequential(): void {
+async function shipAutoSequential(): Promise<void> {
   const skippedIssues = new Set<number>();
   const results: AutoResult[] = [];
   const allUnblockAttempts: UnblockAttempt[] = [];
@@ -605,11 +629,11 @@ function shipAutoSequential(): void {
   for (;;) {
     // Inner loop: process all available candidates
     for (;;) {
-      const candidate = selectNextCandidate(skippedIssues);
+      const candidate = await selectNextCandidate(skippedIssues);
       if (!candidate) break;
 
       console.log(`\nAuto: advancing issue #${candidate.number} — ${candidate.title}`);
-      const result = shipOneIssue(String(candidate.number), true);
+      const result = await shipOneIssue(String(candidate.number), true);
 
       if (result.success) {
         results.push({ issue: candidate.number, title: candidate.title, outcome: 'pass' });
@@ -631,7 +655,7 @@ function shipAutoSequential(): void {
     let progress = false;
     for (const issue of blocked) {
       console.log(`\nAuto: attempting unblock of #${issue.number} — ${issue.title}`);
-      const unblocked = attemptUnblock(String(issue.number));
+      const unblocked = await attemptUnblock(String(issue.number));
       allUnblockAttempts.push({
         issue: issue.number,
         title: issue.title,
@@ -684,7 +708,7 @@ async function shipAutoParallel(parallel: number): Promise<void> {
         if (run.child.exitCode === null && run.child.signalCode === null) {
           run.child.kill('SIGKILL');
         }
-        releaseIssueLock(String(issueNumber));
+        void releaseIssueLock(String(issueNumber));
       }
 
       process.exit(1);
@@ -699,7 +723,7 @@ async function shipAutoParallel(parallel: number): Promise<void> {
       if (shuttingDown) break;
 
       while (!shuttingDown && activeRuns.size < parallel) {
-        const candidate = selectNextCandidate(skippedIssues, new Set(activeRuns.keys()));
+        const candidate = await selectNextCandidate(skippedIssues, new Set(activeRuns.keys()));
         if (!candidate) break;
 
         const logFile = path.join(logsDir, `ship-${candidate.number}-${formatLogTimestamp()}.log`);
@@ -726,7 +750,7 @@ async function shipAutoParallel(parallel: number): Promise<void> {
           console.log(
             `\n[#${issue.number}] Auto: attempting unblock of #${issue.number} — ${issue.title}`
           );
-          const unblocked = attemptUnblock(String(issue.number));
+          const unblocked = await attemptUnblock(String(issue.number));
           allUnblockAttempts.push({
             issue: issue.number,
             title: issue.title,
@@ -795,11 +819,15 @@ export async function shipCommand(
       return;
     }
 
-    shipAutoSequential();
+    await shipAutoSequential();
     return;
   }
 
   // Non-auto path: issue is required (validated in index.ts)
-  const result = shipOneIssue(issue!, options.merge);
+  if (!issue) {
+    console.error('Error: an issue number is required unless --auto is used.');
+    process.exit(1);
+  }
+  const result = await shipOneIssue(issue, options.merge);
   process.exit(result.success ? 0 : 1);
 }

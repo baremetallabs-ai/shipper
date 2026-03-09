@@ -15,12 +15,16 @@ vi.mock('@dnsquared/shipper-core', async () => {
     resolveRef: vi.fn(),
     autoSelectPrForStage: vi.fn(),
     runPrompt: vi.fn(),
-    withStageHooks: vi.fn((_stage: unknown, _env: unknown, fn: () => unknown) => fn()),
-    withIssueLock: vi.fn((_issue: unknown, fn: () => unknown) => fn()),
-    withWorktree: vi.fn((_opts: unknown, fn: (wtPath: string) => unknown) => fn('/tmp/fake-wt')),
-    getBranchForPR: vi.fn(() => 'shipper/10-feature'),
-    getRepoRoot: vi.fn(() => '/tmp/fake-repo'),
-    sleepMs: vi.fn(),
+    withStageHooks: vi.fn(
+      async (_stage: unknown, _env: unknown, fn: () => Promise<unknown>) => await fn()
+    ),
+    withIssueLock: vi.fn(async (_issue: unknown, fn: () => Promise<unknown>) => await fn()),
+    withWorktree: vi.fn(
+      async (_opts: unknown, fn: (wtPath: string) => Promise<unknown>) => await fn('/tmp/fake-wt')
+    ),
+    getBranchForPR: vi.fn(async () => 'shipper/10-feature'),
+    getRepoRoot: vi.fn(async () => '/tmp/fake-repo'),
+    sleepMs: vi.fn(async () => {}),
     getSettings: () => getSettingsMock(),
     fetchChecks: (...args: unknown[]) => fetchChecksMock(...args),
   };
@@ -36,8 +40,8 @@ describe('prRemediateCommand', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockResolveRef.mockReturnValue({ prNumber: '42', issueNumber: '10' });
-    mockRunPrompt.mockReturnValue(0);
+    mockResolveRef.mockResolvedValue({ prNumber: '42', issueNumber: '10' });
+    mockRunPrompt.mockResolvedValue(0);
     getSettingsMock.mockReturnValue({
       prReviewWait: { mode: 'timer', timeoutMinutes: 0 },
       hooks: {},
@@ -54,7 +58,7 @@ describe('prRemediateCommand', () => {
   it('passes issueNumber (not PR number) as issueRef to runPrompt', async () => {
     const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
 
-    expect(() => prRemediateCommand('42')).toThrow('exit:0');
+    await expect(prRemediateCommand('42')).rejects.toThrow('exit:0');
 
     expect(mockRunPrompt).toHaveBeenCalledWith(
       'pr_remediate',
@@ -72,7 +76,7 @@ describe('prRemediateCommand', () => {
     });
     const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
 
-    expect(() => prRemediateCommand('42')).toThrow('exit:0');
+    await expect(prRemediateCommand('42')).rejects.toThrow('exit:0');
     expect(mockRunPrompt).toHaveBeenCalled();
     expect(fetchChecksMock).not.toHaveBeenCalled();
   });
@@ -82,14 +86,14 @@ describe('prRemediateCommand', () => {
       prReviewWait: { mode: 'checks', timeoutMinutes: 1 },
       hooks: {},
     });
-    fetchChecksMock.mockReturnValue([
+    fetchChecksMock.mockResolvedValue([
       { name: 'build', state: 'COMPLETED', bucket: 'pass' },
       { name: 'test', state: 'COMPLETED', bucket: 'pass' },
     ]);
 
     const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
 
-    expect(() => prRemediateCommand('42')).toThrow('exit:0');
+    await expect(prRemediateCommand('42')).rejects.toThrow('exit:0');
     expect(mockRunPrompt).toHaveBeenCalled();
     expect(fetchChecksMock).toHaveBeenCalled();
   });
@@ -100,12 +104,12 @@ describe('prRemediateCommand', () => {
       hooks: {},
     });
     // Return empty array for all calls (initial + 3 grace retries)
-    fetchChecksMock.mockReturnValue([]);
+    fetchChecksMock.mockResolvedValue([]);
 
     const logMock = vi.spyOn(console, 'log').mockImplementation(() => {});
     const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
 
-    expect(() => prRemediateCommand('42')).toThrow('exit:0');
+    await expect(prRemediateCommand('42')).rejects.toThrow('exit:0');
     expect(mockRunPrompt).toHaveBeenCalled();
     // Initial call + 3 grace retries = 4 calls
     expect(fetchChecksMock).toHaveBeenCalledTimes(4);

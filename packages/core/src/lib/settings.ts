@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 export interface PrReviewWait {
@@ -63,15 +63,15 @@ const KNOWN_PROMPT_COMMANDS = new Set([
   'setup',
 ]);
 
-export function loadSettings(): void {
+export async function loadSettings(): Promise<void> {
   const basePath = path.resolve('.shipper', 'settings.json');
   const localPath = path.resolve('.shipper', 'settings.local.json');
 
   let base: Partial<Settings> = {};
   let local: Partial<Settings> = {};
 
-  base = readSettingsFile(basePath);
-  local = readSettingsFile(localPath);
+  base = await readSettingsFile(basePath);
+  local = await readSettingsFile(localPath);
 
   const baseAgents = isPlainObject(base?.agents) ? base.agents : {};
   const localAgents = isPlainObject(local?.agents) ? local.agents : {};
@@ -114,10 +114,10 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function readSettingsFile(filepath: string): Partial<Settings> {
+async function readSettingsFile(filepath: string): Promise<Partial<Settings>> {
   let raw: string;
   try {
-    raw = readFileSync(filepath, 'utf-8');
+    raw = await readFile(filepath, 'utf-8');
   } catch (err: unknown) {
     if (err instanceof Error && 'code' in err && (err as { code: string }).code === 'ENOENT') {
       return {};

@@ -1,5 +1,5 @@
-import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseFrontmatter } from './frontmatter.js';
 import { fetchIssue, fetchPR } from './github.js';
@@ -14,13 +14,26 @@ export interface RunPromptOpts {
   baseBranch?: string;
 }
 
-export function runPrompt(name: string, opts: RunPromptOpts): number {
+function spawnAsync(command: string, args: string[], opts: { cwd?: string }): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      stdio: 'inherit',
+      env: process.env,
+      cwd: opts.cwd,
+    });
+
+    child.on('error', reject);
+    child.on('close', (code) => resolve(code ?? 1));
+  });
+}
+
+export async function runPrompt(name: string, opts: RunPromptOpts): Promise<number> {
   const agent = resolveAgent(name);
   const promptPath = path.resolve('.shipper', 'prompts', agent, `${name}.md`);
 
   let raw: string;
   try {
-    raw = readFileSync(promptPath, 'utf-8');
+    raw = await readFile(promptPath, 'utf-8');
   } catch {
     const bundled = agentPrompts[agent]?.[`${name}.md`];
     if (!bundled) {
@@ -61,11 +74,11 @@ export function runPrompt(name: string, opts: RunPromptOpts): number {
   const messageParts: string[] = [];
 
   if (frontmatter['append-issue'] && opts.issueRef) {
-    messageParts.push(fetchIssue(opts.issueRef));
+    messageParts.push(await fetchIssue(opts.issueRef));
   }
 
   if (frontmatter['append-pr'] && opts.prRef) {
-    messageParts.push(fetchPR(opts.prRef));
+    messageParts.push(await fetchPR(opts.prRef));
   }
 
   if (frontmatter['append-user-input'] && opts.userInput) {
@@ -86,16 +99,11 @@ export function runPrompt(name: string, opts: RunPromptOpts): number {
     }
   }
 
-  const result = spawnSync(agent, args, {
-    stdio: 'inherit',
-    env: process.env,
-    cwd: opts.cwd,
-  });
-
-  if (result.error) {
-    console.error(`Error: Failed to spawn ${agent}: ${result.error.message}`);
+  try {
+    return await spawnAsync(agent, args, { cwd: opts.cwd });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`Error: Failed to spawn ${agent}: ${message}`);
     return 1;
   }
-
-  return result.status ?? 1;
 }

@@ -3,11 +3,11 @@ import { withStageHooks } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
 import { runPrompt } from '@dnsquared/shipper-core';
 
-export function prReviewCommand(pr?: string) {
+export async function prReviewCommand(pr?: string): Promise<void> {
   let issueNumber: string;
 
   if (!pr) {
-    const selected = autoSelectPrForStage(
+    const selected = await autoSelectPrForStage(
       'shipper:pr-open',
       "No PRs ready for review. Run 'shipper pr open' first."
     );
@@ -17,16 +17,20 @@ export function prReviewCommand(pr?: string) {
     pr = selected.pr;
     issueNumber = String(selected.issue.number);
   } else {
-    const resolved = resolveRef(pr, 'both');
+    const resolved = await resolveRef(pr, 'both');
     pr = resolved.prNumber;
     issueNumber = resolved.issueNumber;
   }
 
   process.exit(
-    withIssueLock(issueNumber, () =>
-      withStageHooks('pr-review', { issueNumber }, () =>
-        runPrompt('pr_review', { issueRef: issueNumber, prRef: pr })
-      )
+    await withIssueLock(
+      issueNumber,
+      async () =>
+        await withStageHooks(
+          'pr-review',
+          { issueNumber },
+          async () => await runPrompt('pr_review', { issueRef: issueNumber, prRef: pr })
+        )
     )
   );
 }
