@@ -310,6 +310,40 @@ describe('withIssueLock', () => {
     }
   });
 
+  it('logs distinct warning when remove succeeds but add fails', async () => {
+    vi.useFakeTimers();
+    try {
+      // acquire: labels check + add-label
+      queueExecFileResult('shipper:groomed\n');
+      queueExecFileResult('');
+
+      // renewal: remove-label succeeds, add-label fails
+      queueExecFileResult('');
+      queueExecFileError(new Error('API unavailable'));
+
+      // release: remove-label
+      queueExecFileResult('');
+
+      let resolve!: () => void;
+      const blocker = new Promise<void>((r) => {
+        resolve = r;
+      });
+
+      const resultPromise = withIssueLock(repo, '42', () => blocker);
+
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+
+      expect(stderrMock).toHaveBeenCalledWith(
+        expect.stringContaining('lock re-add failed for issue #42')
+      );
+
+      resolve();
+      await expect(resultPromise).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('does not start heartbeat when SHIPPER_LOCK_HELD is set', async () => {
     const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
     try {
