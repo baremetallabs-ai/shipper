@@ -219,10 +219,10 @@ List every open product question explicitly. For each, explain what the technica
 
 ```bash
 gh issue comment <ISSUE> --body-file ./.shipper/tmp/design-review-<number>.md
-gh issue edit <ISSUE> --add-label "shipper:designed" --remove-label "shipper:groomed"
+gh issue edit <ISSUE> --add-label "shipper:new" --remove-label "shipper:groomed"
 ```
 
-Rewrite the problem statement. Give the real diagnosis. Provide the design for the fix that actually matters. Strip out the parts that don't. The implementer works from your reframing.
+Rewrite the problem statement. Give the real diagnosis. Provide the design for the fix that actually matters. Strip out the parts that don't. The issue returns to the product owner so they can review your reframing before it proceeds — a redirect is a claim that the issue got the problem wrong, and that claim needs human sign-off just like any other product-level change.
 
 ---
 

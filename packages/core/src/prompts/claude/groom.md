@@ -142,10 +142,11 @@ After producing the final artifacts, you must update GitHub using repo-local tem
 
 1. Unless the parent will be fully replaced by child issues later in Phase 4, save the updated issue body to `.shipper/tmp/issue_body-<number>.md` (using the issue number).
 2. Unless the parent will be fully replaced by child issues later in Phase 4, update the issue: `gh issue edit <ISSUE> --body-file ./.shipper/tmp/issue_body-<number>.md`
-3. Save the grooming summary comment to `.shipper/tmp/grooming_comment-<number>.md` (using the issue number).
-4. Post the comment: `gh issue comment <ISSUE> --body-file ./.shipper/tmp/grooming_comment-<number>.md`
+3. If grooming changed the scope or nature of the issue (e.g., a bug report became a feature request, or scope expanded/narrowed significantly), update the title to match: `gh issue edit <ISSUE> --title "<new title>"`. Use conventional commit format (`fix:`, `feat:`, `refactor:`, etc.). The title is the first thing downstream stages read — if it contradicts the body, it will mislead them.
+4. Save the grooming summary comment to `.shipper/tmp/grooming_comment-<number>.md` (using the issue number).
+5. Post the comment: `gh issue comment <ISSUE> --body-file ./.shipper/tmp/grooming_comment-<number>.md`
 
-5. If the parent remains open after grooming, update labels — **conditional on whether it is still blocked after Phase 2 and decomposition decisions:**
+6. If the parent remains open after grooming, update labels — **conditional on whether it is still blocked after Phase 2 and decomposition decisions:**
 
    **If the parent is not blocked by any hard conflict, dependency, or sibling-ordering constraint:**
    - Add `shipper:groomed`, remove `shipper:new` / `shipper:blocked` (if present)
