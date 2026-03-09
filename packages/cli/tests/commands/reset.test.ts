@@ -355,7 +355,7 @@ describe('resetCommand', () => {
       ]),
       timelineByStage: { groomed: '2024-01-15T12:00:00Z\n' },
       commentsWithDates:
-        '{"id":101,"created_at":"2024-01-15T12:00:01Z"}\n{"id":102,"created_at":"2024-01-15T12:00:02Z"}\n',
+        '{"id":101,"created_at":"2024-01-15T12:01:01Z"}\n{"id":102,"created_at":"2024-01-15T12:01:02Z"}\n',
       prJson: JSON.stringify([{ number: 42, headRefName: 'shipper/18-add-reset' }]),
     });
     mockConfirm.mockResolvedValue(false);
@@ -494,7 +494,7 @@ describe('resetCommand', () => {
     expect(editArgs).not.toContain('--add-label');
   });
 
-  it('preserves comments at or before the target stage timestamp minus 60 seconds', async () => {
+  it('preserves comments within 60 seconds after the target stage label timestamp', async () => {
     setupExecMock({
       issueJson: mockIssueView('OPEN', [
         'shipper:new',
@@ -504,9 +504,9 @@ describe('resetCommand', () => {
       ]),
       timelineByStage: { designed: '2024-01-15T12:00:00Z\n' },
       commentsWithDates:
-        '{"id":301,"created_at":"2024-01-15T11:58:59Z"}\n' +
-        '{"id":302,"created_at":"2024-01-15T11:59:00Z"}\n' +
-        '{"id":303,"created_at":"2024-01-15T11:59:01Z"}\n',
+        '{"id":301,"created_at":"2024-01-15T12:00:30Z"}\n' +
+        '{"id":302,"created_at":"2024-01-15T12:01:00Z"}\n' +
+        '{"id":303,"created_at":"2024-01-15T12:01:01Z"}\n',
     });
 
     await resetCommand('18', { force: true, to: 'designed' });
@@ -567,8 +567,8 @@ describe('resetCommand', () => {
       ]),
       timelineByStage: { implemented: '2024-01-15T12:00:00Z\n' },
       commentsWithDates:
-        '{"id":501,"created_at":"2024-01-15T11:58:59Z"}\n' +
-        '{"id":502,"created_at":"2024-01-15T12:00:01Z"}\n',
+        '{"id":501,"created_at":"2024-01-15T12:00:30Z"}\n' +
+        '{"id":502,"created_at":"2024-01-15T12:01:01Z"}\n',
     });
 
     await resetCommand('18', { force: true, to: 'implemented' });
