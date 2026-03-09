@@ -1,5 +1,5 @@
-import { withIssueLock } from '../lib/lock.js';
-import { runPrompt } from '../lib/prompt-runner.js';
+import { withIssueLock } from '@dnsquared/shipper-core';
+import { runPrompt } from '@dnsquared/shipper-core';
 
 export function unblockCommand(issue: string) {
   if (!issue) {

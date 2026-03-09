@@ -1,8 +1,8 @@
 import { Command, CommanderError } from 'commander';
 import { writeSync } from 'node:fs';
-import { runPreflight } from './lib/prerequisites.js';
-import { loadSettings } from './lib/settings.js';
-import { CLI_VERSION, checkVersionFreshness } from './lib/version.js';
+import { runPreflight } from '@dnsquared/shipper-core';
+import { loadSettings } from '@dnsquared/shipper-core';
+import { CLI_VERSION, checkVersionFreshness } from '@dnsquared/shipper-core';
 import { initCommand } from './commands/init.js';
 import { newCommand } from './commands/new.js';
 import { adoptCommand, adoptAllCommand } from './commands/adopt.js';

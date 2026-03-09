@@ -3,11 +3,11 @@ import type { ChildProcess } from 'node:child_process';
 import { createWriteStream, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { clearStaleLockIfNeeded, selectIssuesForStage } from '../lib/github.js';
-import { getRepoNwo } from '../lib/repo.js';
-import { withStageHooks } from '../lib/hooks.js';
-import { releaseIssueLock, withIssueLock } from '../lib/lock.js';
-import { runPrompt } from '../lib/prompt-runner.js';
+import { clearStaleLockIfNeeded, selectIssuesForStage } from '@dnsquared/shipper-core';
+import { getRepoNwo } from '@dnsquared/shipper-core';
+import { withStageHooks } from '@dnsquared/shipper-core';
+import { releaseIssueLock, withIssueLock } from '@dnsquared/shipper-core';
+import { runPrompt } from '@dnsquared/shipper-core';
 import { postMerge } from './merge.js';
 import type { QueuedPR } from './merge.js';
 

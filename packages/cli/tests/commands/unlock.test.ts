@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockReleaseIssueLock = vi.fn();
 
-vi.mock('../../src/lib/lock.js', () => ({
+vi.mock('@dnsquared/shipper-core', () => ({
   releaseIssueLock: (...args: unknown[]) => mockReleaseIssueLock(...args),
 }));
 

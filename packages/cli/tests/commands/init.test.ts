@@ -23,20 +23,17 @@ vi.mock('node:child_process', () => ({
   execFileSync: vi.fn(),
 }));
 
-vi.mock('../../src/lib/scripts.js', () => ({
+vi.mock('@dnsquared/shipper-core', () => ({
   scripts: {},
-}));
-
-vi.mock('../../src/templates/readme.md', () => ({
-  default: '# Test README content',
-}));
-
-vi.mock('../../src/lib/version.js', () => ({
+  DEFAULTS: {
+    prReviewWait: { mode: 'checks', timeoutMinutes: 15 },
+    lockTimeoutMinutes: 30,
+    headless: {},
+    hooks: {},
+  },
+  SETTING_DESCRIPTIONS: {},
   CLI_VERSION: '1.2.3',
-  checkVersionFreshness: vi.fn(),
-}));
-
-vi.mock('../../src/lib/prerequisites.js', () => ({
+  readmeTemplate: '# Test README content',
   runPrereqChecks: () => true,
   checkGitRepo: vi.fn(),
   checkGhInstalled: vi.fn(),

@@ -1,0 +1,17 @@
+// Core intentionally uses a single barrel export for its public API.
+export * from './lib/branch.js';
+export * from './lib/checks.js';
+export * from './lib/frontmatter.js';
+export * from './lib/github.js';
+export * from './lib/hooks.js';
+export * from './lib/lock.js';
+export * from './lib/prerequisites.js';
+export * from './lib/prompt-runner.js';
+export * from './lib/prompts.js';
+export * from './lib/repo.js';
+export * from './lib/scripts.js';
+export * from './lib/settings.js';
+export * from './lib/sleep.js';
+export * from './lib/version.js';
+export * from './lib/worktree.js';
+export { default as readmeTemplate } from './templates/readme.js';

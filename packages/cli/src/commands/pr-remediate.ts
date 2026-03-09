@@ -1,14 +1,14 @@
 import { execFileSync } from 'node:child_process';
-import { getBranchForPR, getRepoRoot } from '../lib/branch.js';
-import { fetchChecks, classifyChecks } from '../lib/checks.js';
-import { autoSelectPrForStage, resolveRef } from '../lib/github.js';
-import { withStageHooks } from '../lib/hooks.js';
-import { withIssueLock } from '../lib/lock.js';
-import { withWorktree } from '../lib/worktree.js';
-import { runPrompt } from '../lib/prompt-runner.js';
-import { getSettings } from '../lib/settings.js';
+import { getBranchForPR, getRepoRoot } from '@dnsquared/shipper-core';
+import { fetchChecks, classifyChecks } from '@dnsquared/shipper-core';
+import { autoSelectPrForStage, resolveRef } from '@dnsquared/shipper-core';
+import { withStageHooks } from '@dnsquared/shipper-core';
+import { withIssueLock } from '@dnsquared/shipper-core';
+import { withWorktree } from '@dnsquared/shipper-core';
+import { runPrompt } from '@dnsquared/shipper-core';
+import { getSettings } from '@dnsquared/shipper-core';
 
-import { sleepMs } from '../lib/sleep.js';
+import { sleepMs } from '@dnsquared/shipper-core';
 
 function waitForChecks(pr: string, timeoutMinutes: number): void {
   const deadline = Date.now() + timeoutMinutes * 60_000;

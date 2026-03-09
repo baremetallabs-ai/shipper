@@ -1,24 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-vi.mock('../../src/lib/github.js', () => ({
+vi.mock('@dnsquared/shipper-core', () => ({
   resolveRef: vi.fn(),
   autoSelectPrForStage: vi.fn(),
-}));
-
-vi.mock('../../src/lib/prompt-runner.js', () => ({
   runPrompt: vi.fn(),
-}));
-
-vi.mock('../../src/lib/hooks.js', () => ({
   withStageHooks: vi.fn((_stage: unknown, _env: unknown, fn: () => unknown) => fn()),
-}));
-
-vi.mock('../../src/lib/lock.js', () => ({
   withIssueLock: vi.fn((_issue: unknown, fn: () => unknown) => fn()),
 }));
 
-import { resolveRef } from '../../src/lib/github.js';
-import { runPrompt } from '../../src/lib/prompt-runner.js';
+import { resolveRef, runPrompt } from '@dnsquared/shipper-core';
 
 const mockResolveRef = vi.mocked(resolveRef);
 const mockRunPrompt = vi.mocked(runPrompt);

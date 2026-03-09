@@ -5,53 +5,33 @@ vi.mock('node:child_process', async () => {
   return { ...actual, execFileSync: vi.fn() };
 });
 
-vi.mock('../../src/lib/github.js', () => ({
-  resolveRef: vi.fn(),
-  autoSelectPrForStage: vi.fn(),
-}));
-
-vi.mock('../../src/lib/prompt-runner.js', () => ({
-  runPrompt: vi.fn(),
-}));
-
-vi.mock('../../src/lib/hooks.js', () => ({
-  withStageHooks: vi.fn((_stage: unknown, _env: unknown, fn: () => unknown) => fn()),
-}));
-
-vi.mock('../../src/lib/lock.js', () => ({
-  withIssueLock: vi.fn((_issue: unknown, fn: () => unknown) => fn()),
-}));
-
-vi.mock('../../src/lib/worktree.js', () => ({
-  withWorktree: vi.fn((_opts: unknown, fn: (wtPath: string) => unknown) => fn('/tmp/fake-wt')),
-}));
-
-vi.mock('../../src/lib/branch.js', () => ({
-  getBranchForPR: vi.fn(() => 'shipper/10-feature'),
-  getRepoRoot: vi.fn(() => '/tmp/fake-repo'),
-}));
-
-vi.mock('../../src/lib/sleep.js', () => ({
-  sleepMs: vi.fn(),
-}));
-
 const getSettingsMock = vi.fn();
-vi.mock('../../src/lib/settings.js', () => ({
-  getSettings: () => getSettingsMock(),
-}));
-
 const fetchChecksMock = vi.fn();
-vi.mock('../../src/lib/checks.js', async () => {
-  const actual =
-    await vi.importActual<typeof import('../../src/lib/checks.js')>('../../src/lib/checks.js');
+vi.mock('@dnsquared/shipper-core', () => {
+  const classifyChecks = (
+    checks: Array<{ state: string; bucket: string }>
+  ): { pending: Array<{ state: string; bucket: string }>; total: number } => ({
+    pending: checks.filter((check) => check.state !== 'COMPLETED' || check.bucket === 'pending'),
+    total: checks.length,
+  });
+
   return {
-    ...actual,
+    resolveRef: vi.fn(),
+    autoSelectPrForStage: vi.fn(),
+    runPrompt: vi.fn(),
+    withStageHooks: vi.fn((_stage: unknown, _env: unknown, fn: () => unknown) => fn()),
+    withIssueLock: vi.fn((_issue: unknown, fn: () => unknown) => fn()),
+    withWorktree: vi.fn((_opts: unknown, fn: (wtPath: string) => unknown) => fn('/tmp/fake-wt')),
+    getBranchForPR: vi.fn(() => 'shipper/10-feature'),
+    getRepoRoot: vi.fn(() => '/tmp/fake-repo'),
+    sleepMs: vi.fn(),
+    getSettings: () => getSettingsMock(),
     fetchChecks: (...args: unknown[]) => fetchChecksMock(...args),
+    classifyChecks,
   };
 });
 
-import { resolveRef } from '../../src/lib/github.js';
-import { runPrompt } from '../../src/lib/prompt-runner.js';
+import { resolveRef, runPrompt } from '@dnsquared/shipper-core';
 
 const mockResolveRef = vi.mocked(resolveRef);
 const mockRunPrompt = vi.mocked(runPrompt);

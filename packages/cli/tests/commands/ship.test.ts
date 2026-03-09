@@ -21,26 +21,14 @@ import {
 } from '../../src/commands/ship.js';
 import type { UnblockAttempt } from '../../src/commands/ship.js';
 
-vi.mock('../../src/lib/github.js', () => ({
+vi.mock('@dnsquared/shipper-core', () => ({
   selectIssuesForStage: vi.fn(() => []),
   clearStaleLockIfNeeded: vi.fn(),
-}));
-
-vi.mock('../../src/lib/repo.js', () => ({
   getRepoNwo: vi.fn(() => 'owner/repo'),
-}));
-
-vi.mock('../../src/lib/lock.js', () => ({
+  withStageHooks: vi.fn((_stage: string, _env: unknown, fn: () => unknown) => fn()),
   withIssueLock: vi.fn((_issue: string, fn: () => unknown) => fn()),
   releaseIssueLock: vi.fn(),
-}));
-
-vi.mock('../../src/lib/prompt-runner.js', () => ({
   runPrompt: vi.fn(() => 0),
-}));
-
-vi.mock('../../src/lib/prompts.js', () => ({
-  agentPrompts: { claude: {} },
 }));
 
 vi.mock('node:fs', async (importOriginal) => {
@@ -84,8 +72,11 @@ vi.mock('node:child_process', async (importOriginal) => {
   };
 });
 
-import { selectIssuesForStage, clearStaleLockIfNeeded } from '../../src/lib/github.js';
-import { releaseIssueLock } from '../../src/lib/lock.js';
+import {
+  selectIssuesForStage,
+  clearStaleLockIfNeeded,
+  releaseIssueLock,
+} from '@dnsquared/shipper-core';
 import { execFileSync, spawn } from 'node:child_process';
 
 const mockSelectIssuesForStage = vi.mocked(selectIssuesForStage);

@@ -1,16 +1,13 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Settings } from '../../src/lib/settings.js';
+import type { Settings } from '@dnsquared/shipper-core';
 
 const { mockRunPrompt, mockGetSettings } = vi.hoisted(() => ({
   mockRunPrompt: vi.fn(),
   mockGetSettings: vi.fn(),
 }));
 
-vi.mock('../../src/lib/prompt-runner.js', () => ({
+vi.mock('@dnsquared/shipper-core', () => ({
   runPrompt: (...args: unknown[]) => mockRunPrompt(...args),
-}));
-
-vi.mock('../../src/lib/settings.js', () => ({
   getSettings: () => mockGetSettings(),
 }));
 

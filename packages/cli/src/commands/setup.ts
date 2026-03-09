@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { runPrompt } from '../lib/prompt-runner.js';
+import { runPrompt } from '@dnsquared/shipper-core';
 
 export function setupCommand(words: string[]) {
   const userText = words.join(' ').trim();

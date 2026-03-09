@@ -1,5 +1,5 @@
-import { runPrompt } from '../lib/prompt-runner.js';
-import { getSettings } from '../lib/settings.js';
+import { runPrompt } from '@dnsquared/shipper-core';
+import { getSettings } from '@dnsquared/shipper-core';
 
 export function newCommand(
   pitchWords: string[],

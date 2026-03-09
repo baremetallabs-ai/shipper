@@ -2,17 +2,16 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync } from 'n
 import { createInterface } from 'node:readline/promises';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { scripts } from '../lib/scripts.js';
-import { DEFAULTS, SETTING_DESCRIPTIONS } from '../lib/settings.js';
-import { CLI_VERSION } from '../lib/version.js';
-import readmeContent from '../templates/readme.md';
+import { scripts } from '@dnsquared/shipper-core';
+import { DEFAULTS, SETTING_DESCRIPTIONS } from '@dnsquared/shipper-core';
+import { CLI_VERSION, readmeTemplate } from '@dnsquared/shipper-core';
 import {
   runPrereqChecks,
   checkGitRepo,
   checkGhInstalled,
   checkGhAuth,
   checkGitHubRemote,
-} from '../lib/prerequisites.js';
+} from '@dnsquared/shipper-core';
 
 const LABELS = [
   { name: 'shipper:new', color: 'C2E0C6', description: 'New issue from shipper' },
@@ -176,7 +175,7 @@ export async function initCommand(options: { agent?: string }) {
 
   // Write README
   const readmePath = path.resolve('.shipper', 'README.md');
-  writeFileSync(readmePath, readmeContent);
+  writeFileSync(readmePath, readmeTemplate);
   console.log('Wrote .shipper/README.md');
 
   // Ensure labels exist

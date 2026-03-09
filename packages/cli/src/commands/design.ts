@@ -1,7 +1,7 @@
-import { autoSelectIssue } from '../lib/github.js';
-import { withStageHooks } from '../lib/hooks.js';
-import { withIssueLock } from '../lib/lock.js';
-import { runPrompt } from '../lib/prompt-runner.js';
+import { autoSelectIssue } from '@dnsquared/shipper-core';
+import { withStageHooks } from '@dnsquared/shipper-core';
+import { withIssueLock } from '@dnsquared/shipper-core';
+import { runPrompt } from '@dnsquared/shipper-core';
 
 export function designCommand(issue?: string) {
   if (!issue) {
