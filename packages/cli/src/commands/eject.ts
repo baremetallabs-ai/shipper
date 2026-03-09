@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { agentPrompts } from '../lib/prompts.js';
-import { getSettings } from '../lib/settings.js';
+import { agentPrompts } from '@dnsquared/shipper-core';
+import { getSettings } from '@dnsquared/shipper-core';
 
 function filenameToCliName(filename: string): string {
   return filename.replace(/\.md$/, '').replace(/_/g, '-');

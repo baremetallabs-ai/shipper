@@ -1,10 +1,10 @@
-import { findBranchForIssue, getRepoRoot } from '../lib/branch.js';
-import { autoSelectIssue, resolveBaseBranch, resolveRef } from '../lib/github.js';
-import { withStageHooks } from '../lib/hooks.js';
-import { getSettings } from '../lib/settings.js';
-import { withIssueLock } from '../lib/lock.js';
-import { withWorktree } from '../lib/worktree.js';
-import { runPrompt } from '../lib/prompt-runner.js';
+import { findBranchForIssue, getRepoRoot } from '@dnsquared/shipper-core';
+import { autoSelectIssue, resolveBaseBranch, resolveRef } from '@dnsquared/shipper-core';
+import { withStageHooks } from '@dnsquared/shipper-core';
+import { getSettings } from '@dnsquared/shipper-core';
+import { withIssueLock } from '@dnsquared/shipper-core';
+import { withWorktree } from '@dnsquared/shipper-core';
+import { runPrompt } from '@dnsquared/shipper-core';
 
 export function prOpenCommand(issue?: string) {
   if (!issue) {

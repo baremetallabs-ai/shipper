@@ -55,11 +55,8 @@ vi.mock('node:fs', async () => {
   };
 });
 
-vi.mock('../../src/lib/settings.js', () => ({
+vi.mock('@dnsquared/shipper-core', () => ({
   getSettings: (...args: unknown[]) => getSettingsMock(...args),
-}));
-
-vi.mock('../../src/lib/prompts.js', () => ({
   agentPrompts: {
     claude: claudePrompts,
     codex: codexPrompts,

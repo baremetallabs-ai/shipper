@@ -14,11 +14,8 @@ vi.mock('../../src/lib/confirm.js', () => ({
   promptChoice: mockPromptChoice,
 }));
 
-vi.mock('../../src/lib/repo.js', () => ({
+vi.mock('@dnsquared/shipper-core', () => ({
   getRepoNwo: () => mockGetRepoNwo(),
-}));
-
-vi.mock('../../src/lib/lock.js', () => ({
   isLockStale: (...args: unknown[]) => mockIsLockStale(...args),
 }));
 

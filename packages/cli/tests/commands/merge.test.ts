@@ -11,18 +11,15 @@ vi.mock('node:child_process', async () => {
   };
 });
 
-const getSettingsMock = vi.fn();
-vi.mock('../../src/lib/settings.js', () => ({
-  getSettings: () => getSettingsMock(),
-}));
-
 const tryResolvePrForIssueMock = vi.fn();
-vi.mock('../../src/lib/github.js', () => ({
+const getSettingsMock = vi.fn();
+vi.mock('@dnsquared/shipper-core', () => ({
+  getSettings: () => getSettingsMock(),
   tryResolvePrForIssue: (...args: unknown[]) => tryResolvePrForIssueMock(...args),
-}));
-
-vi.mock('../../src/lib/repo.js', () => ({
   getRepoNwo: () => 'owner/repo',
+  withStageHooks: vi.fn((_stage: unknown, _env: unknown, fn: () => unknown) => fn()),
+  fetchChecks: vi.fn(),
+  classifyChecks: vi.fn(),
 }));
 
 const logMock = vi.spyOn(console, 'log').mockImplementation(() => {});

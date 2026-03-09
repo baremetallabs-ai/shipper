@@ -1,9 +1,9 @@
-import { generateBranchName, getRepoRoot } from '../lib/branch.js';
-import { autoSelectIssue } from '../lib/github.js';
-import { withStageHooks } from '../lib/hooks.js';
-import { withIssueLock } from '../lib/lock.js';
-import { withWorktree } from '../lib/worktree.js';
-import { runPrompt } from '../lib/prompt-runner.js';
+import { generateBranchName, getRepoRoot } from '@dnsquared/shipper-core';
+import { autoSelectIssue } from '@dnsquared/shipper-core';
+import { withStageHooks } from '@dnsquared/shipper-core';
+import { withIssueLock } from '@dnsquared/shipper-core';
+import { withWorktree } from '@dnsquared/shipper-core';
+import { runPrompt } from '@dnsquared/shipper-core';
 
 export function implementCommand(issue?: string) {
   if (!issue) {

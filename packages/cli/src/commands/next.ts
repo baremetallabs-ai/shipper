@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { resolveRef, tryResolvePrForIssue } from '../lib/github.js';
-import { withIssueLock } from '../lib/lock.js';
+import { resolveRef, tryResolvePrForIssue } from '@dnsquared/shipper-core';
+import { withIssueLock } from '@dnsquared/shipper-core';
 import { groomCommand } from './groom.js';
 import { designCommand } from './design.js';
 import { planCommand } from './plan.js';

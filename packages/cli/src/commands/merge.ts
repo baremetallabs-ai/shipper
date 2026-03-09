@@ -2,10 +2,10 @@ import { execFileSync } from 'node:child_process';
 import { openSync, closeSync, readFileSync, writeFileSync, unlinkSync, constants } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fetchChecks, classifyChecks } from '../lib/checks.js';
-import { tryResolvePrForIssue } from '../lib/github.js';
-import { getRepoNwo } from '../lib/repo.js';
-import { withStageHooks } from '../lib/hooks.js';
+import { fetchChecks, classifyChecks } from '@dnsquared/shipper-core';
+import { tryResolvePrForIssue } from '@dnsquared/shipper-core';
+import { getRepoNwo } from '@dnsquared/shipper-core';
+import { withStageHooks } from '@dnsquared/shipper-core';
 
 interface MergeOptions {
   interval: string;

@@ -1,4 +1,4 @@
-import { releaseIssueLock } from '../lib/lock.js';
+import { releaseIssueLock } from '@dnsquared/shipper-core';
 
 export function unlockCommand(issue: string) {
   if (!issue) {

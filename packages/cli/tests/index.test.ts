@@ -1,15 +1,9 @@
 import { execFileSync } from 'node:child_process';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../src/lib/prerequisites.js', () => ({
+vi.mock('@dnsquared/shipper-core', () => ({
   runPreflight: vi.fn(),
-}));
-
-vi.mock('../src/lib/settings.js', () => ({
   loadSettings: vi.fn(),
-}));
-
-vi.mock('../src/lib/version.js', () => ({
   CLI_VERSION: '0.1.0-test',
   checkVersionFreshness: vi.fn(),
 }));
@@ -39,8 +33,7 @@ vi.mock('../src/commands/setup.js', () => ({ setupCommand: vi.fn() }));
 
 import { shipCommand } from '../src/commands/ship.js';
 import { ejectCommand } from '../src/commands/eject.js';
-import { runPreflight } from '../src/lib/prerequisites.js';
-import { loadSettings } from '../src/lib/settings.js';
+import { runPreflight, loadSettings } from '@dnsquared/shipper-core';
 
 const mockShipCommand = vi.mocked(shipCommand);
 const mockEjectCommand = vi.mocked(ejectCommand);

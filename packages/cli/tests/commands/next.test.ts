@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { resolveRef, tryResolvePrForIssue } from '../../src/lib/github.js';
-import { withIssueLock } from '../../src/lib/lock.js';
+import { resolveRef, tryResolvePrForIssue, withIssueLock } from '@dnsquared/shipper-core';
 import { groomCommand } from '../../src/commands/groom.js';
 import { designCommand } from '../../src/commands/design.js';
 import { planCommand } from '../../src/commands/plan.js';
@@ -15,12 +14,9 @@ vi.mock('node:child_process', async (importOriginal) => {
   return { ...actual, execFileSync: vi.fn() };
 });
 
-vi.mock('../../src/lib/github.js', () => ({
+vi.mock('@dnsquared/shipper-core', () => ({
   resolveRef: vi.fn(),
   tryResolvePrForIssue: vi.fn(),
-}));
-
-vi.mock('../../src/lib/lock.js', () => ({
   withIssueLock: vi.fn((_issue: string, fn: () => void) => fn()),
 }));
 

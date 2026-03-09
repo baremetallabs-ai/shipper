@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { confirm, promptChoice } from '../lib/confirm.js';
-import { isLockStale } from '../lib/lock.js';
-import { getRepoNwo } from '../lib/repo.js';
+import { isLockStale } from '@dnsquared/shipper-core';
+import { getRepoNwo } from '@dnsquared/shipper-core';
 
 const WORKFLOW_STAGES = ['new', 'groomed', 'designed', 'planned', 'implemented'] as const;
 const PR_STAGE_LABELS = ['shipper:pr-open', 'shipper:pr-reviewed', 'shipper:ready'] as const;
