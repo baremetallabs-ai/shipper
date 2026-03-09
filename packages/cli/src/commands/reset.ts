@@ -168,7 +168,7 @@ function scanArtifacts(
           `Warning: Could not determine when ${targetLabel} was applied. Skipping comment cleanup.`
         );
       } else {
-        const cutoff = cutoffDate.getTime() - 60_000;
+        const cutoff = cutoffDate.getTime() + 60_000;
         try {
           const raw = execFileSync(
             'gh',
