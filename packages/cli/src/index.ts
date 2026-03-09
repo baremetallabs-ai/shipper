@@ -87,7 +87,7 @@ program
   .description('Adopt an existing issue into the shipper workflow')
   .argument('[issue]', 'issue number')
   .option('--all', 'adopt all open issues without shipper labels', false)
-  .action((issue: string | undefined, options: { all: boolean }) => {
+  .action(async (issue: string | undefined, options: { all: boolean }) => {
     if (options.all && issue) {
       console.error('Error: --all and an explicit issue number are mutually exclusive.');
       process.exit(1);
@@ -97,9 +97,9 @@ program
       process.exit(1);
     }
     if (options.all) {
-      adoptAllCommand();
+      await adoptAllCommand();
     } else {
-      adoptCommand(issue as string);
+      await adoptCommand(issue as string);
     }
   });
 
@@ -240,8 +240,8 @@ issue
   .command('list')
   .description('List shipper-managed issues by pipeline status')
   .option('--status <name>', 'filter to a single status (e.g. planned)')
-  .action((options: { status?: string }) => {
-    issueListCommand(options);
+  .action(async (options: { status?: string }) => {
+    await issueListCommand(options);
   });
 
 const pr = program.command('pr').description('Pull request commands');

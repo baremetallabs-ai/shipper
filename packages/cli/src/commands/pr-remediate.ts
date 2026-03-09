@@ -1,8 +1,8 @@
-import { execFileSync } from 'node:child_process';
 import { getBranchForPR, getRepoRoot } from '@dnsquared/shipper-core';
 import { fetchChecks, classifyChecks } from '@dnsquared/shipper-core';
 import { autoSelectPrForStage, resolveRef } from '@dnsquared/shipper-core';
 import type { CommandMode } from '@dnsquared/shipper-core';
+import { gh } from '@dnsquared/shipper-core';
 import { withStageHooks } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
 import { withWorktree } from '@dnsquared/shipper-core';
@@ -123,10 +123,8 @@ export async function prRemediateCommand(pr?: string, mode?: CommandMode): Promi
 
       if (prReviewWait.mode === 'timer') {
         if (prReviewWait.timeoutMinutes > 0) {
-          const prJson = execFileSync('gh', ['pr', 'view', prRef, '--json', 'createdAt'], {
-            encoding: 'utf-8',
-          });
-          const { createdAt } = JSON.parse(prJson) as { createdAt: string };
+          const { stdout } = await gh(['pr', 'view', prRef, '--json', 'createdAt']);
+          const { createdAt } = JSON.parse(stdout) as { createdAt: string };
           const elapsedMs = Date.now() - new Date(createdAt).getTime();
           const waitMs = prReviewWait.timeoutMinutes * 60_000;
           const remainingMs = waitMs - elapsedMs;

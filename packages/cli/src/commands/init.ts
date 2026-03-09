@@ -1,8 +1,7 @@
 import { mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync } from 'node:fs';
-import { createInterface } from 'node:readline/promises';
-import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { scripts } from '@dnsquared/shipper-core';
+import { createInterface } from 'node:readline/promises';
+import { gh, scripts } from '@dnsquared/shipper-core';
 import { DEFAULTS, SETTING_DESCRIPTIONS } from '@dnsquared/shipper-core';
 import { CLI_VERSION, readmeTemplate } from '@dnsquared/shipper-core';
 import {
@@ -256,11 +255,15 @@ export async function initCommand(options: { agent?: string }) {
   let labelCount = 0;
   for (const label of LABELS) {
     try {
-      execFileSync(
-        'gh',
-        ['label', 'create', label.name, '--color', label.color, '--description', label.description],
-        { stdio: 'ignore' }
-      );
+      await gh([
+        'label',
+        'create',
+        label.name,
+        '--color',
+        label.color,
+        '--description',
+        label.description,
+      ]);
       labelCount++;
     } catch {
       // Label already exists — that's fine
