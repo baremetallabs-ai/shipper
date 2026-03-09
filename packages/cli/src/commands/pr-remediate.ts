@@ -17,7 +17,7 @@ class PollingInterruptedError extends Error {
   }
 }
 
-async function waitForChecks(pr: string, timeoutMinutes: number): Promise<void> {
+async function waitForChecks(repo: string, pr: string, timeoutMinutes: number): Promise<void> {
   const deadline = Date.now() + timeoutMinutes * 60_000;
   let previousCompleted = -1;
   let interrupted = false;
@@ -30,13 +30,13 @@ async function waitForChecks(pr: string, timeoutMinutes: number): Promise<void> 
 
   try {
     // Zero-checks grace period: retry up to 3 times at 10s intervals
-    let checks = await fetchChecksGraceful(pr);
+    let checks = await fetchChecksGraceful(repo, pr);
     if (checks !== null && checks.length === 0) {
       for (let retry = 0; retry < 3 && !interrupted; retry++) {
         if (Date.now() >= deadline) break;
         await sleepMs(10_000);
         if (interrupted) break;
-        checks = await fetchChecksGraceful(pr);
+        checks = await fetchChecksGraceful(repo, pr);
         if (checks !== null && checks.length > 0) break;
       }
       if (!interrupted && (checks === null || checks.length === 0)) {
@@ -52,7 +52,7 @@ async function waitForChecks(pr: string, timeoutMinutes: number): Promise<void> 
         break;
       }
 
-      checks = await fetchChecksGraceful(pr);
+      checks = await fetchChecksGraceful(repo, pr);
       if (checks !== null) {
         const { pending, total } = classifyChecks(checks);
         const completed = total - pending.length;
@@ -79,10 +79,11 @@ async function waitForChecks(pr: string, timeoutMinutes: number): Promise<void> 
 }
 
 async function fetchChecksGraceful(
+  repo: string,
   pr: string
 ): Promise<Awaited<ReturnType<typeof fetchChecks>> | null> {
   try {
-    return await fetchChecks(pr);
+    return await fetchChecks(repo, pr);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.warn(`Warning: Failed to fetch CI checks: ${msg}`);
@@ -90,11 +91,16 @@ async function fetchChecksGraceful(
   }
 }
 
-export async function prRemediateCommand(pr?: string, mode?: CommandMode): Promise<void> {
+export async function prRemediateCommand(
+  repo: string,
+  pr?: string,
+  mode?: CommandMode
+): Promise<void> {
   let issueNumber: string;
 
   if (!pr) {
     const selected = await autoSelectPrForStage(
+      repo,
       'shipper:pr-reviewed',
       "No PRs ready for remediation. Run 'shipper pr review' first."
     );
@@ -104,7 +110,7 @@ export async function prRemediateCommand(pr?: string, mode?: CommandMode): Promi
     pr = selected.pr;
     issueNumber = String(selected.issue.number);
   } else {
-    const resolved = await resolveRef(pr, 'both');
+    const resolved = await resolveRef(repo, pr, 'both');
     pr = resolved.prNumber;
     issueNumber = resolved.issueNumber;
   }
@@ -116,14 +122,14 @@ export async function prRemediateCommand(pr?: string, mode?: CommandMode): Promi
   }
 
   const run = async () => {
-    const branch = await getBranchForPR(prRef);
+    const branch = await getBranchForPR(repo, prRef);
 
     return await withStageHooks('pr-remediate', { issueNumber, branchName: branch }, async () => {
       const { prReviewWait } = getSettings();
 
       if (prReviewWait.mode === 'timer') {
         if (prReviewWait.timeoutMinutes > 0) {
-          const { stdout } = await gh(['pr', 'view', prRef, '--json', 'createdAt']);
+          const { stdout } = await gh(['pr', 'view', prRef, '-R', repo, '--json', 'createdAt']);
           const { createdAt } = JSON.parse(stdout) as { createdAt: string };
           const elapsedMs = Date.now() - new Date(createdAt).getTime();
           const waitMs = prReviewWait.timeoutMinutes * 60_000;
@@ -139,7 +145,7 @@ export async function prRemediateCommand(pr?: string, mode?: CommandMode): Promi
           }
         }
       } else {
-        await waitForChecks(prRef, prReviewWait.timeoutMinutes);
+        await waitForChecks(repo, prRef, prReviewWait.timeoutMinutes);
       }
 
       const repoRoot = await getRepoRoot();
@@ -148,6 +154,7 @@ export async function prRemediateCommand(pr?: string, mode?: CommandMode): Promi
         { repoRoot, branch, createBranch: false, issueNumber, stage: 'pr-remediate' },
         async (wtPath) => {
           return await runPrompt('pr_remediate', {
+            repo,
             issueRef: issueNumber,
             prRef,
             cwd: wtPath,
@@ -159,7 +166,7 @@ export async function prRemediateCommand(pr?: string, mode?: CommandMode): Promi
   };
 
   try {
-    const code = await withIssueLock(issueNumber, run);
+    const code = await withIssueLock(repo, issueNumber, run);
     process.exitCode = code;
   } catch (err) {
     if (err instanceof PollingInterruptedError) {

@@ -31,10 +31,6 @@ vi.mock('../../src/lib/lock.js', () => ({
   releaseIssueLock: vi.fn(async () => {}),
 }));
 
-vi.mock('../../src/lib/repo.js', () => ({
-  getRepoNwo: vi.fn(async () => 'owner/repo'),
-}));
-
 function queueExecFileResult(stdout: string): void {
   execFileMock.mockImplementationOnce((_cmd: string, _args: string[], ...rest: unknown[]) => {
     const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
@@ -67,6 +63,7 @@ const {
   tryResolvePrForIssue,
 } = await import('../../src/lib/github.js');
 type TimelineLabelEvent = import('../../src/lib/github.js').TimelineLabelEvent;
+const repo = 'owner/repo';
 
 describe('formatIssue', () => {
   it('formats a basic issue with comments', () => {
@@ -278,32 +275,32 @@ describe('tryResolvePrForIssue', () => {
 
   it('matches exact branch shipper/12', async () => {
     queueExecFileResult(JSON.stringify([{ number: 99, headRefName: 'shipper/12' }]));
-    expect(await tryResolvePrForIssue(12)).toBe('99');
+    expect(await tryResolvePrForIssue(repo, 12)).toBe('99');
   });
 
   it('matches prefixed branch shipper/12-some-slug', async () => {
     queueExecFileResult(JSON.stringify([{ number: 50, headRefName: 'shipper/12-some-slug' }]));
-    expect(await tryResolvePrForIssue(12)).toBe('50');
+    expect(await tryResolvePrForIssue(repo, 12)).toBe('50');
   });
 
   it('does NOT match unrelated branch containing the number', async () => {
     queueExecFileResult(JSON.stringify([{ number: 77, headRefName: 'fix/update-12-deps' }]));
-    expect(await tryResolvePrForIssue(12)).toBeUndefined();
+    expect(await tryResolvePrForIssue(repo, 12)).toBeUndefined();
   });
 
   it('does NOT match partial prefix shipper/123 when searching for 12', async () => {
     queueExecFileResult(JSON.stringify([{ number: 88, headRefName: 'shipper/123' }]));
-    expect(await tryResolvePrForIssue(12)).toBeUndefined();
+    expect(await tryResolvePrForIssue(repo, 12)).toBeUndefined();
   });
 
   it('returns undefined when no PRs exist', async () => {
     queueExecFileResult(JSON.stringify([]));
-    expect(await tryResolvePrForIssue(12)).toBeUndefined();
+    expect(await tryResolvePrForIssue(repo, 12)).toBeUndefined();
   });
 
   it('returns undefined when gh command fails', async () => {
     queueExecFileError('gh failed');
-    expect(await tryResolvePrForIssue(12)).toBeUndefined();
+    expect(await tryResolvePrForIssue(repo, 12)).toBeUndefined();
   });
 });
 
@@ -314,7 +311,7 @@ describe('resolveBaseBranch', () => {
 
   it('returns configured value when branch exists on remote', async () => {
     queueExecFileResult('abc123\trefs/heads/develop\n');
-    expect(await resolveBaseBranch('develop')).toBe('develop');
+    expect(await resolveBaseBranch(repo, 'develop')).toBe('develop');
     expect(execFileMock).toHaveBeenCalledWith(
       'git',
       ['ls-remote', '--heads', 'origin', 'develop'],
@@ -323,23 +320,19 @@ describe('resolveBaseBranch', () => {
     );
   });
 
-  it('exits with error when configured branch does not exist on remote', async () => {
-    const exitMock = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
-    const stderrMock = vi.spyOn(console, 'error').mockImplementation(() => {});
+  it('throws when configured branch does not exist on remote', async () => {
     queueExecFileResult('');
-    await resolveBaseBranch('nonexistent');
-    expect(stderrMock).toHaveBeenCalledWith(
-      "Error: configured defaultBaseBranch 'nonexistent' does not exist on remote."
+    await expect(resolveBaseBranch(repo, 'nonexistent')).rejects.toThrow(
+      "configured defaultBaseBranch 'nonexistent' does not exist on remote."
     );
-    expect(exitMock).toHaveBeenCalledWith(1);
   });
 
   it('auto-detects via gh repo view when no value configured', async () => {
     queueExecFileResult('main\n');
-    expect(await resolveBaseBranch()).toBe('main');
+    expect(await resolveBaseBranch(repo)).toBe('main');
     expect(execFileMock).toHaveBeenCalledWith(
       'gh',
-      ['repo', 'view', '--json', 'defaultBranchRef', '-q', '.defaultBranchRef.name'],
+      ['repo', 'view', '-R', repo, '--json', 'defaultBranchRef', '-q', '.defaultBranchRef.name'],
       { encoding: 'utf-8' },
       expect.any(Function)
     );
@@ -347,7 +340,7 @@ describe('resolveBaseBranch', () => {
 
   it('auto-detects non-main default branches', async () => {
     queueExecFileResult('master\n');
-    expect(await resolveBaseBranch(undefined)).toBe('master');
+    expect(await resolveBaseBranch(repo, undefined)).toBe('master');
   });
 });
 
@@ -369,12 +362,12 @@ describe('selectIssuesForStage', () => {
     // Second call: locked issues query
     queueExecFileResult(JSON.stringify([{ number: 2, title: 'Stale locked' }]));
     mockIsLockStale.mockResolvedValueOnce(true);
-    // Third + fourth calls: timeline for each issue (getRepoNwo is mocked via repo.js)
+    // Third + fourth calls: timeline for each issue
     queueExecFileResult('');
     queueExecFileResult('');
 
     const staleLocked = new Set<number>();
-    const result = await selectIssuesForStage('shipper:new', staleLocked);
+    const result = await selectIssuesForStage(repo, 'shipper:new', staleLocked);
 
     expect(result).toEqual(
       expect.arrayContaining([
@@ -392,7 +385,7 @@ describe('selectIssuesForStage', () => {
     mockIsLockStale.mockResolvedValueOnce(false);
 
     const staleLocked = new Set<number>();
-    const result = await selectIssuesForStage('shipper:new', staleLocked);
+    const result = await selectIssuesForStage(repo, 'shipper:new', staleLocked);
 
     expect(result).toEqual([{ number: 1, title: 'Normal' }]);
     expect(staleLocked.size).toBe(0);
@@ -402,7 +395,7 @@ describe('selectIssuesForStage', () => {
     queueExecFileResult(JSON.stringify([{ number: 1, title: 'Normal' }]));
     queueExecFileResult(JSON.stringify([]));
 
-    const result = await selectIssuesForStage('shipper:new');
+    const result = await selectIssuesForStage(repo, 'shipper:new');
 
     expect(result).toEqual([{ number: 1, title: 'Normal' }]);
   });
@@ -411,11 +404,11 @@ describe('selectIssuesForStage', () => {
     queueExecFileResult(JSON.stringify([{ number: 1, title: 'Normal' }]));
     queueExecFileResult(JSON.stringify([{ number: 2, title: 'Stale locked' }]));
     mockIsLockStale.mockResolvedValueOnce(true);
-    // timelines (2 issues triggers sorting path; getRepoNwo is mocked via repo.js)
+    // timelines (2 issues triggers sorting path)
     queueExecFileResult('');
     queueExecFileResult('');
 
-    const result = await selectIssuesForStage('shipper:new');
+    const result = await selectIssuesForStage(repo, 'shipper:new');
 
     expect(result).toEqual(
       expect.arrayContaining([
@@ -429,7 +422,7 @@ describe('selectIssuesForStage', () => {
     queueExecFileResult(JSON.stringify([]));
     queueExecFileResult(JSON.stringify([]));
 
-    await selectIssuesForStage('shipper:new');
+    await selectIssuesForStage(repo, 'shipper:new');
 
     expect(execFileMock).toHaveBeenNthCalledWith(
       1,
@@ -437,6 +430,8 @@ describe('selectIssuesForStage', () => {
       [
         'issue',
         'list',
+        '-R',
+        repo,
         '--label',
         'shipper:new',
         '--state',
@@ -457,6 +452,8 @@ describe('selectIssuesForStage', () => {
       [
         'issue',
         'list',
+        '-R',
+        repo,
         '--label',
         'shipper:new',
         '--label',
@@ -477,7 +474,7 @@ describe('selectIssuesForStage', () => {
     queueExecFileResult(JSON.stringify([]));
     queueExecFileResult(JSON.stringify([]));
 
-    await selectIssuesForStage('shipper:groomed');
+    await selectIssuesForStage(repo, 'shipper:groomed');
 
     expect(execFileMock).toHaveBeenNthCalledWith(
       1,
@@ -485,6 +482,8 @@ describe('selectIssuesForStage', () => {
       [
         'issue',
         'list',
+        '-R',
+        repo,
         '--label',
         'shipper:groomed',
         '--state',
@@ -505,6 +504,8 @@ describe('selectIssuesForStage', () => {
       [
         'issue',
         'list',
+        '-R',
+        repo,
         '--label',
         'shipper:groomed',
         '--label',
@@ -528,7 +529,7 @@ describe('selectIssuesForStage', () => {
     queueExecFileError('gh failed');
     const stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    const result = await selectIssuesForStage('shipper:new');
+    const result = await selectIssuesForStage(repo, 'shipper:new');
 
     expect(result).toEqual([{ number: 1, title: 'Normal' }]);
     expect(stderrSpy).toHaveBeenCalledWith(
@@ -558,10 +559,10 @@ describe('autoSelectIssue', () => {
     mockIsLockStale.mockResolvedValueOnce(true);
     const stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    const result = await autoSelectIssue('shipper:new');
+    const result = await autoSelectIssue(repo, 'shipper:new');
 
     expect(result).toEqual({ number: 42, title: 'Stale issue' });
-    expect(mockReleaseIssueLock).toHaveBeenCalledWith('42');
+    expect(mockReleaseIssueLock).toHaveBeenCalledWith(repo, '42');
     expect(stderrSpy).toHaveBeenCalledWith('Issue #42 lock is stale \u2014 clearing.');
   });
 
@@ -569,7 +570,7 @@ describe('autoSelectIssue', () => {
     queueExecFileResult(JSON.stringify([{ number: 10, title: 'Normal issue' }]));
     queueExecFileResult(JSON.stringify([]));
 
-    const result = await autoSelectIssue('shipper:new');
+    const result = await autoSelectIssue(repo, 'shipper:new');
 
     expect(result).toEqual({ number: 10, title: 'Normal issue' });
     expect(mockReleaseIssueLock).not.toHaveBeenCalled();
@@ -579,7 +580,7 @@ describe('autoSelectIssue', () => {
     queueExecFileResult(JSON.stringify([]));
     queueExecFileResult(JSON.stringify([]));
 
-    const result = await autoSelectIssue('shipper:new');
+    const result = await autoSelectIssue(repo, 'shipper:new');
 
     expect(result).toBeNull();
     expect(mockReleaseIssueLock).not.toHaveBeenCalled();
@@ -608,7 +609,7 @@ describe('autoSelectIssue', () => {
       })
     );
 
-    const result = await autoSelectIssue('shipper:new');
+    const result = await autoSelectIssue(repo, 'shipper:new');
 
     expect(result).toEqual({ number: 10, title: 'Normal issue' });
   });

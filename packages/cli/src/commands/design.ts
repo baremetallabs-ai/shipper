@@ -4,9 +4,13 @@ import { withStageHooks } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
 import { runPrompt } from '@dnsquared/shipper-core';
 
-export async function designCommand(issue?: string, mode?: CommandMode): Promise<void> {
+export async function designCommand(
+  repo: string,
+  issue?: string,
+  mode?: CommandMode
+): Promise<void> {
   if (!issue) {
-    const selected = await autoSelectIssue('shipper:groomed');
+    const selected = await autoSelectIssue(repo, 'shipper:groomed');
     if (!selected) {
       console.error("No issues ready for design. Run 'shipper groom' first.");
       process.exit(1);
@@ -16,12 +20,13 @@ export async function designCommand(issue?: string, mode?: CommandMode): Promise
   }
 
   const code = await withIssueLock(
+    repo,
     issue,
     async () =>
       await withStageHooks(
         'design',
         { issueNumber: issue },
-        async () => await runPrompt('design', { issueRef: issue, mode })
+        async () => await runPrompt('design', { repo, issueRef: issue, mode })
       )
   );
 

@@ -191,7 +191,7 @@ describe('lookupPR', () => {
 
     const result = await lookupPR('10', 'owner/repo');
 
-    expect(tryResolvePrForIssueMock).toHaveBeenCalledWith(10);
+    expect(tryResolvePrForIssueMock).toHaveBeenCalledWith('owner/repo', 10);
     expect(result).toEqual({
       number: 42,
       title: 'Add feature',

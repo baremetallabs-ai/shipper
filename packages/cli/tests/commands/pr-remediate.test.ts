@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const getSettingsMock = vi.fn();
 const fetchChecksMock = vi.fn();
+const repo = 'owner/repo';
 vi.mock('@dnsquared/shipper-core', async () => {
   const actual =
     await vi.importActual<typeof import('@dnsquared/shipper-core')>('@dnsquared/shipper-core');
@@ -13,7 +14,9 @@ vi.mock('@dnsquared/shipper-core', async () => {
     withStageHooks: vi.fn(
       async (_stage: unknown, _env: unknown, fn: () => Promise<unknown>) => await fn()
     ),
-    withIssueLock: vi.fn(async (_issue: unknown, fn: () => Promise<unknown>) => await fn()),
+    withIssueLock: vi.fn(
+      async (_repo: unknown, _issue: unknown, fn: () => Promise<unknown>) => await fn()
+    ),
     withWorktree: vi.fn(
       async (_opts: unknown, fn: (wtPath: string) => Promise<unknown>) => await fn('/tmp/fake-wt')
     ),
@@ -26,11 +29,13 @@ vi.mock('@dnsquared/shipper-core', async () => {
   };
 });
 
-import { gh, resolveRef, runPrompt } from '@dnsquared/shipper-core';
+import { gh, resolveRef, runPrompt, getBranchForPR, withIssueLock } from '@dnsquared/shipper-core';
 
 const mockGh = vi.mocked(gh);
 const mockResolveRef = vi.mocked(resolveRef);
 const mockRunPrompt = vi.mocked(runPrompt);
+const mockGetBranchForPR = vi.mocked(getBranchForPR);
+const mockWithIssueLock = vi.mocked(withIssueLock);
 
 describe('prRemediateCommand', () => {
   let exitSpy: ReturnType<typeof vi.spyOn>;
@@ -61,13 +66,18 @@ describe('prRemediateCommand', () => {
   it('passes issueNumber (not PR number) as issueRef to runPrompt', async () => {
     const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
 
-    await expect(prRemediateCommand('42')).resolves.toBeUndefined();
+    await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
     expect(exitSpy).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(0);
 
+    expect(mockResolveRef).toHaveBeenCalledWith(repo, '42', 'both');
+    expect(fetchChecksMock).not.toHaveBeenCalled();
+    expect(mockGetBranchForPR).toHaveBeenCalledWith(repo, '42');
+    expect(mockWithIssueLock).toHaveBeenCalledWith(repo, '10', expect.any(Function));
     expect(mockRunPrompt).toHaveBeenCalledWith(
       'pr_remediate',
       expect.objectContaining({
+        repo,
         issueRef: '10',
         prRef: '42',
       })
@@ -81,7 +91,7 @@ describe('prRemediateCommand', () => {
     });
     const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
 
-    await expect(prRemediateCommand('42')).resolves.toBeUndefined();
+    await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
     expect(exitSpy).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(0);
     expect(mockRunPrompt).toHaveBeenCalled();
@@ -100,11 +110,11 @@ describe('prRemediateCommand', () => {
 
     const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
 
-    await expect(prRemediateCommand('42')).resolves.toBeUndefined();
+    await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
     expect(exitSpy).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(0);
     expect(mockRunPrompt).toHaveBeenCalled();
-    expect(fetchChecksMock).toHaveBeenCalled();
+    expect(fetchChecksMock).toHaveBeenCalledWith(repo, '42');
   });
 
   it('in checks mode with zero checks, retries then proceeds', async () => {
@@ -118,7 +128,7 @@ describe('prRemediateCommand', () => {
     const logMock = vi.spyOn(console, 'log').mockImplementation(() => {});
     const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
 
-    await expect(prRemediateCommand('42')).resolves.toBeUndefined();
+    await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
     expect(exitSpy).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(0);
     expect(mockRunPrompt).toHaveBeenCalled();

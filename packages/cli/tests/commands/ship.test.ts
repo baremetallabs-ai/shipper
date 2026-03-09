@@ -25,11 +25,12 @@ vi.mock('@dnsquared/shipper-core', () => ({
   selectIssuesForStage: vi.fn(async () => []),
   clearStaleLockIfNeeded: vi.fn(async () => {}),
   gh: vi.fn(),
-  getRepoNwo: vi.fn(async () => 'owner/repo'),
   withStageHooks: vi.fn(
     async (_stage: string, _env: unknown, fn: () => Promise<unknown>) => await fn()
   ),
-  withIssueLock: vi.fn(async (_issue: string, fn: () => Promise<unknown>) => await fn()),
+  withIssueLock: vi.fn(
+    async (_repo: string, _issue: string, fn: () => Promise<unknown>) => await fn()
+  ),
   releaseIssueLock: vi.fn(async () => {}),
   runPrompt: vi.fn(async () => 0),
 }));
@@ -90,6 +91,7 @@ const mockSpawn = vi.mocked(spawn);
 const mockCreateWriteStream = fsMockState.mockCreateWriteStream;
 const mockMkdirSync = fsMockState.mockMkdirSync;
 const mockHomedir = osMockState.mockHomedir;
+const repo = 'owner/repo';
 
 type ShipSignal = 'SIGINT' | 'SIGTERM' | 'SIGKILL';
 
@@ -182,7 +184,7 @@ describe('selectNextCandidate', () => {
   });
 
   it('returns the issue from the highest-priority label', async () => {
-    mockSelectIssuesForStage.mockImplementation(async (label: string) => {
+    mockSelectIssuesForStage.mockImplementation(async (_repo: string, label: string) => {
       if (label === 'shipper:ready') return [];
       if (label === 'shipper:pr-reviewed') return [];
       if (label === 'shipper:pr-open') return [{ number: 10, title: 'PR open issue' }];
@@ -190,12 +192,12 @@ describe('selectNextCandidate', () => {
       return [];
     });
 
-    const result = await selectNextCandidate(new Set());
+    const result = await selectNextCandidate(repo, new Set());
     expect(result).toEqual({ number: 10, title: 'PR open issue' });
   });
 
   it('skips issues in the skippedIssues set', async () => {
-    mockSelectIssuesForStage.mockImplementation(async (label: string) => {
+    mockSelectIssuesForStage.mockImplementation(async (_repo: string, label: string) => {
       if (label === 'shipper:pr-open')
         return [
           { number: 10, title: 'Skipped issue' },
@@ -204,29 +206,29 @@ describe('selectNextCandidate', () => {
       return [];
     });
 
-    const result = await selectNextCandidate(new Set([10]));
+    const result = await selectNextCandidate(repo, new Set([10]));
     expect(result).toEqual({ number: 11, title: 'Next issue' });
   });
 
   it('returns null when no candidates remain', async () => {
     mockSelectIssuesForStage.mockResolvedValue([]);
 
-    const result = await selectNextCandidate(new Set());
+    const result = await selectNextCandidate(repo, new Set());
     expect(result).toBeNull();
   });
 
   it('returns null when all candidates are skipped', async () => {
-    mockSelectIssuesForStage.mockImplementation(async (label: string) => {
+    mockSelectIssuesForStage.mockImplementation(async (_repo: string, label: string) => {
       if (label === 'shipper:planned') return [{ number: 5, title: 'Only issue' }];
       return [];
     });
 
-    const result = await selectNextCandidate(new Set([5]));
+    const result = await selectNextCandidate(repo, new Set([5]));
     expect(result).toBeNull();
   });
 
   it('returns the first issue within a label (already sorted by time-in-state)', async () => {
-    mockSelectIssuesForStage.mockImplementation(async (label: string) => {
+    mockSelectIssuesForStage.mockImplementation(async (_repo: string, label: string) => {
       if (label === 'shipper:groomed')
         return [
           { number: 1, title: 'Oldest' },
@@ -235,13 +237,13 @@ describe('selectNextCandidate', () => {
       return [];
     });
 
-    const result = await selectNextCandidate(new Set());
+    const result = await selectNextCandidate(repo, new Set());
     expect(result).toEqual({ number: 1, title: 'Oldest' });
   });
 
   it('clears stale lock on selected candidate', async () => {
     mockSelectIssuesForStage.mockImplementation(
-      async (label: string, staleLocked?: Set<number>) => {
+      async (_repo: string, label: string, staleLocked?: Set<number>) => {
         if (label === 'shipper:planned') {
           const issues = [{ number: 7, title: 'Stale locked issue' }];
           staleLocked?.add(7);
@@ -251,24 +253,24 @@ describe('selectNextCandidate', () => {
       }
     );
 
-    const result = await selectNextCandidate(new Set());
+    const result = await selectNextCandidate(repo, new Set());
     expect(result).toEqual({ number: 7, title: 'Stale locked issue' });
-    expect(mockClearStaleLockIfNeeded).toHaveBeenCalledWith(7, expect.any(Set));
+    expect(mockClearStaleLockIfNeeded).toHaveBeenCalledWith(repo, 7, expect.any(Set));
   });
 
   it('calls clearStaleLockIfNeeded with empty staleLocked set for non-stale candidate', async () => {
-    mockSelectIssuesForStage.mockImplementation(async (label: string) => {
+    mockSelectIssuesForStage.mockImplementation(async (_repo: string, label: string) => {
       if (label === 'shipper:planned') return [{ number: 7, title: 'Normal issue' }];
       return [];
     });
 
-    const result = await selectNextCandidate(new Set());
+    const result = await selectNextCandidate(repo, new Set());
     expect(result).toEqual({ number: 7, title: 'Normal issue' });
-    expect(mockClearStaleLockIfNeeded).toHaveBeenCalledWith(7, new Set());
+    expect(mockClearStaleLockIfNeeded).toHaveBeenCalledWith(repo, 7, new Set());
   });
 
   it('skips issues already active in parallel slots', async () => {
-    mockSelectIssuesForStage.mockImplementation(async (label: string) => {
+    mockSelectIssuesForStage.mockImplementation(async (_repo: string, label: string) => {
       if (label === 'shipper:planned')
         return [
           { number: 7, title: 'Active issue' },
@@ -277,7 +279,7 @@ describe('selectNextCandidate', () => {
       return [];
     });
 
-    const result = await selectNextCandidate(new Set(), new Set([7]));
+    const result = await selectNextCandidate(repo, new Set(), new Set([7]));
     expect(result).toEqual({ number: 8, title: 'Available issue' });
   });
 });
@@ -289,7 +291,7 @@ describe('selectBlockedIssues', () => {
 
   it('returns empty array when no blocked issues exist', async () => {
     mockGh.mockResolvedValue({ stdout: '[]', stderr: '' });
-    const result = await selectBlockedIssues();
+    const result = await selectBlockedIssues(repo);
     expect(result).toEqual([]);
   });
 
@@ -313,7 +315,7 @@ describe('selectBlockedIssues', () => {
     ];
     mockGh.mockResolvedValue({ stdout: JSON.stringify(issues), stderr: '' });
 
-    const result = await selectBlockedIssues();
+    const result = await selectBlockedIssues(repo);
     expect(result).toEqual([
       { number: 20, title: 'PR reviewed issue' },
       { number: 30, title: 'Planned issue' },
@@ -323,15 +325,15 @@ describe('selectBlockedIssues', () => {
 
   it('returns empty array when gh throws', async () => {
     mockGh.mockRejectedValue(new Error('gh CLI error'));
-    const result = await selectBlockedIssues();
+    const result = await selectBlockedIssues(repo);
     expect(result).toEqual([]);
   });
 
   it('passes --search flag to exclude shipper:locked issues', async () => {
     mockGh.mockResolvedValue({ stdout: '[]', stderr: '' });
-    await selectBlockedIssues();
+    await selectBlockedIssues(repo);
     expect(mockGh).toHaveBeenCalledWith(
-      expect.arrayContaining(['--search', '-label:shipper:locked'])
+      expect.arrayContaining(['-R', repo, '--search', '-label:shipper:locked'])
     );
   });
 
@@ -350,7 +352,7 @@ describe('selectBlockedIssues', () => {
     ];
     mockGh.mockResolvedValue({ stdout: JSON.stringify(issues), stderr: '' });
 
-    const result = await selectBlockedIssues();
+    const result = await selectBlockedIssues(repo);
     expect(result).toEqual([
       { number: 20, title: 'Groomed issue' },
       { number: 10, title: 'No stage label' },
@@ -440,7 +442,7 @@ describe('shipCommand parallel auto runner', () => {
       { number: 2, title: 'Issue two' },
       { number: 3, title: 'Issue three' },
     ];
-    mockSelectIssuesForStage.mockImplementation((label: string) => {
+    mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
       if (label === 'shipper:planned') return plannedIssues;
       return [];
     });
@@ -453,7 +455,7 @@ describe('shipCommand parallel auto runner', () => {
       .mockReturnValueOnce(child2 as never)
       .mockReturnValueOnce(child3 as never);
 
-    const runPromise = shipCommand(undefined, { auto: true, merge: false, parallel: 2 });
+    const runPromise = shipCommand(repo, undefined, { auto: true, merge: false, parallel: 2 });
 
     await flushMicrotasks();
     const cliEntrypoint = process.argv[1];
@@ -473,7 +475,7 @@ describe('shipCommand parallel auto runner', () => {
     expect(mockSpawn).toHaveBeenCalledTimes(3);
     expect(mockSpawn.mock.calls[2]?.[1]).toEqual([cliEntrypoint, 'ship', '3', '--merge']);
     expect(
-      mockSelectIssuesForStage.mock.calls.filter(([label]) => label === 'shipper:planned').length
+      mockSelectIssuesForStage.mock.calls.filter(([, label]) => label === 'shipper:planned').length
     ).toBeGreaterThanOrEqual(3);
 
     plannedIssues = plannedIssues.filter((issue) => issue.number !== 2);
@@ -496,7 +498,7 @@ describe('shipCommand parallel auto runner', () => {
       { number: 1, title: 'Issue one' },
       { number: 2, title: 'Issue two' },
     ];
-    mockSelectIssuesForStage.mockImplementation((label: string) => {
+    mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
       if (label === 'shipper:planned') return plannedIssues;
       return [];
     });
@@ -525,7 +527,7 @@ describe('shipCommand parallel auto runner', () => {
     const child2 = new FakeChildProcess();
     mockSpawn.mockReturnValueOnce(child1 as never).mockReturnValueOnce(child2 as never);
 
-    const runPromise = shipCommand(undefined, { auto: true, merge: false, parallel: 2 });
+    const runPromise = shipCommand(repo, undefined, { auto: true, merge: false, parallel: 2 });
 
     await flushMicrotasks();
 
@@ -585,7 +587,7 @@ describe('shipCommand parallel auto runner', () => {
       { number: 2, title: 'Issue two' },
       { number: 3, title: 'Issue three' },
     ];
-    mockSelectIssuesForStage.mockImplementation((label: string) => {
+    mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
       if (label === 'shipper:planned') return plannedIssues;
       return [];
     });
@@ -598,7 +600,7 @@ describe('shipCommand parallel auto runner', () => {
       .mockReturnValueOnce(child2 as never)
       .mockReturnValueOnce(child3 as never);
 
-    const runPromise = shipCommand(undefined, { auto: true, merge: false, parallel: 2 });
+    const runPromise = shipCommand(repo, undefined, { auto: true, merge: false, parallel: 2 });
 
     await flushMicrotasks();
     plannedIssues = plannedIssues.filter((issue) => issue.number !== 1);
@@ -625,7 +627,7 @@ describe('shipCommand parallel auto runner', () => {
       { number: 1, title: 'Issue one' },
       { number: 2, title: 'Issue two' },
     ];
-    mockSelectIssuesForStage.mockImplementation((label: string) => {
+    mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
       if (label === 'shipper:planned') {
         return plannedIssues;
       }
@@ -636,7 +638,7 @@ describe('shipCommand parallel auto runner', () => {
     const child2 = new FakeChildProcess();
     mockSpawn.mockReturnValueOnce(child1 as never).mockReturnValueOnce(child2 as never);
 
-    const runPromise = shipCommand(undefined, { auto: true, merge: false, parallel: 2 });
+    const runPromise = shipCommand(repo, undefined, { auto: true, merge: false, parallel: 2 });
 
     await flushMicrotasks();
     plannedIssues = plannedIssues.filter((issue) => issue.number !== 1);
@@ -651,7 +653,7 @@ describe('shipCommand parallel auto runner', () => {
 
     expect(mockGh).toHaveBeenCalledTimes(1);
     expect(mockGh).toHaveBeenCalledWith(
-      expect.arrayContaining(['issue', 'list', '--label', 'shipper:blocked'])
+      expect.arrayContaining(['issue', 'list', '-R', repo, '--label', 'shipper:blocked'])
     );
   });
 
@@ -660,7 +662,7 @@ describe('shipCommand parallel auto runner', () => {
 
     mockSelectIssuesForStage.mockReturnValue([]);
 
-    await shipCommand(undefined, { auto: true, merge: false, parallel: undefined });
+    await shipCommand(repo, undefined, { auto: true, merge: false, parallel: undefined });
 
     expect(mockSpawn).not.toHaveBeenCalled();
     expect(mockCreateWriteStream).not.toHaveBeenCalled();
@@ -677,7 +679,7 @@ describe('shipCommand parallel auto runner', () => {
 
     mockSelectIssuesForStage.mockReturnValue([]);
 
-    await shipCommand(undefined, { auto: true, merge: false, parallel: 1 });
+    await shipCommand(repo, undefined, { auto: true, merge: false, parallel: 1 });
 
     expect(mockSpawn).not.toHaveBeenCalled();
     expect(mockCreateWriteStream).not.toHaveBeenCalled();
@@ -691,7 +693,7 @@ describe('shipCommand parallel auto runner', () => {
 
   it('fails the issue instead of crashing when the log stream errors before child exit', async () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    mockSelectIssuesForStage.mockImplementation((label: string) => {
+    mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
       if (label === 'shipper:planned') {
         return [{ number: 1, title: 'Issue one' }];
       }
@@ -715,7 +717,7 @@ describe('shipCommand parallel auto runner', () => {
       return stream;
     });
 
-    const runPromise = shipCommand(undefined, { auto: true, merge: false, parallel: 2 });
+    const runPromise = shipCommand(repo, undefined, { auto: true, merge: false, parallel: 2 });
 
     await flushMicrotasks();
     expect(child.kill).toHaveBeenCalled();
@@ -741,7 +743,7 @@ describe('shipCommand parallel auto runner', () => {
         { number: 2, title: 'Issue two' },
         { number: 3, title: 'Issue three' },
       ];
-      mockSelectIssuesForStage.mockImplementation((label: string) => {
+      mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
         if (label === 'shipper:planned') {
           return plannedIssues;
         }
@@ -752,7 +754,7 @@ describe('shipCommand parallel auto runner', () => {
       const child2 = new FakeChildProcess();
       mockSpawn.mockReturnValueOnce(child1 as never).mockReturnValueOnce(child2 as never);
 
-      const runPromise = shipCommand(undefined, { auto: true, merge: false, parallel: 2 });
+      const runPromise = shipCommand(repo, undefined, { auto: true, merge: false, parallel: 2 });
 
       await flushMicrotasks();
       process.emit(signal, signal);
@@ -769,8 +771,8 @@ describe('shipCommand parallel auto runner', () => {
       expect(child2.kill).toHaveBeenCalledWith(signal);
       expect(child1.kill).not.toHaveBeenCalledWith('SIGKILL');
       expect(child2.kill).toHaveBeenCalledWith('SIGKILL');
-      expect(mockReleaseIssueLock).not.toHaveBeenCalledWith('1');
-      expect(mockReleaseIssueLock).toHaveBeenCalledWith('2');
+      expect(mockReleaseIssueLock).not.toHaveBeenCalledWith(repo, '1');
+      expect(mockReleaseIssueLock).toHaveBeenCalledWith(repo, '2');
       child2.finish(null, 'SIGKILL');
       await flushMicrotasks();
       await runPromise;

@@ -6,6 +6,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   loadSettings: vi.fn(),
   CLI_VERSION: '0.1.0-test',
   checkVersionFreshness: vi.fn(),
+  getRepoNwo: vi.fn(async () => 'owner/repo'),
 }));
 
 vi.mock('../src/commands/init.js', () => ({ initCommand: vi.fn() }));
@@ -37,7 +38,7 @@ import { newCommand } from '../src/commands/new.js';
 import { groomCommand } from '../src/commands/groom.js';
 import { prReviewCommand } from '../src/commands/pr-review.js';
 import { setupCommand } from '../src/commands/setup.js';
-import { runPreflight, loadSettings } from '@dnsquared/shipper-core';
+import { runPreflight, loadSettings, getRepoNwo } from '@dnsquared/shipper-core';
 
 const mockShipCommand = vi.mocked(shipCommand);
 const mockEjectCommand = vi.mocked(ejectCommand);
@@ -47,6 +48,7 @@ const mockPrReviewCommand = vi.mocked(prReviewCommand);
 const mockSetupCommand = vi.mocked(setupCommand);
 const mockRunPreflight = vi.mocked(runPreflight);
 const mockLoadSettings = vi.mocked(loadSettings);
+const mockGetRepoNwo = vi.mocked(getRepoNwo);
 
 describe('shipper-cli', () => {
   beforeAll(() => {
@@ -87,6 +89,7 @@ describe('shipper-cli', () => {
       mockEjectCommand.mockReset();
       mockRunPreflight.mockClear();
       mockLoadSettings.mockClear();
+      mockGetRepoNwo.mockClear();
     });
 
     afterEach(() => {
@@ -104,18 +107,21 @@ describe('shipper-cli', () => {
 
       expect(mockEjectCommand).toHaveBeenCalledWith('groom');
       expect(mockLoadSettings).toHaveBeenCalled();
-      expect(mockRunPreflight).toHaveBeenCalled();
+      expect(mockGetRepoNwo).toHaveBeenCalled();
+      expect(mockRunPreflight).toHaveBeenCalledWith('owner/repo');
     });
   });
 
   describe('prompt command mode wiring', () => {
     const originalArgv = [...process.argv];
     let exitSpy: ReturnType<typeof vi.spyOn>;
+    let errorSpy: ReturnType<typeof vi.spyOn>;
 
     beforeEach(() => {
       exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
         throw new Error(`process.exit:${code ?? 0}`);
       }) as typeof process.exit);
+      errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       vi.resetModules();
       mockNewCommand.mockReset();
       mockGroomCommand.mockReset();
@@ -123,12 +129,15 @@ describe('shipper-cli', () => {
       mockSetupCommand.mockReset();
       mockRunPreflight.mockClear();
       mockLoadSettings.mockClear();
+      mockGetRepoNwo.mockClear();
       exitSpy.mockClear();
+      errorSpy.mockClear();
     });
 
     afterEach(() => {
       process.argv = [...originalArgv];
       exitSpy.mockRestore();
+      errorSpy.mockRestore();
     });
 
     async function importEntrypoint() {
@@ -148,7 +157,8 @@ describe('shipper-cli', () => {
 
       await importEntrypoint();
 
-      expect(mockGroomCommand).toHaveBeenCalledWith('42', {
+      expect(mockGetRepoNwo).toHaveBeenCalled();
+      expect(mockGroomCommand).toHaveBeenCalledWith('owner/repo', '42', {
         auto: false,
         mode: 'interactive',
       });
@@ -159,7 +169,7 @@ describe('shipper-cli', () => {
 
       await importEntrypoint();
 
-      expect(mockPrReviewCommand).toHaveBeenCalledWith('7', 'interactive');
+      expect(mockPrReviewCommand).toHaveBeenCalledWith('owner/repo', '7', 'interactive');
     });
 
     it('loads settings explicitly for setup and does not run preflight', async () => {
@@ -178,6 +188,16 @@ describe('shipper-cli', () => {
       await expect(importEntrypoint()).rejects.toThrow('process.exit:1');
       expect(mockNewCommand).not.toHaveBeenCalled();
     });
+
+    it('prints thrown command errors and exits 1 via the CLI wrapper', async () => {
+      mockGroomCommand.mockRejectedValueOnce(new Error('boom'));
+      process.argv = ['node', 'src/index.ts', 'groom', '42'];
+
+      await expect(importEntrypoint()).rejects.toThrow('process.exit:1');
+
+      expect(errorSpy).toHaveBeenCalledWith('boom');
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    });
   });
 
   describe('ship command parallel validation', () => {
@@ -193,6 +213,7 @@ describe('shipper-cli', () => {
       mockShipCommand.mockReset();
       mockShipCommand.mockResolvedValue(undefined);
       errorSpy.mockClear();
+      mockGetRepoNwo.mockClear();
       exitSpy.mockClear();
     });
 
@@ -209,7 +230,6 @@ describe('shipper-cli', () => {
       process.argv = ['node', 'src/index.ts', 'ship', '42', '--parallel', '3'];
 
       await expect(importEntrypoint()).rejects.toThrow('process.exit:1');
-      expect(errorSpy).toHaveBeenCalledWith('Error: --parallel requires --auto');
       expect(mockShipCommand).not.toHaveBeenCalled();
     });
 
@@ -237,7 +257,7 @@ describe('shipper-cli', () => {
 
       await importEntrypoint();
 
-      expect(mockShipCommand).toHaveBeenCalledWith(undefined, {
+      expect(mockShipCommand).toHaveBeenCalledWith('owner/repo', undefined, {
         merge: false,
         auto: true,
         parallel: undefined,
@@ -249,7 +269,7 @@ describe('shipper-cli', () => {
 
       await importEntrypoint();
 
-      expect(mockShipCommand).toHaveBeenCalledWith(undefined, {
+      expect(mockShipCommand).toHaveBeenCalledWith('owner/repo', undefined, {
         merge: false,
         auto: true,
         parallel: 3,

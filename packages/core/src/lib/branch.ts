@@ -12,12 +12,22 @@ export async function getRepoRoot(): Promise<string> {
   return stdout.trim();
 }
 
-export async function generateBranchName(issueRef: string): Promise<string> {
+export async function generateBranchName(repo: string, issueRef: string): Promise<string> {
   const num = issueRef.replace(/^#/, '');
 
   let title: string;
   try {
-    const { stdout } = await gh(['issue', 'view', num, '--json', 'title', '--jq', '.title']);
+    const { stdout } = await gh([
+      'issue',
+      'view',
+      num,
+      '-R',
+      repo,
+      '--json',
+      'title',
+      '--jq',
+      '.title',
+    ]);
     title = stdout.trim();
   } catch {
     title = '';
@@ -84,8 +94,8 @@ export async function findBranchForIssue(issueRef: string): Promise<string> {
   return branch.replace(/^origin\//, '');
 }
 
-export async function getBranchForPR(prRef: string): Promise<string> {
-  const { stdout } = await gh(['pr', 'view', prRef, '--json', 'headRefName']);
+export async function getBranchForPR(repo: string, prRef: string): Promise<string> {
+  const { stdout } = await gh(['pr', 'view', prRef, '-R', repo, '--json', 'headRefName']);
   const data: { headRefName: string } = JSON.parse(stdout);
   return data.headRefName;
 }

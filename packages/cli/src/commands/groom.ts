@@ -11,14 +11,15 @@ export interface GroomOptions {
 }
 
 async function groomOneIssue(
+  repo: string,
   issueStr: string,
   mode?: CommandMode
 ): Promise<{ success: boolean; error?: string }> {
-  const code = await withIssueLock(issueStr, () =>
+  const code = await withIssueLock(repo, issueStr, () =>
     withStageHooks(
       'groom',
       { issueNumber: issueStr },
-      async () => await runPrompt('groom', { issueRef: issueStr, mode })
+      async () => await runPrompt('groom', { repo, issueRef: issueStr, mode })
     )
   );
   return code === 0
@@ -27,6 +28,7 @@ async function groomOneIssue(
 }
 
 export async function groomCommand(
+  repo: string,
   issue?: string,
   options: GroomOptions = { auto: false }
 ): Promise<void> {
@@ -34,11 +36,11 @@ export async function groomCommand(
     const results: AutoResult[] = [];
 
     for (;;) {
-      const candidate = await autoSelectIssue('shipper:new');
+      const candidate = await autoSelectIssue(repo, 'shipper:new');
       if (!candidate) break;
 
       console.log(`\nAuto: grooming issue #${candidate.number} — ${candidate.title}`);
-      const result = await groomOneIssue(String(candidate.number), options.mode);
+      const result = await groomOneIssue(repo, String(candidate.number), options.mode);
 
       results.push({
         issue: candidate.number,
@@ -56,7 +58,7 @@ export async function groomCommand(
   }
 
   if (!issue) {
-    const selected = await autoSelectIssue('shipper:new');
+    const selected = await autoSelectIssue(repo, 'shipper:new');
     if (!selected) {
       console.error("No issues ready for grooming. Create one with 'shipper new'.");
       process.exit(1);
@@ -65,5 +67,5 @@ export async function groomCommand(
     issue = String(selected.number);
   }
 
-  process.exitCode = (await groomOneIssue(issue, options.mode)).success ? 0 : 1;
+  process.exitCode = (await groomOneIssue(repo, issue, options.mode)).success ? 0 : 1;
 }

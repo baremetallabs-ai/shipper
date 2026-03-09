@@ -4,11 +4,16 @@ import { withStageHooks } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
 import { runPrompt } from '@dnsquared/shipper-core';
 
-export async function prReviewCommand(pr?: string, mode?: CommandMode): Promise<void> {
+export async function prReviewCommand(
+  repo: string,
+  pr?: string,
+  mode?: CommandMode
+): Promise<void> {
   let issueNumber: string;
 
   if (!pr) {
     const selected = await autoSelectPrForStage(
+      repo,
       'shipper:pr-open',
       "No PRs ready for review. Run 'shipper pr open' first."
     );
@@ -18,18 +23,19 @@ export async function prReviewCommand(pr?: string, mode?: CommandMode): Promise<
     pr = selected.pr;
     issueNumber = String(selected.issue.number);
   } else {
-    const resolved = await resolveRef(pr, 'both');
+    const resolved = await resolveRef(repo, pr, 'both');
     pr = resolved.prNumber;
     issueNumber = resolved.issueNumber;
   }
 
   const code = await withIssueLock(
+    repo,
     issueNumber,
     async () =>
       await withStageHooks(
         'pr-review',
         { issueNumber },
-        async () => await runPrompt('pr_review', { issueRef: issueNumber, prRef: pr, mode })
+        async () => await runPrompt('pr_review', { repo, issueRef: issueNumber, prRef: pr, mode })
       )
   );
 

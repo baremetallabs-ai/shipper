@@ -1,15 +1,15 @@
 import { execFile } from 'node:child_process';
 import { gh } from './gh.js';
-import { getRepoNwo } from './repo.js';
 import { getSettings } from './settings.js';
 
-export async function isLockStale(issueNumber: string): Promise<boolean> {
-  const nwo = await getRepoNwo();
+export async function isLockStale(repo: string, issueNumber: string): Promise<boolean> {
   let output: string;
   try {
     const result = await gh([
       'api',
-      `repos/${nwo}/issues/${issueNumber}/timeline`,
+      '-R',
+      repo,
+      `repos/${repo}/issues/${issueNumber}/timeline`,
       '--paginate',
       '--jq',
       '.[] | select(.event == "labeled" and .label.name? == "shipper:locked") | .created_at',
@@ -42,13 +42,15 @@ export async function isLockStale(issueNumber: string): Promise<boolean> {
   return Date.now() - labeledAt > timeoutMs;
 }
 
-export async function acquireIssueLock(issueNumber: string): Promise<void> {
+export async function acquireIssueLock(repo: string, issueNumber: string): Promise<void> {
   let output: string;
   try {
     const result = await gh([
       'issue',
       'view',
       issueNumber,
+      '-R',
+      repo,
       '--json',
       'labels',
       '--jq',
@@ -57,62 +59,67 @@ export async function acquireIssueLock(issueNumber: string): Promise<void> {
     output = result.stdout.trim();
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`Error: Failed to fetch issue #${issueNumber}: ${msg}`);
-    process.exit(1);
+    throw new Error(`Failed to fetch issue #${issueNumber}: ${msg}`);
   }
 
   const labels = output ? output.split(/\r?\n/) : [];
 
   if (labels.includes('shipper:locked')) {
-    if (await isLockStale(issueNumber)) {
+    if (await isLockStale(repo, issueNumber)) {
       console.error(`Issue #${issueNumber} lock is stale — clearing.`);
-      await releaseIssueLock(issueNumber);
+      await releaseIssueLock(repo, issueNumber);
     } else {
-      console.error(
+      throw new Error(
         `Issue #${issueNumber} is locked by another shipper instance. Use 'shipper unlock ${issueNumber}' to force-release.`
       );
-      process.exit(1);
     }
   }
 
   try {
-    await gh(['issue', 'edit', issueNumber, '--add-label', 'shipper:locked']);
+    await gh(['issue', 'edit', issueNumber, '-R', repo, '--add-label', 'shipper:locked']);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`Error: Failed to acquire lock on issue #${issueNumber}: ${msg}`);
-    process.exit(1);
+    throw new Error(`Failed to acquire lock on issue #${issueNumber}: ${msg}`);
   }
 }
 
-export async function releaseIssueLock(issueNumber: string): Promise<void> {
+export async function releaseIssueLock(repo: string, issueNumber: string): Promise<void> {
   try {
-    await gh(['issue', 'edit', issueNumber, '--remove-label', 'shipper:locked']);
+    await gh(['issue', 'edit', issueNumber, '-R', repo, '--remove-label', 'shipper:locked']);
   } catch {
     // Idempotent — ignore errors if label already removed
   }
 }
 
-function releaseIssueLockWithoutAwait(issueNumber: string): void {
-  execFile('gh', ['issue', 'edit', issueNumber, '--remove-label', 'shipper:locked'], () => {
-    // Idempotent — ignore errors if label already removed
-  });
+function releaseIssueLockWithoutAwait(repo: string, issueNumber: string): void {
+  execFile(
+    'gh',
+    ['issue', 'edit', issueNumber, '-R', repo, '--remove-label', 'shipper:locked'],
+    () => {
+      // Idempotent — ignore errors if label already removed
+    }
+  );
 }
 
-export async function withIssueLock<T>(issueNumber: string, fn: () => Promise<T>): Promise<T> {
+export async function withIssueLock<T>(
+  repo: string,
+  issueNumber: string,
+  fn: () => Promise<T>
+): Promise<T> {
   if (process.env.SHIPPER_LOCK_HELD === issueNumber) {
     return await fn();
   }
 
-  await acquireIssueLock(issueNumber);
+  await acquireIssueLock(repo, issueNumber);
   process.env.SHIPPER_LOCK_HELD = issueNumber;
 
   const cleanup = async () => {
-    await releaseIssueLock(issueNumber);
+    await releaseIssueLock(repo, issueNumber);
     delete process.env.SHIPPER_LOCK_HELD;
   };
 
   const cleanupWithoutAwait = () => {
-    releaseIssueLockWithoutAwait(issueNumber);
+    releaseIssueLockWithoutAwait(repo, issueNumber);
     delete process.env.SHIPPER_LOCK_HELD;
   };
 
@@ -120,8 +127,8 @@ export async function withIssueLock<T>(issueNumber: string, fn: () => Promise<T>
     cleanupWithoutAwait();
   };
 
-  // process.exit() bypasses finally blocks, so keep a best-effort fallback
-  // that fires off the gh subprocess before Node finishes exiting.
+  // CLI-boundary exits and signal-driven shutdown still bypass finally blocks,
+  // so keep a best-effort fallback that fires off the gh subprocess first.
   const onExit = () => {
     cleanupWithoutAwait();
   };

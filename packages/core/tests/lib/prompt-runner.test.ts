@@ -144,10 +144,30 @@ describe('runPrompt', () => {
     fetchPRMock.mockResolvedValueOnce('pr details');
     mockSpawnResult();
 
-    await runPrompt('test', { issueRef: '42', prRef: '5' });
+    await runPrompt('test', { repo: 'owner/repo', issueRef: '42', prRef: '5' });
 
     const args = spawnMock.mock.calls[0][1] as string[];
     expect(args).toContain('issue details\n\n---\n\npr details');
+    expect(fetchIssueMock).toHaveBeenCalledWith('owner/repo', '42');
+    expect(fetchPRMock).toHaveBeenCalledWith('owner/repo', '5');
+  });
+
+  it('throws when appended issue or PR context is requested without a repo', async () => {
+    readFileMock.mockResolvedValueOnce(
+      [
+        '---',
+        'cmd: claude',
+        'append-issue: true',
+        'append-pr: true',
+        '---',
+        '',
+        'prompt body',
+      ].join('\n')
+    );
+
+    await expect(runPrompt('test', { issueRef: '42', prRef: '5' })).rejects.toThrow(
+      'Prompt "test" requires opts.repo when append-issue is enabled.'
+    );
   });
 
   it('returns 1 when the resolved agent does not match frontmatter', async () => {

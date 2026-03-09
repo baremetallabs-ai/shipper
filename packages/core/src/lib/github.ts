@@ -2,7 +2,6 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { gh } from './gh.js';
 import { isLockStale, releaseIssueLock } from './lock.js';
-import { getRepoNwo } from './repo.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -53,7 +52,7 @@ export interface ResolvedRefBoth extends ResolvedRef {
   prNumber: string;
 }
 
-export async function resolveBaseBranch(configured?: string): Promise<string> {
+export async function resolveBaseBranch(repo: string, configured?: string): Promise<string> {
   if (configured) {
     let result: string;
     try {
@@ -63,8 +62,7 @@ export async function resolveBaseBranch(configured?: string): Promise<string> {
       result = output.stdout;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`Error: Failed to check remote branch '${configured}': ${msg}`);
-      process.exit(1);
+      throw new Error(`Failed to check remote branch '${configured}': ${msg}`);
     }
     // ls-remote uses pattern matching, so verify the exact ref is present
     const exactRef = `refs/heads/${configured}`;
@@ -73,10 +71,7 @@ export async function resolveBaseBranch(configured?: string): Promise<string> {
       .split('\n')
       .some((line) => line.endsWith(`\t${exactRef}`));
     if (!found) {
-      console.error(
-        `Error: configured defaultBaseBranch '${configured}' does not exist on remote.`
-      );
-      process.exit(1);
+      throw new Error(`configured defaultBaseBranch '${configured}' does not exist on remote.`);
     }
     return configured;
   }
@@ -85,6 +80,8 @@ export async function resolveBaseBranch(configured?: string): Promise<string> {
     const result = await gh([
       'repo',
       'view',
+      '-R',
+      repo,
       '--json',
       'defaultBranchRef',
       '-q',
@@ -93,53 +90,53 @@ export async function resolveBaseBranch(configured?: string): Promise<string> {
     output = result.stdout;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`Error: Failed to auto-detect default base branch: ${msg}`);
-    process.exit(1);
+    throw new Error(`Failed to auto-detect default base branch: ${msg}`);
   }
   const branch = output.trim();
   if (!branch) {
-    console.error('Error: Failed to auto-detect default base branch: received empty branch name.');
-    process.exit(1);
+    throw new Error('Failed to auto-detect default base branch: received empty branch name.');
   }
   return branch;
 }
 
-export async function fetchIssue(ref: string): Promise<string> {
+export async function fetchIssue(repo: string, ref: string): Promise<string> {
   let json: string;
   try {
     const result = await gh([
       'issue',
       'view',
       ref,
+      '-R',
+      repo,
       '--json',
       'number,title,state,labels,body,comments,author,createdAt',
     ]);
     json = result.stdout;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`Error: Failed to fetch issue ${ref}: ${msg}`);
-    process.exit(1);
+    throw new Error(`Failed to fetch issue ${ref}: ${msg}`);
   }
 
   const data: IssueData = JSON.parse(json);
   return formatIssue(data);
 }
 
-export async function fetchPR(ref: string): Promise<string> {
+export async function fetchPR(repo: string, ref: string): Promise<string> {
   let json: string;
   try {
     const result = await gh([
       'pr',
       'view',
       ref,
+      '-R',
+      repo,
       '--json',
       'number,title,state,labels,body,comments,author,createdAt,headRefName,baseRefName,reviews',
     ]);
     json = result.stdout;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`Error: Failed to fetch PR ${ref}: ${msg}`);
-    process.exit(1);
+    throw new Error(`Failed to fetch PR ${ref}: ${msg}`);
   }
 
   const data: PRData = JSON.parse(json);
@@ -167,11 +164,16 @@ export function formatIssue(data: IssueData): string {
   return lines.join('\n');
 }
 
-export async function tryResolvePrForIssue(issueNumber: number): Promise<string | undefined> {
+export async function tryResolvePrForIssue(
+  repo: string,
+  issueNumber: number
+): Promise<string | undefined> {
   try {
     const result = await gh([
       'pr',
       'list',
+      '-R',
+      repo,
       '--state',
       'open',
       '--json',
@@ -257,6 +259,7 @@ export function sortIssuesByLabelTime(
 }
 
 export async function selectIssuesForStage(
+  repo: string,
   label: string,
   staleLocked?: Set<number>
 ): Promise<{ number: number; title: string }[]> {
@@ -270,6 +273,8 @@ export async function selectIssuesForStage(
     const result = await gh([
       'issue',
       'list',
+      '-R',
+      repo,
       '--label',
       label,
       '--state',
@@ -292,6 +297,8 @@ export async function selectIssuesForStage(
     const result = await gh([
       'issue',
       'list',
+      '-R',
+      repo,
       '--label',
       label,
       '--label',
@@ -307,7 +314,7 @@ export async function selectIssuesForStage(
     const lockedOutput = result.stdout.trim();
     const lockedIssues = JSON.parse(lockedOutput) as { number: number; title: string }[];
     for (const issue of lockedIssues) {
-      if (await isLockStale(String(issue.number))) {
+      if (await isLockStale(repo, String(issue.number))) {
         issues.push(issue);
         staleLocked?.add(issue.number);
       }
@@ -320,14 +327,15 @@ export async function selectIssuesForStage(
     return issues;
   }
 
-  const nwo = await getRepoNwo();
   const timelinesByIssue = new Map<number, TimelineLabelEvent[]>();
 
   for (const issue of issues) {
     try {
       const result = await gh([
         'api',
-        `repos/${nwo}/issues/${issue.number}/timeline`,
+        '-R',
+        repo,
+        `repos/${repo}/issues/${issue.number}/timeline`,
         '--paginate',
         '--jq',
         '.[] | select(.event == "labeled") | {event, label, created_at}',
@@ -346,63 +354,68 @@ export async function selectIssuesForStage(
 }
 
 export async function clearStaleLockIfNeeded(
+  repo: string,
   issueNumber: number,
   staleLocked: Set<number>
 ): Promise<void> {
   if (staleLocked.has(issueNumber)) {
     console.error(`Issue #${issueNumber} lock is stale — clearing.`);
-    await releaseIssueLock(String(issueNumber));
+    await releaseIssueLock(repo, String(issueNumber));
   }
 }
 
 export async function autoSelectIssue(
+  repo: string,
   label: string
 ): Promise<{ number: number; title: string } | null> {
   const staleLocked = new Set<number>();
-  const issues = await selectIssuesForStage(label, staleLocked);
+  const issues = await selectIssuesForStage(repo, label, staleLocked);
   const candidate = issues[0] ?? null;
   if (candidate) {
-    await clearStaleLockIfNeeded(candidate.number, staleLocked);
+    await clearStaleLockIfNeeded(repo, candidate.number, staleLocked);
   }
   return candidate;
 }
 
 export async function autoSelectPrForStage(
+  repo: string,
   label: string,
   emptyMessage: string
 ): Promise<{ pr: string; issue: { number: number; title: string } }> {
   const staleLocked = new Set<number>();
-  const issues = await selectIssuesForStage(label, staleLocked);
+  const issues = await selectIssuesForStage(repo, label, staleLocked);
   for (const issue of issues) {
-    const resolved = await tryResolvePrForIssue(issue.number);
+    const resolved = await tryResolvePrForIssue(repo, issue.number);
     if (resolved) {
-      await clearStaleLockIfNeeded(issue.number, staleLocked);
+      await clearStaleLockIfNeeded(repo, issue.number, staleLocked);
       return { pr: resolved, issue };
     }
   }
-  console.error(emptyMessage);
-  process.exit(1);
+  throw new Error(emptyMessage);
 }
 
-export function resolveRef(ref: string, need: 'both'): Promise<ResolvedRefBoth>;
+export function resolveRef(repo: string, ref: string, need: 'both'): Promise<ResolvedRefBoth>;
 // eslint-disable-next-line no-redeclare
-export function resolveRef(ref: string, need: 'issue' | 'pr'): Promise<ResolvedRef>;
+export function resolveRef(repo: string, ref: string, need: 'issue' | 'pr'): Promise<ResolvedRef>;
 // eslint-disable-next-line no-redeclare
-export async function resolveRef(ref: string, need: 'issue' | 'pr' | 'both'): Promise<ResolvedRef> {
+export async function resolveRef(
+  repo: string,
+  ref: string,
+  need: 'issue' | 'pr' | 'both'
+): Promise<ResolvedRef> {
   // Try as PR first — GitHub treats PRs as issues, so `gh issue view` succeeds
   // for PR numbers. Checking `gh pr view` first avoids misclassifying PRs.
   try {
-    const result = await gh(['pr', 'view', ref, '--json', 'number,body']);
+    const result = await gh(['pr', 'view', ref, '-R', repo, '--json', 'number,body']);
     const output = result.stdout.trim();
     const prData = JSON.parse(output) as { number: number; body: string };
     const prNumber = String(prData.number);
     const match = /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/i.exec(prData.body);
     const linkedIssue = match?.[1];
     if (!linkedIssue && (need === 'issue' || need === 'both')) {
-      console.error(
+      throw new Error(
         `PR #${ref} has no linked issue. Ensure the PR body references an issue (e.g., 'Closes #42').`
       );
-      process.exit(1);
     }
     return { issueNumber: linkedIssue ?? ref, prNumber };
   } catch {
@@ -410,21 +423,18 @@ export async function resolveRef(ref: string, need: 'issue' | 'pr' | 'both'): Pr
   }
 
   try {
-    await gh(['issue', 'view', ref, '--json', 'number']);
+    await gh(['issue', 'view', ref, '-R', repo, '--json', 'number']);
     // ref is an issue number
     let prNumber: string | undefined;
     if (need === 'pr' || need === 'both') {
-      prNumber = await tryResolvePrForIssue(Number(ref));
+      prNumber = await tryResolvePrForIssue(repo, Number(ref));
       if (!prNumber) {
-        console.error(`No open PR found for issue #${ref}. Run 'shipper pr open ${ref}' first.`);
-        process.exit(1);
+        throw new Error(`No open PR found for issue #${ref}. Run 'shipper pr open ${ref}' first.`);
       }
     }
     return { issueNumber: ref, prNumber };
   } catch {
     // Not an issue either
   }
-
-  console.error(`Could not find issue or PR matching '${ref}'.`);
-  process.exit(1);
+  throw new Error(`Could not find issue or PR matching '${ref}'.`);
 }

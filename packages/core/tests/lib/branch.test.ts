@@ -23,6 +23,7 @@ vi.mock('node:child_process', () => ({
 }));
 
 const { generateBranchName } = await import('../../src/lib/branch.js');
+const repo = 'owner/repo';
 
 beforeEach(() => {
   execFileMock.mockReset();
@@ -38,12 +39,18 @@ beforeEach(() => {
 
 describe('generateBranchName', () => {
   it('generates a slug from the issue title', async () => {
-    const result = await generateBranchName('42');
+    const result = await generateBranchName(repo, '42');
     expect(result).toBe('shipper/42-add-login-flow');
+    expect(execFileMock).toHaveBeenCalledWith(
+      'gh',
+      ['issue', 'view', '42', '-R', repo, '--json', 'title', '--jq', '.title'],
+      expect.objectContaining({ encoding: 'utf-8' }),
+      expect.any(Function)
+    );
   });
 
   it('strips leading # from issue ref', async () => {
-    const result = await generateBranchName('#42');
+    const result = await generateBranchName(repo, '#42');
     expect(result).toBe('shipper/42-add-login-flow');
   });
 
@@ -53,7 +60,7 @@ describe('generateBranchName', () => {
       cb(null, 'Fix: login & signup (v2)!!!\n', '');
     });
 
-    const result = await generateBranchName('10');
+    const result = await generateBranchName(repo, '10');
     expect(result).toBe('shipper/10-fix-login-signup-v2');
   });
 
@@ -63,7 +70,7 @@ describe('generateBranchName', () => {
       cb(null, 'a'.repeat(100) + '\n', '');
     });
 
-    const result = await generateBranchName('7');
+    const result = await generateBranchName(repo, '7');
     expect(result.length).toBeLessThanOrEqual(60); // "shipper/7-" (10) + 50-char slug max
   });
 
@@ -73,7 +80,7 @@ describe('generateBranchName', () => {
       cb(Object.assign(new Error('gh failed'), { stderr: 'HTTP 404 not found' }));
     });
 
-    const result = await generateBranchName('99');
+    const result = await generateBranchName(repo, '99');
     expect(result).toBe('shipper/99-implement');
   });
 });
