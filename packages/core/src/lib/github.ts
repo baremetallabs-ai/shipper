@@ -206,7 +206,7 @@ export async function tryResolvePrForIssue(
 export function formatPR(data: PRData): string {
   const labels = data.labels.map((l) => l.name).join(', ') || 'none';
   const parts: string[] = [
-    `<pr number="${data.number}" title="${escapeAttr(data.title)}" state="${data.state}" labels="${escapeAttr(labels)}" author="${data.author.login}" created="${data.createdAt}" head="${data.headRefName}" base="${data.baseRefName}">`,
+    `<pr number="${data.number}" title="${escapeAttr(data.title)}" state="${data.state}" labels="${escapeAttr(labels)}" author="${data.author.login}" created="${data.createdAt}" head="${escapeAttr(data.headRefName)}" base="${escapeAttr(data.baseRefName)}">`,
   ];
 
   parts.push(data.body ? `<body>\n${data.body}\n</body>` : '<body />');
@@ -215,7 +215,9 @@ export function formatPR(data: PRData): string {
     parts.push('<reviews>');
     for (const r of data.reviews) {
       parts.push(
-        `<review author="${r.author.login}" state="${r.state}" date="${r.submittedAt}">\n${r.body || ''}\n</review>`
+        r.body
+          ? `<review author="${r.author.login}" state="${r.state}" date="${r.submittedAt}">\n${r.body}\n</review>`
+          : `<review author="${r.author.login}" state="${r.state}" date="${r.submittedAt}"></review>`
       );
     }
     parts.push('</reviews>');
