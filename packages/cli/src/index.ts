@@ -1,7 +1,7 @@
-import { Command, CommanderError } from 'commander';
+import { Command, CommanderError, Option } from 'commander';
 import { writeSync } from 'node:fs';
 import { runPreflight } from '@dnsquared/shipper-core';
-import { loadSettings } from '@dnsquared/shipper-core';
+import { loadSettings, type CommandMode } from '@dnsquared/shipper-core';
 import { CLI_VERSION, checkVersionFreshness } from '@dnsquared/shipper-core';
 import { initCommand } from './commands/init.js';
 import { newCommand } from './commands/new.js';
@@ -24,6 +24,14 @@ import { issueListCommand } from './commands/issue-list.js';
 import { setupCommand } from './commands/setup.js';
 
 const program = new Command();
+
+function addModeOption(command: Command): Command {
+  return command.addOption(
+    new Option('--mode <mode>', 'execution mode: headless, interactive, or default')
+      .choices(['headless', 'interactive', 'default'])
+      .default('default')
+  );
+}
 
 program.configureOutput({
   outputError: (str, write) => {
@@ -54,21 +62,25 @@ program
     await initCommand(options);
   });
 
-program
-  .command('setup [words...]')
-  .description('Configure repository settings with an agent')
-  .action(async (words: string[]) => {
-    await setupCommand(words);
-  });
+addModeOption(
+  program
+    .command('setup [words...]')
+    .description('Configure repository settings with an agent')
+    .action(async (words: string[], options: { mode: string }) => {
+      await loadSettings();
+      await setupCommand(words, { mode: options.mode as CommandMode });
+    })
+);
 
-program
-  .command('new')
-  .description('Create a new issue from a pitch')
-  .argument('<pitch...>', 'your idea for the new issue')
-  .option('--headless', 'skip clarifying questions and create issue directly', false)
-  .action(async (pitch: string[], options: { headless: boolean }) => {
-    await newCommand(pitch, options);
-  });
+addModeOption(
+  program
+    .command('new')
+    .description('Create a new issue from a pitch')
+    .argument('<pitch...>', 'your idea for the new issue')
+    .action(async (pitch: string[], options: { mode: string }) => {
+      await newCommand(pitch, { mode: options.mode as CommandMode });
+    })
+);
 
 program
   .command('adopt')
@@ -141,42 +153,50 @@ program
     }
   );
 
-program
-  .command('groom')
-  .description('Groom an existing issue')
-  .argument('[issue]', 'issue number or URL')
-  .option('--auto', 'groom all eligible shipper:new issues in sequence', false)
-  .action(async (issue: string | undefined, options: { auto: boolean }) => {
-    if (options.auto && issue) {
-      console.error('Error: --auto and an explicit issue number are mutually exclusive.');
-      process.exit(1);
-    }
-    await groomCommand(issue, options);
-  });
+addModeOption(
+  program
+    .command('groom')
+    .description('Groom an existing issue')
+    .argument('[issue]', 'issue number or URL')
+    .option('--auto', 'groom all eligible shipper:new issues in sequence', false)
+    .action(async (issue: string | undefined, options: { auto: boolean; mode: string }) => {
+      if (options.auto && issue) {
+        console.error('Error: --auto and an explicit issue number are mutually exclusive.');
+        process.exit(1);
+      }
+      await groomCommand(issue, { auto: options.auto, mode: options.mode as CommandMode });
+    })
+);
 
-program
-  .command('design')
-  .description('Run technical design review on an issue')
-  .argument('[issue]', 'issue number or URL')
-  .action(async (issue?: string) => {
-    await designCommand(issue);
-  });
+addModeOption(
+  program
+    .command('design')
+    .description('Run technical design review on an issue')
+    .argument('[issue]', 'issue number or URL')
+    .action(async (issue: string | undefined, options: { mode: string }) => {
+      await designCommand(issue, options.mode as CommandMode);
+    })
+);
 
-program
-  .command('plan')
-  .description('Create an implementation plan for an issue')
-  .argument('[issue]', 'issue number or URL')
-  .action(async (issue?: string) => {
-    await planCommand(issue);
-  });
+addModeOption(
+  program
+    .command('plan')
+    .description('Create an implementation plan for an issue')
+    .argument('[issue]', 'issue number or URL')
+    .action(async (issue: string | undefined, options: { mode: string }) => {
+      await planCommand(issue, options.mode as CommandMode);
+    })
+);
 
-program
-  .command('implement')
-  .description('Implement an issue in a worktree')
-  .argument('[issue]', 'issue number or URL')
-  .action(async (issue?: string) => {
-    await implementCommand(issue);
-  });
+addModeOption(
+  program
+    .command('implement')
+    .description('Implement an issue in a worktree')
+    .argument('[issue]', 'issue number or URL')
+    .action(async (issue: string | undefined, options: { mode: string }) => {
+      await implementCommand(issue, options.mode as CommandMode);
+    })
+);
 
 program
   .command('eject')
@@ -196,13 +216,15 @@ program
     await resetCommand(issue, opts);
   });
 
-program
-  .command('unblock')
-  .description('Check if a blocked issue can proceed')
-  .argument('<issue>', 'issue number')
-  .action(async (issue: string) => {
-    await unblockCommand(issue);
-  });
+addModeOption(
+  program
+    .command('unblock')
+    .description('Check if a blocked issue can proceed')
+    .argument('<issue>', 'issue number')
+    .action(async (issue: string, options: { mode: string }) => {
+      await unblockCommand(issue, options.mode as CommandMode);
+    })
+);
 
 program
   .command('unlock')
@@ -224,26 +246,35 @@ issue
 
 const pr = program.command('pr').description('Pull request commands');
 
-pr.command('review')
-  .description('Review a pull request')
-  .argument('[pr]', 'PR number or URL')
-  .action(async (prArg?: string) => {
-    await prReviewCommand(prArg);
-  });
+addModeOption(
+  pr
+    .command('review')
+    .description('Review a pull request')
+    .argument('[pr]', 'PR number or URL')
+    .action(async (prArg: string | undefined, options: { mode: string }) => {
+      await prReviewCommand(prArg, options.mode as CommandMode);
+    })
+);
 
-pr.command('open')
-  .description('Open a pull request for an implemented issue')
-  .argument('[issue]', 'issue number or URL')
-  .action(async (issue?: string) => {
-    await prOpenCommand(issue);
-  });
+addModeOption(
+  pr
+    .command('open')
+    .description('Open a pull request for an implemented issue')
+    .argument('[issue]', 'issue number or URL')
+    .action(async (issue: string | undefined, options: { mode: string }) => {
+      await prOpenCommand(issue, options.mode as CommandMode);
+    })
+);
 
-pr.command('remediate')
-  .description('Remediate a pull request after review feedback')
-  .argument('[pr]', 'PR number or URL')
-  .action(async (prArg?: string) => {
-    await prRemediateCommand(prArg);
-  });
+addModeOption(
+  pr
+    .command('remediate')
+    .description('Remediate a pull request after review feedback')
+    .argument('[pr]', 'PR number or URL')
+    .action(async (prArg: string | undefined, options: { mode: string }) => {
+      await prRemediateCommand(prArg, options.mode as CommandMode);
+    })
+);
 
 program
   .command('merge')

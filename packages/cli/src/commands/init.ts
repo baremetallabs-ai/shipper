@@ -32,12 +32,19 @@ const LABELS = [
 
 const VALID_AGENTS = ['claude', 'codex'] as const;
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function getStoredAgent(): string | undefined {
   const basePath = path.resolve('.shipper', 'settings.json');
   const localPath = path.resolve('.shipper', 'settings.local.json');
   for (const filepath of [localPath, basePath]) {
     try {
       const data = JSON.parse(readFileSync(filepath, 'utf-8')) as Record<string, unknown>;
+      const commands = isPlainObject(data.commands) ? data.commands : undefined;
+      const commandDefault = isPlainObject(commands?.default) ? commands.default : undefined;
+      if (typeof commandDefault?.agent === 'string') return commandDefault.agent;
       const agents = data.agents as Record<string, unknown> | undefined;
       if (agents?.default && typeof agents.default === 'string') return agents.default;
       if (typeof data.agent === 'string' && data.agent) return data.agent;
@@ -113,15 +120,61 @@ export async function initCommand(options: { agent?: string }) {
 
   // Write settings.json (merge with existing if present)
   const settingsPath = path.resolve('.shipper', 'settings.json');
-  let merged = { ...DEFAULTS };
+  let merged: Record<string, unknown> = {
+    ...DEFAULTS,
+    commands: { default: { ...DEFAULTS.commands.default } },
+    hooks: { ...DEFAULTS.hooks },
+  };
   let existingAgent: string | undefined;
   if (existsSync(settingsPath)) {
     try {
       const existing = JSON.parse(readFileSync(settingsPath, 'utf-8')) as Record<string, unknown>;
-      const existingAgents = existing.agents as Record<string, unknown> | undefined;
+      const existingCommands = isPlainObject(existing.commands) ? existing.commands : {};
+      const existingCommandDefault = isPlainObject(existingCommands.default)
+        ? existingCommands.default
+        : {};
+      const existingAgents = isPlainObject(existing.agents) ? existing.agents : {};
+      const existingHeadless = isPlainObject(existing.headless) ? existing.headless : {};
+      const migratedCommands: Record<string, unknown> = {
+        ...existingCommands,
+        default: {
+          ...DEFAULTS.commands.default,
+          ...existingCommandDefault,
+        },
+      };
+
+      if (typeof existingAgents.default === 'string') {
+        migratedCommands.default = {
+          ...(isPlainObject(migratedCommands.default) ? migratedCommands.default : {}),
+          agent: existingAgents.default,
+        };
+      }
+
+      for (const [step, stepAgent] of Object.entries(existingAgents)) {
+        if (step === 'default' || typeof stepAgent !== 'string') continue;
+        const stepConfig = isPlainObject(migratedCommands[step]) ? migratedCommands[step] : {};
+        migratedCommands[step] = { ...stepConfig, agent: stepAgent };
+      }
+
+      for (const [step, enabled] of Object.entries(existingHeadless)) {
+        if (enabled !== true) continue;
+        const stepConfig = isPlainObject(migratedCommands[step]) ? migratedCommands[step] : {};
+        migratedCommands[step] = { ...stepConfig, mode: 'headless' };
+      }
+
       existingAgent =
-        (existingAgents?.default as string | undefined) ?? (existing.agent as string | undefined);
-      merged = { ...DEFAULTS, ...existing };
+        (existingCommandDefault.agent as string | undefined) ??
+        (existingAgents.default as string | undefined) ??
+        (existing.agent as string | undefined);
+      merged = {
+        ...DEFAULTS,
+        ...existing,
+        commands: migratedCommands,
+        hooks: {
+          ...DEFAULTS.hooks,
+          ...(isPlainObject(existing.hooks) ? existing.hooks : {}),
+        },
+      };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`Error: Malformed JSON in ${settingsPath}: ${message}`);
@@ -134,13 +187,16 @@ export async function initCommand(options: { agent?: string }) {
     console.log(`Switching agent from ${existingAgent} to ${agent}`);
   }
 
-  const existingAgentsObj =
-    typeof merged.agents === 'object' && merged.agents !== null && !Array.isArray(merged.agents)
-      ? merged.agents
-      : {};
-  merged.agents = { ...existingAgentsObj, default: agent as 'claude' | 'codex' };
-  delete (merged as Record<string, unknown>).agent;
-  (merged as Record<string, unknown>).cliVersion = CLI_VERSION;
+  const mergedCommands = isPlainObject(merged.commands) ? merged.commands : {};
+  const mergedDefaultCommand = isPlainObject(mergedCommands.default) ? mergedCommands.default : {};
+  merged.commands = {
+    ...mergedCommands,
+    default: { ...mergedDefaultCommand, agent: agent as 'claude' | 'codex' },
+  };
+  delete merged.agent;
+  delete merged.agents;
+  delete merged.headless;
+  merged.cliVersion = CLI_VERSION;
   writeFileSync(settingsPath, JSON.stringify(merged, null, 2) + '\n');
   console.log('Wrote .shipper/settings.json with default settings:');
   for (const [key, value] of Object.entries(DEFAULTS)) {

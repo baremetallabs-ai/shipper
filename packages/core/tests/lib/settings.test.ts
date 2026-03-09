@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import path from 'node:path';
 
 const readFileMock = vi.fn();
@@ -13,13 +13,8 @@ const exitMock = vi.spyOn(process, 'exit').mockImplementation((() => {
 const stderrMock = vi.spyOn(console, 'error').mockImplementation(() => {});
 const warnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-beforeEach(() => {
-  vi.resetModules();
-  readFileMock.mockReset();
-  exitMock.mockClear();
-  stderrMock.mockClear();
-  warnMock.mockClear();
-});
+const settingsPath = path.resolve('.shipper', 'settings.json');
+const localPath = path.resolve('.shipper', 'settings.local.json');
 
 function enoent(filepath: string): Error {
   const err = new Error(`ENOENT: no such file or directory, open '${filepath}'`) as Error & {
@@ -29,67 +24,116 @@ function enoent(filepath: string): Error {
   return err;
 }
 
-const settingsPath = path.resolve('.shipper', 'settings.json');
-const localPath = path.resolve('.shipper', 'settings.local.json');
-
 async function loadModule() {
   return await import('../../src/lib/settings.js');
 }
 
+beforeEach(() => {
+  vi.resetModules();
+  readFileMock.mockReset();
+  exitMock.mockClear();
+  stderrMock.mockClear();
+  warnMock.mockClear();
+});
+
 describe('loadSettings', () => {
-  it('returns defaults when no files exist', async () => {
+  it('returns commands-based defaults when no files exist', async () => {
     readFileMock.mockImplementation(async (p: string) => {
       throw enoent(p);
     });
+
     const { loadSettings, getSettings } = await loadModule();
     await loadSettings();
+
     expect(getSettings()).toEqual({
       prReviewWait: { mode: 'checks', timeoutMinutes: 15 },
       lockTimeoutMinutes: 30,
-      agents: { default: 'claude' },
-      headless: {},
+      commands: { default: { agent: 'claude' } },
       hooks: {},
     });
   });
 
-  it('loads base settings file with prReviewWait', async () => {
+  it('migrates legacy agents and headless into commands', async () => {
     readFileMock.mockImplementation(async (p: string) => {
-      if (p === settingsPath) return '{"prReviewWait": {"mode": "timer", "timeoutMinutes": 20}}';
+      if (p === settingsPath) {
+        return JSON.stringify({
+          agents: { default: 'claude', groom: 'codex' },
+          headless: { new: true },
+        });
+      }
       throw enoent(p);
     });
+
     const { loadSettings, getSettings } = await loadModule();
     await loadSettings();
-    expect(getSettings().prReviewWait).toEqual({ mode: 'timer', timeoutMinutes: 20 });
+
+    expect(getSettings().commands).toEqual({
+      default: { agent: 'claude' },
+      groom: { agent: 'codex' },
+      new: { mode: 'headless' },
+    });
   });
 
-  it('local overrides base', async () => {
+  it('deep-merges commands from base and local settings', async () => {
     readFileMock.mockImplementation(async (p: string) => {
-      if (p === settingsPath) return '{"prReviewWait": {"mode": "timer", "timeoutMinutes": 20}}';
-      if (p === localPath) return '{"prReviewWait": {"mode": "checks", "timeoutMinutes": 5}}';
+      if (p === settingsPath) {
+        return JSON.stringify({
+          commands: {
+            default: { agent: 'claude' },
+            groom: { agent: 'codex' },
+          },
+        });
+      }
+      if (p === localPath) {
+        return JSON.stringify({
+          commands: {
+            default: { mode: 'interactive' },
+            groom: { mode: 'headless' },
+          },
+        });
+      }
       throw enoent(p);
     });
+
     const { loadSettings, getSettings } = await loadModule();
     await loadSettings();
-    expect(getSettings().prReviewWait).toEqual({ mode: 'checks', timeoutMinutes: 5 });
+
+    expect(getSettings().commands).toEqual({
+      default: { agent: 'claude', mode: 'interactive' },
+      groom: { agent: 'codex', mode: 'headless' },
+    });
   });
 
-  it('preserves existing keys over defaults', async () => {
+  it('warns on unknown settings.commands keys', async () => {
     readFileMock.mockImplementation(async (p: string) => {
-      if (p === settingsPath) return '{"prReviewWait": {"mode": "timer", "timeoutMinutes": 45}}';
+      if (p === settingsPath) {
+        return JSON.stringify({
+          commands: {
+            default: { agent: 'claude' },
+            banana: { mode: 'headless' },
+          },
+        });
+      }
       throw enoent(p);
     });
-    const { loadSettings, getSettings } = await loadModule();
+
+    const { loadSettings } = await loadModule();
     await loadSettings();
-    expect(getSettings().prReviewWait).toEqual({ mode: 'timer', timeoutMinutes: 45 });
+
+    expect(warnMock).toHaveBeenCalledWith(
+      'Warning: Unknown command "banana" in settings.commands.'
+    );
   });
 
-  it('exits with error on malformed JSON', async () => {
+  it('exits with an error on malformed JSON', async () => {
     readFileMock.mockImplementation(async (p: string) => {
       if (p === settingsPath) return '{bad json';
       throw enoent(p);
     });
+
     const { loadSettings } = await loadModule();
     await expect(loadSettings()).rejects.toThrow('process.exit');
+
     expect(exitMock).toHaveBeenCalledWith(1);
     expect(stderrMock).toHaveBeenCalledWith(
       expect.stringContaining(`Malformed JSON in ${settingsPath}`)
@@ -117,8 +161,7 @@ describe('getSettings', () => {
     expect(getSettings()).toEqual({
       prReviewWait: { mode: 'checks', timeoutMinutes: 15 },
       lockTimeoutMinutes: 30,
-      agents: { default: 'claude' },
-      headless: {},
+      commands: { default: { agent: 'claude' } },
       hooks: {},
     });
   });
@@ -191,131 +234,93 @@ describe('lockTimeoutMinutes', () => {
 });
 
 describe('hooks settings', () => {
-  it('loads hooks.postMerge from settings', async () => {
+  it('loads hooks from settings', async () => {
     readFileMock.mockImplementation(async (p: string) => {
-      if (p === settingsPath) return '{"hooks": {"postMerge": "echo done"}}';
+      if (p === settingsPath) return '{"hooks": {"worktreeSetup": "echo done"}}';
       throw enoent(p);
     });
     const { loadSettings, getSettings } = await loadModule();
     await loadSettings();
-    expect(getSettings().hooks.postMerge).toBe('echo done');
+    expect(getSettings().hooks.worktreeSetup).toBe('echo done');
   });
 
   it('local hooks override base hooks', async () => {
     readFileMock.mockImplementation(async (p: string) => {
-      if (p === settingsPath) return '{"hooks": {"postMerge": "echo base"}}';
-      if (p === localPath) return '{"hooks": {"postMerge": "echo local"}}';
+      if (p === settingsPath) return '{"hooks": {"worktreeSetup": "echo base"}}';
+      if (p === localPath) return '{"hooks": {"worktreeSetup": "echo local"}}';
       throw enoent(p);
     });
     const { loadSettings, getSettings } = await loadModule();
     await loadSettings();
-    expect(getSettings().hooks.postMerge).toBe('echo local');
-  });
-});
-
-describe('agents settings', () => {
-  it('auto-migrates legacy agent string to agents.default', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
-      if (p === settingsPath) return '{"agent": "codex"}';
-      throw enoent(p);
-    });
-    const { loadSettings, getSettings } = await loadModule();
-    await loadSettings();
-    expect(getSettings().agents.default).toBe('codex');
-    expect((getSettings() as Record<string, unknown>).agent).toBeUndefined();
-  });
-
-  it('deep-merges agents from base and local', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
-      if (p === settingsPath) return '{"agents": {"default": "claude", "implement": "codex"}}';
-      if (p === localPath) return '{"agents": {"implement": "claude"}}';
-      throw enoent(p);
-    });
-    const { loadSettings, getSettings } = await loadModule();
-    await loadSettings();
-    expect(getSettings().agents).toEqual({ default: 'claude', implement: 'claude' });
-  });
-
-  it('local agents do not clobber base agents.default', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
-      if (p === settingsPath) return '{"agents": {"default": "claude"}}';
-      if (p === localPath) return '{"agents": {"implement": "codex"}}';
-      throw enoent(p);
-    });
-    const { loadSettings, getSettings } = await loadModule();
-    await loadSettings();
-    expect(getSettings().agents.default).toBe('claude');
-    expect(getSettings().agents.implement).toBe('codex');
-  });
-});
-
-describe('headless settings', () => {
-  it('deep-merges headless settings from base and local', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
-      if (p === settingsPath) return '{"headless": {"new": true, "plan": false}}';
-      if (p === localPath) return '{"headless": {"implement": true, "new": false}}';
-      throw enoent(p);
-    });
-    const { loadSettings, getSettings } = await loadModule();
-    await loadSettings();
-    expect(getSettings().headless).toEqual({ new: false, plan: false, implement: true });
-  });
-
-  it('warns on unknown headless command keys', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
-      if (p === settingsPath) return '{"headless": {"banana": true}}';
-      throw enoent(p);
-    });
-    const { loadSettings } = await loadModule();
-    await loadSettings();
-    expect(warnMock).toHaveBeenCalledWith(
-      'Warning: Unknown command "banana" in settings.headless.'
-    );
-  });
-
-  it('does not warn for known headless command keys', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
-      if (p === settingsPath) return '{"headless": {"new": true, "pr_open": false}}';
-      throw enoent(p);
-    });
-    const { loadSettings } = await loadModule();
-    await loadSettings();
-    expect(warnMock).not.toHaveBeenCalled();
+    expect(getSettings().hooks.worktreeSetup).toBe('echo local');
   });
 });
 
 describe('resolveAgent', () => {
-  it('returns per-step override when set', async () => {
+  it('returns the per-step agent override when configured', async () => {
     readFileMock.mockImplementation(async (p: string) => {
-      if (p === settingsPath) return '{"agents": {"default": "claude", "implement": "codex"}}';
+      if (p === settingsPath) {
+        return JSON.stringify({
+          commands: {
+            default: { agent: 'claude' },
+            implement: { agent: 'codex' },
+          },
+        });
+      }
       throw enoent(p);
     });
-    const { loadSettings, resolveAgent } = await loadModule();
-    await loadSettings();
-    expect(resolveAgent('implement')).toBe('codex');
-  });
 
-  it('falls back to default when step not configured', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
-      if (p === settingsPath) return '{"agents": {"default": "claude"}}';
-      throw enoent(p);
-    });
     const { loadSettings, resolveAgent } = await loadModule();
     await loadSettings();
+
+    expect(resolveAgent('implement')).toBe('codex');
     expect(resolveAgent('groom')).toBe('claude');
   });
 
-  it('exits on invalid agent value', async () => {
+  it('exits on an invalid command agent', async () => {
     readFileMock.mockImplementation(async (p: string) => {
-      if (p === settingsPath) return '{"agents": {"default": "claude", "implement": "vim"}}';
+      if (p === settingsPath) {
+        return JSON.stringify({
+          commands: {
+            default: { agent: 'claude' },
+            implement: { agent: 'vim' },
+          },
+        });
+      }
       throw enoent(p);
     });
+
     const { loadSettings, resolveAgent } = await loadModule();
     await loadSettings();
     expect(() => resolveAgent('implement')).toThrow('process.exit');
+
     expect(exitMock).toHaveBeenCalledWith(1);
     expect(stderrMock).toHaveBeenCalledWith(
       expect.stringContaining('Invalid agent "vim" for step "implement"')
     );
+  });
+});
+
+describe('resolveMode', () => {
+  it('uses the CLI override unless it is default', async () => {
+    readFileMock.mockImplementation(async (p: string) => {
+      if (p === settingsPath) {
+        return JSON.stringify({
+          commands: {
+            default: { agent: 'claude', mode: 'interactive' },
+            groom: { mode: 'headless' },
+          },
+        });
+      }
+      throw enoent(p);
+    });
+
+    const { loadSettings, resolveMode } = await loadModule();
+    await loadSettings();
+
+    expect(resolveMode('groom')).toBe('headless');
+    expect(resolveMode('design')).toBe('interactive');
+    expect(resolveMode('groom', 'interactive')).toBe('interactive');
+    expect(resolveMode('groom', 'default')).toBe('headless');
   });
 });

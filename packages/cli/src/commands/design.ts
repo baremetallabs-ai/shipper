@@ -1,9 +1,10 @@
 import { autoSelectIssue } from '@dnsquared/shipper-core';
+import type { CommandMode } from '@dnsquared/shipper-core';
 import { withStageHooks } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
 import { runPrompt } from '@dnsquared/shipper-core';
 
-export async function designCommand(issue?: string): Promise<void> {
+export async function designCommand(issue?: string, mode?: CommandMode): Promise<void> {
   if (!issue) {
     const selected = await autoSelectIssue('shipper:groomed');
     if (!selected) {
@@ -20,7 +21,7 @@ export async function designCommand(issue?: string): Promise<void> {
       await withStageHooks(
         'design',
         { issueNumber: issue },
-        async () => await runPrompt('design', { issueRef: issue })
+        async () => await runPrompt('design', { issueRef: issue, mode })
       )
   );
 

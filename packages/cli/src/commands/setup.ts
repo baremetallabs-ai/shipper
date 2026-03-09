@@ -1,8 +1,11 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { runPrompt } from '@dnsquared/shipper-core';
+import { runPrompt, type CommandMode } from '@dnsquared/shipper-core';
 
-export async function setupCommand(words: string[]): Promise<void> {
+export async function setupCommand(
+  words: string[],
+  options: { mode?: CommandMode } = {}
+): Promise<void> {
   const userText = words.join(' ').trim();
 
   let userInput: string;
@@ -16,5 +19,5 @@ export async function setupCommand(words: string[]): Promise<void> {
       : `Run setup for ${repoName}. This is a fresh setup — no .shipper/ directory found.`;
   }
 
-  process.exit(await runPrompt('setup', { userInput }));
+  process.exit(await runPrompt('setup', { userInput, mode: options.mode }));
 }

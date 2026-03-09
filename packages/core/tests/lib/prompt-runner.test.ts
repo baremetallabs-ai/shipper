@@ -7,6 +7,7 @@ const readFileMock = vi.fn();
 const fetchIssueMock = vi.fn();
 const fetchPRMock = vi.fn();
 const resolveAgentMock = vi.fn().mockReturnValue('claude');
+const resolveModeMock = vi.fn().mockReturnValue('default');
 
 vi.mock('node:child_process', async () => {
   const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
@@ -25,8 +26,8 @@ vi.mock('../../src/lib/github.js', () => ({
 
 vi.mock('../../src/lib/settings.js', () => ({
   resolveAgent: (...args: unknown[]) => resolveAgentMock(...args),
+  resolveMode: (...args: unknown[]) => resolveModeMock(...args),
 }));
-
 vi.mock('../../src/lib/prompts.js', () => ({
   agentPrompts: {
     claude: { 'test.md': '---\ncmd: claude\n---\n\nbundled body' },
@@ -53,9 +54,26 @@ function mockSpawnResult(opts: { code?: number; error?: Error } = {}): void {
 
 const { runPrompt } = await import('../../src/lib/prompt-runner.js');
 
+function makePrompt(cmd: 'claude' | 'codex', args: string[] = [], body = 'prompt body'): string {
+  const lines = ['---', `cmd: ${cmd}`];
+  if (args.length > 0) {
+    lines.push('args:');
+    for (const arg of args) {
+      lines.push(`  - ${arg}`);
+    }
+  }
+  lines.push('---', '', body);
+  return lines.join('\n');
+}
+
+function spawnedArgs(): string[] {
+  return spawnMock.mock.calls[0][1] as string[];
+}
+
 afterEach(() => {
   vi.clearAllMocks();
   resolveAgentMock.mockReturnValue('claude');
+  resolveModeMock.mockReturnValue('default');
   fetchIssueMock.mockResolvedValue('issue body');
   fetchPRMock.mockResolvedValue('pr body');
 });
@@ -94,6 +112,8 @@ describe('runPrompt', () => {
       path.resolve('.shipper', 'prompts', 'claude', 'test.md'),
       'utf-8'
     );
+    expect(resolveAgentMock).toHaveBeenCalledWith('test');
+    expect(resolveModeMock).toHaveBeenCalledWith('test', undefined);
   });
 
   it('replaces {{BASE_BRANCH}} when provided', async () => {
@@ -159,5 +179,84 @@ describe('runPrompt', () => {
     mockSpawnResult({ error: new Error('spawn failed') });
 
     await expect(runPrompt('test', {})).resolves.toBe(1);
+  });
+
+  it('injects -p for claude headless mode when absent', async () => {
+    resolveModeMock.mockReturnValue('headless');
+    readFileMock.mockResolvedValueOnce(makePrompt('claude', ['--model', 'opus']));
+    mockSpawnResult();
+
+    await runPrompt('test', { mode: 'headless' });
+
+    expect(spawnedArgs().slice(0, 3)).toEqual(['-p', '--model', 'opus']);
+  });
+
+  it('does not duplicate -p for claude headless mode when already present', async () => {
+    resolveModeMock.mockReturnValue('headless');
+    readFileMock.mockResolvedValueOnce(makePrompt('claude', ['-p', '--model', 'opus']));
+    mockSpawnResult();
+
+    await runPrompt('test', { mode: 'headless' });
+
+    expect(spawnedArgs().filter((arg) => arg === '-p')).toHaveLength(1);
+  });
+
+  it('strips -p for claude interactive mode', async () => {
+    resolveModeMock.mockReturnValue('interactive');
+    readFileMock.mockResolvedValueOnce(makePrompt('claude', ['-p', '--model', 'opus']));
+    mockSpawnResult();
+
+    await runPrompt('test', { mode: 'interactive' });
+
+    expect(spawnedArgs()).not.toContain('-p');
+    expect(spawnedArgs()).toContain('--model');
+  });
+
+  it('leaves frontmatter args unchanged for default mode', async () => {
+    resolveModeMock.mockReturnValue('default');
+    readFileMock.mockResolvedValueOnce(makePrompt('claude', ['--model', 'opus']));
+    mockSpawnResult();
+
+    await runPrompt('test', { mode: 'default' });
+
+    expect(spawnedArgs().slice(0, 2)).toEqual(['--model', 'opus']);
+  });
+
+  it('injects codex headless args when absent', async () => {
+    resolveAgentMock.mockReturnValue('codex');
+    resolveModeMock.mockReturnValue('headless');
+    readFileMock.mockResolvedValueOnce(makePrompt('codex'));
+    mockSpawnResult();
+
+    await runPrompt('test', { mode: 'headless' });
+
+    expect(spawnedArgs().slice(0, 4)).toEqual([
+      'exec',
+      '--full-auto',
+      '-c',
+      'sandbox_workspace_write.network_access=true',
+    ]);
+  });
+
+  it('strips codex headless args for interactive mode', async () => {
+    resolveAgentMock.mockReturnValue('codex');
+    resolveModeMock.mockReturnValue('interactive');
+    readFileMock.mockResolvedValueOnce(
+      makePrompt('codex', [
+        'exec',
+        '--full-auto',
+        '-c',
+        'sandbox_workspace_write.network_access=true',
+      ])
+    );
+    mockSpawnResult();
+
+    await runPrompt('test', { mode: 'interactive' });
+
+    expect(spawnedArgs()).not.toContain('exec');
+    expect(spawnedArgs()).not.toContain('--full-auto');
+    expect(spawnedArgs()).not.toContain('-c');
+    expect(spawnedArgs()).not.toContain('sandbox_workspace_write.network_access=true');
+    expect(spawnedArgs()).toContain('prompt body');
   });
 });

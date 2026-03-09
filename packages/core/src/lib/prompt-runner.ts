@@ -4,7 +4,7 @@ import path from 'node:path';
 import { parseFrontmatter } from './frontmatter.js';
 import { fetchIssue, fetchPR } from './github.js';
 import { agentPrompts } from './prompts.js';
-import { resolveAgent } from './settings.js';
+import { resolveAgent, resolveMode, type CommandMode } from './settings.js';
 
 export interface RunPromptOpts {
   userInput?: string;
@@ -12,6 +12,7 @@ export interface RunPromptOpts {
   prRef?: string;
   cwd?: string;
   baseBranch?: string;
+  mode?: CommandMode;
 }
 
 function spawnAsync(command: string, args: string[], opts: { cwd?: string }): Promise<number> {
@@ -51,7 +52,7 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
       `Error: Agent mismatch for step "${name}". Settings resolve to "${agent}", but prompt frontmatter specifies "cmd: ${frontmatter.cmd}" in ${promptPath}.`
     );
     console.error(
-      `Update the prompt file's frontmatter to "cmd: ${agent}", or change agents.${name} in settings.`
+      `Update the prompt file's frontmatter to "cmd: ${agent}", or change commands.${name}.agent in settings.`
     );
     return 1;
   }
@@ -62,6 +63,30 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
   }
 
   const args = [...frontmatter.args];
+  const effectiveMode = resolveMode(name, opts.mode);
+
+  if (effectiveMode === 'headless') {
+    if (agent === 'claude' && !args.includes('-p')) {
+      args.unshift('-p');
+    } else if (agent === 'codex' && !args.includes('exec')) {
+      args.unshift('exec', '--full-auto', '-c', 'sandbox_workspace_write.network_access=true');
+    }
+  } else if (effectiveMode === 'interactive') {
+    if (agent === 'claude') {
+      const pIdx = args.indexOf('-p');
+      if (pIdx !== -1) args.splice(pIdx, 1);
+    } else if (agent === 'codex') {
+      for (const token of [
+        'exec',
+        '--full-auto',
+        '-c',
+        'sandbox_workspace_write.network_access=true',
+      ]) {
+        const idx = args.indexOf(token);
+        if (idx !== -1) args.splice(idx, 1);
+      }
+    }
+  }
 
   if (agent === 'claude') {
     args.push('--append-system-prompt', promptBody);

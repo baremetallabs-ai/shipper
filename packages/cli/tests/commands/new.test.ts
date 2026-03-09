@@ -1,14 +1,11 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Settings } from '@dnsquared/shipper-core';
 
-const { mockRunPrompt, mockGetSettings } = vi.hoisted(() => ({
+const { mockRunPrompt } = vi.hoisted(() => ({
   mockRunPrompt: vi.fn(),
-  mockGetSettings: vi.fn(),
 }));
 
 vi.mock('@dnsquared/shipper-core', () => ({
   runPrompt: (...args: unknown[]) => mockRunPrompt(...args),
-  getSettings: () => mockGetSettings(),
 }));
 
 import { newCommand } from '../../src/commands/new.js';
@@ -18,88 +15,42 @@ const exitMock = vi.spyOn(process, 'exit').mockImplementation(((code?: number) =
 }) as typeof process.exit);
 const errorMock = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-const initialHeadlessEnv = process.env.SHIPPER_HEADLESS;
-
-function makeSettings(headless: Record<string, boolean> = {}): Settings {
-  return {
-    prReviewWait: { mode: 'checks', timeoutMinutes: 15 },
-    lockTimeoutMinutes: 30,
-    agents: { default: 'claude' },
-    headless,
-    hooks: {},
-  };
-}
-
 beforeEach(() => {
   vi.clearAllMocks();
-  mockRunPrompt.mockReturnValue(0);
-  mockGetSettings.mockReturnValue(makeSettings());
-  if (initialHeadlessEnv === undefined) {
-    delete process.env.SHIPPER_HEADLESS;
-  } else {
-    process.env.SHIPPER_HEADLESS = initialHeadlessEnv;
-  }
+  mockRunPrompt.mockResolvedValue(0);
+  delete process.env.SHIPPER_HEADLESS;
 });
 
 afterAll(() => {
-  if (initialHeadlessEnv === undefined) {
-    delete process.env.SHIPPER_HEADLESS;
-  } else {
-    process.env.SHIPPER_HEADLESS = initialHeadlessEnv;
-  }
   exitMock.mockRestore();
   errorMock.mockRestore();
 });
 
 describe('newCommand', () => {
-  it('sets SHIPPER_HEADLESS for the prompt when the flag is enabled and clears it afterward', async () => {
-    const previousHeadless = process.env.SHIPPER_HEADLESS;
-    let envDuringPrompt: string | undefined;
-    mockRunPrompt.mockImplementation(async () => {
-      envDuringPrompt = process.env.SHIPPER_HEADLESS;
-      return 0;
+  it('passes the selected mode through to runPrompt', async () => {
+    await expect(newCommand(['my', 'pitch'], { mode: 'headless' })).rejects.toThrow(
+      'process.exit:0'
+    );
+
+    expect(mockRunPrompt).toHaveBeenCalledWith('new', {
+      userInput: 'my pitch',
+      mode: 'headless',
     });
-
-    await expect(newCommand(['my', 'pitch'], { headless: true })).rejects.toThrow('process.exit:0');
-
-    expect(envDuringPrompt).toBe('true');
-    expect(process.env.SHIPPER_HEADLESS).toBe(previousHeadless);
-    expect(mockRunPrompt).toHaveBeenCalledWith('new', { userInput: 'my pitch' });
-  });
-
-  it('uses the settings headless default and restores any previous env value afterward', async () => {
-    let envDuringPrompt: string | undefined;
-    mockGetSettings.mockReturnValue(makeSettings({ new: true }));
-    process.env.SHIPPER_HEADLESS = 'preset';
-    mockRunPrompt.mockImplementation(async () => {
-      envDuringPrompt = process.env.SHIPPER_HEADLESS;
-      return 0;
-    });
-
-    await expect(newCommand(['my', 'pitch'])).rejects.toThrow('process.exit:0');
-
-    expect(envDuringPrompt).toBe('true');
-    expect(process.env.SHIPPER_HEADLESS).toBe('preset');
-    expect(mockRunPrompt).toHaveBeenCalledWith('new', { userInput: 'my pitch' });
-  });
-
-  it('does not set SHIPPER_HEADLESS when neither the flag nor settings enable it', async () => {
-    let envDuringPrompt: string | undefined;
-    mockGetSettings.mockReturnValue(makeSettings({ new: false }));
-    mockRunPrompt.mockImplementation(async () => {
-      envDuringPrompt = process.env.SHIPPER_HEADLESS;
-      return 0;
-    });
-
-    await expect(newCommand(['my', 'pitch'])).rejects.toThrow('process.exit:0');
-
-    expect(envDuringPrompt).toBeUndefined();
     expect(process.env.SHIPPER_HEADLESS).toBeUndefined();
-    expect(mockRunPrompt).toHaveBeenCalledWith('new', { userInput: 'my pitch' });
+  });
+
+  it('uses runPrompt without a mode override when none is provided', async () => {
+    await expect(newCommand(['my', 'pitch'])).rejects.toThrow('process.exit:0');
+
+    expect(mockRunPrompt).toHaveBeenCalledWith('new', {
+      userInput: 'my pitch',
+      mode: undefined,
+    });
+    expect(process.env.SHIPPER_HEADLESS).toBeUndefined();
   });
 
   it('exits with the existing usage error when the pitch is empty', async () => {
-    await expect(newCommand(['   '], { headless: true })).rejects.toThrow('process.exit:1');
+    await expect(newCommand(['   '], { mode: 'interactive' })).rejects.toThrow('process.exit:1');
 
     expect(errorMock).toHaveBeenCalledWith('Error: Please provide a pitch for the new issue.');
     expect(errorMock).toHaveBeenCalledWith('Usage: shipper new <pitch>');

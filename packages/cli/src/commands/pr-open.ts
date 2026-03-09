@@ -1,12 +1,13 @@
 import { findBranchForIssue, getRepoRoot } from '@dnsquared/shipper-core';
 import { autoSelectIssue, resolveBaseBranch, resolveRef } from '@dnsquared/shipper-core';
+import type { CommandMode } from '@dnsquared/shipper-core';
 import { withStageHooks } from '@dnsquared/shipper-core';
 import { getSettings } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
 import { withWorktree } from '@dnsquared/shipper-core';
 import { runPrompt } from '@dnsquared/shipper-core';
 
-export async function prOpenCommand(issue?: string): Promise<void> {
+export async function prOpenCommand(issue?: string, mode?: CommandMode): Promise<void> {
   if (!issue) {
     const selected = await autoSelectIssue('shipper:implemented');
     if (!selected) {
@@ -34,7 +35,7 @@ export async function prOpenCommand(issue?: string): Promise<void> {
         await withWorktree(
           { repoRoot, branch, createBranch: false, issueNumber: issue, stage: 'pr-open' },
           async (wtPath) => {
-            return await runPrompt('pr_open', { issueRef: issue, cwd: wtPath, baseBranch });
+            return await runPrompt('pr_open', { issueRef: issue, cwd: wtPath, baseBranch, mode });
           }
         )
     );
