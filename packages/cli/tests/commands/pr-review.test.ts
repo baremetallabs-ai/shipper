@@ -20,6 +20,7 @@ describe('prReviewCommand', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    process.exitCode = undefined;
     mockResolveRef.mockResolvedValue({ prNumber: '42', issueNumber: '10' });
     mockRunPrompt.mockResolvedValue(0);
     exitSpy = vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
@@ -28,13 +29,16 @@ describe('prReviewCommand', () => {
   });
 
   afterEach(() => {
+    process.exitCode = undefined;
     exitSpy.mockRestore();
   });
 
   it('passes issueNumber as issueRef to runPrompt', async () => {
     const { prReviewCommand } = await import('../../src/commands/pr-review.js');
 
-    await expect(prReviewCommand('42')).rejects.toThrow('exit:0');
+    await expect(prReviewCommand('42')).resolves.toBeUndefined();
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(0);
 
     expect(mockRunPrompt).toHaveBeenCalledWith(
       'pr_review',

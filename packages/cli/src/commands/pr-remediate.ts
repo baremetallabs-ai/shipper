@@ -10,6 +10,12 @@ import { getSettings } from '@dnsquared/shipper-core';
 
 import { sleepMs } from '@dnsquared/shipper-core';
 
+class PollingInterruptedError extends Error {
+  constructor() {
+    super('Check polling interrupted.');
+  }
+}
+
 async function waitForChecks(pr: string, timeoutMinutes: number): Promise<void> {
   const deadline = Date.now() + timeoutMinutes * 60_000;
   let previousCompleted = -1;
@@ -67,7 +73,7 @@ async function waitForChecks(pr: string, timeoutMinutes: number): Promise<void> 
   }
 
   if (interrupted) {
-    process.exit(130);
+    throw new PollingInterruptedError();
   }
 }
 
@@ -111,52 +117,55 @@ export async function prRemediateCommand(pr?: string): Promise<void> {
   const run = async () => {
     const branch = await getBranchForPR(prRef);
 
-    const code = await withStageHooks(
-      'pr-remediate',
-      { issueNumber, branchName: branch },
-      async () => {
-        const { prReviewWait } = getSettings();
+    return await withStageHooks('pr-remediate', { issueNumber, branchName: branch }, async () => {
+      const { prReviewWait } = getSettings();
 
-        if (prReviewWait.mode === 'timer') {
-          if (prReviewWait.timeoutMinutes > 0) {
-            const prJson = execFileSync('gh', ['pr', 'view', prRef, '--json', 'createdAt'], {
-              encoding: 'utf-8',
-            });
-            const { createdAt } = JSON.parse(prJson) as { createdAt: string };
-            const elapsedMs = Date.now() - new Date(createdAt).getTime();
-            const waitMs = prReviewWait.timeoutMinutes * 60_000;
-            const remainingMs = waitMs - elapsedMs;
+      if (prReviewWait.mode === 'timer') {
+        if (prReviewWait.timeoutMinutes > 0) {
+          const prJson = execFileSync('gh', ['pr', 'view', prRef, '--json', 'createdAt'], {
+            encoding: 'utf-8',
+          });
+          const { createdAt } = JSON.parse(prJson) as { createdAt: string };
+          const elapsedMs = Date.now() - new Date(createdAt).getTime();
+          const waitMs = prReviewWait.timeoutMinutes * 60_000;
+          const remainingMs = waitMs - elapsedMs;
 
-            if (remainingMs > 0) {
-              const remainingMin = Math.ceil(remainingMs / 60_000);
-              console.log(
-                `PR #${pr} is ${Math.floor(elapsedMs / 60_000)} minutes old. ` +
-                  `Waiting ${remainingMin} more minute(s) for reviewers (prReviewWait.timeoutMinutes: ${prReviewWait.timeoutMinutes})...`
-              );
-              await sleepMs(remainingMs);
-            }
+          if (remainingMs > 0) {
+            const remainingMin = Math.ceil(remainingMs / 60_000);
+            console.log(
+              `PR #${pr} is ${Math.floor(elapsedMs / 60_000)} minutes old. ` +
+                `Waiting ${remainingMin} more minute(s) for reviewers (prReviewWait.timeoutMinutes: ${prReviewWait.timeoutMinutes})...`
+            );
+            await sleepMs(remainingMs);
           }
-        } else {
-          await waitForChecks(prRef, prReviewWait.timeoutMinutes);
         }
-
-        const repoRoot = await getRepoRoot();
-
-        return await withWorktree(
-          { repoRoot, branch, createBranch: false, issueNumber, stage: 'pr-remediate' },
-          async (wtPath) => {
-            return await runPrompt('pr_remediate', {
-              issueRef: issueNumber,
-              prRef,
-              cwd: wtPath,
-            });
-          }
-        );
+      } else {
+        await waitForChecks(prRef, prReviewWait.timeoutMinutes);
       }
-    );
 
-    process.exit(code);
+      const repoRoot = await getRepoRoot();
+
+      return await withWorktree(
+        { repoRoot, branch, createBranch: false, issueNumber, stage: 'pr-remediate' },
+        async (wtPath) => {
+          return await runPrompt('pr_remediate', {
+            issueRef: issueNumber,
+            prRef,
+            cwd: wtPath,
+          });
+        }
+      );
+    });
   };
 
-  await withIssueLock(issueNumber, run);
+  try {
+    const code = await withIssueLock(issueNumber, run);
+    process.exitCode = code;
+  } catch (err) {
+    if (err instanceof PollingInterruptedError) {
+      process.exitCode = 130;
+      return;
+    }
+    throw err;
+  }
 }

@@ -8,7 +8,9 @@ export async function unblockCommand(issue: string): Promise<void> {
     process.exit(1);
   }
 
-  process.exit(
-    await withIssueLock(issue, async () => await runPrompt('unblock', { issueRef: issue }))
+  const code = await withIssueLock(
+    issue,
+    async () => await runPrompt('unblock', { issueRef: issue })
   );
+  process.exitCode = code;
 }

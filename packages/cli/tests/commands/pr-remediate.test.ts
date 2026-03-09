@@ -40,6 +40,7 @@ describe('prRemediateCommand', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    process.exitCode = undefined;
     mockResolveRef.mockResolvedValue({ prNumber: '42', issueNumber: '10' });
     mockRunPrompt.mockResolvedValue(0);
     getSettingsMock.mockReturnValue({
@@ -52,13 +53,16 @@ describe('prRemediateCommand', () => {
   });
 
   afterEach(() => {
+    process.exitCode = undefined;
     exitSpy.mockRestore();
   });
 
   it('passes issueNumber (not PR number) as issueRef to runPrompt', async () => {
     const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
 
-    await expect(prRemediateCommand('42')).rejects.toThrow('exit:0');
+    await expect(prRemediateCommand('42')).resolves.toBeUndefined();
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(0);
 
     expect(mockRunPrompt).toHaveBeenCalledWith(
       'pr_remediate',
@@ -76,7 +80,9 @@ describe('prRemediateCommand', () => {
     });
     const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
 
-    await expect(prRemediateCommand('42')).rejects.toThrow('exit:0');
+    await expect(prRemediateCommand('42')).resolves.toBeUndefined();
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(0);
     expect(mockRunPrompt).toHaveBeenCalled();
     expect(fetchChecksMock).not.toHaveBeenCalled();
   });
@@ -93,7 +99,9 @@ describe('prRemediateCommand', () => {
 
     const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
 
-    await expect(prRemediateCommand('42')).rejects.toThrow('exit:0');
+    await expect(prRemediateCommand('42')).resolves.toBeUndefined();
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(0);
     expect(mockRunPrompt).toHaveBeenCalled();
     expect(fetchChecksMock).toHaveBeenCalled();
   });
@@ -109,7 +117,9 @@ describe('prRemediateCommand', () => {
     const logMock = vi.spyOn(console, 'log').mockImplementation(() => {});
     const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
 
-    await expect(prRemediateCommand('42')).rejects.toThrow('exit:0');
+    await expect(prRemediateCommand('42')).resolves.toBeUndefined();
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(0);
     expect(mockRunPrompt).toHaveBeenCalled();
     // Initial call + 3 grace retries = 4 calls
     expect(fetchChecksMock).toHaveBeenCalledTimes(4);
