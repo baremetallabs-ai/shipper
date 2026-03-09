@@ -1,11 +1,18 @@
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 
-export function getRepoNwo(): string {
+const execFileAsync = promisify(execFile);
+
+export async function getRepoNwo(): Promise<string> {
   try {
-    return execFileSync('gh', ['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'], {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
+    const { stdout } = await execFileAsync(
+      'gh',
+      ['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'],
+      {
+        encoding: 'utf-8',
+      }
+    );
+    return stdout.trim();
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(

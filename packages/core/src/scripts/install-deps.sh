@@ -8,7 +8,7 @@ if [ ! -f "$SETTINGS_FILE" ]; then
   exit 0
 fi
 
-INSTALL_CMD=$(node -e "const s=JSON.parse(require('fs').readFileSync('$SETTINGS_FILE','utf8'));if(s.installCommand)process.stdout.write(s.installCommand)" 2>/dev/null || true)
+INSTALL_CMD=$(node -e "require('fs/promises').readFile('$SETTINGS_FILE','utf8').then((raw)=>{const s=JSON.parse(raw);if(s.installCommand)process.stdout.write(s.installCommand)}).catch(()=>{})" 2>/dev/null || true)
 
 if [ -z "$INSTALL_CMD" ]; then
   echo "Warning: No installCommand configured in $SETTINGS_FILE, skipping." >&2

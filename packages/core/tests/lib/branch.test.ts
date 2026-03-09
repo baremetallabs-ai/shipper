@@ -1,49 +1,79 @@
-import { describe, it, expect, vi } from 'vitest';
-import { generateBranchName } from '../../src/lib/branch.js';
+import { promisify } from 'node:util';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
+
+const execFileMock = vi.fn();
+const execFile = Object.assign((...args: unknown[]) => execFileMock(...args), {
+  [promisify.custom]: (...args: unknown[]) =>
+    new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+      execFileMock(
+        ...args,
+        (err: unknown, stdout: string | Buffer = '', stderr: string | Buffer = '') => {
+          if (err) {
+            reject(err);
+            return;
+          }
+          resolve({ stdout: String(stdout), stderr: String(stderr) });
+        }
+      );
+    }),
+});
 
 vi.mock('node:child_process', () => ({
-  execFileSync: vi.fn((_cmd: string, args: string[]) => {
-    if (args.includes('--jq')) {
-      return 'Add Login Flow\n';
-    }
-    return '';
-  }),
+  execFile,
 }));
 
+const { generateBranchName } = await import('../../src/lib/branch.js');
+
+beforeEach(() => {
+  execFileMock.mockReset();
+  execFileMock.mockImplementation((_cmd: string, args: string[], ...rest: unknown[]) => {
+    const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
+    if (args.includes('--jq')) {
+      cb(null, 'Add Login Flow\n', '');
+      return;
+    }
+    cb(null, '', '');
+  });
+});
+
 describe('generateBranchName', () => {
-  it('generates a slug from the issue title', () => {
-    const result = generateBranchName('42');
+  it('generates a slug from the issue title', async () => {
+    const result = await generateBranchName('42');
     expect(result).toBe('shipper/42-add-login-flow');
   });
 
-  it('strips leading # from issue ref', () => {
-    const result = generateBranchName('#42');
+  it('strips leading # from issue ref', async () => {
+    const result = await generateBranchName('#42');
     expect(result).toBe('shipper/42-add-login-flow');
   });
 
   it('handles special characters in title', async () => {
-    const { execFileSync } = await import('node:child_process');
-    vi.mocked(execFileSync).mockReturnValueOnce('Fix: login & signup (v2)!!!\n');
+    execFileMock.mockImplementationOnce((_cmd: string, _args: string[], ...rest: unknown[]) => {
+      const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
+      cb(null, 'Fix: login & signup (v2)!!!\n', '');
+    });
 
-    const result = generateBranchName('10');
+    const result = await generateBranchName('10');
     expect(result).toBe('shipper/10-fix-login-signup-v2');
   });
 
   it('truncates long slugs', async () => {
-    const { execFileSync } = await import('node:child_process');
-    vi.mocked(execFileSync).mockReturnValueOnce('a'.repeat(100) + '\n');
+    execFileMock.mockImplementationOnce((_cmd: string, _args: string[], ...rest: unknown[]) => {
+      const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
+      cb(null, 'a'.repeat(100) + '\n', '');
+    });
 
-    const result = generateBranchName('7');
+    const result = await generateBranchName('7');
     expect(result.length).toBeLessThanOrEqual(60); // "shipper/7-" (10) + 50-char slug max
   });
 
   it('falls back to implement when title fetch fails', async () => {
-    const { execFileSync } = await import('node:child_process');
-    vi.mocked(execFileSync).mockImplementationOnce(() => {
-      throw new Error('gh failed');
+    execFileMock.mockImplementationOnce((_cmd: string, _args: string[], ...rest: unknown[]) => {
+      const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
+      cb(new Error('gh failed'));
     });
 
-    const result = generateBranchName('99');
+    const result = await generateBranchName('99');
     expect(result).toBe('shipper/99-implement');
   });
 });

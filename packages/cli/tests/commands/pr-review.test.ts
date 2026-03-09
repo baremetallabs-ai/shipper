@@ -4,8 +4,10 @@ vi.mock('@dnsquared/shipper-core', () => ({
   resolveRef: vi.fn(),
   autoSelectPrForStage: vi.fn(),
   runPrompt: vi.fn(),
-  withStageHooks: vi.fn((_stage: unknown, _env: unknown, fn: () => unknown) => fn()),
-  withIssueLock: vi.fn((_issue: unknown, fn: () => unknown) => fn()),
+  withStageHooks: vi.fn(
+    async (_stage: unknown, _env: unknown, fn: () => Promise<unknown>) => await fn()
+  ),
+  withIssueLock: vi.fn(async (_issue: unknown, fn: () => Promise<unknown>) => await fn()),
 }));
 
 import { resolveRef, runPrompt } from '@dnsquared/shipper-core';
@@ -18,8 +20,8 @@ describe('prReviewCommand', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockResolveRef.mockReturnValue({ prNumber: '42', issueNumber: '10' });
-    mockRunPrompt.mockReturnValue(0);
+    mockResolveRef.mockResolvedValue({ prNumber: '42', issueNumber: '10' });
+    mockRunPrompt.mockResolvedValue(0);
     exitSpy = vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
       throw new Error(`exit:${code}`);
     });
@@ -32,7 +34,7 @@ describe('prReviewCommand', () => {
   it('passes issueNumber as issueRef to runPrompt', async () => {
     const { prReviewCommand } = await import('../../src/commands/pr-review.js');
 
-    expect(() => prReviewCommand('42')).toThrow('exit:0');
+    await expect(prReviewCommand('42')).rejects.toThrow('exit:0');
 
     expect(mockRunPrompt).toHaveBeenCalledWith(
       'pr_review',

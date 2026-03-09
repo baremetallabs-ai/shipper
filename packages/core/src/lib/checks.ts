@@ -1,4 +1,7 @@
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 export interface PRChecksLine {
   name: string;
@@ -13,16 +16,15 @@ export interface CheckClassification {
   total: number;
 }
 
-export function fetchChecks(prNumber: string, nwo?: string): PRChecksLine[] {
+export async function fetchChecks(prNumber: string, nwo?: string): Promise<PRChecksLine[]> {
   const args = ['pr', 'checks', prNumber, '--json', 'name,state,bucket'];
   if (nwo) {
     args.push('-R', nwo);
   }
-  const output = execFileSync('gh', args, {
+  const { stdout } = await execFileAsync('gh', args, {
     encoding: 'utf-8',
-    stdio: ['ignore', 'pipe', 'pipe'],
   });
-  return JSON.parse(output) as PRChecksLine[];
+  return JSON.parse(stdout) as PRChecksLine[];
 }
 
 export function classifyChecks(checks: PRChecksLine[]): CheckClassification {

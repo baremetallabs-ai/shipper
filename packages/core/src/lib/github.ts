@@ -1,6 +1,9 @@
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { isLockStale, releaseIssueLock } from './lock.js';
 import { getRepoNwo } from './repo.js';
+
+const execFileAsync = promisify(execFile);
 
 interface IssueComment {
   author: { login: string };
@@ -49,13 +52,14 @@ export interface ResolvedRefBoth extends ResolvedRef {
   prNumber: string;
 }
 
-export function resolveBaseBranch(configured?: string): string {
+export async function resolveBaseBranch(configured?: string): Promise<string> {
   if (configured) {
     let result: string;
     try {
-      result = execFileSync('git', ['ls-remote', '--heads', 'origin', configured], {
+      const output = await execFileAsync('git', ['ls-remote', '--heads', 'origin', configured], {
         encoding: 'utf-8',
       });
+      result = output.stdout;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`Error: Failed to check remote branch '${configured}': ${msg}`);
@@ -77,11 +81,12 @@ export function resolveBaseBranch(configured?: string): string {
   }
   let output: string;
   try {
-    output = execFileSync(
+    const result = await execFileAsync(
       'gh',
       ['repo', 'view', '--json', 'defaultBranchRef', '-q', '.defaultBranchRef.name'],
       { encoding: 'utf-8' }
     );
+    output = result.stdout;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`Error: Failed to auto-detect default base branch: ${msg}`);
@@ -95,14 +100,15 @@ export function resolveBaseBranch(configured?: string): string {
   return branch;
 }
 
-export function fetchIssue(ref: string): string {
+export async function fetchIssue(ref: string): Promise<string> {
   let json: string;
   try {
-    json = execFileSync(
+    const result = await execFileAsync(
       'gh',
       ['issue', 'view', ref, '--json', 'number,title,state,labels,body,comments,author,createdAt'],
       { encoding: 'utf-8' }
     );
+    json = result.stdout;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`Error: Failed to fetch issue ${ref}: ${msg}`);
@@ -113,10 +119,10 @@ export function fetchIssue(ref: string): string {
   return formatIssue(data);
 }
 
-export function fetchPR(ref: string): string {
+export async function fetchPR(ref: string): Promise<string> {
   let json: string;
   try {
-    json = execFileSync(
+    const result = await execFileAsync(
       'gh',
       [
         'pr',
@@ -127,6 +133,7 @@ export function fetchPR(ref: string): string {
       ],
       { encoding: 'utf-8' }
     );
+    json = result.stdout;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`Error: Failed to fetch PR ${ref}: ${msg}`);
@@ -158,13 +165,14 @@ export function formatIssue(data: IssueData): string {
   return lines.join('\n');
 }
 
-export function tryResolvePrForIssue(issueNumber: number): string | undefined {
+export async function tryResolvePrForIssue(issueNumber: number): Promise<string | undefined> {
   try {
-    const output = execFileSync(
+    const result = await execFileAsync(
       'gh',
       ['pr', 'list', '--state', 'open', '--json', 'number,headRefName', '--limit', '100'],
-      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
-    ).trim();
+      { encoding: 'utf-8' }
+    );
+    const output = result.stdout.trim();
     const prs = JSON.parse(output) as { number: number; headRefName: string }[];
     const match = prs.find(
       (pr) =>
@@ -241,10 +249,10 @@ export function sortIssuesByLabelTime(
   return withTimestamps.map((w) => w.issue);
 }
 
-export function selectIssuesForStage(
+export async function selectIssuesForStage(
   label: string,
   staleLocked?: Set<number>
-): { number: number; title: string }[] {
+): Promise<{ number: number; title: string }[]> {
   const issueSearchFilter =
     label === 'shipper:new'
       ? '-label:shipper:locked'
@@ -252,7 +260,7 @@ export function selectIssuesForStage(
   const lockedSearchFilter = label === 'shipper:new' ? null : '-label:shipper:blocked';
   let issues: { number: number; title: string }[];
   try {
-    const output = execFileSync(
+    const result = await execFileAsync(
       'gh',
       [
         'issue',
@@ -268,8 +276,9 @@ export function selectIssuesForStage(
         '--json',
         'number,title',
       ],
-      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
-    ).trim();
+      { encoding: 'utf-8' }
+    );
+    const output = result.stdout.trim();
     issues = JSON.parse(output) as { number: number; title: string }[];
   } catch {
     return [];
@@ -277,7 +286,7 @@ export function selectIssuesForStage(
 
   // Fetch locked issues for the same stage and check for stale locks
   try {
-    const lockedOutput = execFileSync(
+    const result = await execFileAsync(
       'gh',
       [
         'issue',
@@ -294,11 +303,12 @@ export function selectIssuesForStage(
         '--json',
         'number,title',
       ],
-      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
-    ).trim();
+      { encoding: 'utf-8' }
+    );
+    const lockedOutput = result.stdout.trim();
     const lockedIssues = JSON.parse(lockedOutput) as { number: number; title: string }[];
     for (const issue of lockedIssues) {
-      if (isLockStale(String(issue.number))) {
+      if (await isLockStale(String(issue.number))) {
         issues.push(issue);
         staleLocked?.add(issue.number);
       }
@@ -311,12 +321,12 @@ export function selectIssuesForStage(
     return issues;
   }
 
-  const nwo = getRepoNwo();
+  const nwo = await getRepoNwo();
   const timelinesByIssue = new Map<number, TimelineLabelEvent[]>();
 
   for (const issue of issues) {
     try {
-      const output = execFileSync(
+      const result = await execFileAsync(
         'gh',
         [
           'api',
@@ -325,8 +335,9 @@ export function selectIssuesForStage(
           '--jq',
           '.[] | select(.event == "labeled") | {event, label, created_at}',
         ],
-        { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
-      ).trim();
+        { encoding: 'utf-8' }
+      );
+      const output = result.stdout.trim();
       const events: TimelineLabelEvent[] = output
         ? output.split('\n').map((line) => JSON.parse(line) as TimelineLabelEvent)
         : [];
@@ -339,33 +350,38 @@ export function selectIssuesForStage(
   return sortIssuesByLabelTime(issues, timelinesByIssue, label);
 }
 
-export function clearStaleLockIfNeeded(issueNumber: number, staleLocked: Set<number>): void {
+export async function clearStaleLockIfNeeded(
+  issueNumber: number,
+  staleLocked: Set<number>
+): Promise<void> {
   if (staleLocked.has(issueNumber)) {
     console.error(`Issue #${issueNumber} lock is stale — clearing.`);
-    releaseIssueLock(String(issueNumber));
+    await releaseIssueLock(String(issueNumber));
   }
 }
 
-export function autoSelectIssue(label: string): { number: number; title: string } | null {
+export async function autoSelectIssue(
+  label: string
+): Promise<{ number: number; title: string } | null> {
   const staleLocked = new Set<number>();
-  const issues = selectIssuesForStage(label, staleLocked);
+  const issues = await selectIssuesForStage(label, staleLocked);
   const candidate = issues[0] ?? null;
   if (candidate) {
-    clearStaleLockIfNeeded(candidate.number, staleLocked);
+    await clearStaleLockIfNeeded(candidate.number, staleLocked);
   }
   return candidate;
 }
 
-export function autoSelectPrForStage(
+export async function autoSelectPrForStage(
   label: string,
   emptyMessage: string
-): { pr: string; issue: { number: number; title: string } } {
+): Promise<{ pr: string; issue: { number: number; title: string } }> {
   const staleLocked = new Set<number>();
-  const issues = selectIssuesForStage(label, staleLocked);
+  const issues = await selectIssuesForStage(label, staleLocked);
   for (const issue of issues) {
-    const resolved = tryResolvePrForIssue(issue.number);
+    const resolved = await tryResolvePrForIssue(issue.number);
     if (resolved) {
-      clearStaleLockIfNeeded(issue.number, staleLocked);
+      await clearStaleLockIfNeeded(issue.number, staleLocked);
       return { pr: resolved, issue };
     }
   }
@@ -373,18 +389,18 @@ export function autoSelectPrForStage(
   process.exit(1);
 }
 
-export function resolveRef(ref: string, need: 'both'): ResolvedRefBoth;
+export function resolveRef(ref: string, need: 'both'): Promise<ResolvedRefBoth>;
 // eslint-disable-next-line no-redeclare
-export function resolveRef(ref: string, need: 'issue' | 'pr'): ResolvedRef;
+export function resolveRef(ref: string, need: 'issue' | 'pr'): Promise<ResolvedRef>;
 // eslint-disable-next-line no-redeclare
-export function resolveRef(ref: string, need: 'issue' | 'pr' | 'both'): ResolvedRef {
+export async function resolveRef(ref: string, need: 'issue' | 'pr' | 'both'): Promise<ResolvedRef> {
   // Try as PR first — GitHub treats PRs as issues, so `gh issue view` succeeds
   // for PR numbers. Checking `gh pr view` first avoids misclassifying PRs.
   try {
-    const output = execFileSync('gh', ['pr', 'view', ref, '--json', 'number,body'], {
+    const result = await execFileAsync('gh', ['pr', 'view', ref, '--json', 'number,body'], {
       encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
+    });
+    const output = result.stdout.trim();
     const prData = JSON.parse(output) as { number: number; body: string };
     const prNumber = String(prData.number);
     const match = /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/i.exec(prData.body);
@@ -401,14 +417,13 @@ export function resolveRef(ref: string, need: 'issue' | 'pr' | 'both'): Resolved
   }
 
   try {
-    execFileSync('gh', ['issue', 'view', ref, '--json', 'number'], {
+    await execFileAsync('gh', ['issue', 'view', ref, '--json', 'number'], {
       encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
     });
     // ref is an issue number
     let prNumber: string | undefined;
     if (need === 'pr' || need === 'both') {
-      prNumber = tryResolvePrForIssue(Number(ref));
+      prNumber = await tryResolvePrForIssue(Number(ref));
       if (!prNumber) {
         console.error(`No open PR found for issue #${ref}. Run 'shipper pr open ${ref}' first.`);
         process.exit(1);

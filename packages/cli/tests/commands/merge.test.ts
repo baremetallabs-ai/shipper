@@ -17,7 +17,9 @@ vi.mock('@dnsquared/shipper-core', () => ({
   getSettings: () => getSettingsMock(),
   tryResolvePrForIssue: (...args: unknown[]) => tryResolvePrForIssueMock(...args),
   getRepoNwo: () => 'owner/repo',
-  withStageHooks: vi.fn((_stage: unknown, _env: unknown, fn: () => unknown) => fn()),
+  withStageHooks: vi.fn(
+    async (_stage: unknown, _env: unknown, fn: () => Promise<unknown>) => await fn()
+  ),
   fetchChecks: vi.fn(),
   classifyChecks: vi.fn(),
 }));
@@ -51,9 +53,9 @@ const mockPR = {
 };
 
 describe('getLinkedIssueNumber', () => {
-  it('returns issue number when PR body contains Closes #N', () => {
+  it('returns issue number when PR body contains Closes #N', async () => {
     execFileSyncMock.mockReturnValue(JSON.stringify({ body: 'Some text\n\nCloses #25\n' }));
-    expect(getLinkedIssueNumber(42, 'owner/repo')).toBe(25);
+    await expect(getLinkedIssueNumber(42, 'owner/repo')).resolves.toBe(25);
     expect(execFileSyncMock).toHaveBeenCalledWith(
       'gh',
       ['pr', 'view', '42', '-R', 'owner/repo', '--json', 'body'],
@@ -61,26 +63,26 @@ describe('getLinkedIssueNumber', () => {
     );
   });
 
-  it('returns issue number for Fixes #N', () => {
+  it('returns issue number for Fixes #N', async () => {
     execFileSyncMock.mockReturnValue(JSON.stringify({ body: 'Fixes #10' }));
-    expect(getLinkedIssueNumber(1, 'o/r')).toBe(10);
+    await expect(getLinkedIssueNumber(1, 'o/r')).resolves.toBe(10);
   });
 
-  it('returns issue number for Resolves #N', () => {
+  it('returns issue number for Resolves #N', async () => {
     execFileSyncMock.mockReturnValue(JSON.stringify({ body: 'Resolves #99' }));
-    expect(getLinkedIssueNumber(1, 'o/r')).toBe(99);
+    await expect(getLinkedIssueNumber(1, 'o/r')).resolves.toBe(99);
   });
 
-  it('returns null when PR body has no closing keyword', () => {
+  it('returns null when PR body has no closing keyword', async () => {
     execFileSyncMock.mockReturnValue(JSON.stringify({ body: 'Just a regular PR body' }));
-    expect(getLinkedIssueNumber(42, 'owner/repo')).toBeNull();
+    await expect(getLinkedIssueNumber(42, 'owner/repo')).resolves.toBeNull();
   });
 
-  it('returns null when gh pr view throws', () => {
+  it('returns null when gh pr view throws', async () => {
     execFileSyncMock.mockImplementation(() => {
       throw new Error('gh failed');
     });
-    expect(getLinkedIssueNumber(42, 'owner/repo')).toBeNull();
+    await expect(getLinkedIssueNumber(42, 'owner/repo')).resolves.toBeNull();
   });
 });
 
@@ -135,10 +137,10 @@ describe('lookupPR', () => {
     exitSpy.mockRestore();
   });
 
-  it('returns QueuedPR for a valid PR with shipper:ready label', () => {
+  it('returns QueuedPR for a valid PR with shipper:ready label', async () => {
     execFileSyncMock.mockReturnValue(validPRJson);
 
-    const result = lookupPR('42', 'owner/repo');
+    const result = await lookupPR('42', 'owner/repo');
 
     expect(result).toEqual({
       number: 42,
@@ -162,7 +164,7 @@ describe('lookupPR', () => {
     );
   });
 
-  it('exits with error when PR does not have shipper:ready label', () => {
+  it('exits with error when PR does not have shipper:ready label', async () => {
     execFileSyncMock.mockReturnValue(
       JSON.stringify({
         number: 42,
@@ -174,11 +176,11 @@ describe('lookupPR', () => {
       })
     );
 
-    expect(() => lookupPR('42', 'owner/repo')).toThrow('exit:1');
+    await expect(lookupPR('42', 'owner/repo')).rejects.toThrow('exit:1');
     expect(errorMock).toHaveBeenCalledWith('Error: PR #42 does not have the shipper:ready label.');
   });
 
-  it('exits with error when PR is closed', () => {
+  it('exits with error when PR is closed', async () => {
     execFileSyncMock.mockReturnValue(
       JSON.stringify({
         number: 42,
@@ -190,19 +192,19 @@ describe('lookupPR', () => {
       })
     );
 
-    expect(() => lookupPR('42', 'owner/repo')).toThrow('exit:1');
+    await expect(lookupPR('42', 'owner/repo')).rejects.toThrow('exit:1');
     expect(errorMock).toHaveBeenCalledWith('Error: PR #42 is not open (state: CLOSED).');
   });
 
-  it('resolves issue to linked PR when ref is not a PR', () => {
+  it('resolves issue to linked PR when ref is not a PR', async () => {
     execFileSyncMock
       .mockImplementationOnce(() => {
         throw new Error('not a PR');
       })
       .mockReturnValueOnce(validPRJson);
-    tryResolvePrForIssueMock.mockReturnValue('42');
+    tryResolvePrForIssueMock.mockResolvedValue('42');
 
-    const result = lookupPR('10', 'owner/repo');
+    const result = await lookupPR('10', 'owner/repo');
 
     expect(tryResolvePrForIssueMock).toHaveBeenCalledWith(10);
     expect(result).toEqual({
@@ -214,13 +216,13 @@ describe('lookupPR', () => {
     });
   });
 
-  it('exits with error when issue has no linked PR', () => {
+  it('exits with error when issue has no linked PR', async () => {
     execFileSyncMock.mockImplementation(() => {
       throw new Error('not found');
     });
-    tryResolvePrForIssueMock.mockReturnValue(undefined);
+    tryResolvePrForIssueMock.mockResolvedValue(undefined);
 
-    expect(() => lookupPR('99', 'owner/repo')).toThrow('exit:1');
+    await expect(lookupPR('99', 'owner/repo')).rejects.toThrow('exit:1');
     expect(errorMock).toHaveBeenCalledWith('Error: #99 is not a PR and no linked PR was found.');
   });
 });

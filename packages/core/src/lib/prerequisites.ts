@@ -1,15 +1,18 @@
-import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { access, mkdir } from 'node:fs/promises';
 import path from 'node:path';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 interface CheckResult {
   ok: boolean;
   message: string;
 }
 
-export function checkGhInstalled(): CheckResult {
+export async function checkGhInstalled(): Promise<CheckResult> {
   try {
-    execFileSync('gh', ['--version'], { stdio: 'ignore' });
+    await execFileAsync('gh', ['--version']);
     return { ok: true, message: 'gh is installed' };
   } catch {
     return {
@@ -19,30 +22,34 @@ export function checkGhInstalled(): CheckResult {
   }
 }
 
-export function checkGhAuth(): CheckResult {
+export async function checkGhAuth(): Promise<CheckResult> {
   try {
-    execFileSync('gh', ['auth', 'status'], { stdio: 'ignore' });
+    await execFileAsync('gh', ['auth', 'status']);
     return { ok: true, message: 'gh is authenticated' };
   } catch {
     return { ok: false, message: 'GitHub CLI is not authenticated. Run: gh auth login' };
   }
 }
 
-export function checkGitRepo(): CheckResult {
+export async function checkGitRepo(): Promise<CheckResult> {
   try {
-    execFileSync('git', ['rev-parse', '--git-dir'], { stdio: 'ignore' });
+    await execFileAsync('git', ['rev-parse', '--git-dir']);
     return { ok: true, message: 'Inside a git repository' };
   } catch {
     return { ok: false, message: 'Not inside a git repository. Run: git init' };
   }
 }
 
-export function checkGitHubRemote(): CheckResult {
+export async function checkGitHubRemote(): Promise<CheckResult> {
   try {
-    const output = execFileSync('gh', ['repo', 'view', '--json', 'name', '-q', '.name'], {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
+    const { stdout } = await execFileAsync(
+      'gh',
+      ['repo', 'view', '--json', 'name', '-q', '.name'],
+      {
+        encoding: 'utf-8',
+      }
+    );
+    const output = stdout.trim();
     if (output) {
       return { ok: true, message: `GitHub remote found: ${output}` };
     }
@@ -58,12 +65,14 @@ export function checkGitHubRemote(): CheckResult {
   }
 }
 
-export function checkShipperDir(): CheckResult {
+export async function checkShipperDir(): Promise<CheckResult> {
   const shipperDir = path.resolve('.shipper');
-  if (existsSync(shipperDir)) {
+  try {
+    await access(shipperDir);
     return { ok: true, message: '.shipper directory exists' };
+  } catch {
+    return { ok: false, message: '.shipper directory not found. Run: shipper init' };
   }
-  return { ok: false, message: '.shipper directory not found. Run: shipper init' };
 }
 
 const REQUIRED_LABELS = [
@@ -76,13 +85,14 @@ const REQUIRED_LABELS = [
   'shipper:ready',
 ];
 
-export function checkLabels(): CheckResult {
+export async function checkLabels(): Promise<CheckResult> {
   try {
-    const output = execFileSync(
+    const { stdout } = await execFileAsync(
       'gh',
       ['label', 'list', '--search', 'shipper:', '--json', 'name', '-q', '.[].name'],
-      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
-    ).trim();
+      { encoding: 'utf-8' }
+    );
+    const output = stdout.trim();
     const existing = output ? output.split(/\r?\n/) : [];
     const missing = REQUIRED_LABELS.filter((l) => !existing.includes(l));
     if (missing.length === 0) {
@@ -94,9 +104,9 @@ export function checkLabels(): CheckResult {
   }
 }
 
-export function runPrereqChecks(checks: Array<() => CheckResult>): boolean {
+export async function runPrereqChecks(checks: Array<() => Promise<CheckResult>>): Promise<boolean> {
   for (const check of checks) {
-    const result = check();
+    const result = await check();
     if (!result.ok) {
       console.error(`Prereq failed: ${result.message}`);
       return false;
@@ -105,12 +115,12 @@ export function runPrereqChecks(checks: Array<() => CheckResult>): boolean {
   return true;
 }
 
-export function runPreflight(): void {
+export async function runPreflight(): Promise<void> {
   const checks = [checkGhInstalled, checkGhAuth, checkShipperDir, checkLabels];
 
   const failures: string[] = [];
   for (const check of checks) {
-    const result = check();
+    const result = await check();
     if (!result.ok) {
       failures.push(result.message);
     }
@@ -125,5 +135,5 @@ export function runPreflight(): void {
   }
 
   // Auto-create .shipper/tmp if missing (cheap, idempotent)
-  mkdirSync(path.resolve('.shipper', 'tmp'), { recursive: true });
+  await mkdir(path.resolve('.shipper', 'tmp'), { recursive: true });
 }

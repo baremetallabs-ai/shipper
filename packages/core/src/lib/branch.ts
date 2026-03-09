@@ -1,17 +1,28 @@
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 
-export function getRepoRoot(): string {
-  return execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf-8' }).trim();
+const execFileAsync = promisify(execFile);
+
+export async function getRepoRoot(): Promise<string> {
+  const { stdout } = await execFileAsync('git', ['rev-parse', '--show-toplevel'], {
+    encoding: 'utf-8',
+  });
+  return stdout.trim();
 }
 
-export function generateBranchName(issueRef: string): string {
+export async function generateBranchName(issueRef: string): Promise<string> {
   const num = issueRef.replace(/^#/, '');
 
   let title: string;
   try {
-    title = execFileSync('gh', ['issue', 'view', num, '--json', 'title', '--jq', '.title'], {
-      encoding: 'utf-8',
-    }).trim();
+    const { stdout } = await execFileAsync(
+      'gh',
+      ['issue', 'view', num, '--json', 'title', '--jq', '.title'],
+      {
+        encoding: 'utf-8',
+      }
+    );
+    title = stdout.trim();
   } catch {
     title = '';
   }
@@ -29,20 +40,25 @@ export function generateBranchName(issueRef: string): string {
   return `shipper/${num}-implement`;
 }
 
-export function findBranchForIssue(issueRef: string): string {
+export async function findBranchForIssue(issueRef: string): Promise<string> {
   const num = issueRef.replace(/^#/, '');
 
   // Fetch to ensure local remote-tracking refs are up to date (e.g. after a
   // push from a sandboxed agent that couldn't update local tracking metadata).
   try {
-    execFileSync('git', ['fetch', 'origin', '--prune'], { stdio: 'ignore' });
+    await execFileAsync('git', ['fetch', 'origin', '--prune']);
   } catch {
     // Best-effort — fall through to branch lookup with stale refs
   }
 
-  const output = execFileSync('git', ['branch', '-r', '--list', `origin/shipper/${num}-*`], {
-    encoding: 'utf-8',
-  }).trim();
+  const { stdout } = await execFileAsync(
+    'git',
+    ['branch', '-r', '--list', `origin/shipper/${num}-*`],
+    {
+      encoding: 'utf-8',
+    }
+  );
+  const output = stdout.trim();
 
   if (!output) {
     throw new Error(
@@ -72,10 +88,10 @@ export function findBranchForIssue(issueRef: string): string {
   return branch.replace(/^origin\//, '');
 }
 
-export function getBranchForPR(prRef: string): string {
-  const json = execFileSync('gh', ['pr', 'view', prRef, '--json', 'headRefName'], {
+export async function getBranchForPR(prRef: string): Promise<string> {
+  const { stdout } = await execFileAsync('gh', ['pr', 'view', prRef, '--json', 'headRefName'], {
     encoding: 'utf-8',
   });
-  const data: { headRefName: string } = JSON.parse(json);
+  const data: { headRefName: string } = JSON.parse(stdout);
   return data.headRefName;
 }

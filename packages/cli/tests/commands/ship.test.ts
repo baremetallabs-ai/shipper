@@ -22,13 +22,15 @@ import {
 import type { UnblockAttempt } from '../../src/commands/ship.js';
 
 vi.mock('@dnsquared/shipper-core', () => ({
-  selectIssuesForStage: vi.fn(() => []),
-  clearStaleLockIfNeeded: vi.fn(),
-  getRepoNwo: vi.fn(() => 'owner/repo'),
-  withStageHooks: vi.fn((_stage: string, _env: unknown, fn: () => unknown) => fn()),
-  withIssueLock: vi.fn((_issue: string, fn: () => unknown) => fn()),
-  releaseIssueLock: vi.fn(),
-  runPrompt: vi.fn(() => 0),
+  selectIssuesForStage: vi.fn(async () => []),
+  clearStaleLockIfNeeded: vi.fn(async () => {}),
+  getRepoNwo: vi.fn(async () => 'owner/repo'),
+  withStageHooks: vi.fn(
+    async (_stage: string, _env: unknown, fn: () => Promise<unknown>) => await fn()
+  ),
+  withIssueLock: vi.fn(async (_issue: string, fn: () => Promise<unknown>) => await fn()),
+  releaseIssueLock: vi.fn(async () => {}),
+  runPrompt: vi.fn(async () => 0),
 }));
 
 vi.mock('node:fs', async (importOriginal) => {
@@ -174,12 +176,12 @@ describe('AUTO_PRIORITY_LABELS', () => {
 describe('selectNextCandidate', () => {
   beforeEach(() => {
     mockSelectIssuesForStage.mockReset();
-    mockSelectIssuesForStage.mockReturnValue([]);
+    mockSelectIssuesForStage.mockResolvedValue([]);
     mockClearStaleLockIfNeeded.mockReset();
   });
 
-  it('returns the issue from the highest-priority label', () => {
-    mockSelectIssuesForStage.mockImplementation((label: string) => {
+  it('returns the issue from the highest-priority label', async () => {
+    mockSelectIssuesForStage.mockImplementation(async (label: string) => {
       if (label === 'shipper:ready') return [];
       if (label === 'shipper:pr-reviewed') return [];
       if (label === 'shipper:pr-open') return [{ number: 10, title: 'PR open issue' }];
@@ -187,12 +189,12 @@ describe('selectNextCandidate', () => {
       return [];
     });
 
-    const result = selectNextCandidate(new Set());
+    const result = await selectNextCandidate(new Set());
     expect(result).toEqual({ number: 10, title: 'PR open issue' });
   });
 
-  it('skips issues in the skippedIssues set', () => {
-    mockSelectIssuesForStage.mockImplementation((label: string) => {
+  it('skips issues in the skippedIssues set', async () => {
+    mockSelectIssuesForStage.mockImplementation(async (label: string) => {
       if (label === 'shipper:pr-open')
         return [
           { number: 10, title: 'Skipped issue' },
@@ -201,29 +203,29 @@ describe('selectNextCandidate', () => {
       return [];
     });
 
-    const result = selectNextCandidate(new Set([10]));
+    const result = await selectNextCandidate(new Set([10]));
     expect(result).toEqual({ number: 11, title: 'Next issue' });
   });
 
-  it('returns null when no candidates remain', () => {
-    mockSelectIssuesForStage.mockReturnValue([]);
+  it('returns null when no candidates remain', async () => {
+    mockSelectIssuesForStage.mockResolvedValue([]);
 
-    const result = selectNextCandidate(new Set());
+    const result = await selectNextCandidate(new Set());
     expect(result).toBeNull();
   });
 
-  it('returns null when all candidates are skipped', () => {
-    mockSelectIssuesForStage.mockImplementation((label: string) => {
+  it('returns null when all candidates are skipped', async () => {
+    mockSelectIssuesForStage.mockImplementation(async (label: string) => {
       if (label === 'shipper:planned') return [{ number: 5, title: 'Only issue' }];
       return [];
     });
 
-    const result = selectNextCandidate(new Set([5]));
+    const result = await selectNextCandidate(new Set([5]));
     expect(result).toBeNull();
   });
 
-  it('returns the first issue within a label (already sorted by time-in-state)', () => {
-    mockSelectIssuesForStage.mockImplementation((label: string) => {
+  it('returns the first issue within a label (already sorted by time-in-state)', async () => {
+    mockSelectIssuesForStage.mockImplementation(async (label: string) => {
       if (label === 'shipper:groomed')
         return [
           { number: 1, title: 'Oldest' },
@@ -232,38 +234,40 @@ describe('selectNextCandidate', () => {
       return [];
     });
 
-    const result = selectNextCandidate(new Set());
+    const result = await selectNextCandidate(new Set());
     expect(result).toEqual({ number: 1, title: 'Oldest' });
   });
 
-  it('clears stale lock on selected candidate', () => {
-    mockSelectIssuesForStage.mockImplementation((label: string, staleLocked?: Set<number>) => {
-      if (label === 'shipper:planned') {
-        const issues = [{ number: 7, title: 'Stale locked issue' }];
-        staleLocked?.add(7);
-        return issues;
+  it('clears stale lock on selected candidate', async () => {
+    mockSelectIssuesForStage.mockImplementation(
+      async (label: string, staleLocked?: Set<number>) => {
+        if (label === 'shipper:planned') {
+          const issues = [{ number: 7, title: 'Stale locked issue' }];
+          staleLocked?.add(7);
+          return issues;
+        }
+        return [];
       }
-      return [];
-    });
+    );
 
-    const result = selectNextCandidate(new Set());
+    const result = await selectNextCandidate(new Set());
     expect(result).toEqual({ number: 7, title: 'Stale locked issue' });
     expect(mockClearStaleLockIfNeeded).toHaveBeenCalledWith(7, expect.any(Set));
   });
 
-  it('calls clearStaleLockIfNeeded with empty staleLocked set for non-stale candidate', () => {
-    mockSelectIssuesForStage.mockImplementation((label: string) => {
+  it('calls clearStaleLockIfNeeded with empty staleLocked set for non-stale candidate', async () => {
+    mockSelectIssuesForStage.mockImplementation(async (label: string) => {
       if (label === 'shipper:planned') return [{ number: 7, title: 'Normal issue' }];
       return [];
     });
 
-    const result = selectNextCandidate(new Set());
+    const result = await selectNextCandidate(new Set());
     expect(result).toEqual({ number: 7, title: 'Normal issue' });
     expect(mockClearStaleLockIfNeeded).toHaveBeenCalledWith(7, new Set());
   });
 
-  it('skips issues already active in parallel slots', () => {
-    mockSelectIssuesForStage.mockImplementation((label: string) => {
+  it('skips issues already active in parallel slots', async () => {
+    mockSelectIssuesForStage.mockImplementation(async (label: string) => {
       if (label === 'shipper:planned')
         return [
           { number: 7, title: 'Active issue' },
@@ -272,7 +276,7 @@ describe('selectNextCandidate', () => {
       return [];
     });
 
-    const result = selectNextCandidate(new Set(), new Set([7]));
+    const result = await selectNextCandidate(new Set(), new Set([7]));
     expect(result).toEqual({ number: 8, title: 'Available issue' });
   });
 });
@@ -455,10 +459,12 @@ describe('shipCommand parallel auto runner', () => {
     const runPromise = shipCommand(undefined, { auto: true, merge: false, parallel: 2 });
 
     await flushMicrotasks();
+    const cliEntrypoint = process.argv[1];
+    expect(cliEntrypoint).toBeDefined();
 
     expect(mockSpawn).toHaveBeenCalledTimes(2);
-    expect(mockSpawn.mock.calls[0]?.[1]).toEqual([process.argv[1]!, 'ship', '1', '--merge']);
-    expect(mockSpawn.mock.calls[1]?.[1]).toEqual([process.argv[1]!, 'ship', '2', '--merge']);
+    expect(mockSpawn.mock.calls[0]?.[1]).toEqual([cliEntrypoint, 'ship', '1', '--merge']);
+    expect(mockSpawn.mock.calls[1]?.[1]).toEqual([cliEntrypoint, 'ship', '2', '--merge']);
 
     plannedIssues = plannedIssues.filter((issue) => issue.number !== 1);
     child1.finish(0);
@@ -468,7 +474,7 @@ describe('shipCommand parallel auto runner', () => {
     });
 
     expect(mockSpawn).toHaveBeenCalledTimes(3);
-    expect(mockSpawn.mock.calls[2]?.[1]).toEqual([process.argv[1]!, 'ship', '3', '--merge']);
+    expect(mockSpawn.mock.calls[2]?.[1]).toEqual([cliEntrypoint, 'ship', '3', '--merge']);
     expect(
       mockSelectIssuesForStage.mock.calls.filter(([label]) => label === 'shipper:planned').length
     ).toBeGreaterThanOrEqual(3);
