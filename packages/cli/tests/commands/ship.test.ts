@@ -24,6 +24,7 @@ import type { UnblockAttempt } from '../../src/commands/ship.js';
 vi.mock('@dnsquared/shipper-core', () => ({
   selectIssuesForStage: vi.fn(async () => []),
   clearStaleLockIfNeeded: vi.fn(async () => {}),
+  gh: vi.fn(),
   getRepoNwo: vi.fn(async () => 'owner/repo'),
   withStageHooks: vi.fn(
     async (_stage: string, _env: unknown, fn: () => Promise<unknown>) => await fn()
@@ -68,7 +69,6 @@ vi.mock('node:child_process', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
-    execFileSync: vi.fn(),
     spawn: vi.fn(),
     spawnSync: vi.fn(),
   };
@@ -77,14 +77,15 @@ vi.mock('node:child_process', async (importOriginal) => {
 import {
   selectIssuesForStage,
   clearStaleLockIfNeeded,
+  gh,
   releaseIssueLock,
 } from '@dnsquared/shipper-core';
-import { execFileSync, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 
 const mockSelectIssuesForStage = vi.mocked(selectIssuesForStage);
 const mockClearStaleLockIfNeeded = vi.mocked(clearStaleLockIfNeeded);
+const mockGh = vi.mocked(gh);
 const mockReleaseIssueLock = vi.mocked(releaseIssueLock);
-const mockExecFileSync = vi.mocked(execFileSync);
 const mockSpawn = vi.mocked(spawn);
 const mockCreateWriteStream = fsMockState.mockCreateWriteStream;
 const mockMkdirSync = fsMockState.mockMkdirSync;
@@ -283,16 +284,16 @@ describe('selectNextCandidate', () => {
 
 describe('selectBlockedIssues', () => {
   beforeEach(() => {
-    mockExecFileSync.mockReset();
+    mockGh.mockReset();
   });
 
-  it('returns empty array when no blocked issues exist', () => {
-    mockExecFileSync.mockReturnValue('[]');
-    const result = selectBlockedIssues();
+  it('returns empty array when no blocked issues exist', async () => {
+    mockGh.mockResolvedValue({ stdout: '[]', stderr: '' });
+    const result = await selectBlockedIssues();
     expect(result).toEqual([]);
   });
 
-  it('returns issues sorted by stage priority', () => {
+  it('returns issues sorted by stage priority', async () => {
     const issues = [
       {
         number: 10,
@@ -310,9 +311,9 @@ describe('selectBlockedIssues', () => {
         labels: [{ name: 'shipper:planned' }, { name: 'shipper:blocked' }],
       },
     ];
-    mockExecFileSync.mockReturnValue(JSON.stringify(issues));
+    mockGh.mockResolvedValue({ stdout: JSON.stringify(issues), stderr: '' });
 
-    const result = selectBlockedIssues();
+    const result = await selectBlockedIssues();
     expect(result).toEqual([
       { number: 20, title: 'PR reviewed issue' },
       { number: 30, title: 'Planned issue' },
@@ -320,25 +321,21 @@ describe('selectBlockedIssues', () => {
     ]);
   });
 
-  it('returns empty array when execFileSync throws', () => {
-    mockExecFileSync.mockImplementation(() => {
-      throw new Error('gh CLI error');
-    });
-    const result = selectBlockedIssues();
+  it('returns empty array when gh throws', async () => {
+    mockGh.mockRejectedValue(new Error('gh CLI error'));
+    const result = await selectBlockedIssues();
     expect(result).toEqual([]);
   });
 
-  it('passes --search flag to exclude shipper:locked issues', () => {
-    mockExecFileSync.mockReturnValue('[]');
-    selectBlockedIssues();
-    expect(mockExecFileSync).toHaveBeenCalledWith(
-      'gh',
-      expect.arrayContaining(['--search', '-label:shipper:locked']),
-      expect.any(Object)
+  it('passes --search flag to exclude shipper:locked issues', async () => {
+    mockGh.mockResolvedValue({ stdout: '[]', stderr: '' });
+    await selectBlockedIssues();
+    expect(mockGh).toHaveBeenCalledWith(
+      expect.arrayContaining(['--search', '-label:shipper:locked'])
     );
   });
 
-  it('sorts issues with no recognized stage label to the end', () => {
+  it('sorts issues with no recognized stage label to the end', async () => {
     const issues = [
       {
         number: 10,
@@ -351,9 +348,9 @@ describe('selectBlockedIssues', () => {
         labels: [{ name: 'shipper:groomed' }, { name: 'shipper:blocked' }],
       },
     ];
-    mockExecFileSync.mockReturnValue(JSON.stringify(issues));
+    mockGh.mockResolvedValue({ stdout: JSON.stringify(issues), stderr: '' });
 
-    const result = selectBlockedIssues();
+    const result = await selectBlockedIssues();
     expect(result).toEqual([
       { number: 20, title: 'Groomed issue' },
       { number: 10, title: 'No stage label' },
@@ -421,8 +418,8 @@ describe('shipCommand parallel auto runner', () => {
   beforeEach(() => {
     mockSelectIssuesForStage.mockReset();
     mockClearStaleLockIfNeeded.mockReset();
-    mockExecFileSync.mockReset();
-    mockExecFileSync.mockReturnValue('[]');
+    mockGh.mockReset();
+    mockGh.mockResolvedValue({ stdout: '[]', stderr: '' });
     mockSpawn.mockReset();
     mockReleaseIssueLock.mockReset();
     mockCreateWriteStream.mockClear();
@@ -503,23 +500,25 @@ describe('shipCommand parallel auto runner', () => {
       if (label === 'shipper:planned') return plannedIssues;
       return [];
     });
-    mockExecFileSync.mockImplementation((cmd, args) => {
-      const argList = args as string[];
-      if (cmd === 'gh' && argList.includes('list')) {
-        return JSON.stringify([
-          {
-            number: 7,
-            title: 'Blocked issue',
-            labels: [{ name: 'shipper:planned' }, { name: 'shipper:blocked' }],
-          },
-        ]);
+    mockGh.mockImplementation(async (args: string[]) => {
+      if (args.includes('list')) {
+        return {
+          stdout: JSON.stringify([
+            {
+              number: 7,
+              title: 'Blocked issue',
+              labels: [{ name: 'shipper:planned' }, { name: 'shipper:blocked' }],
+            },
+          ]),
+          stderr: '',
+        };
       }
 
-      if (cmd === 'gh' && argList.includes('view')) {
-        return 'shipper:planned\nshipper:blocked';
+      if (args.includes('view')) {
+        return { stdout: 'shipper:planned\nshipper:blocked', stderr: '' };
       }
 
-      return '[]';
+      return { stdout: '[]', stderr: '' };
     });
 
     const child1 = new FakeChildProcess();
@@ -644,17 +643,15 @@ describe('shipCommand parallel auto runner', () => {
     child1.finish(0);
     await flushMicrotasks();
 
-    expect(mockExecFileSync).not.toHaveBeenCalled();
+    expect(mockGh).not.toHaveBeenCalled();
 
     plannedIssues = plannedIssues.filter((issue) => issue.number !== 2);
     child2.finish(0);
     await runPromise;
 
-    expect(mockExecFileSync).toHaveBeenCalledTimes(1);
-    expect(mockExecFileSync).toHaveBeenCalledWith(
-      'gh',
-      expect.arrayContaining(['issue', 'list', '--label', 'shipper:blocked']),
-      expect.any(Object)
+    expect(mockGh).toHaveBeenCalledTimes(1);
+    expect(mockGh).toHaveBeenCalledWith(
+      expect.arrayContaining(['issue', 'list', '--label', 'shipper:blocked'])
     );
   });
 

@@ -19,11 +19,8 @@ vi.mock('node:fs', async () => {
   };
 });
 
-vi.mock('node:child_process', () => ({
-  execFileSync: vi.fn(),
-}));
-
 vi.mock('@dnsquared/shipper-core', () => ({
+  gh: vi.fn(async () => ({ stdout: '', stderr: '' })),
   scripts: {},
   DEFAULTS: {
     prReviewWait: { mode: 'checks', timeoutMinutes: 15 },

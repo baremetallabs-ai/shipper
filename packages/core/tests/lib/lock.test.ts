@@ -49,7 +49,7 @@ function queueExecFileResult(stdout: string): void {
 function queueExecFileError(error: Error): void {
   execFileMock.mockImplementationOnce((_cmd: string, _args: string[], ...rest: unknown[]) => {
     const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
-    cb(error);
+    cb(Object.assign(error, { stderr: 'not found' }));
   });
 }
 
@@ -97,6 +97,7 @@ describe('acquireIssueLock', () => {
       2,
       'gh',
       ['issue', 'edit', '42', '--add-label', 'shipper:locked'],
+      expect.objectContaining({ encoding: 'utf-8' }),
       expect.any(Function)
     );
   });
@@ -113,11 +114,13 @@ describe('acquireIssueLock', () => {
     expect(execFileMock).toHaveBeenCalledWith(
       'gh',
       ['issue', 'edit', '42', '--remove-label', 'shipper:locked'],
+      expect.objectContaining({ encoding: 'utf-8' }),
       expect.any(Function)
     );
     expect(execFileMock).toHaveBeenCalledWith(
       'gh',
       ['issue', 'edit', '42', '--add-label', 'shipper:locked'],
+      expect.objectContaining({ encoding: 'utf-8' }),
       expect.any(Function)
     );
   });
@@ -180,6 +183,7 @@ describe('withIssueLock', () => {
     expect(execFileMock).toHaveBeenLastCalledWith(
       'gh',
       ['issue', 'edit', '42', '--remove-label', 'shipper:locked'],
+      expect.objectContaining({ encoding: 'utf-8' }),
       expect.any(Function)
     );
   });
