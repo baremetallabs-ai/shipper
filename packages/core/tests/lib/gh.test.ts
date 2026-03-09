@@ -38,6 +38,10 @@ function permanentError(message: string): Error & { stderr: string } {
   return Object.assign(new Error(message), { stderr: message });
 }
 
+function missingBinaryError(): Error & { code: string } {
+  return Object.assign(new Error('spawn gh ENOENT'), { code: 'ENOENT' });
+}
+
 describe('gh', () => {
   let errorSpy: ReturnType<typeof vi.spyOn>;
 
@@ -125,7 +129,6 @@ describe('gh', () => {
     'HTTP 401 unauthorized',
     'HTTP 404 missing',
     'HTTP 422 validation failed',
-    'not found',
     'could not resolve to a Repository',
     'validation failed',
   ])('does not retry permanent failure "%s"', async (stderr) => {
@@ -138,5 +141,18 @@ describe('gh', () => {
     await expect(gh(['issue', 'view', '42'])).rejects.toBe(err);
     expect(execFileMock).toHaveBeenCalledTimes(1);
     expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not retry when gh is missing from PATH', async () => {
+    const err = missingBinaryError();
+    execFileMock.mockImplementationOnce((_cmd: string, _args: string[], ...rest: unknown[]) => {
+      const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
+      cb(err);
+    });
+
+    await expect(gh(['--version'])).rejects.toBe(err);
+    expect(execFileMock).toHaveBeenCalledTimes(1);
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(sleepMsMock).not.toHaveBeenCalled();
   });
 });
