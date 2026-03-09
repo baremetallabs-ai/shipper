@@ -1,6 +1,8 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
+import { gh } from './gh.js';
+
 const execFileAsync = promisify(execFile);
 
 export async function getRepoRoot(): Promise<string> {
@@ -15,13 +17,7 @@ export async function generateBranchName(issueRef: string): Promise<string> {
 
   let title: string;
   try {
-    const { stdout } = await execFileAsync(
-      'gh',
-      ['issue', 'view', num, '--json', 'title', '--jq', '.title'],
-      {
-        encoding: 'utf-8',
-      }
-    );
+    const { stdout } = await gh(['issue', 'view', num, '--json', 'title', '--jq', '.title']);
     title = stdout.trim();
   } catch {
     title = '';
@@ -89,9 +85,7 @@ export async function findBranchForIssue(issueRef: string): Promise<string> {
 }
 
 export async function getBranchForPR(prRef: string): Promise<string> {
-  const { stdout } = await execFileAsync('gh', ['pr', 'view', prRef, '--json', 'headRefName'], {
-    encoding: 'utf-8',
-  });
+  const { stdout } = await gh(['pr', 'view', prRef, '--json', 'headRefName']);
   const data: { headRefName: string } = JSON.parse(stdout);
   return data.headRefName;
 }

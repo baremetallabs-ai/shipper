@@ -1,25 +1,19 @@
 import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { gh } from './gh.js';
 import { getRepoNwo } from './repo.js';
 import { getSettings } from './settings.js';
-
-const execFileAsync = promisify(execFile);
 
 export async function isLockStale(issueNumber: string): Promise<boolean> {
   const nwo = await getRepoNwo();
   let output: string;
   try {
-    const result = await execFileAsync(
-      'gh',
-      [
-        'api',
-        `repos/${nwo}/issues/${issueNumber}/timeline`,
-        '--paginate',
-        '--jq',
-        '.[] | select(.event == "labeled" and .label.name? == "shipper:locked") | .created_at',
-      ],
-      { encoding: 'utf-8' }
-    );
+    const result = await gh([
+      'api',
+      `repos/${nwo}/issues/${issueNumber}/timeline`,
+      '--paginate',
+      '--jq',
+      '.[] | select(.event == "labeled" and .label.name? == "shipper:locked") | .created_at',
+    ]);
     output = result.stdout.trim();
   } catch {
     // If we can't fetch timeline, fail closed — treat as NOT stale to preserve the lock
@@ -51,11 +45,15 @@ export async function isLockStale(issueNumber: string): Promise<boolean> {
 export async function acquireIssueLock(issueNumber: string): Promise<void> {
   let output: string;
   try {
-    const result = await execFileAsync(
-      'gh',
-      ['issue', 'view', issueNumber, '--json', 'labels', '--jq', '.labels[].name'],
-      { encoding: 'utf-8' }
-    );
+    const result = await gh([
+      'issue',
+      'view',
+      issueNumber,
+      '--json',
+      'labels',
+      '--jq',
+      '.labels[].name',
+    ]);
     output = result.stdout.trim();
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -78,7 +76,7 @@ export async function acquireIssueLock(issueNumber: string): Promise<void> {
   }
 
   try {
-    await execFileAsync('gh', ['issue', 'edit', issueNumber, '--add-label', 'shipper:locked']);
+    await gh(['issue', 'edit', issueNumber, '--add-label', 'shipper:locked']);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`Error: Failed to acquire lock on issue #${issueNumber}: ${msg}`);
@@ -88,7 +86,7 @@ export async function acquireIssueLock(issueNumber: string): Promise<void> {
 
 export async function releaseIssueLock(issueNumber: string): Promise<void> {
   try {
-    await execFileAsync('gh', ['issue', 'edit', issueNumber, '--remove-label', 'shipper:locked']);
+    await gh(['issue', 'edit', issueNumber, '--remove-label', 'shipper:locked']);
   } catch {
     // Idempotent — ignore errors if label already removed
   }

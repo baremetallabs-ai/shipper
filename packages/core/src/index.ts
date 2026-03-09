@@ -2,6 +2,7 @@
 export * from './lib/branch.js';
 export * from './lib/checks.js';
 export * from './lib/frontmatter.js';
+export * from './lib/gh.js';
 export * from './lib/github.js';
 export * from './lib/hooks.js';
 export * from './lib/lock.js';

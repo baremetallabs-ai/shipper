@@ -1,7 +1,4 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-
-const execFileAsync = promisify(execFile);
+import { gh } from './gh.js';
 
 export interface PRChecksLine {
   name: string;
@@ -21,9 +18,7 @@ export async function fetchChecks(prNumber: string, nwo?: string): Promise<PRChe
   if (nwo) {
     args.push('-R', nwo);
   }
-  const { stdout } = await execFileAsync('gh', args, {
-    encoding: 'utf-8',
-  });
+  const { stdout } = await gh(args);
   return JSON.parse(stdout) as PRChecksLine[];
 }
 
