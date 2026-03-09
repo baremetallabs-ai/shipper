@@ -12,7 +12,7 @@ function cliNameToFilename(name: string): string {
 }
 
 export function ejectCommand(name?: string) {
-  const agent = getSettings().agents.default;
+  const agent = getSettings().commands.default.agent;
   const promptSet = agentPrompts[agent];
   if (!promptSet) {
     console.error(`Error: No bundled prompts found for agent "${agent}".`);

@@ -74,7 +74,7 @@ const { ejectCommand } = await import('../../src/commands/eject.js');
 beforeEach(() => {
   vi.clearAllMocks();
   getSettingsMock.mockReturnValue({
-    agents: { default: 'claude' },
+    commands: { default: { agent: 'claude' } },
   });
   existsSyncMock.mockReturnValue(false);
 });
@@ -102,7 +102,10 @@ describe('ejectCommand', () => {
 
   it('uses the default agent even when per-step overrides are present', () => {
     getSettingsMock.mockReturnValue({
-      agents: { default: 'claude', implement: 'codex' },
+      commands: {
+        default: { agent: 'claude' },
+        implement: { agent: 'codex' },
+      },
     });
 
     ejectCommand('implement');

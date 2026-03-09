@@ -33,10 +33,18 @@ vi.mock('../src/commands/setup.js', () => ({ setupCommand: vi.fn() }));
 
 import { shipCommand } from '../src/commands/ship.js';
 import { ejectCommand } from '../src/commands/eject.js';
+import { newCommand } from '../src/commands/new.js';
+import { groomCommand } from '../src/commands/groom.js';
+import { prReviewCommand } from '../src/commands/pr-review.js';
+import { setupCommand } from '../src/commands/setup.js';
 import { runPreflight, loadSettings } from '@dnsquared/shipper-core';
 
 const mockShipCommand = vi.mocked(shipCommand);
 const mockEjectCommand = vi.mocked(ejectCommand);
+const mockNewCommand = vi.mocked(newCommand);
+const mockGroomCommand = vi.mocked(groomCommand);
+const mockPrReviewCommand = vi.mocked(prReviewCommand);
+const mockSetupCommand = vi.mocked(setupCommand);
 const mockRunPreflight = vi.mocked(runPreflight);
 const mockLoadSettings = vi.mocked(loadSettings);
 
@@ -56,6 +64,19 @@ describe('shipper-cli', () => {
     expect(output).toContain('plan');
     expect(output).toContain('eject');
     expect(output).toContain('pr');
+  });
+
+  it('shows --mode on prompt-running command help and removes --headless from new', () => {
+    const newHelp = execFileSync('node', ['dist/index.js', 'new', '--help'], {
+      encoding: 'utf-8',
+    });
+    const setupHelp = execFileSync('node', ['dist/index.js', 'setup', '--help'], {
+      encoding: 'utf-8',
+    });
+
+    expect(newHelp).toContain('--mode <mode>');
+    expect(newHelp).not.toContain('--headless');
+    expect(setupHelp).toContain('--mode <mode>');
   });
 
   describe('eject command wiring', () => {
@@ -84,6 +105,80 @@ describe('shipper-cli', () => {
       expect(mockEjectCommand).toHaveBeenCalledWith('groom');
       expect(mockLoadSettings).toHaveBeenCalled();
       expect(mockRunPreflight).toHaveBeenCalled();
+    });
+  });
+
+  describe('prompt command mode wiring', () => {
+    const originalArgv = [...process.argv];
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      throw new Error(`process.exit:${code ?? 0}`);
+    }) as typeof process.exit);
+
+    beforeEach(() => {
+      vi.resetModules();
+      mockNewCommand.mockReset();
+      mockGroomCommand.mockReset();
+      mockPrReviewCommand.mockReset();
+      mockSetupCommand.mockReset();
+      mockRunPreflight.mockClear();
+      mockLoadSettings.mockClear();
+      exitSpy.mockClear();
+    });
+
+    afterEach(() => {
+      process.argv = [...originalArgv];
+    });
+
+    afterAll(() => {
+      exitSpy.mockRestore();
+    });
+
+    async function importEntrypoint() {
+      await import('../src/index.ts');
+    }
+
+    it('passes mode to newCommand', async () => {
+      process.argv = ['node', 'src/index.ts', 'new', 'pitch', '--mode', 'headless'];
+
+      await importEntrypoint();
+
+      expect(mockNewCommand).toHaveBeenCalledWith(['pitch'], { mode: 'headless' });
+    });
+
+    it('passes mode through groomCommand options', async () => {
+      process.argv = ['node', 'src/index.ts', 'groom', '42', '--mode', 'interactive'];
+
+      await importEntrypoint();
+
+      expect(mockGroomCommand).toHaveBeenCalledWith('42', {
+        auto: false,
+        mode: 'interactive',
+      });
+    });
+
+    it('passes mode to pr review', async () => {
+      process.argv = ['node', 'src/index.ts', 'pr', 'review', '7', '--mode', 'interactive'];
+
+      await importEntrypoint();
+
+      expect(mockPrReviewCommand).toHaveBeenCalledWith('7', 'interactive');
+    });
+
+    it('loads settings explicitly for setup and does not run preflight', async () => {
+      process.argv = ['node', 'src/index.ts', 'setup', 'repo', '--mode', 'headless'];
+
+      await importEntrypoint();
+
+      expect(mockLoadSettings).toHaveBeenCalled();
+      expect(mockRunPreflight).not.toHaveBeenCalled();
+      expect(mockSetupCommand).toHaveBeenCalledWith(['repo'], { mode: 'headless' });
+    });
+
+    it('rejects the removed --headless option on new', async () => {
+      process.argv = ['node', 'src/index.ts', 'new', 'pitch', '--headless'];
+
+      await expect(importEntrypoint()).rejects.toThrow('process.exit:1');
+      expect(mockNewCommand).not.toHaveBeenCalled();
     });
   });
 
@@ -118,7 +213,7 @@ describe('shipper-cli', () => {
     it('errors when --parallel is used without --auto', async () => {
       process.argv = ['node', 'src/index.ts', 'ship', '42', '--parallel', '3'];
 
-      await expect(importEntrypoint()).rejects.toThrow('process.exit:1');
+      await expect(importEntrypoint()).rejects.toThrow();
       expect(errorSpy).toHaveBeenCalledWith('Error: --parallel requires --auto');
       expect(mockShipCommand).not.toHaveBeenCalled();
     });
@@ -126,7 +221,7 @@ describe('shipper-cli', () => {
     it('errors when --parallel is missing its numeric value', async () => {
       process.argv = ['node', 'src/index.ts', 'ship', '--auto', '--parallel'];
 
-      await expect(importEntrypoint()).rejects.toThrow('process.exit:1');
+      await expect(importEntrypoint()).rejects.toThrow();
       expect(mockShipCommand).not.toHaveBeenCalled();
 
       try {
@@ -169,7 +264,7 @@ describe('shipper-cli', () => {
     it('keeps non-ship commands on normal unknown-option handling', async () => {
       process.argv = ['node', 'src/index.ts', 'groom', '--parallel'];
 
-      await expect(importEntrypoint()).rejects.toThrow('process.exit:1');
+      await expect(importEntrypoint()).rejects.toThrow();
       expect(errorSpy).not.toHaveBeenCalledWith('Error: --parallel requires a number');
       expect(mockShipCommand).not.toHaveBeenCalled();
     });

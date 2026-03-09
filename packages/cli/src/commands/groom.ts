@@ -1,4 +1,5 @@
 import { autoSelectIssue } from '@dnsquared/shipper-core';
+import type { CommandMode } from '@dnsquared/shipper-core';
 import { withStageHooks } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
 import { runPrompt } from '@dnsquared/shipper-core';
@@ -6,14 +7,18 @@ import { printAutoSummary, type AutoResult } from './ship.js';
 
 export interface GroomOptions {
   auto: boolean;
+  mode?: CommandMode;
 }
 
-async function groomOneIssue(issueStr: string): Promise<{ success: boolean; error?: string }> {
+async function groomOneIssue(
+  issueStr: string,
+  mode?: CommandMode
+): Promise<{ success: boolean; error?: string }> {
   const code = await withIssueLock(issueStr, () =>
     withStageHooks(
       'groom',
       { issueNumber: issueStr },
-      async () => await runPrompt('groom', { issueRef: issueStr })
+      async () => await runPrompt('groom', { issueRef: issueStr, mode })
     )
   );
   return code === 0
@@ -33,7 +38,7 @@ export async function groomCommand(
       if (!candidate) break;
 
       console.log(`\nAuto: grooming issue #${candidate.number} — ${candidate.title}`);
-      const result = await groomOneIssue(String(candidate.number));
+      const result = await groomOneIssue(String(candidate.number), options.mode);
 
       results.push({
         issue: candidate.number,
@@ -60,5 +65,5 @@ export async function groomCommand(
     issue = String(selected.number);
   }
 
-  process.exitCode = (await groomOneIssue(issue)).success ? 0 : 1;
+  process.exitCode = (await groomOneIssue(issue, options.mode)).success ? 0 : 1;
 }

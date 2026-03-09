@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { getBranchForPR, getRepoRoot } from '@dnsquared/shipper-core';
 import { fetchChecks, classifyChecks } from '@dnsquared/shipper-core';
 import { autoSelectPrForStage, resolveRef } from '@dnsquared/shipper-core';
+import type { CommandMode } from '@dnsquared/shipper-core';
 import { withStageHooks } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
 import { withWorktree } from '@dnsquared/shipper-core';
@@ -89,7 +90,7 @@ async function fetchChecksGraceful(
   }
 }
 
-export async function prRemediateCommand(pr?: string): Promise<void> {
+export async function prRemediateCommand(pr?: string, mode?: CommandMode): Promise<void> {
   let issueNumber: string;
 
   if (!pr) {
@@ -152,6 +153,7 @@ export async function prRemediateCommand(pr?: string): Promise<void> {
             issueRef: issueNumber,
             prRef,
             cwd: wtPath,
+            mode,
           });
         }
       );

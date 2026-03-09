@@ -1,9 +1,10 @@
 import { autoSelectPrForStage, resolveRef } from '@dnsquared/shipper-core';
+import type { CommandMode } from '@dnsquared/shipper-core';
 import { withStageHooks } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
 import { runPrompt } from '@dnsquared/shipper-core';
 
-export async function prReviewCommand(pr?: string): Promise<void> {
+export async function prReviewCommand(pr?: string, mode?: CommandMode): Promise<void> {
   let issueNumber: string;
 
   if (!pr) {
@@ -28,7 +29,7 @@ export async function prReviewCommand(pr?: string): Promise<void> {
       await withStageHooks(
         'pr-review',
         { issueNumber },
-        async () => await runPrompt('pr_review', { issueRef: issueNumber, prRef: pr })
+        async () => await runPrompt('pr_review', { issueRef: issueNumber, prRef: pr, mode })
       )
   );
 
