@@ -52,6 +52,20 @@ export interface ResolvedRefBoth extends ResolvedRef {
   prNumber: string;
 }
 
+export interface ListIssueItem {
+  number: number;
+  title: string;
+  labels: string[];
+  state: string;
+  author: string;
+  createdAt: string;
+}
+
+export interface ListIssuesOptions {
+  label?: string;
+  state?: 'open' | 'closed' | 'all';
+}
+
 export async function resolveBaseBranch(repo: string, configured?: string): Promise<string> {
   if (configured) {
     let result: string;
@@ -149,6 +163,49 @@ function escapeAttr(value: string): string {
     .replace(/"/g, '&quot;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
+}
+
+export async function listIssues(
+  repo: string,
+  options?: ListIssuesOptions
+): Promise<ListIssueItem[]> {
+  const args = [
+    'issue',
+    'list',
+    '-R',
+    repo,
+    '--json',
+    'number,title,labels,state,author,createdAt',
+    '--limit',
+    '1000',
+    '--state',
+    options?.state ?? 'open',
+  ];
+
+  if (options?.label) {
+    args.push('--label', options.label);
+  } else {
+    args.push('--search', 'label:shipper:');
+  }
+
+  let json: string;
+  try {
+    const result = await gh(args);
+    json = result.stdout;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Failed to list issues for ${repo}: ${msg}`);
+  }
+
+  const raw = JSON.parse(json) as IssueData[];
+  return raw.map((issue) => ({
+    number: issue.number,
+    title: issue.title,
+    labels: issue.labels.map((l) => l.name),
+    state: issue.state,
+    author: issue.author.login,
+    createdAt: issue.createdAt,
+  }));
 }
 
 export function formatIssue(data: IssueData): string {
