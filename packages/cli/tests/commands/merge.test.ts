@@ -1,20 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-const execFileSyncMock = vi.fn();
-const execSyncMock = vi.fn();
-vi.mock('node:child_process', async () => {
-  const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
-  return {
-    ...actual,
-    execFileSync: (...args: unknown[]) => execFileSyncMock(...args),
-    execSync: (...args: unknown[]) => execSyncMock(...args),
-  };
-});
-
 const tryResolvePrForIssueMock = vi.fn();
 const getSettingsMock = vi.fn();
+const ghMock = vi.fn();
 vi.mock('@dnsquared/shipper-core', () => ({
   getSettings: () => getSettingsMock(),
+  gh: (...args: unknown[]) => ghMock(...args),
   tryResolvePrForIssue: (...args: unknown[]) => tryResolvePrForIssueMock(...args),
   getRepoNwo: () => 'owner/repo',
   withStageHooks: vi.fn(
@@ -29,8 +20,7 @@ const warnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
 const errorMock = vi.spyOn(console, 'error').mockImplementation(() => {});
 
 beforeEach(() => {
-  execFileSyncMock.mockReset();
-  execSyncMock.mockReset();
+  ghMock.mockReset();
   getSettingsMock.mockReset();
   tryResolvePrForIssueMock.mockReset();
   logMock.mockClear();
@@ -54,61 +44,60 @@ const mockPR = {
 
 describe('getLinkedIssueNumber', () => {
   it('returns issue number when PR body contains Closes #N', async () => {
-    execFileSyncMock.mockReturnValue(JSON.stringify({ body: 'Some text\n\nCloses #25\n' }));
+    ghMock.mockResolvedValue({
+      stdout: JSON.stringify({ body: 'Some text\n\nCloses #25\n' }),
+      stderr: '',
+    });
     await expect(getLinkedIssueNumber(42, 'owner/repo')).resolves.toBe(25);
-    expect(execFileSyncMock).toHaveBeenCalledWith(
-      'gh',
-      ['pr', 'view', '42', '-R', 'owner/repo', '--json', 'body'],
-      expect.objectContaining({ encoding: 'utf-8' })
-    );
+    expect(ghMock).toHaveBeenCalledWith(['pr', 'view', '42', '-R', 'owner/repo', '--json', 'body']);
   });
 
   it('returns issue number for Fixes #N', async () => {
-    execFileSyncMock.mockReturnValue(JSON.stringify({ body: 'Fixes #10' }));
+    ghMock.mockResolvedValue({ stdout: JSON.stringify({ body: 'Fixes #10' }), stderr: '' });
     await expect(getLinkedIssueNumber(1, 'o/r')).resolves.toBe(10);
   });
 
   it('returns issue number for Resolves #N', async () => {
-    execFileSyncMock.mockReturnValue(JSON.stringify({ body: 'Resolves #99' }));
+    ghMock.mockResolvedValue({ stdout: JSON.stringify({ body: 'Resolves #99' }), stderr: '' });
     await expect(getLinkedIssueNumber(1, 'o/r')).resolves.toBe(99);
   });
 
   it('returns null when PR body has no closing keyword', async () => {
-    execFileSyncMock.mockReturnValue(JSON.stringify({ body: 'Just a regular PR body' }));
+    ghMock.mockResolvedValue({
+      stdout: JSON.stringify({ body: 'Just a regular PR body' }),
+      stderr: '',
+    });
     await expect(getLinkedIssueNumber(42, 'owner/repo')).resolves.toBeNull();
   });
 
   it('returns null when gh pr view throws', async () => {
-    execFileSyncMock.mockImplementation(() => {
-      throw new Error('gh failed');
-    });
+    ghMock.mockRejectedValue(new Error('gh failed'));
     await expect(getLinkedIssueNumber(42, 'owner/repo')).resolves.toBeNull();
   });
 });
 
 describe('postMerge', () => {
-  it('cleans up labels and closes issue', () => {
-    execFileSyncMock.mockReturnValue('');
+  it('cleans up labels and closes issue', async () => {
+    ghMock.mockResolvedValue({ stdout: '', stderr: '' });
 
-    postMerge(mockPR, 25, 'owner/repo', false);
+    await postMerge(mockPR, 25, 'owner/repo', false);
 
-    expect(execFileSyncMock).toHaveBeenCalledWith(
-      'gh',
-      ['issue', 'edit', '25', '-R', 'owner/repo', '--remove-label', 'shipper:ready'],
-      expect.anything()
-    );
-    expect(execFileSyncMock).toHaveBeenCalledWith(
-      'gh',
-      ['issue', 'close', '25', '-R', 'owner/repo'],
-      expect.anything()
-    );
+    expect(ghMock).toHaveBeenCalledWith([
+      'issue',
+      'edit',
+      '25',
+      '-R',
+      'owner/repo',
+      '--remove-label',
+      'shipper:ready',
+    ]);
+    expect(ghMock).toHaveBeenCalledWith(['issue', 'close', '25', '-R', 'owner/repo']);
   });
 
-  it('logs dry-run message', () => {
-    postMerge(mockPR, 25, 'owner/repo', true);
+  it('logs dry-run message', async () => {
+    await postMerge(mockPR, 25, 'owner/repo', true);
 
-    expect(execSyncMock).not.toHaveBeenCalled();
-    expect(execFileSyncMock).not.toHaveBeenCalled();
+    expect(ghMock).not.toHaveBeenCalled();
     expect(logMock).toHaveBeenCalledWith(
       '  [dry-run] Would remove shipper:ready and close issue #25'
     );
@@ -138,7 +127,7 @@ describe('lookupPR', () => {
   });
 
   it('returns QueuedPR for a valid PR with shipper:ready label', async () => {
-    execFileSyncMock.mockReturnValue(validPRJson);
+    ghMock.mockResolvedValue({ stdout: validPRJson, stderr: '' });
 
     const result = await lookupPR('42', 'owner/repo');
 
@@ -149,59 +138,55 @@ describe('lookupPR', () => {
       baseRefName: 'main',
       labeledAt: '',
     });
-    expect(execFileSyncMock).toHaveBeenCalledWith(
-      'gh',
-      [
-        'pr',
-        'view',
-        '42',
-        '-R',
-        'owner/repo',
-        '--json',
-        'number,title,headRefName,baseRefName,state,labels',
-      ],
-      expect.objectContaining({ encoding: 'utf-8' })
-    );
+    expect(ghMock).toHaveBeenCalledWith([
+      'pr',
+      'view',
+      '42',
+      '-R',
+      'owner/repo',
+      '--json',
+      'number,title,headRefName,baseRefName,state,labels',
+    ]);
   });
 
   it('exits with error when PR does not have shipper:ready label', async () => {
-    execFileSyncMock.mockReturnValue(
-      JSON.stringify({
+    ghMock.mockResolvedValue({
+      stdout: JSON.stringify({
         number: 42,
         title: 'Add feature',
         headRefName: 'feature-branch',
         baseRefName: 'main',
         state: 'OPEN',
         labels: [{ name: 'bug' }],
-      })
-    );
+      }),
+      stderr: '',
+    });
 
     await expect(lookupPR('42', 'owner/repo')).rejects.toThrow('exit:1');
     expect(errorMock).toHaveBeenCalledWith('Error: PR #42 does not have the shipper:ready label.');
   });
 
   it('exits with error when PR is closed', async () => {
-    execFileSyncMock.mockReturnValue(
-      JSON.stringify({
+    ghMock.mockResolvedValue({
+      stdout: JSON.stringify({
         number: 42,
         title: 'Add feature',
         headRefName: 'feature-branch',
         baseRefName: 'main',
         state: 'CLOSED',
         labels: [{ name: 'shipper:ready' }],
-      })
-    );
+      }),
+      stderr: '',
+    });
 
     await expect(lookupPR('42', 'owner/repo')).rejects.toThrow('exit:1');
     expect(errorMock).toHaveBeenCalledWith('Error: PR #42 is not open (state: CLOSED).');
   });
 
   it('resolves issue to linked PR when ref is not a PR', async () => {
-    execFileSyncMock
-      .mockImplementationOnce(() => {
-        throw new Error('not a PR');
-      })
-      .mockReturnValueOnce(validPRJson);
+    ghMock
+      .mockRejectedValueOnce(new Error('not a PR'))
+      .mockResolvedValueOnce({ stdout: validPRJson, stderr: '' });
     tryResolvePrForIssueMock.mockResolvedValue('42');
 
     const result = await lookupPR('10', 'owner/repo');
@@ -217,9 +202,7 @@ describe('lookupPR', () => {
   });
 
   it('exits with error when issue has no linked PR', async () => {
-    execFileSyncMock.mockImplementation(() => {
-      throw new Error('not found');
-    });
+    ghMock.mockRejectedValue(new Error('not found'));
     tryResolvePrForIssueMock.mockResolvedValue(undefined);
 
     await expect(lookupPR('99', 'owner/repo')).rejects.toThrow('exit:1');

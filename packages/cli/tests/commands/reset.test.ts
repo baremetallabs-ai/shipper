@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { mockConfirm, mockPromptChoice, mockGetRepoNwo, mockExecFileSync, mockIsLockStale } =
+const { mockConfirm, mockPromptChoice, mockGetRepoNwo, mockExecFileSync, mockGh, mockIsLockStale } =
   vi.hoisted(() => ({
     mockConfirm: vi.fn(),
     mockPromptChoice: vi.fn(),
     mockGetRepoNwo: vi.fn(() => 'owner/repo'),
     mockExecFileSync: vi.fn(),
+    mockGh: vi.fn(),
     mockIsLockStale: vi.fn(() => true),
   }));
 
@@ -16,6 +17,7 @@ vi.mock('../../src/lib/confirm.js', () => ({
 
 vi.mock('@dnsquared/shipper-core', () => ({
   getRepoNwo: () => mockGetRepoNwo(),
+  gh: (...args: unknown[]) => mockGh(...args),
   isLockStale: (...args: unknown[]) => mockIsLockStale(...args),
 }));
 
@@ -61,14 +63,14 @@ function setupExecMock(overrides?: {
   const commentsWithDates = overrides?.commentsWithDates ?? '';
   const timelineByStage = overrides?.timelineByStage ?? {};
 
-  mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
-    if (args[0] === 'issue' && args[1] === 'view') return issueJson;
+  mockGh.mockImplementation(async (args: string[]) => {
+    if (args[0] === 'issue' && args[1] === 'view') return { stdout: issueJson, stderr: '' };
 
     if (args[0] === 'api' && typeof args[1] === 'string' && args[1].includes('/timeline')) {
       const jqIndex = args.indexOf('--jq');
       const jq = jqIndex === -1 ? '' : args[jqIndex + 1]!;
       const match = jq.match(/shipper:([a-z-]+)/);
-      return match ? (timelineByStage[match[1]!] ?? '') : '';
+      return { stdout: match ? (timelineByStage[match[1]!] ?? '') : '', stderr: '' };
     }
 
     if (
@@ -79,35 +81,29 @@ function setupExecMock(overrides?: {
     ) {
       const jqIndex = args.indexOf('--jq');
       const jq = jqIndex === -1 ? '' : args[jqIndex + 1]!;
-      return jq.includes('created_at') ? commentsWithDates : commentIds;
+      return { stdout: jq.includes('created_at') ? commentsWithDates : commentIds, stderr: '' };
     }
 
-    if (args[0] === 'pr' && args[1] === 'list') return prJson;
+    if (args[0] === 'pr' && args[1] === 'list') return { stdout: prJson, stderr: '' };
 
-    return '';
+    return { stdout: '', stderr: '' };
   });
 }
 
 function getIssueEditArgs(): string[] {
-  const call = mockExecFileSync.mock.calls.find(
-    (entry: unknown[]) =>
-      entry[0] === 'gh' &&
-      (entry[1] as string[])[0] === 'issue' &&
-      (entry[1] as string[])[1] === 'edit'
+  const call = mockGh.mock.calls.find(
+    ([args]) => (args as string[])[0] === 'issue' && (args as string[])[1] === 'edit'
   );
 
-  return call?.[1] as string[];
+  return call?.[0] as string[];
 }
 
 function getIssueCommentBody(): string {
-  const call = mockExecFileSync.mock.calls.find(
-    (entry: unknown[]) =>
-      entry[0] === 'gh' &&
-      (entry[1] as string[])[0] === 'issue' &&
-      (entry[1] as string[])[1] === 'comment'
+  const call = mockGh.mock.calls.find(
+    ([args]) => (args as string[])[0] === 'issue' && (args as string[])[1] === 'comment'
   );
 
-  return ((call?.[1] as string[]) ?? [])[4] ?? '';
+  return ((call?.[0] as string[]) ?? [])[4] ?? '';
 }
 
 describe('resetCommand', () => {
@@ -135,11 +131,7 @@ describe('resetCommand', () => {
       issueJson: mockIssueView('OPEN', ['shipper:new', 'shipper:groomed']),
     });
     await resetCommand('#18', { force: true, to: 'new' });
-    expect(mockExecFileSync).toHaveBeenCalledWith(
-      'gh',
-      ['issue', 'view', '18', '--json', 'number,state,labels'],
-      expect.any(Object)
-    );
+    expect(mockGh).toHaveBeenCalledWith(['issue', 'view', '18', '--json', 'number,state,labels']);
   });
 
   it('blocks reset when shipper:locked is present and lock is not stale', async () => {
@@ -339,9 +331,7 @@ describe('resetCommand', () => {
     await resetCommand('18', { force: false });
 
     expect(mockConsoleLog).toHaveBeenCalledWith('Reset cancelled.');
-    const deleteCalls = mockExecFileSync.mock.calls.filter(
-      (entry: unknown[]) => entry[0] === 'gh' && (entry[1] as string[]).includes('DELETE')
-    );
+    const deleteCalls = mockGh.mock.calls.filter(([args]) => (args as string[]).includes('DELETE'));
     expect(deleteCalls).toHaveLength(0);
   });
 
@@ -387,23 +377,31 @@ describe('resetCommand', () => {
 
     await resetCommand('18', { force: true, to: 'new' });
 
-    const cleanupCalls = mockExecFileSync.mock.calls.filter((entry: unknown[]) => {
-      const args = entry[1] as string[];
-      return (
-        (entry[0] === 'gh' && args[0] === 'pr' && args[1] === 'close') ||
-        (entry[0] === 'git' && args.includes('--delete')) ||
-        (entry[0] === 'gh' && args.includes('DELETE')) ||
-        (entry[0] === 'gh' && args[0] === 'issue' && args[1] === 'edit') ||
-        (entry[0] === 'gh' && args[0] === 'issue' && args[1] === 'comment')
+    const ghCleanupCalls = mockGh.mock.calls
+      .map(([args]) => args as string[])
+      .filter(
+        (args) =>
+          (args[0] === 'pr' && args[1] === 'close') ||
+          args.includes('DELETE') ||
+          (args[0] === 'issue' && args[1] === 'edit') ||
+          (args[0] === 'issue' && args[1] === 'comment')
       );
-    });
+    const gitCleanupCalls = mockExecFileSync.mock.calls
+      .map(([cmd, args]) => ({ cmd: cmd as string, args: args as string[] }))
+      .filter((entry) => entry.cmd === 'git' && entry.args.includes('--delete'));
 
-    expect((cleanupCalls[0]![1] as string[])[1]).toBe('close');
-    expect(cleanupCalls[1]![0]).toBe('git');
-    expect((cleanupCalls[2]![1] as string[]).includes('DELETE')).toBe(true);
-    expect((cleanupCalls[2]![1] as string[])[3]).toBe('repos/owner/repo/issues/comments/101');
-    expect((cleanupCalls[3]![1] as string[])[1]).toBe('edit');
-    expect((cleanupCalls[4]![1] as string[])[1]).toBe('comment');
+    expect(ghCleanupCalls[0]![1]).toBe('close');
+    expect(gitCleanupCalls[0]!.cmd).toBe('git');
+    expect(gitCleanupCalls[0]!.args).toEqual([
+      'push',
+      'origin',
+      '--delete',
+      'shipper/18-add-reset',
+    ]);
+    expect(ghCleanupCalls[1]!.includes('DELETE')).toBe(true);
+    expect(ghCleanupCalls[1]![3]).toBe('repos/owner/repo/issues/comments/101');
+    expect(ghCleanupCalls[2]![1]).toBe('edit');
+    expect(ghCleanupCalls[3]![1]).toBe('comment');
   });
 
   it('rejects resetting to the current stage', async () => {
@@ -511,11 +509,9 @@ describe('resetCommand', () => {
 
     await resetCommand('18', { force: true, to: 'designed' });
 
-    const deleteCalls = mockExecFileSync.mock.calls.filter(
-      (entry: unknown[]) => entry[0] === 'gh' && (entry[1] as string[]).includes('DELETE')
-    );
+    const deleteCalls = mockGh.mock.calls.filter(([args]) => (args as string[]).includes('DELETE'));
     expect(deleteCalls).toHaveLength(1);
-    expect((deleteCalls[0]![1] as string[])[3]).toBe('repos/owner/repo/issues/comments/303');
+    expect((deleteCalls[0]![0] as string[])[3]).toBe('repos/owner/repo/issues/comments/303');
   });
 
   it('deletes all comments when resetting to new', async () => {
@@ -526,9 +522,7 @@ describe('resetCommand', () => {
 
     await resetCommand('18', { force: true, to: 'new' });
 
-    const deleteCalls = mockExecFileSync.mock.calls.filter(
-      (entry: unknown[]) => entry[0] === 'gh' && (entry[1] as string[]).includes('DELETE')
-    );
+    const deleteCalls = mockGh.mock.calls.filter(([args]) => (args as string[]).includes('DELETE'));
     expect(deleteCalls).toHaveLength(3);
   });
 
@@ -577,11 +571,8 @@ describe('resetCommand', () => {
     expect(editArgs[editArgs.indexOf('--remove-label') + 1]).toBe('shipper:pr-open');
     expect(editArgs).not.toContain('--add-label');
 
-    const closeCalls = mockExecFileSync.mock.calls.filter(
-      (entry: unknown[]) =>
-        entry[0] === 'gh' &&
-        (entry[1] as string[])[0] === 'pr' &&
-        (entry[1] as string[])[1] === 'close'
+    const closeCalls = mockGh.mock.calls.filter(
+      ([args]) => (args as string[])[0] === 'pr' && (args as string[])[1] === 'close'
     );
     expect(closeCalls).toHaveLength(2);
 
@@ -599,11 +590,9 @@ describe('resetCommand', () => {
     );
     expect(branchDeleteCalls).toHaveLength(0);
 
-    const deleteCalls = mockExecFileSync.mock.calls.filter(
-      (entry: unknown[]) => entry[0] === 'gh' && (entry[1] as string[]).includes('DELETE')
-    );
+    const deleteCalls = mockGh.mock.calls.filter(([args]) => (args as string[]).includes('DELETE'));
     expect(deleteCalls).toHaveLength(1);
-    expect((deleteCalls[0]![1] as string[])[3]).toBe('repos/owner/repo/issues/comments/502');
+    expect((deleteCalls[0]![0] as string[])[3]).toBe('repos/owner/repo/issues/comments/502');
   });
 
   it('filters branches to only shipper-prefixed names for deletion', async () => {
@@ -648,14 +637,11 @@ describe('resetCommand', () => {
 
     await resetCommand('18', { force: true, to: 'implemented' });
 
-    const closeCalls = mockExecFileSync.mock.calls.filter(
-      (entry: unknown[]) =>
-        entry[0] === 'gh' &&
-        (entry[1] as string[])[0] === 'pr' &&
-        (entry[1] as string[])[1] === 'close'
+    const closeCalls = mockGh.mock.calls.filter(
+      ([args]) => (args as string[])[0] === 'pr' && (args as string[])[1] === 'close'
     );
     expect(closeCalls).toHaveLength(1);
-    expect((closeCalls[0]![1] as string[])[2]).toBe('52');
+    expect((closeCalls[0]![0] as string[])[2]).toBe('52');
   });
 
   it('posts a generalized reset notice for implemented targets', async () => {

@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { execFileSync } from 'node:child_process';
-import { resolveRef, tryResolvePrForIssue, withIssueLock } from '@dnsquared/shipper-core';
+import { gh, resolveRef, tryResolvePrForIssue, withIssueLock } from '@dnsquared/shipper-core';
 import { groomCommand } from '../../src/commands/groom.js';
 import { designCommand } from '../../src/commands/design.js';
 import { planCommand } from '../../src/commands/plan.js';
@@ -9,12 +8,8 @@ import { prOpenCommand } from '../../src/commands/pr-open.js';
 import { prReviewCommand } from '../../src/commands/pr-review.js';
 import { prRemediateCommand } from '../../src/commands/pr-remediate.js';
 
-vi.mock('node:child_process', async (importOriginal) => {
-  const actual = (await importOriginal()) as Record<string, unknown>;
-  return { ...actual, execFileSync: vi.fn() };
-});
-
 vi.mock('@dnsquared/shipper-core', () => ({
+  gh: vi.fn(),
   resolveRef: vi.fn(),
   tryResolvePrForIssue: vi.fn(),
   withIssueLock: vi.fn(async (_issue: string, fn: () => Promise<void>) => await fn()),
@@ -50,7 +45,7 @@ vi.mock('../../src/commands/pr-remediate.js', () => ({
 
 import { nextCommand } from '../../src/commands/next.js';
 
-const mockExecFileSync = vi.mocked(execFileSync);
+const mockGh = vi.mocked(gh);
 const mockResolveRef = vi.mocked(resolveRef);
 const mockTryResolvePrForIssue = vi.mocked(tryResolvePrForIssue);
 const mockWithIssueLock = vi.mocked(withIssueLock);
@@ -71,6 +66,7 @@ describe('nextCommand', () => {
     vi.clearAllMocks();
     mockResolveRef.mockResolvedValue({ issueNumber: '159' });
     mockTryResolvePrForIssue.mockResolvedValue('200');
+    mockGh.mockResolvedValue({ stdout: '', stderr: '' });
     mockWithIssueLock.mockImplementation(
       async (_issue: string, fn: () => Promise<void>) => await fn()
     );
@@ -88,12 +84,13 @@ describe('nextCommand', () => {
   });
 
   it('dispatches to grooming for blocked shipper:new issues', async () => {
-    mockExecFileSync.mockReturnValueOnce(
-      JSON.stringify({
+    mockGh.mockResolvedValueOnce({
+      stdout: JSON.stringify({
         number: 159,
         labels: [{ name: 'shipper:new' }, { name: 'shipper:blocked' }],
-      })
-    );
+      }),
+      stderr: '',
+    });
 
     await nextCommand('159');
 
@@ -119,12 +116,13 @@ describe('nextCommand', () => {
     'shipper:pr-reviewed',
     'shipper:ready',
   ])('exits for blocked %s issues before dispatch', async (stageLabel) => {
-    mockExecFileSync.mockReturnValueOnce(
-      JSON.stringify({
+    mockGh.mockResolvedValueOnce({
+      stdout: JSON.stringify({
         number: 159,
         labels: [{ name: stageLabel }, { name: 'shipper:blocked' }],
-      })
-    );
+      }),
+      stderr: '',
+    });
 
     await expect(nextCommand('159')).rejects.toThrow('exit:1');
 

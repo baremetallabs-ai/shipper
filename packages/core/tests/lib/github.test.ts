@@ -45,7 +45,7 @@ function queueExecFileResult(stdout: string): void {
 function queueExecFileError(message: string): void {
   execFileMock.mockImplementationOnce((_cmd: string, _args: string[], ...rest: unknown[]) => {
     const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
-    cb(new Error(message));
+    cb(Object.assign(new Error(message), { stderr: 'not found' }));
   });
 }
 

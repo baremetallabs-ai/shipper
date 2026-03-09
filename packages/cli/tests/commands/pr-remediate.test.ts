@@ -1,10 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-vi.mock('node:child_process', async () => {
-  const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
-  return { ...actual, execFileSync: vi.fn() };
-});
-
 const getSettingsMock = vi.fn();
 const fetchChecksMock = vi.fn();
 vi.mock('@dnsquared/shipper-core', async () => {
@@ -24,14 +19,16 @@ vi.mock('@dnsquared/shipper-core', async () => {
     ),
     getBranchForPR: vi.fn(async () => 'shipper/10-feature'),
     getRepoRoot: vi.fn(async () => '/tmp/fake-repo'),
+    gh: vi.fn(),
     sleepMs: vi.fn(async () => {}),
     getSettings: () => getSettingsMock(),
     fetchChecks: (...args: unknown[]) => fetchChecksMock(...args),
   };
 });
 
-import { resolveRef, runPrompt } from '@dnsquared/shipper-core';
+import { gh, resolveRef, runPrompt } from '@dnsquared/shipper-core';
 
+const mockGh = vi.mocked(gh);
 const mockResolveRef = vi.mocked(resolveRef);
 const mockRunPrompt = vi.mocked(runPrompt);
 
@@ -43,6 +40,10 @@ describe('prRemediateCommand', () => {
     process.exitCode = undefined;
     mockResolveRef.mockResolvedValue({ prNumber: '42', issueNumber: '10' });
     mockRunPrompt.mockResolvedValue(0);
+    mockGh.mockResolvedValue({
+      stdout: JSON.stringify({ createdAt: new Date().toISOString() }),
+      stderr: '',
+    });
     getSettingsMock.mockReturnValue({
       prReviewWait: { mode: 'timer', timeoutMinutes: 0 },
       hooks: {},

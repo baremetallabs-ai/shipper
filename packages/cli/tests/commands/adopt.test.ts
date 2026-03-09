@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { mockExecFileSync } = vi.hoisted(() => ({
-  mockExecFileSync: vi.fn(),
+const { mockGh } = vi.hoisted(() => ({
+  mockGh: vi.fn(),
 }));
 
-vi.mock('node:child_process', () => ({
-  execFileSync: (...args: unknown[]) => mockExecFileSync(...args),
+vi.mock('@dnsquared/shipper-core', () => ({
+  gh: (...args: unknown[]) => mockGh(...args),
 }));
 
 import { adoptCommand, adoptAllCommand } from '../../src/commands/adopt.js';
@@ -24,108 +24,100 @@ beforeEach(() => {
 });
 
 describe('adoptCommand', () => {
-  it('adopts a valid issue with no shipper labels', () => {
-    mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+  it('adopts a valid issue with no shipper labels', async () => {
+    mockGh.mockImplementation((args: string[]) => {
       if (args[0] === 'issue' && args[1] === 'view') {
-        return JSON.stringify({ number: 42, labels: [] });
+        return Promise.resolve({ stdout: JSON.stringify({ number: 42, labels: [] }), stderr: '' });
       }
       if (args[0] === 'pr' && args[1] === 'view') {
-        throw new Error('not a PR');
+        return Promise.reject(new Error('not a PR'));
       }
-      return '';
+      return Promise.resolve({ stdout: '', stderr: '' });
     });
 
-    adoptCommand('42');
+    await adoptCommand('42');
 
-    expect(mockExecFileSync).toHaveBeenCalledWith(
-      'gh',
-      ['issue', 'edit', '42', '--add-label', 'shipper:new'],
-      expect.any(Object)
-    );
+    expect(mockGh).toHaveBeenCalledWith(['issue', 'edit', '42', '--add-label', 'shipper:new']);
     expect(mockConsoleLog).toHaveBeenCalledWith('Issue #42 adopted into shipper workflow.');
   });
 
-  it('warns and does not modify an issue that already has shipper labels', () => {
-    mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+  it('warns and does not modify an issue that already has shipper labels', async () => {
+    mockGh.mockImplementation((args: string[]) => {
       if (args[0] === 'issue' && args[1] === 'view') {
-        return JSON.stringify({ number: 42, labels: [{ name: 'shipper:groomed' }] });
+        return Promise.resolve({
+          stdout: JSON.stringify({ number: 42, labels: [{ name: 'shipper:groomed' }] }),
+          stderr: '',
+        });
       }
       if (args[0] === 'pr' && args[1] === 'view') {
-        throw new Error('not a PR');
+        return Promise.reject(new Error('not a PR'));
       }
-      return '';
+      return Promise.resolve({ stdout: '', stderr: '' });
     });
 
-    adoptCommand('42');
+    await adoptCommand('42');
 
     expect(mockConsoleWarn).toHaveBeenCalledWith(
       'Warning: Issue #42 already has shipper label(s): shipper:groomed. No changes made.'
     );
     // Should not call gh issue edit
-    const editCalls = mockExecFileSync.mock.calls.filter(
-      (call: unknown[]) =>
-        call[0] === 'gh' &&
-        (call[1] as string[])[0] === 'issue' &&
-        (call[1] as string[])[1] === 'edit'
+    const editCalls = mockGh.mock.calls.filter(
+      ([args]) => (args as string[])[0] === 'issue' && (args as string[])[1] === 'edit'
     );
     expect(editCalls).toHaveLength(0);
   });
 
-  it('exits with error for non-existent issue', () => {
-    mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+  it('exits with error for non-existent issue', async () => {
+    mockGh.mockImplementation((args: string[]) => {
       if (args[0] === 'issue' && args[1] === 'view') {
-        throw new Error('not found');
+        return Promise.reject(new Error('not found'));
       }
-      return '';
+      return Promise.resolve({ stdout: '', stderr: '' });
     });
 
-    expect(() => adoptCommand('9999')).toThrow('process.exit');
+    await expect(adoptCommand('9999')).rejects.toThrow('process.exit');
     expect(mockConsoleError).toHaveBeenCalledWith('Error: Issue #9999 not found.');
   });
 
-  it('exits with error when issue number is a pull request', () => {
-    mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+  it('exits with error when issue number is a pull request', async () => {
+    mockGh.mockImplementation((args: string[]) => {
       if (args[0] === 'issue' && args[1] === 'view') {
-        return JSON.stringify({ number: 42, labels: [] });
+        return Promise.resolve({ stdout: JSON.stringify({ number: 42, labels: [] }), stderr: '' });
       }
       if (args[0] === 'pr' && args[1] === 'view') {
-        return JSON.stringify({ number: 42 });
+        return Promise.resolve({ stdout: JSON.stringify({ number: 42 }), stderr: '' });
       }
-      return '';
+      return Promise.resolve({ stdout: '', stderr: '' });
     });
 
-    expect(() => adoptCommand('42')).toThrow('process.exit');
+    await expect(adoptCommand('42')).rejects.toThrow('process.exit');
     expect(mockConsoleError).toHaveBeenCalledWith('Error: #42 is a pull request, not an issue.');
   });
 
-  it('strips # prefix from issue number', () => {
-    mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+  it('strips # prefix from issue number', async () => {
+    mockGh.mockImplementation((args: string[]) => {
       if (args[0] === 'issue' && args[1] === 'view') {
-        return JSON.stringify({ number: 42, labels: [] });
+        return Promise.resolve({ stdout: JSON.stringify({ number: 42, labels: [] }), stderr: '' });
       }
       if (args[0] === 'pr' && args[1] === 'view') {
-        throw new Error('not a PR');
+        return Promise.reject(new Error('not a PR'));
       }
-      return '';
+      return Promise.resolve({ stdout: '', stderr: '' });
     });
 
-    adoptCommand('#42');
+    await adoptCommand('#42');
 
-    expect(mockExecFileSync).toHaveBeenCalledWith(
-      'gh',
-      ['issue', 'view', '42', '--json', 'number,labels'],
-      expect.any(Object)
-    );
+    expect(mockGh).toHaveBeenCalledWith(['issue', 'view', '42', '--json', 'number,labels']);
   });
 
-  it('exits with error for non-numeric input', () => {
-    expect(() => adoptCommand('abc')).toThrow('process.exit');
+  it('exits with error for non-numeric input', async () => {
+    await expect(adoptCommand('abc')).rejects.toThrow('process.exit');
     expect(mockConsoleError).toHaveBeenCalledWith('Error: Please provide a valid issue number.');
   });
 });
 
 describe('adoptAllCommand', () => {
-  it('adopts multiple eligible issues, skips labeled ones', () => {
+  it('adopts multiple eligible issues, skips labeled ones', async () => {
     const issues = [
       { number: 10, labels: [] },
       { number: 11, labels: [{ name: 'shipper:groomed' }] },
@@ -133,100 +125,94 @@ describe('adoptAllCommand', () => {
       { number: 13, labels: [{ name: 'bug' }] },
     ];
 
-    mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+    mockGh.mockImplementation((args: string[]) => {
       if (args[0] === 'issue' && args[1] === 'list') {
-        return JSON.stringify(issues);
+        return Promise.resolve({ stdout: JSON.stringify(issues), stderr: '' });
       }
-      return '';
+      return Promise.resolve({ stdout: '', stderr: '' });
     });
 
-    adoptAllCommand();
+    await adoptAllCommand();
 
-    const editCalls = mockExecFileSync.mock.calls.filter(
-      (call: unknown[]) =>
-        call[0] === 'gh' &&
-        (call[1] as string[])[0] === 'issue' &&
-        (call[1] as string[])[1] === 'edit'
+    const editCalls = mockGh.mock.calls.filter(
+      ([args]) => (args as string[])[0] === 'issue' && (args as string[])[1] === 'edit'
     );
     expect(editCalls).toHaveLength(3);
-    expect(editCalls[0]![1]).toEqual(['issue', 'edit', '10', '--add-label', 'shipper:new']);
-    expect(editCalls[1]![1]).toEqual(['issue', 'edit', '12', '--add-label', 'shipper:new']);
-    expect(editCalls[2]![1]).toEqual(['issue', 'edit', '13', '--add-label', 'shipper:new']);
+    expect(editCalls[0]![0]).toEqual(['issue', 'edit', '10', '--add-label', 'shipper:new']);
+    expect(editCalls[1]![0]).toEqual(['issue', 'edit', '12', '--add-label', 'shipper:new']);
+    expect(editCalls[2]![0]).toEqual(['issue', 'edit', '13', '--add-label', 'shipper:new']);
     expect(mockConsoleLog).toHaveBeenCalledWith('Adopted #10, #12, #13 into shipper workflow.');
   });
 
-  it('prints message when no eligible issues found', () => {
-    mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+  it('prints message when no eligible issues found', async () => {
+    mockGh.mockImplementation((args: string[]) => {
       if (args[0] === 'issue' && args[1] === 'list') {
-        return JSON.stringify([{ number: 5, labels: [{ name: 'shipper:new' }] }]);
+        return Promise.resolve({
+          stdout: JSON.stringify([{ number: 5, labels: [{ name: 'shipper:new' }] }]),
+          stderr: '',
+        });
       }
-      return '';
+      return Promise.resolve({ stdout: '', stderr: '' });
     });
 
-    adoptAllCommand();
+    await adoptAllCommand();
 
     expect(mockConsoleLog).toHaveBeenCalledWith('No eligible issues found.');
-    const editCalls = mockExecFileSync.mock.calls.filter(
-      (call: unknown[]) =>
-        call[0] === 'gh' &&
-        (call[1] as string[])[0] === 'issue' &&
-        (call[1] as string[])[1] === 'edit'
+    const editCalls = mockGh.mock.calls.filter(
+      ([args]) => (args as string[])[0] === 'issue' && (args as string[])[1] === 'edit'
     );
     expect(editCalls).toHaveLength(0);
   });
 
-  it('exits with error when gh issue list fails', () => {
-    mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+  it('exits with error when gh issue list fails', async () => {
+    mockGh.mockImplementation((args: string[]) => {
       if (args[0] === 'issue' && args[1] === 'list') {
-        throw new Error('gh issue list failed');
+        return Promise.reject(new Error('gh issue list failed'));
       }
-      return '';
+      return Promise.resolve({ stdout: '', stderr: '' });
     });
 
-    expect(() => adoptAllCommand()).toThrow('process.exit');
+    await expect(adoptAllCommand()).rejects.toThrow('process.exit');
     expect(mockConsoleError).toHaveBeenCalledWith('Error: Failed to fetch issues.');
   });
 
-  it('continues labeling remaining issues when one fails', () => {
+  it('continues labeling remaining issues when one fails', async () => {
     const issues = [
       { number: 10, labels: [] },
       { number: 12, labels: [] },
       { number: 13, labels: [] },
     ];
 
-    mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+    mockGh.mockImplementation((args: string[]) => {
       if (args[0] === 'issue' && args[1] === 'list') {
-        return JSON.stringify(issues);
+        return Promise.resolve({ stdout: JSON.stringify(issues), stderr: '' });
       }
       if (args[0] === 'issue' && args[1] === 'edit' && (args as string[])[2] === '12') {
-        throw new Error('API error');
+        return Promise.reject(new Error('API error'));
       }
-      return '';
+      return Promise.resolve({ stdout: '', stderr: '' });
     });
 
-    expect(() => adoptAllCommand()).toThrow('process.exit');
+    await expect(adoptAllCommand()).rejects.toThrow('process.exit');
     expect(mockConsoleError).toHaveBeenCalledWith(
       "Error: Failed to add 'shipper:new' label to issue #12."
     );
     expect(mockConsoleLog).toHaveBeenCalledWith('Adopted #10, #13 into shipper workflow.');
   });
 
-  it('handles empty repo with no issues', () => {
-    mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+  it('handles empty repo with no issues', async () => {
+    mockGh.mockImplementation((args: string[]) => {
       if (args[0] === 'issue' && args[1] === 'list') {
-        return JSON.stringify([]);
+        return Promise.resolve({ stdout: JSON.stringify([]), stderr: '' });
       }
-      return '';
+      return Promise.resolve({ stdout: '', stderr: '' });
     });
 
-    adoptAllCommand();
+    await adoptAllCommand();
 
     expect(mockConsoleLog).toHaveBeenCalledWith('No eligible issues found.');
-    const editCalls = mockExecFileSync.mock.calls.filter(
-      (call: unknown[]) =>
-        call[0] === 'gh' &&
-        (call[1] as string[])[0] === 'issue' &&
-        (call[1] as string[])[1] === 'edit'
+    const editCalls = mockGh.mock.calls.filter(
+      ([args]) => (args as string[])[0] === 'issue' && (args as string[])[1] === 'edit'
     );
     expect(editCalls).toHaveLength(0);
   });
