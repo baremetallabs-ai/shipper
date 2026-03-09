@@ -57,6 +57,7 @@ const {
   autoSelectIssue,
   formatIssue,
   formatPR,
+  listIssues,
   resolveBaseBranch,
   selectIssuesForStage,
   sortIssuesByLabelTime,
@@ -689,5 +690,141 @@ describe('autoSelectIssue', () => {
     const result = await autoSelectIssue(repo, 'shipper:new');
 
     expect(result).toEqual({ number: 10, title: 'Normal issue' });
+  });
+});
+
+describe('listIssues', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('returns flattened issue objects for shipper-labeled issues', async () => {
+    const ghOutput = [
+      {
+        number: 1,
+        title: 'First issue',
+        labels: [{ name: 'shipper:groomed' }, { name: 'bug' }],
+        state: 'OPEN',
+        author: { login: 'alice' },
+        createdAt: '2025-01-01T00:00:00Z',
+      },
+      {
+        number: 2,
+        title: 'Second issue',
+        labels: [{ name: 'shipper:planned' }],
+        state: 'OPEN',
+        author: { login: 'bob' },
+        createdAt: '2025-01-02T00:00:00Z',
+      },
+    ];
+    queueExecFileResult(JSON.stringify(ghOutput));
+
+    const result = await listIssues(repo);
+
+    expect(result).toEqual([
+      {
+        number: 1,
+        title: 'First issue',
+        labels: ['shipper:groomed', 'bug'],
+        state: 'OPEN',
+        author: 'alice',
+        createdAt: '2025-01-01T00:00:00Z',
+      },
+      {
+        number: 2,
+        title: 'Second issue',
+        labels: ['shipper:planned'],
+        state: 'OPEN',
+        author: 'bob',
+        createdAt: '2025-01-02T00:00:00Z',
+      },
+    ]);
+    expect(execFileMock).toHaveBeenCalledWith(
+      'gh',
+      [
+        'issue',
+        'list',
+        '-R',
+        repo,
+        '--json',
+        'number,title,labels,state,author,createdAt',
+        '--limit',
+        '1000',
+        '--state',
+        'open',
+        '--search',
+        'label:shipper:',
+      ],
+      { encoding: 'utf-8' },
+      expect.any(Function)
+    );
+  });
+
+  it('returns empty array when no issues found', async () => {
+    queueExecFileResult('[]');
+
+    const result = await listIssues(repo);
+
+    expect(result).toEqual([]);
+  });
+
+  it('throws with context message on gh failure', async () => {
+    queueExecFileError('gh failed');
+    queueExecFileError('gh failed');
+    queueExecFileError('gh failed');
+
+    await expect(listIssues(repo)).rejects.toThrow('Failed to list issues for owner/repo');
+  });
+
+  it('passes --label when label option is provided', async () => {
+    queueExecFileResult('[]');
+
+    await listIssues(repo, { label: 'shipper:planned' });
+
+    expect(execFileMock).toHaveBeenCalledWith(
+      'gh',
+      [
+        'issue',
+        'list',
+        '-R',
+        repo,
+        '--json',
+        'number,title,labels,state,author,createdAt',
+        '--limit',
+        '1000',
+        '--state',
+        'open',
+        '--label',
+        'shipper:planned',
+      ],
+      { encoding: 'utf-8' },
+      expect.any(Function)
+    );
+  });
+
+  it('passes --state when state option is provided', async () => {
+    queueExecFileResult('[]');
+
+    await listIssues(repo, { state: 'closed' });
+
+    expect(execFileMock).toHaveBeenCalledWith(
+      'gh',
+      [
+        'issue',
+        'list',
+        '-R',
+        repo,
+        '--json',
+        'number,title,labels,state,author,createdAt',
+        '--limit',
+        '1000',
+        '--state',
+        'closed',
+        '--search',
+        'label:shipper:',
+      ],
+      { encoding: 'utf-8' },
+      expect.any(Function)
+    );
   });
 });
