@@ -4,15 +4,11 @@
     "timeoutMinutes": 15
   },
   "lockTimeoutMinutes": 30,
-  "agents": {
-    "default": "claude",
-    "implement": "codex",
-    "pr_remediate": "codex",
-    "plan": "codex"
-  },
-  "headless": {},
-  "hooks": {
-    "worktreeSetup": "npm install"
+  "commands": {
+    "default": { "agent": "claude" },
+    "implement": { "agent": "codex" },
+    "pr_remediate": { "agent": "codex" },
+    "plan": { "agent": "codex" }
   },
   "cliVersion": "1.0.0"
 }
