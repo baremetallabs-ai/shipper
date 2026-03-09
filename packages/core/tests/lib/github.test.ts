@@ -716,6 +716,14 @@ describe('listIssues', () => {
         author: { login: 'bob' },
         createdAt: '2025-01-02T00:00:00Z',
       },
+      {
+        number: 3,
+        title: 'Non-shipper issue',
+        labels: [{ name: 'bug' }],
+        state: 'OPEN',
+        author: { login: 'charlie' },
+        createdAt: '2025-01-03T00:00:00Z',
+      },
     ];
     queueExecFileResult(JSON.stringify(ghOutput));
 
@@ -752,8 +760,6 @@ describe('listIssues', () => {
         '1000',
         '--state',
         'open',
-        '--search',
-        'label:shipper:',
       ],
       { encoding: 'utf-8' },
       expect.any(Function)
@@ -820,8 +826,6 @@ describe('listIssues', () => {
         '1000',
         '--state',
         'closed',
-        '--search',
-        'label:shipper:',
       ],
       { encoding: 'utf-8' },
       expect.any(Function)
