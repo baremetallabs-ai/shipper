@@ -84,14 +84,15 @@ describe('formatIssue', () => {
       createdAt: '2025-01-14T08:00:00Z',
     });
 
-    expect(result).toContain('# Issue #42: Fix login bug');
-    expect(result).toContain('**State:** OPEN');
-    expect(result).toContain('bug, shipper:groomed');
-    expect(result).toContain('@bob');
-    expect(result).toContain('Login fails on Safari.');
-    expect(result).toContain('## Comments');
-    expect(result).toContain('@alice');
-    expect(result).toContain('Can reproduce on iOS too.');
+    expect(result).toContain(
+      '<issue number="42" title="Fix login bug" state="OPEN" labels="bug, shipper:groomed" author="bob" created="2025-01-14T08:00:00Z">'
+    );
+    expect(result).toContain('<body>\nLogin fails on Safari.\n</body>');
+    expect(result).toContain('<comments>');
+    expect(result).toContain(
+      '<comment author="alice" date="2025-01-15T10:30:00Z">\nCan reproduce on iOS too.\n</comment>'
+    );
+    expect(result).toContain('</issue>');
   });
 
   it('formats an issue with no comments', () => {
@@ -106,9 +107,10 @@ describe('formatIssue', () => {
       createdAt: '2025-01-01T00:00:00Z',
     });
 
-    expect(result).toContain('# Issue #1: Add feature');
-    expect(result).toContain('**Labels:** none');
-    expect(result).not.toContain('## Comments');
+    expect(result).toContain('<issue number="1" title="Add feature"');
+    expect(result).toContain('labels="none"');
+    expect(result).not.toContain('<comments>');
+    expect(result).toContain('</issue>');
   });
 
   it('handles missing body', () => {
@@ -123,7 +125,8 @@ describe('formatIssue', () => {
       createdAt: '2025-01-01T00:00:00Z',
     });
 
-    expect(result).toContain('*No description provided.*');
+    expect(result).toContain('<body />');
+    expect(result).not.toContain('*No description provided.*');
   });
 });
 
@@ -156,13 +159,19 @@ describe('formatPR', () => {
       ],
     });
 
-    expect(result).toContain('# PR #10: Fix the thing');
-    expect(result).toContain('**Branch:** fix/thing → main');
-    expect(result).toContain('## Reviews');
-    expect(result).toContain('APPROVED');
-    expect(result).toContain('Approved with minor notes.');
-    expect(result).toContain('## Comments');
-    expect(result).toContain('Looks good overall.');
+    expect(result).toContain(
+      '<pr number="10" title="Fix the thing" state="OPEN" labels="enhancement" author="dev" created="2025-01-30T09:00:00Z" head="fix/thing" base="main">'
+    );
+    expect(result).toContain('<body>\nThis fixes the thing.\n</body>');
+    expect(result).toContain('<reviews>');
+    expect(result).toContain(
+      '<review author="reviewer" state="APPROVED" date="2025-02-01T11:00:00Z">\nApproved with minor notes.\n</review>'
+    );
+    expect(result).toContain('<comments>');
+    expect(result).toContain(
+      '<comment author="reviewer" date="2025-02-01T12:00:00Z">\nLooks good overall.\n</comment>'
+    );
+    expect(result).toContain('</pr>');
   });
 
   it('formats a PR with no reviews or comments', () => {
@@ -180,10 +189,11 @@ describe('formatPR', () => {
       reviews: [],
     });
 
-    expect(result).toContain('# PR #3: Simple change');
-    expect(result).toContain('**Branch:** patch-1 → main');
-    expect(result).not.toContain('## Reviews');
-    expect(result).not.toContain('## Comments');
+    expect(result).toContain('<pr number="3" title="Simple change"');
+    expect(result).toContain('head="patch-1" base="main"');
+    expect(result).not.toContain('<reviews>');
+    expect(result).not.toContain('<comments>');
+    expect(result).toContain('</pr>');
   });
 });
 

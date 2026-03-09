@@ -143,25 +143,34 @@ export async function fetchPR(repo: string, ref: string): Promise<string> {
   return formatPR(data);
 }
 
+function escapeAttr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 export function formatIssue(data: IssueData): string {
   const labels = data.labels.map((l) => l.name).join(', ') || 'none';
-  const lines: string[] = [
-    `# Issue #${data.number}: ${data.title}`,
-    `**State:** ${data.state} | **Labels:** ${labels} | **Author:** @${data.author.login} | **Created:** ${data.createdAt}`,
-    '',
-    '## Body',
-    '',
-    data.body || '*No description provided.*',
+  const parts: string[] = [
+    `<issue number="${data.number}" title="${escapeAttr(data.title)}" state="${data.state}" labels="${escapeAttr(labels)}" author="${data.author.login}" created="${data.createdAt}">`,
   ];
 
+  parts.push(data.body ? `<body>\n${data.body}\n</body>` : '<body />');
+
   if (data.comments.length > 0) {
-    lines.push('', '## Comments', '');
+    parts.push('<comments>');
     for (const c of data.comments) {
-      lines.push(`### @${c.author.login} — ${c.createdAt}`, '', c.body, '');
+      parts.push(
+        `<comment author="${c.author.login}" date="${c.createdAt}">\n${c.body}\n</comment>`
+      );
     }
+    parts.push('</comments>');
   }
 
-  return lines.join('\n');
+  parts.push('</issue>');
+  return parts.join('\n');
 }
 
 export async function tryResolvePrForIssue(
@@ -196,36 +205,34 @@ export async function tryResolvePrForIssue(
 
 export function formatPR(data: PRData): string {
   const labels = data.labels.map((l) => l.name).join(', ') || 'none';
-  const lines: string[] = [
-    `# PR #${data.number}: ${data.title}`,
-    `**State:** ${data.state} | **Labels:** ${labels} | **Author:** @${data.author.login} | **Created:** ${data.createdAt}`,
-    `**Branch:** ${data.headRefName} → ${data.baseRefName}`,
-    '',
-    '## Body',
-    '',
-    data.body || '*No description provided.*',
+  const parts: string[] = [
+    `<pr number="${data.number}" title="${escapeAttr(data.title)}" state="${data.state}" labels="${escapeAttr(labels)}" author="${data.author.login}" created="${data.createdAt}" head="${data.headRefName}" base="${data.baseRefName}">`,
   ];
 
+  parts.push(data.body ? `<body>\n${data.body}\n</body>` : '<body />');
+
   if (data.reviews.length > 0) {
-    lines.push('', '## Reviews', '');
+    parts.push('<reviews>');
     for (const r of data.reviews) {
-      lines.push(
-        `### @${r.author.login} — ${r.state} — ${r.submittedAt}`,
-        '',
-        r.body || '*No review body.*',
-        ''
+      parts.push(
+        `<review author="${r.author.login}" state="${r.state}" date="${r.submittedAt}">\n${r.body || ''}\n</review>`
       );
     }
+    parts.push('</reviews>');
   }
 
   if (data.comments.length > 0) {
-    lines.push('', '## Comments', '');
+    parts.push('<comments>');
     for (const c of data.comments) {
-      lines.push(`### @${c.author.login} — ${c.createdAt}`, '', c.body, '');
+      parts.push(
+        `<comment author="${c.author.login}" date="${c.createdAt}">\n${c.body}\n</comment>`
+      );
     }
+    parts.push('</comments>');
   }
 
-  return lines.join('\n');
+  parts.push('</pr>');
+  return parts.join('\n');
 }
 
 export interface TimelineLabelEvent {
