@@ -140,10 +140,7 @@ export function resolveAgent(step: string): AgentName {
   const s = getSettings();
   const agent = s.commands[step]?.agent ?? s.commands.default.agent;
   if (agent !== 'claude' && agent !== 'codex') {
-    console.error(
-      `Error: Invalid agent "${agent}" for step "${step}". Must be "claude" or "codex".`
-    );
-    process.exit(1);
+    throw new Error(`Invalid agent "${agent}" for step "${step}". Must be "claude" or "codex".`);
   }
   return agent;
 }
@@ -174,10 +171,9 @@ function validateMode(mode: unknown, step: string): CommandMode {
     return mode;
   }
 
-  console.error(
-    `Error: Invalid mode "${String(mode)}" for step "${step}". Must be "headless", "interactive", or "default".`
+  throw new Error(
+    `Invalid mode "${String(mode)}" for step "${step}". Must be "headless", "interactive", or "default".`
   );
-  process.exit(1);
 }
 
 async function readSettingsFile(filepath: string): Promise<Partial<Settings>> {
@@ -247,7 +243,6 @@ async function readSettingsFile(filepath: string): Promise<Partial<Settings>> {
     return parsed as Partial<Settings>;
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error(`Error: Malformed JSON in ${filepath}: ${message}`);
-    process.exit(1);
+    throw new Error(`Malformed JSON in ${filepath}: ${message}`);
   }
 }

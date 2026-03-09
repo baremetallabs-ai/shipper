@@ -163,7 +163,7 @@ describe('resetCommand', () => {
 
     await resetCommand('18', { force: false, to: 'new' });
 
-    expect(mockIsLockStale).toHaveBeenCalledWith('18');
+    expect(mockIsLockStale).toHaveBeenCalledWith('owner/repo', '18');
     expect(mockConsoleError).not.toHaveBeenCalledWith(
       expect.stringContaining('locked by another shipper instance')
     );

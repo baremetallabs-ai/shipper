@@ -25,6 +25,7 @@ vi.mock('node:child_process', async () => {
 
 const { fetchChecks, classifyChecks } = await import('../../src/lib/checks.js');
 type PRChecksLine = import('../../src/lib/checks.js').PRChecksLine;
+const repo = 'owner/repo';
 
 beforeEach(() => {
   execFileMock.mockReset();
@@ -38,45 +39,31 @@ describe('fetchChecks', () => {
       cb(null, JSON.stringify(checks), '');
     });
 
-    const result = await fetchChecks('42');
+    const result = await fetchChecks(repo, '42');
 
     expect(execFileMock).toHaveBeenCalledWith(
       'gh',
-      ['pr', 'checks', '42', '--json', 'name,state,bucket'],
+      ['pr', 'checks', '42', '-R', repo, '--json', 'name,state,bucket'],
       expect.objectContaining({ encoding: 'utf-8' }),
       expect.any(Function)
     );
     expect(result).toEqual(checks);
   });
 
-  it('includes -R flag when nwo is provided', async () => {
+  it('always includes -R with the repo argument', async () => {
     execFileMock.mockImplementation((_cmd: string, _args: string[], ...rest: unknown[]) => {
       const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
       cb(null, '[]', '');
     });
 
-    await fetchChecks('42', 'owner/repo');
+    await fetchChecks(repo, '42');
 
     expect(execFileMock).toHaveBeenCalledWith(
       'gh',
-      ['pr', 'checks', '42', '--json', 'name,state,bucket', '-R', 'owner/repo'],
+      ['pr', 'checks', '42', '-R', repo, '--json', 'name,state,bucket'],
       expect.objectContaining({ encoding: 'utf-8' }),
       expect.any(Function)
     );
-  });
-
-  it('does not include -R flag when nwo is omitted', async () => {
-    execFileMock.mockImplementation((_cmd: string, _args: string[], ...rest: unknown[]) => {
-      const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
-      cb(null, '[]', '');
-    });
-
-    await fetchChecks('42');
-
-    const firstCall = execFileMock.mock.calls[0];
-    expect(firstCall).toBeDefined();
-    const args = firstCall?.[1] as string[];
-    expect(args).not.toContain('-R');
   });
 });
 

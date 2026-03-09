@@ -7,10 +7,6 @@ vi.mock('node:fs/promises', async () => {
   return { ...actual, readFile: (...args: unknown[]) => readFileMock(...args) };
 });
 
-const exitMock = vi.spyOn(process, 'exit').mockImplementation((() => {
-  throw new Error('process.exit');
-}) as typeof process.exit);
-const stderrMock = vi.spyOn(console, 'error').mockImplementation(() => {});
 const warnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
 const settingsPath = path.resolve('.shipper', 'settings.json');
@@ -31,8 +27,6 @@ async function loadModule() {
 beforeEach(() => {
   vi.resetModules();
   readFileMock.mockReset();
-  exitMock.mockClear();
-  stderrMock.mockClear();
   warnMock.mockClear();
 });
 
@@ -168,33 +162,24 @@ describe('loadSettings', () => {
     expect((Object.prototype as Record<string, unknown>).mode).toBeUndefined();
   });
 
-  it('exits with an error on malformed JSON', async () => {
+  it('throws on malformed JSON', async () => {
     readFileMock.mockImplementation(async (p: string) => {
       if (p === settingsPath) return '{bad json';
       throw enoent(p);
     });
 
     const { loadSettings } = await loadModule();
-    await expect(loadSettings()).rejects.toThrow('process.exit');
-
-    expect(exitMock).toHaveBeenCalledWith(1);
-    expect(stderrMock).toHaveBeenCalledWith(
-      expect.stringContaining(`Malformed JSON in ${settingsPath}`)
-    );
+    await expect(loadSettings()).rejects.toThrow(`Malformed JSON in ${settingsPath}`);
   });
 
-  it('exits with error on malformed local JSON', async () => {
+  it('throws on malformed local JSON', async () => {
     readFileMock.mockImplementation(async (p: string) => {
       if (p === settingsPath) return '{"prReviewWait": {"mode": "checks", "timeoutMinutes": 20}}';
       if (p === localPath) return 'not json';
       throw enoent(p);
     });
     const { loadSettings } = await loadModule();
-    await expect(loadSettings()).rejects.toThrow('process.exit');
-    expect(exitMock).toHaveBeenCalledWith(1);
-    expect(stderrMock).toHaveBeenCalledWith(
-      expect.stringContaining(`Malformed JSON in ${localPath}`)
-    );
+    await expect(loadSettings()).rejects.toThrow(`Malformed JSON in ${localPath}`);
   });
 });
 
@@ -320,7 +305,7 @@ describe('resolveAgent', () => {
     expect(resolveAgent('groom')).toBe('claude');
   });
 
-  it('exits on an invalid command agent', async () => {
+  it('throws on an invalid command agent', async () => {
     readFileMock.mockImplementation(async (p: string) => {
       if (p === settingsPath) {
         return JSON.stringify({
@@ -335,12 +320,7 @@ describe('resolveAgent', () => {
 
     const { loadSettings, resolveAgent } = await loadModule();
     await loadSettings();
-    expect(() => resolveAgent('implement')).toThrow('process.exit');
-
-    expect(exitMock).toHaveBeenCalledWith(1);
-    expect(stderrMock).toHaveBeenCalledWith(
-      expect.stringContaining('Invalid agent "vim" for step "implement"')
-    );
+    expect(() => resolveAgent('implement')).toThrow('Invalid agent "vim" for step "implement"');
   });
 
   it('preserves invalid legacy default agents for later validation', async () => {
@@ -356,10 +336,7 @@ describe('resolveAgent', () => {
     const { loadSettings, resolveAgent } = await loadModule();
     await loadSettings();
 
-    expect(() => resolveAgent('groom')).toThrow('process.exit');
-    expect(stderrMock).toHaveBeenCalledWith(
-      expect.stringContaining('Invalid agent "vim" for step "groom"')
-    );
+    expect(() => resolveAgent('groom')).toThrow('Invalid agent "vim" for step "groom"');
   });
 });
 
@@ -386,7 +363,7 @@ describe('resolveMode', () => {
     expect(resolveMode('groom', 'default')).toBe('headless');
   });
 
-  it('exits on an invalid command mode', async () => {
+  it('throws on an invalid command mode', async () => {
     readFileMock.mockImplementation(async (p: string) => {
       if (p === settingsPath) {
         return JSON.stringify({
@@ -402,9 +379,6 @@ describe('resolveMode', () => {
     const { loadSettings, resolveMode } = await loadModule();
     await loadSettings();
 
-    expect(() => resolveMode('groom')).toThrow('process.exit');
-    expect(stderrMock).toHaveBeenCalledWith(
-      expect.stringContaining('Invalid mode "banana" for step "groom"')
-    );
+    expect(() => resolveMode('groom')).toThrow('Invalid mode "banana" for step "groom"');
   });
 });

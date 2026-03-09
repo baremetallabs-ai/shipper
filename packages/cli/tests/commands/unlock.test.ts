@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockReleaseIssueLock = vi.fn();
+const repo = 'owner/repo';
 
 vi.mock('@dnsquared/shipper-core', () => ({
   releaseIssueLock: (...args: unknown[]) => mockReleaseIssueLock(...args),
@@ -19,18 +20,18 @@ beforeEach(() => {
 });
 
 describe('unlockCommand', () => {
-  it('calls releaseIssueLock with the issue number', async () => {
-    await unlockCommand('42');
-    expect(mockReleaseIssueLock).toHaveBeenCalledWith('42');
+  it('calls releaseIssueLock with the repo and issue number', async () => {
+    await unlockCommand(repo, '42');
+    expect(mockReleaseIssueLock).toHaveBeenCalledWith(repo, '42');
   });
 
   it('strips # prefix from issue number', async () => {
-    await unlockCommand('#42');
-    expect(mockReleaseIssueLock).toHaveBeenCalledWith('42');
+    await unlockCommand(repo, '#42');
+    expect(mockReleaseIssueLock).toHaveBeenCalledWith(repo, '42');
   });
 
   it('exits with error when no issue provided', async () => {
-    await expect(unlockCommand('')).rejects.toThrow('process.exit');
+    await expect(unlockCommand(repo, '')).rejects.toThrow('process.exit');
     expect(mockExit).toHaveBeenCalledWith(1);
   });
 });

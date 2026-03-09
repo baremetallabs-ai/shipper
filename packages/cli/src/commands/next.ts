@@ -17,8 +17,8 @@ interface IssueData {
   labels: IssueLabel[];
 }
 
-async function resolvePrForIssue(issueNumber: number): Promise<string> {
-  const pr = await tryResolvePrForIssue(issueNumber);
+async function resolvePrForIssue(repo: string, issueNumber: number): Promise<string> {
+  const pr = await tryResolvePrForIssue(repo, issueNumber);
   if (!pr) {
     console.error(
       `No open PR found for issue #${issueNumber}. Run \`shipper pr open ${issueNumber}\` first.`
@@ -28,7 +28,7 @@ async function resolvePrForIssue(issueNumber: number): Promise<string> {
   return pr;
 }
 
-export async function nextCommand(ref: string): Promise<void> {
+export async function nextCommand(repo: string, ref: string): Promise<void> {
   if (!ref) {
     console.error('Error: Please provide an issue or PR number.');
     console.error('Usage: shipper next <issue-or-pr>');
@@ -38,7 +38,7 @@ export async function nextCommand(ref: string): Promise<void> {
   // Strip leading # if present
   const cleanRef = ref.replace(/^#/, '');
 
-  const resolved = await resolveRef(cleanRef, 'issue');
+  const resolved = await resolveRef(repo, cleanRef, 'issue');
   const { stdout } = await gh(['issue', 'view', resolved.issueNumber, '--json', 'number,labels']);
   const issueData = JSON.parse(stdout.trim()) as IssueData;
   const issueNumber = issueData.number;
@@ -82,38 +82,38 @@ export async function nextCommand(ref: string): Promise<void> {
   const issueStr = String(issueNumber);
 
   // Dispatch (wrapped in lock so inner commands become passthroughs)
-  await withIssueLock(issueStr, async () => {
+  await withIssueLock(repo, issueStr, async () => {
     switch (label) {
       case 'shipper:new':
         console.log(`Running: shipper groom ${issueStr}`);
-        await groomCommand(issueStr);
+        await groomCommand(repo, issueStr);
         break;
       case 'shipper:groomed':
         console.log(`Running: shipper design ${issueStr}`);
-        await designCommand(issueStr);
+        await designCommand(repo, issueStr);
         break;
       case 'shipper:designed':
         console.log(`Running: shipper plan ${issueStr}`);
-        await planCommand(issueStr);
+        await planCommand(repo, issueStr);
         break;
       case 'shipper:planned':
         console.log(`Running: shipper implement ${issueStr}`);
-        await implementCommand(issueStr);
+        await implementCommand(repo, issueStr);
         break;
       case 'shipper:implemented':
         console.log(`Running: shipper pr open ${issueStr}`);
-        await prOpenCommand(issueStr);
+        await prOpenCommand(repo, issueStr);
         break;
       case 'shipper:pr-open': {
-        const prNum = await resolvePrForIssue(issueNumber);
+        const prNum = await resolvePrForIssue(repo, issueNumber);
         console.log(`Running: shipper pr review ${prNum}`);
-        await prReviewCommand(prNum);
+        await prReviewCommand(repo, prNum);
         break;
       }
       case 'shipper:pr-reviewed': {
-        const prNum = await resolvePrForIssue(issueNumber);
+        const prNum = await resolvePrForIssue(repo, issueNumber);
         console.log(`Running: shipper pr remediate ${prNum}`);
-        await prRemediateCommand(prNum);
+        await prRemediateCommand(repo, prNum);
         break;
       }
       case 'shipper:ready':

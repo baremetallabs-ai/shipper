@@ -8,6 +8,7 @@ import { resolveAgent, resolveMode, type CommandMode } from './settings.js';
 
 export interface RunPromptOpts {
   userInput?: string;
+  repo?: string;
   issueRef?: string;
   prRef?: string;
   cwd?: string;
@@ -93,12 +94,22 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
 
   const messageParts: string[] = [];
 
-  if (frontmatter['append-issue'] && opts.issueRef) {
-    messageParts.push(await fetchIssue(opts.issueRef));
+  if (frontmatter['append-issue']) {
+    if (!opts.repo) {
+      throw new Error(`Prompt "${name}" requires opts.repo when append-issue is enabled.`);
+    }
+    if (opts.issueRef) {
+      messageParts.push(await fetchIssue(opts.repo, opts.issueRef));
+    }
   }
 
-  if (frontmatter['append-pr'] && opts.prRef) {
-    messageParts.push(await fetchPR(opts.prRef));
+  if (frontmatter['append-pr']) {
+    if (!opts.repo) {
+      throw new Error(`Prompt "${name}" requires opts.repo when append-pr is enabled.`);
+    }
+    if (opts.prRef) {
+      messageParts.push(await fetchPR(opts.repo, opts.prRef));
+    }
   }
 
   if (frontmatter['append-user-input'] && opts.userInput) {

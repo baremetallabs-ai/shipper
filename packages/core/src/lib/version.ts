@@ -14,8 +14,6 @@ export function checkVersionFreshness(): void {
     const reason = recorded
       ? `Installed CLI version (${installed}) differs from initialized version (${recorded}).`
       : `No version fingerprint found in .shipper/settings.json.`;
-    console.error(`Error: ${reason}`);
-    console.error('Run `shipper init` to re-initialize.');
-    process.exit(1);
+    throw new Error(`${reason}\nRun \`shipper init\` to re-initialize.`);
   }
 }

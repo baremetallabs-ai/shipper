@@ -5,7 +5,6 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { clearStaleLockIfNeeded, selectIssuesForStage } from '@dnsquared/shipper-core';
 import { gh } from '@dnsquared/shipper-core';
-import { getRepoNwo } from '@dnsquared/shipper-core';
 import { withStageHooks } from '@dnsquared/shipper-core';
 import { releaseIssueLock, withIssueLock } from '@dnsquared/shipper-core';
 import { runPrompt } from '@dnsquared/shipper-core';
@@ -87,13 +86,15 @@ function formatLogTimestamp(date = new Date()): string {
   ].join('');
 }
 
-async function getCurrentLabel(issueStr: string): Promise<string | undefined> {
+async function getCurrentLabel(repo: string, issueStr: string): Promise<string | undefined> {
   let output: string;
   try {
     const result = await gh([
       'issue',
       'view',
       issueStr,
+      '-R',
+      repo,
       '--json',
       'labels',
       '--jq',
@@ -275,13 +276,14 @@ async function mergePr(pr: QueuedPR, issueNumber: number, nwo: string): Promise<
 }
 
 async function shipOneIssue(
+  repo: string,
   issue: string,
   merge: boolean
 ): Promise<{ success: boolean; error?: string }> {
   const issueStr = issue.replace(/^#/, '');
 
-  return await withIssueLock(issueStr, async () => {
-    let label = await getCurrentLabel(issueStr);
+  return await withIssueLock(repo, issueStr, async () => {
+    let label = await getCurrentLabel(repo, issueStr);
 
     if (!label) {
       const msg = `Issue #${issueStr} has no shipper label. Run \`shipper next\` or add a label first.`;
@@ -338,7 +340,7 @@ async function shipOneIssue(
 
         results.push({ stage: stageName, status: 'pass' });
 
-        label = await getCurrentLabel(issueStr);
+        label = await getCurrentLabel(repo, issueStr);
 
         if (label === 'shipper:ready') {
           break;
@@ -382,7 +384,7 @@ async function shipOneIssue(
     if (merge) {
       console.log('Running stage: merge');
       const issueNumber = Number(issueStr);
-      const nwo = await getRepoNwo();
+      const nwo = repo;
 
       let pr: QueuedPR;
       try {
@@ -528,29 +530,34 @@ function shipOneIssueAsync(issue: string, logFile?: string): AsyncIssueRun {
 }
 
 export async function selectNextCandidate(
+  repo: string,
   skippedIssues: Set<number>,
   activeIssues: ReadonlySet<number> = new Set<number>()
 ): Promise<{ number: number; title: string } | null> {
   for (const label of AUTO_PRIORITY_LABELS) {
     const staleLocked = new Set<number>();
-    const issues = await selectIssuesForStage(label, staleLocked);
+    const issues = await selectIssuesForStage(repo, label, staleLocked);
     const candidate = issues.find(
       (i) => !skippedIssues.has(i.number) && !activeIssues.has(i.number)
     );
     if (candidate) {
-      await clearStaleLockIfNeeded(candidate.number, staleLocked);
+      await clearStaleLockIfNeeded(repo, candidate.number, staleLocked);
       return candidate;
     }
   }
   return null;
 }
 
-export async function selectBlockedIssues(): Promise<{ number: number; title: string }[]> {
+export async function selectBlockedIssues(
+  repo: string
+): Promise<{ number: number; title: string }[]> {
   let output: string;
   try {
     const result = await gh([
       'issue',
       'list',
+      '-R',
+      repo,
       '--label',
       'shipper:blocked',
       '--state',
@@ -594,8 +601,12 @@ export async function selectBlockedIssues(): Promise<{ number: number; title: st
   return issues.map((i) => ({ number: i.number, title: i.title }));
 }
 
-async function attemptUnblock(issueStr: string): Promise<boolean> {
-  await withIssueLock(issueStr, async () => await runPrompt('unblock', { issueRef: issueStr }));
+async function attemptUnblock(repo: string, issueStr: string): Promise<boolean> {
+  await withIssueLock(
+    repo,
+    issueStr,
+    async () => await runPrompt('unblock', { repo, issueRef: issueStr })
+  );
 
   // Check whether shipper:blocked was removed — this is the only reliable signal
   let output: string;
@@ -604,6 +615,8 @@ async function attemptUnblock(issueStr: string): Promise<boolean> {
       'issue',
       'view',
       issueStr,
+      '-R',
+      repo,
       '--json',
       'labels',
       '--jq',
@@ -631,7 +644,7 @@ export function printUnblockSummary(attempts: UnblockAttempt[]): void {
   }
 }
 
-async function shipAutoSequential(): Promise<void> {
+async function shipAutoSequential(repo: string): Promise<void> {
   const skippedIssues = new Set<number>();
   const results: AutoResult[] = [];
   const allUnblockAttempts: UnblockAttempt[] = [];
@@ -639,11 +652,11 @@ async function shipAutoSequential(): Promise<void> {
   for (;;) {
     // Inner loop: process all available candidates
     for (;;) {
-      const candidate = await selectNextCandidate(skippedIssues);
+      const candidate = await selectNextCandidate(repo, skippedIssues);
       if (!candidate) break;
 
       console.log(`\nAuto: advancing issue #${candidate.number} — ${candidate.title}`);
-      const result = await shipOneIssue(String(candidate.number), true);
+      const result = await shipOneIssue(repo, String(candidate.number), true);
 
       if (result.success) {
         results.push({ issue: candidate.number, title: candidate.title, outcome: 'pass' });
@@ -659,13 +672,13 @@ async function shipAutoSequential(): Promise<void> {
     }
 
     // Unblock pass
-    const blocked = await selectBlockedIssues();
+    const blocked = await selectBlockedIssues(repo);
     if (blocked.length === 0) break;
 
     let progress = false;
     for (const issue of blocked) {
       console.log(`\nAuto: attempting unblock of #${issue.number} — ${issue.title}`);
-      const unblocked = await attemptUnblock(String(issue.number));
+      const unblocked = await attemptUnblock(repo, String(issue.number));
       allUnblockAttempts.push({
         issue: issue.number,
         title: issue.title,
@@ -685,7 +698,7 @@ async function shipAutoSequential(): Promise<void> {
   process.exit(0);
 }
 
-async function shipAutoParallel(parallel: number): Promise<void> {
+async function shipAutoParallel(repo: string, parallel: number): Promise<void> {
   const skippedIssues = new Set<number>();
   const results: AutoResult[] = [];
   const allUnblockAttempts: UnblockAttempt[] = [];
@@ -725,7 +738,7 @@ async function shipAutoParallel(parallel: number): Promise<void> {
           if (run.child.exitCode !== null || run.child.signalCode !== null) {
             return Promise.resolve();
           }
-          return releaseIssueLock(String(issueNumber));
+          return releaseIssueLock(repo, String(issueNumber));
         })
       );
 
@@ -741,7 +754,11 @@ async function shipAutoParallel(parallel: number): Promise<void> {
       if (shuttingDown) break;
 
       while (!shuttingDown && activeRuns.size < parallel) {
-        const candidate = await selectNextCandidate(skippedIssues, new Set(activeRuns.keys()));
+        const candidate = await selectNextCandidate(
+          repo,
+          skippedIssues,
+          new Set(activeRuns.keys())
+        );
         if (!candidate) break;
 
         const logFile = path.join(logsDir, `ship-${candidate.number}-${formatLogTimestamp()}.log`);
@@ -760,7 +777,7 @@ async function shipAutoParallel(parallel: number): Promise<void> {
       if (shuttingDown) break;
 
       if (activeRuns.size === 0) {
-        const blocked = await selectBlockedIssues();
+        const blocked = await selectBlockedIssues(repo);
         if (blocked.length === 0) break;
 
         let progress = false;
@@ -768,7 +785,7 @@ async function shipAutoParallel(parallel: number): Promise<void> {
           console.log(
             `\n[#${issue.number}] Auto: attempting unblock of #${issue.number} — ${issue.title}`
           );
-          const unblocked = await attemptUnblock(String(issue.number));
+          const unblocked = await attemptUnblock(repo, String(issue.number));
           allUnblockAttempts.push({
             issue: issue.number,
             title: issue.title,
@@ -827,17 +844,18 @@ async function shipAutoParallel(parallel: number): Promise<void> {
 }
 
 export async function shipCommand(
+  repo: string,
   issue: string | undefined,
   options: ShipOptions = { merge: false, auto: false }
 ): Promise<void> {
   if (options.auto) {
     const parallel = options.parallel ?? 0;
     if (parallel >= 2) {
-      await shipAutoParallel(parallel);
+      await shipAutoParallel(repo, parallel);
       return;
     }
 
-    await shipAutoSequential();
+    await shipAutoSequential(repo);
     return;
   }
 
@@ -846,6 +864,6 @@ export async function shipCommand(
     console.error('Error: an issue number is required unless --auto is used.');
     process.exit(1);
   }
-  const result = await shipOneIssue(issue, options.merge);
+  const result = await shipOneIssue(repo, issue, options.merge);
   process.exit(result.success ? 0 : 1);
 }

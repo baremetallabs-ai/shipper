@@ -17,7 +17,6 @@ const execFile = Object.assign((...args: unknown[]) => execFileMock(...args), {
       );
     }),
 });
-const mockGetRepoNwo = vi.fn(async () => 'owner/repo');
 const mockGetSettings = vi.fn(() => ({
   lockTimeoutMinutes: 30,
   hooks: {},
@@ -28,16 +27,12 @@ vi.mock('node:child_process', async () => {
   return { ...actual, execFile };
 });
 
-vi.mock('../../src/lib/repo.js', () => ({
-  getRepoNwo: (...args: unknown[]) => mockGetRepoNwo(...args),
-}));
-
 vi.mock('../../src/lib/settings.js', () => ({
   getSettings: (...args: unknown[]) => mockGetSettings(...args),
 }));
 
-const exitMock = vi.spyOn(process, 'exit');
 const stderrMock = vi.spyOn(console, 'error').mockImplementation(() => {});
+const repo = 'owner/repo';
 
 function queueExecFileResult(stdout: string): void {
   execFileMock.mockImplementationOnce((_cmd: string, _args: string[], ...rest: unknown[]) => {
@@ -58,13 +53,8 @@ const { isLockStale, acquireIssueLock, releaseIssueLock, withIssueLock } =
 
 beforeEach(() => {
   execFileMock.mockReset();
-  mockGetRepoNwo.mockClear();
   mockGetSettings.mockClear();
-  exitMock.mockReset();
   stderrMock.mockClear();
-  exitMock.mockImplementation((() => {
-    throw new Error('process.exit');
-  }) as typeof process.exit);
   delete process.env.SHIPPER_LOCK_HELD;
 });
 
@@ -76,13 +66,27 @@ describe('isLockStale', () => {
   it('returns false for a recent lock', async () => {
     queueExecFileResult(new Date(Date.now() - 5 * 60_000).toISOString());
 
-    await expect(isLockStale('42')).resolves.toBe(false);
+    await expect(isLockStale(repo, '42')).resolves.toBe(false);
+    expect(execFileMock).toHaveBeenCalledWith(
+      'gh',
+      [
+        'api',
+        '-R',
+        repo,
+        `repos/${repo}/issues/42/timeline`,
+        '--paginate',
+        '--jq',
+        expect.any(String),
+      ],
+      expect.objectContaining({ encoding: 'utf-8' }),
+      expect.any(Function)
+    );
   });
 
   it('returns true for an old lock', async () => {
     queueExecFileResult(new Date(Date.now() - 60 * 60_000).toISOString());
 
-    await expect(isLockStale('42')).resolves.toBe(true);
+    await expect(isLockStale(repo, '42')).resolves.toBe(true);
   });
 });
 
@@ -91,12 +95,12 @@ describe('acquireIssueLock', () => {
     queueExecFileResult('shipper:groomed\n');
     queueExecFileResult('');
 
-    await acquireIssueLock('42');
+    await acquireIssueLock(repo, '42');
 
     expect(execFileMock).toHaveBeenNthCalledWith(
       2,
       'gh',
-      ['issue', 'edit', '42', '--add-label', 'shipper:locked'],
+      ['issue', 'edit', '42', '-R', repo, '--add-label', 'shipper:locked'],
       expect.objectContaining({ encoding: 'utf-8' }),
       expect.any(Function)
     );
@@ -108,39 +112,40 @@ describe('acquireIssueLock', () => {
     queueExecFileResult('');
     queueExecFileResult('');
 
-    await acquireIssueLock('42');
+    await acquireIssueLock(repo, '42');
 
     expect(stderrMock).toHaveBeenCalledWith('Issue #42 lock is stale — clearing.');
     expect(execFileMock).toHaveBeenCalledWith(
       'gh',
-      ['issue', 'edit', '42', '--remove-label', 'shipper:locked'],
+      ['issue', 'edit', '42', '-R', repo, '--remove-label', 'shipper:locked'],
       expect.objectContaining({ encoding: 'utf-8' }),
       expect.any(Function)
     );
     expect(execFileMock).toHaveBeenCalledWith(
       'gh',
-      ['issue', 'edit', '42', '--add-label', 'shipper:locked'],
+      ['issue', 'edit', '42', '-R', repo, '--add-label', 'shipper:locked'],
       expect.objectContaining({ encoding: 'utf-8' }),
       expect.any(Function)
     );
   });
 
-  it('exits when the lock is active and not stale', async () => {
+  it('throws when the lock is active and not stale', async () => {
     queueExecFileResult('shipper:groomed\nshipper:locked\n');
     queueExecFileResult(new Date(Date.now() - 5 * 60_000).toISOString());
 
-    await expect(acquireIssueLock('42')).rejects.toThrow('process.exit');
-    expect(exitMock).toHaveBeenCalledWith(1);
+    await expect(acquireIssueLock(repo, '42')).rejects.toThrow(
+      'Issue #42 is locked by another shipper instance.'
+    );
   });
 });
 
 describe('releaseIssueLock', () => {
   it('removes shipper:locked and ignores errors', async () => {
     queueExecFileResult('');
-    await expect(releaseIssueLock('42')).resolves.toBeUndefined();
+    await expect(releaseIssueLock(repo, '42')).resolves.toBeUndefined();
 
     queueExecFileError(new Error('label missing'));
-    await expect(releaseIssueLock('42')).resolves.toBeUndefined();
+    await expect(releaseIssueLock(repo, '42')).resolves.toBeUndefined();
   });
 });
 
@@ -149,7 +154,7 @@ describe('withIssueLock', () => {
     process.env.SHIPPER_LOCK_HELD = '42';
     const fn = vi.fn(async () => 'result');
 
-    await expect(withIssueLock('42', fn)).resolves.toBe('result');
+    await expect(withIssueLock(repo, '42', fn)).resolves.toBe('result');
     expect(execFileMock).not.toHaveBeenCalled();
   });
 
@@ -159,7 +164,7 @@ describe('withIssueLock', () => {
     queueExecFileResult('');
 
     let envDuringFn: string | undefined;
-    const result = await withIssueLock('42', async () => {
+    const result = await withIssueLock(repo, '42', async () => {
       envDuringFn = process.env.SHIPPER_LOCK_HELD;
       return 'ok';
     });
@@ -175,14 +180,14 @@ describe('withIssueLock', () => {
     queueExecFileResult('');
 
     await expect(
-      withIssueLock('42', async () => {
+      withIssueLock(repo, '42', async () => {
         throw new Error('boom');
       })
     ).rejects.toThrow('boom');
 
     expect(execFileMock).toHaveBeenLastCalledWith(
       'gh',
-      ['issue', 'edit', '42', '--remove-label', 'shipper:locked'],
+      ['issue', 'edit', '42', '-R', repo, '--remove-label', 'shipper:locked'],
       expect.objectContaining({ encoding: 'utf-8' }),
       expect.any(Function)
     );

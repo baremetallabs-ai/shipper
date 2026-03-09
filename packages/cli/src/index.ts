@@ -1,6 +1,7 @@
 import { Command, CommanderError, Option } from 'commander';
 import { writeSync } from 'node:fs';
 import { runPreflight } from '@dnsquared/shipper-core';
+import { getRepoNwo } from '@dnsquared/shipper-core';
 import { loadSettings, type CommandMode } from '@dnsquared/shipper-core';
 import { CLI_VERSION, checkVersionFreshness } from '@dnsquared/shipper-core';
 import { initCommand } from './commands/init.js';
@@ -24,6 +25,7 @@ import { issueListCommand } from './commands/issue-list.js';
 import { setupCommand } from './commands/setup.js';
 
 const program = new Command();
+let resolvedRepo: string | undefined;
 
 function addModeOption(command: Command): Command {
   return command.addOption(
@@ -42,34 +44,67 @@ program.configureOutput({
   },
 });
 
+function exitWithError(err: unknown): never {
+  console.error(err instanceof Error ? err.message : String(err));
+  process.exit(1);
+}
+
+function wrapAction<T extends unknown[]>(
+  fn: (...args: T) => Promise<void>
+): (...args: T) => Promise<void> {
+  return async (...args: T) => {
+    try {
+      await fn(...args);
+    } catch (err) {
+      exitWithError(err);
+    }
+  };
+}
+
+function requireResolvedRepo(): string {
+  if (!resolvedRepo) {
+    throw new Error('Repository not resolved.');
+  }
+  return resolvedRepo;
+}
+
 program
   .name('shipper')
   .description('CLI tool for automating development workflow with coding agents')
   .version(CLI_VERSION);
 
-program.hook('preAction', async (_thisCommand, actionCommand) => {
-  if (actionCommand.name() === 'init' || actionCommand.name() === 'setup') return;
-  await loadSettings();
-  checkVersionFreshness();
-  await runPreflight();
-});
+program.hook(
+  'preAction',
+  wrapAction(async (_thisCommand, actionCommand) => {
+    resolvedRepo = undefined;
+    if (actionCommand.name() === 'init' || actionCommand.name() === 'setup') return;
+    await loadSettings();
+    checkVersionFreshness();
+    resolvedRepo = await getRepoNwo();
+    await runPreflight(resolvedRepo);
+  })
+);
 
 program
   .command('init')
   .description('Initialize shipper in the current repository')
   .option('--agent <name>', 'coding agent to use (claude or codex)')
-  .action(async (options: { agent?: string }) => {
-    await initCommand(options);
-  });
+  .action(
+    wrapAction(async (options: { agent?: string }) => {
+      await initCommand(options);
+    })
+  );
 
 addModeOption(
   program
     .command('setup [words...]')
     .description('Configure repository settings with an agent')
-    .action(async (words: string[], options: { mode: string }) => {
-      await loadSettings();
-      await setupCommand(words, { mode: options.mode as CommandMode });
-    })
+    .action(
+      wrapAction(async (words: string[], options: { mode: string }) => {
+        await loadSettings();
+        await setupCommand(words, { mode: options.mode as CommandMode });
+      })
+    )
 );
 
 addModeOption(
@@ -77,9 +112,11 @@ addModeOption(
     .command('new')
     .description('Create a new issue from a pitch')
     .argument('<pitch...>', 'your idea for the new issue')
-    .action(async (pitch: string[], options: { mode: string }) => {
-      await newCommand(pitch, { mode: options.mode as CommandMode });
-    })
+    .action(
+      wrapAction(async (pitch: string[], options: { mode: string }) => {
+        await newCommand(pitch, { mode: options.mode as CommandMode });
+      })
+    )
 );
 
 program
@@ -87,29 +124,33 @@ program
   .description('Adopt an existing issue into the shipper workflow')
   .argument('[issue]', 'issue number')
   .option('--all', 'adopt all open issues without shipper labels', false)
-  .action(async (issue: string | undefined, options: { all: boolean }) => {
-    if (options.all && issue) {
-      console.error('Error: --all and an explicit issue number are mutually exclusive.');
-      process.exit(1);
-    }
-    if (!options.all && !issue) {
-      console.error('Error: an issue number is required unless --all is used.');
-      process.exit(1);
-    }
-    if (options.all) {
-      await adoptAllCommand();
-    } else {
-      await adoptCommand(issue as string);
-    }
-  });
+  .action(
+    wrapAction(async (issue: string | undefined, options: { all: boolean }) => {
+      if (options.all && issue) {
+        console.error('Error: --all and an explicit issue number are mutually exclusive.');
+        process.exit(1);
+      }
+      if (!options.all && !issue) {
+        console.error('Error: an issue number is required unless --all is used.');
+        process.exit(1);
+      }
+      if (options.all) {
+        await adoptAllCommand();
+      } else {
+        await adoptCommand(issue as string);
+      }
+    })
+  );
 
 program
   .command('next')
   .description('Advance an issue to the next workflow step')
   .argument('<ref>', 'issue or PR number/URL')
-  .action(async (ref: string) => {
-    await nextCommand(ref);
-  });
+  .action(
+    wrapAction(async (ref: string) => {
+      await nextCommand(requireResolvedRepo(), ref);
+    })
+  );
 
 program
   .command('ship')
@@ -119,38 +160,44 @@ program
   .option('--auto', 'run autonomous continuous shipping loop', false)
   .option('--parallel <n>', 'number of parallel slots (requires --auto)')
   .action(
-    async (
-      issue: string | undefined,
-      options: { merge: boolean; auto: boolean; parallel?: string }
-    ) => {
-      if (options.auto && issue) {
-        console.error('Error: --auto and an explicit issue number are mutually exclusive.');
-        process.exit(1);
-      }
-      if (!options.auto && !issue) {
-        console.error('Error: an issue number is required unless --auto is used.');
-        process.exit(1);
-      }
-
-      if (options.parallel !== undefined && !options.auto) {
-        console.error('Error: --parallel requires --auto');
-        process.exit(1);
-      }
-
-      let parallel: number | undefined;
-      if (options.parallel !== undefined) {
-        parallel = Number(options.parallel);
-        if (!Number.isInteger(parallel) || parallel < 1) {
-          console.error('Error: --parallel requires a number');
+    wrapAction(
+      async (
+        issue: string | undefined,
+        options: { merge: boolean; auto: boolean; parallel?: string }
+      ) => {
+        if (options.auto && issue) {
+          console.error('Error: --auto and an explicit issue number are mutually exclusive.');
           process.exit(1);
         }
-        if (parallel === 1) {
-          parallel = undefined;
+        if (!options.auto && !issue) {
+          console.error('Error: an issue number is required unless --auto is used.');
+          process.exit(1);
         }
-      }
 
-      await shipCommand(issue, { merge: options.merge, auto: options.auto, parallel });
-    }
+        if (options.parallel !== undefined && !options.auto) {
+          console.error('Error: --parallel requires --auto');
+          process.exit(1);
+        }
+
+        let parallel: number | undefined;
+        if (options.parallel !== undefined) {
+          parallel = Number(options.parallel);
+          if (!Number.isInteger(parallel) || parallel < 1) {
+            console.error('Error: --parallel requires a number');
+            process.exit(1);
+          }
+          if (parallel === 1) {
+            parallel = undefined;
+          }
+        }
+
+        await shipCommand(requireResolvedRepo(), issue, {
+          merge: options.merge,
+          auto: options.auto,
+          parallel,
+        });
+      }
+    )
   );
 
 addModeOption(
@@ -159,13 +206,18 @@ addModeOption(
     .description('Groom an existing issue')
     .argument('[issue]', 'issue number or URL')
     .option('--auto', 'groom all eligible shipper:new issues in sequence', false)
-    .action(async (issue: string | undefined, options: { auto: boolean; mode: string }) => {
-      if (options.auto && issue) {
-        console.error('Error: --auto and an explicit issue number are mutually exclusive.');
-        process.exit(1);
-      }
-      await groomCommand(issue, { auto: options.auto, mode: options.mode as CommandMode });
-    })
+    .action(
+      wrapAction(async (issue: string | undefined, options: { auto: boolean; mode: string }) => {
+        if (options.auto && issue) {
+          console.error('Error: --auto and an explicit issue number are mutually exclusive.');
+          process.exit(1);
+        }
+        await groomCommand(requireResolvedRepo(), issue, {
+          auto: options.auto,
+          mode: options.mode as CommandMode,
+        });
+      })
+    )
 );
 
 addModeOption(
@@ -173,9 +225,11 @@ addModeOption(
     .command('design')
     .description('Run technical design review on an issue')
     .argument('[issue]', 'issue number or URL')
-    .action(async (issue: string | undefined, options: { mode: string }) => {
-      await designCommand(issue, options.mode as CommandMode);
-    })
+    .action(
+      wrapAction(async (issue: string | undefined, options: { mode: string }) => {
+        await designCommand(requireResolvedRepo(), issue, options.mode as CommandMode);
+      })
+    )
 );
 
 addModeOption(
@@ -183,9 +237,11 @@ addModeOption(
     .command('plan')
     .description('Create an implementation plan for an issue')
     .argument('[issue]', 'issue number or URL')
-    .action(async (issue: string | undefined, options: { mode: string }) => {
-      await planCommand(issue, options.mode as CommandMode);
-    })
+    .action(
+      wrapAction(async (issue: string | undefined, options: { mode: string }) => {
+        await planCommand(requireResolvedRepo(), issue, options.mode as CommandMode);
+      })
+    )
 );
 
 addModeOption(
@@ -193,9 +249,11 @@ addModeOption(
     .command('implement')
     .description('Implement an issue in a worktree')
     .argument('[issue]', 'issue number or URL')
-    .action(async (issue: string | undefined, options: { mode: string }) => {
-      await implementCommand(issue, options.mode as CommandMode);
-    })
+    .action(
+      wrapAction(async (issue: string | undefined, options: { mode: string }) => {
+        await implementCommand(requireResolvedRepo(), issue, options.mode as CommandMode);
+      })
+    )
 );
 
 program
@@ -212,27 +270,33 @@ program
   .argument('<issue>', 'issue number')
   .option('-f, --force', 'skip confirmation prompt')
   .option('--to <stage>', 'reset to a specific workflow stage')
-  .action(async (issue: string, opts: { force: boolean; to?: string }) => {
-    await resetCommand(issue, opts);
-  });
+  .action(
+    wrapAction(async (issue: string, opts: { force: boolean; to?: string }) => {
+      await resetCommand(issue, opts);
+    })
+  );
 
 addModeOption(
   program
     .command('unblock')
     .description('Check if a blocked issue can proceed')
     .argument('<issue>', 'issue number')
-    .action(async (issue: string, options: { mode: string }) => {
-      await unblockCommand(issue, options.mode as CommandMode);
-    })
+    .action(
+      wrapAction(async (issue: string, options: { mode: string }) => {
+        await unblockCommand(requireResolvedRepo(), issue, options.mode as CommandMode);
+      })
+    )
 );
 
 program
   .command('unlock')
   .description('Force-release the lock on an issue')
   .argument('<issue>', 'issue number')
-  .action(async (issue: string) => {
-    await unlockCommand(issue);
-  });
+  .action(
+    wrapAction(async (issue: string) => {
+      await unlockCommand(requireResolvedRepo(), issue);
+    })
+  );
 
 const issue = program.command('issue').description('Issue commands');
 
@@ -240,9 +304,11 @@ issue
   .command('list')
   .description('List shipper-managed issues by pipeline status')
   .option('--status <name>', 'filter to a single status (e.g. planned)')
-  .action(async (options: { status?: string }) => {
-    await issueListCommand(options);
-  });
+  .action(
+    wrapAction(async (options: { status?: string }) => {
+      await issueListCommand(options);
+    })
+  );
 
 const pr = program.command('pr').description('Pull request commands');
 
@@ -251,9 +317,11 @@ addModeOption(
     .command('review')
     .description('Review a pull request')
     .argument('[pr]', 'PR number or URL')
-    .action(async (prArg: string | undefined, options: { mode: string }) => {
-      await prReviewCommand(prArg, options.mode as CommandMode);
-    })
+    .action(
+      wrapAction(async (prArg: string | undefined, options: { mode: string }) => {
+        await prReviewCommand(requireResolvedRepo(), prArg, options.mode as CommandMode);
+      })
+    )
 );
 
 addModeOption(
@@ -261,9 +329,11 @@ addModeOption(
     .command('open')
     .description('Open a pull request for an implemented issue')
     .argument('[issue]', 'issue number or URL')
-    .action(async (issue: string | undefined, options: { mode: string }) => {
-      await prOpenCommand(issue, options.mode as CommandMode);
-    })
+    .action(
+      wrapAction(async (issue: string | undefined, options: { mode: string }) => {
+        await prOpenCommand(requireResolvedRepo(), issue, options.mode as CommandMode);
+      })
+    )
 );
 
 addModeOption(
@@ -271,9 +341,11 @@ addModeOption(
     .command('remediate')
     .description('Remediate a pull request after review feedback')
     .argument('[pr]', 'PR number or URL')
-    .action(async (prArg: string | undefined, options: { mode: string }) => {
-      await prRemediateCommand(prArg, options.mode as CommandMode);
-    })
+    .action(
+      wrapAction(async (prArg: string | undefined, options: { mode: string }) => {
+        await prRemediateCommand(requireResolvedRepo(), prArg, options.mode as CommandMode);
+      })
+    )
 );
 
 program
@@ -285,12 +357,14 @@ program
   .option('--dry-run', 'print actions without executing', false)
   .option('--repo <owner/repo>', 'repository (default: inferred from cwd)')
   .action(
-    async (
-      number: string | undefined,
-      options: { interval: string; once: boolean; dryRun: boolean; repo?: string }
-    ) => {
-      await mergeCommand({ ...options, number });
-    }
+    wrapAction(
+      async (
+        number: string | undefined,
+        options: { interval: string; once: boolean; dryRun: boolean; repo?: string }
+      ) => {
+        await mergeCommand({ ...options, number });
+      }
+    )
   );
 
 program.exitOverride();

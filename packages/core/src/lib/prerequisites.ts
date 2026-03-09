@@ -42,9 +42,17 @@ export async function checkGitRepo(): Promise<CheckResult> {
   }
 }
 
-export async function checkGitHubRemote(): Promise<CheckResult> {
+export async function checkGitHubRemote(repo?: string): Promise<CheckResult> {
   try {
-    const { stdout } = await gh(['repo', 'view', '--json', 'name', '-q', '.name']);
+    const { stdout } = await gh([
+      'repo',
+      'view',
+      ...(repo ? ['-R', repo] : []),
+      '--json',
+      'name',
+      '-q',
+      '.name',
+    ]);
     const output = stdout.trim();
     if (output) {
       return { ok: true, message: `GitHub remote found: ${output}` };
@@ -81,11 +89,12 @@ const REQUIRED_LABELS = [
   'shipper:ready',
 ];
 
-export async function checkLabels(): Promise<CheckResult> {
+export async function checkLabels(repo?: string): Promise<CheckResult> {
   try {
     const { stdout } = await gh([
       'label',
       'list',
+      ...(repo ? ['-R', repo] : []),
       '--search',
       'shipper:',
       '--json',
@@ -116,8 +125,8 @@ export async function runPrereqChecks(checks: Array<() => Promise<CheckResult>>)
   return true;
 }
 
-export async function runPreflight(): Promise<void> {
-  const checks = [checkGhInstalled, checkGhAuth, checkShipperDir, checkLabels];
+export async function runPreflight(repo?: string): Promise<void> {
+  const checks = [checkGhInstalled, checkGhAuth, checkShipperDir, () => checkLabels(repo)];
 
   const failures: string[] = [];
   for (const check of checks) {
@@ -128,11 +137,9 @@ export async function runPreflight(): Promise<void> {
   }
 
   if (failures.length > 0) {
-    for (const msg of failures) {
-      console.error(`  ✗ ${msg}`);
-    }
-    console.error('\nRun `shipper init` to fix these issues.');
-    process.exit(1);
+    throw new Error(
+      `${failures.map((msg) => `  ✗ ${msg}`).join('\n')}\n\nRun \`shipper init\` to fix these issues.`
+    );
   }
 
   // Auto-create .shipper/tmp if missing (cheap, idempotent)

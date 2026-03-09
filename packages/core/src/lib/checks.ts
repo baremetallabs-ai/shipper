@@ -13,12 +13,16 @@ export interface CheckClassification {
   total: number;
 }
 
-export async function fetchChecks(prNumber: string, nwo?: string): Promise<PRChecksLine[]> {
-  const args = ['pr', 'checks', prNumber, '--json', 'name,state,bucket'];
-  if (nwo) {
-    args.push('-R', nwo);
-  }
-  const { stdout } = await gh(args);
+export async function fetchChecks(repo: string, prNumber: string): Promise<PRChecksLine[]> {
+  const { stdout } = await gh([
+    'pr',
+    'checks',
+    prNumber,
+    '-R',
+    repo,
+    '--json',
+    'name,state,bucket',
+  ]);
   return JSON.parse(stdout) as PRChecksLine[];
 }
 

@@ -4,9 +4,9 @@ import { withStageHooks } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
 import { runPrompt } from '@dnsquared/shipper-core';
 
-export async function planCommand(issue?: string, mode?: CommandMode): Promise<void> {
+export async function planCommand(repo: string, issue?: string, mode?: CommandMode): Promise<void> {
   if (!issue) {
-    const selected = await autoSelectIssue('shipper:designed');
+    const selected = await autoSelectIssue(repo, 'shipper:designed');
     if (!selected) {
       console.error("No issues ready for planning. Run 'shipper design' first.");
       process.exit(1);
@@ -16,12 +16,13 @@ export async function planCommand(issue?: string, mode?: CommandMode): Promise<v
   }
 
   const code = await withIssueLock(
+    repo,
     issue,
     async () =>
       await withStageHooks(
         'plan',
         { issueNumber: issue },
-        async () => await runPrompt('plan', { issueRef: issue, mode })
+        async () => await runPrompt('plan', { repo, issueRef: issue, mode })
       )
   );
 

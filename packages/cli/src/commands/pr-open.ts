@@ -7,9 +7,13 @@ import { withIssueLock } from '@dnsquared/shipper-core';
 import { withWorktree } from '@dnsquared/shipper-core';
 import { runPrompt } from '@dnsquared/shipper-core';
 
-export async function prOpenCommand(issue?: string, mode?: CommandMode): Promise<void> {
+export async function prOpenCommand(
+  repo: string,
+  issue?: string,
+  mode?: CommandMode
+): Promise<void> {
   if (!issue) {
-    const selected = await autoSelectIssue('shipper:implemented');
+    const selected = await autoSelectIssue(repo, 'shipper:implemented');
     if (!selected) {
       console.error("No issues ready for PR. Run 'shipper implement' first.");
       process.exit(1);
@@ -17,14 +21,14 @@ export async function prOpenCommand(issue?: string, mode?: CommandMode): Promise
     console.error(`Auto-selected #${selected.number}: ${selected.title}`);
     issue = String(selected.number);
   } else {
-    const resolved = await resolveRef(issue, 'issue');
+    const resolved = await resolveRef(repo, issue, 'issue');
     issue = resolved.issueNumber;
   }
 
   const settings = getSettings();
-  const baseBranch = await resolveBaseBranch(settings.defaultBaseBranch);
+  const baseBranch = await resolveBaseBranch(repo, settings.defaultBaseBranch);
 
-  const code = await withIssueLock(issue, async () => {
+  const code = await withIssueLock(repo, issue, async () => {
     const repoRoot = await getRepoRoot();
     const branch = await findBranchForIssue(issue);
 
@@ -35,7 +39,13 @@ export async function prOpenCommand(issue?: string, mode?: CommandMode): Promise
         await withWorktree(
           { repoRoot, branch, createBranch: false, issueNumber: issue, stage: 'pr-open' },
           async (wtPath) => {
-            return await runPrompt('pr_open', { issueRef: issue, cwd: wtPath, baseBranch, mode });
+            return await runPrompt('pr_open', {
+              repo,
+              issueRef: issue,
+              cwd: wtPath,
+              baseBranch,
+              mode,
+            });
           }
         )
     );

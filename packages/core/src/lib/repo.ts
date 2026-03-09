@@ -13,10 +13,9 @@ export async function getRepoNwo(): Promise<string> {
     return stdout.trim();
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(
-      'Error: Could not determine repository. Run this command from inside a GitHub repository.'
+    throw new Error(
+      'Could not determine repository. Run this command from inside a GitHub repository.\n' +
+        `Underlying error: ${msg}`
     );
-    console.error(`Underlying error: ${msg}`);
-    process.exit(1);
   }
 }

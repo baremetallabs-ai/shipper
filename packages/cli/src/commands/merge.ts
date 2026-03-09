@@ -86,7 +86,7 @@ export async function lookupPR(ref: string, nwo: string): Promise<QueuedPR> {
     data = await fetchPRView(ref, nwo);
   } catch {
     // Not a PR — try resolving as an issue number
-    const resolved = await tryResolvePrForIssue(Number(ref));
+    const resolved = await tryResolvePrForIssue(nwo, Number(ref));
     if (!resolved) {
       console.error(`Error: #${ref} is not a PR and no linked PR was found.`);
       process.exit(1);
@@ -420,7 +420,7 @@ async function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): Promise<bo
     // Could be blocked by required checks still running — check CI status
     let checks;
     try {
-      checks = await fetchChecks(String(pr.number), nwo);
+      checks = await fetchChecks(nwo, String(pr.number));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       await failPR(pr, `Could not fetch CI checks: ${msg}`, nwo, dryRun);
