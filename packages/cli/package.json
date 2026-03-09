@@ -39,7 +39,7 @@
     "dist"
   ],
   "dependencies": {
-    "@dnsquared/shipper-core": "*",
+    "@dnsquared/shipper-core": "0.1.0",
     "commander": "^13.1.0"
   },
   "devDependencies": {

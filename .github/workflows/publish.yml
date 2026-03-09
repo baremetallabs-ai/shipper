@@ -35,6 +35,19 @@ jobs:
             exit 1
           fi
 
+      - name: Publish core if needed
+        run: |
+          CORE_NAME="$(node -p "require('./packages/core/package.json').name")"
+          CORE_VERSION="$(node -p "require('./packages/core/package.json').version")"
+
+          if npm view "${CORE_NAME}@${CORE_VERSION}" version --registry=https://npm.pkg.github.com >/dev/null 2>&1; then
+            echo "${CORE_NAME}@${CORE_VERSION} already published"
+          else
+            npm publish --workspace=packages/core
+          fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - run: npm publish --workspace=packages/cli
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
