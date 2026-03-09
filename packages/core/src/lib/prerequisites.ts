@@ -3,6 +3,8 @@ import { access, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
+import { gh } from './gh.js';
+
 const execFileAsync = promisify(execFile);
 
 interface CheckResult {
@@ -12,7 +14,7 @@ interface CheckResult {
 
 export async function checkGhInstalled(): Promise<CheckResult> {
   try {
-    await execFileAsync('gh', ['--version']);
+    await gh(['--version']);
     return { ok: true, message: 'gh is installed' };
   } catch {
     return {
@@ -24,7 +26,7 @@ export async function checkGhInstalled(): Promise<CheckResult> {
 
 export async function checkGhAuth(): Promise<CheckResult> {
   try {
-    await execFileAsync('gh', ['auth', 'status']);
+    await gh(['auth', 'status']);
     return { ok: true, message: 'gh is authenticated' };
   } catch {
     return { ok: false, message: 'GitHub CLI is not authenticated. Run: gh auth login' };
@@ -42,13 +44,7 @@ export async function checkGitRepo(): Promise<CheckResult> {
 
 export async function checkGitHubRemote(): Promise<CheckResult> {
   try {
-    const { stdout } = await execFileAsync(
-      'gh',
-      ['repo', 'view', '--json', 'name', '-q', '.name'],
-      {
-        encoding: 'utf-8',
-      }
-    );
+    const { stdout } = await gh(['repo', 'view', '--json', 'name', '-q', '.name']);
     const output = stdout.trim();
     if (output) {
       return { ok: true, message: `GitHub remote found: ${output}` };
@@ -87,11 +83,16 @@ const REQUIRED_LABELS = [
 
 export async function checkLabels(): Promise<CheckResult> {
   try {
-    const { stdout } = await execFileAsync(
-      'gh',
-      ['label', 'list', '--search', 'shipper:', '--json', 'name', '-q', '.[].name'],
-      { encoding: 'utf-8' }
-    );
+    const { stdout } = await gh([
+      'label',
+      'list',
+      '--search',
+      'shipper:',
+      '--json',
+      'name',
+      '-q',
+      '.[].name',
+    ]);
     const output = stdout.trim();
     const existing = output ? output.split(/\r?\n/) : [];
     const missing = REQUIRED_LABELS.filter((l) => !existing.includes(l));

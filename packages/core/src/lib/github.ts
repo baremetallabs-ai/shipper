@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { gh } from './gh.js';
 import { isLockStale, releaseIssueLock } from './lock.js';
 import { getRepoNwo } from './repo.js';
 
@@ -81,11 +82,14 @@ export async function resolveBaseBranch(configured?: string): Promise<string> {
   }
   let output: string;
   try {
-    const result = await execFileAsync(
-      'gh',
-      ['repo', 'view', '--json', 'defaultBranchRef', '-q', '.defaultBranchRef.name'],
-      { encoding: 'utf-8' }
-    );
+    const result = await gh([
+      'repo',
+      'view',
+      '--json',
+      'defaultBranchRef',
+      '-q',
+      '.defaultBranchRef.name',
+    ]);
     output = result.stdout;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -103,11 +107,13 @@ export async function resolveBaseBranch(configured?: string): Promise<string> {
 export async function fetchIssue(ref: string): Promise<string> {
   let json: string;
   try {
-    const result = await execFileAsync(
-      'gh',
-      ['issue', 'view', ref, '--json', 'number,title,state,labels,body,comments,author,createdAt'],
-      { encoding: 'utf-8' }
-    );
+    const result = await gh([
+      'issue',
+      'view',
+      ref,
+      '--json',
+      'number,title,state,labels,body,comments,author,createdAt',
+    ]);
     json = result.stdout;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -122,17 +128,13 @@ export async function fetchIssue(ref: string): Promise<string> {
 export async function fetchPR(ref: string): Promise<string> {
   let json: string;
   try {
-    const result = await execFileAsync(
-      'gh',
-      [
-        'pr',
-        'view',
-        ref,
-        '--json',
-        'number,title,state,labels,body,comments,author,createdAt,headRefName,baseRefName,reviews',
-      ],
-      { encoding: 'utf-8' }
-    );
+    const result = await gh([
+      'pr',
+      'view',
+      ref,
+      '--json',
+      'number,title,state,labels,body,comments,author,createdAt,headRefName,baseRefName,reviews',
+    ]);
     json = result.stdout;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -167,11 +169,16 @@ export function formatIssue(data: IssueData): string {
 
 export async function tryResolvePrForIssue(issueNumber: number): Promise<string | undefined> {
   try {
-    const result = await execFileAsync(
-      'gh',
-      ['pr', 'list', '--state', 'open', '--json', 'number,headRefName', '--limit', '100'],
-      { encoding: 'utf-8' }
-    );
+    const result = await gh([
+      'pr',
+      'list',
+      '--state',
+      'open',
+      '--json',
+      'number,headRefName',
+      '--limit',
+      '100',
+    ]);
     const output = result.stdout.trim();
     const prs = JSON.parse(output) as { number: number; headRefName: string }[];
     const match = prs.find(
@@ -260,24 +267,20 @@ export async function selectIssuesForStage(
   const lockedSearchFilter = label === 'shipper:new' ? null : '-label:shipper:blocked';
   let issues: { number: number; title: string }[];
   try {
-    const result = await execFileAsync(
-      'gh',
-      [
-        'issue',
-        'list',
-        '--label',
-        label,
-        '--state',
-        'open',
-        '--limit',
-        '1000',
-        '--search',
-        issueSearchFilter,
-        '--json',
-        'number,title',
-      ],
-      { encoding: 'utf-8' }
-    );
+    const result = await gh([
+      'issue',
+      'list',
+      '--label',
+      label,
+      '--state',
+      'open',
+      '--limit',
+      '1000',
+      '--search',
+      issueSearchFilter,
+      '--json',
+      'number,title',
+    ]);
     const output = result.stdout.trim();
     issues = JSON.parse(output) as { number: number; title: string }[];
   } catch {
@@ -286,25 +289,21 @@ export async function selectIssuesForStage(
 
   // Fetch locked issues for the same stage and check for stale locks
   try {
-    const result = await execFileAsync(
-      'gh',
-      [
-        'issue',
-        'list',
-        '--label',
-        label,
-        '--label',
-        'shipper:locked',
-        '--state',
-        'open',
-        '--limit',
-        '1000',
-        ...(lockedSearchFilter ? ['--search', lockedSearchFilter] : []),
-        '--json',
-        'number,title',
-      ],
-      { encoding: 'utf-8' }
-    );
+    const result = await gh([
+      'issue',
+      'list',
+      '--label',
+      label,
+      '--label',
+      'shipper:locked',
+      '--state',
+      'open',
+      '--limit',
+      '1000',
+      ...(lockedSearchFilter ? ['--search', lockedSearchFilter] : []),
+      '--json',
+      'number,title',
+    ]);
     const lockedOutput = result.stdout.trim();
     const lockedIssues = JSON.parse(lockedOutput) as { number: number; title: string }[];
     for (const issue of lockedIssues) {
@@ -326,17 +325,13 @@ export async function selectIssuesForStage(
 
   for (const issue of issues) {
     try {
-      const result = await execFileAsync(
-        'gh',
-        [
-          'api',
-          `repos/${nwo}/issues/${issue.number}/timeline`,
-          '--paginate',
-          '--jq',
-          '.[] | select(.event == "labeled") | {event, label, created_at}',
-        ],
-        { encoding: 'utf-8' }
-      );
+      const result = await gh([
+        'api',
+        `repos/${nwo}/issues/${issue.number}/timeline`,
+        '--paginate',
+        '--jq',
+        '.[] | select(.event == "labeled") | {event, label, created_at}',
+      ]);
       const output = result.stdout.trim();
       const events: TimelineLabelEvent[] = output
         ? output.split('\n').map((line) => JSON.parse(line) as TimelineLabelEvent)
@@ -397,9 +392,7 @@ export async function resolveRef(ref: string, need: 'issue' | 'pr' | 'both'): Pr
   // Try as PR first — GitHub treats PRs as issues, so `gh issue view` succeeds
   // for PR numbers. Checking `gh pr view` first avoids misclassifying PRs.
   try {
-    const result = await execFileAsync('gh', ['pr', 'view', ref, '--json', 'number,body'], {
-      encoding: 'utf-8',
-    });
+    const result = await gh(['pr', 'view', ref, '--json', 'number,body']);
     const output = result.stdout.trim();
     const prData = JSON.parse(output) as { number: number; body: string };
     const prNumber = String(prData.number);
@@ -417,9 +410,7 @@ export async function resolveRef(ref: string, need: 'issue' | 'pr' | 'both'): Pr
   }
 
   try {
-    await execFileAsync('gh', ['issue', 'view', ref, '--json', 'number'], {
-      encoding: 'utf-8',
-    });
+    await gh(['issue', 'view', ref, '--json', 'number']);
     // ref is an issue number
     let prNumber: string | undefined;
     if (need === 'pr' || need === 'both') {
