@@ -213,7 +213,8 @@ async function mergePr(pr: QueuedPR, issueNumber: number, nwo: string): Promise<
     await postMerge(pr, issueNumber, nwo, false);
     return true;
   } catch (err) {
-    console.error(`\nMerge failed for PR #${pr.number}. See command output above for details.`);
+    const reason = err instanceof Error ? err.message : String(err);
+    console.error(`\nMerge failed for PR #${pr.number}: ${reason}`);
 
     try {
       await gh(['pr', 'edit', String(pr.number), '-R', nwo, '--remove-label', 'shipper:ready']);
@@ -255,7 +256,6 @@ async function mergePr(pr: QueuedPR, issueNumber: number, nwo: string): Promise<
       console.error(`Warning: Failed to add shipper:pr-reviewed label to issue #${issueNumber}`);
     }
 
-    const reason = err instanceof Error ? err.message : String(err);
     const comment = [
       `Merge failed for PR #${pr.number}.`,
       '',

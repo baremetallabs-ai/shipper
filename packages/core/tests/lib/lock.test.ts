@@ -49,7 +49,7 @@ function queueExecFileResult(stdout: string): void {
 function queueExecFileError(error: Error): void {
   execFileMock.mockImplementationOnce((_cmd: string, _args: string[], ...rest: unknown[]) => {
     const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
-    cb(Object.assign(error, { stderr: 'not found' }));
+    cb(Object.assign(error, { stderr: 'HTTP 404 not found' }));
   });
 }
 

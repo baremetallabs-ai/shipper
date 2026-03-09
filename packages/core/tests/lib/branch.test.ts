@@ -70,7 +70,7 @@ describe('generateBranchName', () => {
   it('falls back to implement when title fetch fails', async () => {
     execFileMock.mockImplementationOnce((_cmd: string, _args: string[], ...rest: unknown[]) => {
       const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
-      cb(Object.assign(new Error('gh failed'), { stderr: 'not found' }));
+      cb(Object.assign(new Error('gh failed'), { stderr: 'HTTP 404 not found' }));
     });
 
     const result = await generateBranchName('99');
