@@ -405,9 +405,15 @@ export async function resolveRef(
 ): Promise<ResolvedRef> {
   // Try as PR first — GitHub treats PRs as issues, so `gh issue view` succeeds
   // for PR numbers. Checking `gh pr view` first avoids misclassifying PRs.
+  let prResult: { stdout: string } | undefined;
   try {
-    const result = await gh(['pr', 'view', ref, '-R', repo, '--json', 'number,body']);
-    const output = result.stdout.trim();
+    prResult = await gh(['pr', 'view', ref, '-R', repo, '--json', 'number,body']);
+  } catch {
+    // Not a PR — try as issue below
+  }
+
+  if (prResult) {
+    const output = prResult.stdout.trim();
     const prData = JSON.parse(output) as { number: number; body: string };
     const prNumber = String(prData.number);
     const match = /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/i.exec(prData.body);
@@ -418,13 +424,17 @@ export async function resolveRef(
       );
     }
     return { issueNumber: linkedIssue ?? ref, prNumber };
-  } catch {
-    // Not a PR — try as issue
   }
 
+  let issueFound = false;
   try {
     await gh(['issue', 'view', ref, '-R', repo, '--json', 'number']);
-    // ref is an issue number
+    issueFound = true;
+  } catch {
+    // Not an issue either
+  }
+
+  if (issueFound) {
     let prNumber: string | undefined;
     if (need === 'pr' || need === 'both') {
       prNumber = await tryResolvePrForIssue(repo, Number(ref));
@@ -433,8 +443,7 @@ export async function resolveRef(
       }
     }
     return { issueNumber: ref, prNumber };
-  } catch {
-    // Not an issue either
   }
+
   throw new Error(`Could not find issue or PR matching '${ref}'.`);
 }
