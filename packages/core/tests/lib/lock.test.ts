@@ -192,4 +192,134 @@ describe('withIssueLock', () => {
       expect.any(Function)
     );
   });
+
+  it('renews the lock on heartbeat interval', async () => {
+    vi.useFakeTimers();
+    try {
+      // acquire: labels check + add-label
+      queueExecFileResult('shipper:groomed\n');
+      queueExecFileResult('');
+
+      // renewal: remove-label + add-label
+      queueExecFileResult('');
+      queueExecFileResult('');
+
+      // release: remove-label
+      queueExecFileResult('');
+
+      let resolve!: () => void;
+      const blocker = new Promise<void>((r) => {
+        resolve = r;
+      });
+
+      const resultPromise = withIssueLock(repo, '42', () => blocker);
+
+      // Advance past one heartbeat interval (10 min = 600_000 ms)
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+
+      // Verify renewal gh calls were made (calls 3 and 4)
+      expect(execFileMock).toHaveBeenCalledWith(
+        'gh',
+        ['issue', 'edit', '42', '-R', repo, '--remove-label', 'shipper:locked'],
+        expect.objectContaining({ encoding: 'utf-8' }),
+        expect.any(Function)
+      );
+      expect(execFileMock).toHaveBeenCalledWith(
+        'gh',
+        ['issue', 'edit', '42', '-R', repo, '--add-label', 'shipper:locked'],
+        expect.objectContaining({ encoding: 'utf-8' }),
+        expect.any(Function)
+      );
+      expect(stderrMock).toHaveBeenCalledWith('Lock renewed for issue #42');
+
+      resolve();
+      await resultPromise;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('logs warning and continues when renewal fails', async () => {
+    vi.useFakeTimers();
+    try {
+      // acquire: labels check + add-label
+      queueExecFileResult('shipper:groomed\n');
+      queueExecFileResult('');
+
+      // renewal remove-label fails
+      queueExecFileError(new Error('API unavailable'));
+
+      // release: remove-label
+      queueExecFileResult('');
+
+      let resolve!: () => void;
+      const blocker = new Promise<void>((r) => {
+        resolve = r;
+      });
+
+      const resultPromise = withIssueLock(repo, '42', () => blocker);
+
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+
+      expect(stderrMock).toHaveBeenCalledWith(
+        expect.stringContaining('Warning: lock renewal failed for issue #42')
+      );
+
+      resolve();
+      await expect(resultPromise).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('clears heartbeat timer on normal completion', async () => {
+    const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
+    try {
+      // acquire: labels check + add-label
+      queueExecFileResult('shipper:groomed\n');
+      queueExecFileResult('');
+      // release: remove-label
+      queueExecFileResult('');
+
+      await withIssueLock(repo, '42', async () => 'done');
+
+      expect(clearIntervalSpy).toHaveBeenCalled();
+    } finally {
+      clearIntervalSpy.mockRestore();
+    }
+  });
+
+  it('clears heartbeat timer on callback rejection', async () => {
+    const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
+    try {
+      // acquire: labels check + add-label
+      queueExecFileResult('shipper:groomed\n');
+      queueExecFileResult('');
+      // release: remove-label
+      queueExecFileResult('');
+
+      await expect(
+        withIssueLock(repo, '42', async () => {
+          throw new Error('boom');
+        })
+      ).rejects.toThrow('boom');
+
+      expect(clearIntervalSpy).toHaveBeenCalled();
+    } finally {
+      clearIntervalSpy.mockRestore();
+    }
+  });
+
+  it('does not start heartbeat when SHIPPER_LOCK_HELD is set', async () => {
+    const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
+    try {
+      process.env.SHIPPER_LOCK_HELD = '42';
+
+      await withIssueLock(repo, '42', async () => 'result');
+
+      expect(setIntervalSpy).not.toHaveBeenCalled();
+    } finally {
+      setIntervalSpy.mockRestore();
+    }
+  });
 });

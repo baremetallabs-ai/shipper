@@ -101,6 +101,22 @@ function releaseIssueLockWithoutAwait(repo: string, issueNumber: string): void {
   );
 }
 
+// Renew the lock by removing and re-adding the shipper:locked label.
+// This creates a fresh "labeled" timeline event that isLockStale reads.
+// Note: there is a brief sub-second window between remove and add where the label is absent.
+// This is acceptable — the window is <1s vs a 10-minute heartbeat interval, and the lock
+// system already has an inherent race in acquireIssueLock between checking and adding.
+async function renewIssueLock(repo: string, issueNumber: string): Promise<void> {
+  try {
+    await gh(['issue', 'edit', issueNumber, '-R', repo, '--remove-label', 'shipper:locked']);
+    await gh(['issue', 'edit', issueNumber, '-R', repo, '--add-label', 'shipper:locked']);
+    console.error(`Lock renewed for issue #${issueNumber}`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`Warning: lock renewal failed for issue #${issueNumber}: ${msg}`);
+  }
+}
+
 export async function withIssueLock<T>(
   repo: string,
   issueNumber: string,
@@ -113,6 +129,12 @@ export async function withIssueLock<T>(
   await acquireIssueLock(repo, issueNumber);
   process.env.SHIPPER_LOCK_HELD = issueNumber;
 
+  const heartbeatMs = (getSettings().lockTimeoutMinutes / 3) * 60_000;
+  const heartbeatTimer = setInterval(() => {
+    void renewIssueLock(repo, issueNumber);
+  }, heartbeatMs);
+  heartbeatTimer.unref();
+
   const cleanup = async () => {
     await releaseIssueLock(repo, issueNumber);
     delete process.env.SHIPPER_LOCK_HELD;
@@ -124,12 +146,14 @@ export async function withIssueLock<T>(
   };
 
   const onSignal = () => {
+    clearInterval(heartbeatTimer);
     cleanupWithoutAwait();
   };
 
   // CLI-boundary exits and signal-driven shutdown still bypass finally blocks,
   // so keep a best-effort fallback that fires off the gh subprocess first.
   const onExit = () => {
+    clearInterval(heartbeatTimer);
     cleanupWithoutAwait();
   };
 
@@ -140,6 +164,7 @@ export async function withIssueLock<T>(
   try {
     return await fn();
   } finally {
+    clearInterval(heartbeatTimer);
     process.removeListener('SIGINT', onSignal);
     process.removeListener('SIGTERM', onSignal);
     process.removeListener('exit', onExit);
