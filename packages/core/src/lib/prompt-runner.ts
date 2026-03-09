@@ -15,6 +15,9 @@ export interface RunPromptOpts {
   mode?: CommandMode;
 }
 
+const CODEX_HEADLESS_CONFIG = 'sandbox_workspace_write.network_access=true';
+const CODEX_HEADLESS_ARGS = ['exec', '--full-auto', '-c', CODEX_HEADLESS_CONFIG] as const;
+
 function spawnAsync(command: string, args: string[], opts: { cwd?: string }): Promise<number> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -68,23 +71,15 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
   if (effectiveMode === 'headless') {
     if (agent === 'claude' && !args.includes('-p')) {
       args.unshift('-p');
-    } else if (agent === 'codex' && !args.includes('exec')) {
-      args.unshift('exec', '--full-auto', '-c', 'sandbox_workspace_write.network_access=true');
+    } else if (agent === 'codex') {
+      normalizeCodexHeadlessArgs(args);
     }
   } else if (effectiveMode === 'interactive') {
     if (agent === 'claude') {
       const pIdx = args.indexOf('-p');
       if (pIdx !== -1) args.splice(pIdx, 1);
     } else if (agent === 'codex') {
-      for (const token of [
-        'exec',
-        '--full-auto',
-        '-c',
-        'sandbox_workspace_write.network_access=true',
-      ]) {
-        const idx = args.indexOf(token);
-        if (idx !== -1) args.splice(idx, 1);
-      }
+      stripCodexHeadlessArgs(args);
     }
   }
 
@@ -131,4 +126,48 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
     console.error(`Error: Failed to spawn ${agent}: ${message}`);
     return 1;
   }
+}
+
+function normalizeCodexHeadlessArgs(args: string[]): void {
+  const execIdx = args.indexOf('exec');
+  if (execIdx === -1) {
+    args.unshift(...CODEX_HEADLESS_ARGS);
+    return;
+  }
+
+  if (!args.includes('--full-auto')) {
+    args.splice(execIdx + 1, 0, '--full-auto');
+  }
+
+  if (findCodexSandboxConfigIndex(args) === -1) {
+    const fullAutoIdx = args.indexOf('--full-auto');
+    const insertIdx = fullAutoIdx === -1 ? execIdx + 1 : fullAutoIdx + 1;
+    args.splice(insertIdx, 0, '-c', CODEX_HEADLESS_CONFIG);
+  }
+}
+
+function stripCodexHeadlessArgs(args: string[]): void {
+  const execIdx = args.indexOf('exec');
+  if (execIdx !== -1) {
+    args.splice(execIdx, 1);
+  }
+
+  const fullAutoIdx = args.indexOf('--full-auto');
+  if (fullAutoIdx !== -1) {
+    args.splice(fullAutoIdx, 1);
+  }
+
+  const configIdx = findCodexSandboxConfigIndex(args);
+  if (configIdx !== -1) {
+    args.splice(configIdx, 2);
+  }
+}
+
+function findCodexSandboxConfigIndex(args: string[]): number {
+  for (let i = 0; i < args.length - 1; i++) {
+    if (args[i] === '-c' && args[i + 1] === CODEX_HEADLESS_CONFIG) {
+      return i;
+    }
+  }
+  return -1;
 }

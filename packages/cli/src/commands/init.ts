@@ -31,9 +31,14 @@ const LABELS = [
 ];
 
 const VALID_AGENTS = ['claude', 'codex'] as const;
+const UNSAFE_COMMAND_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isSafeCommandKey(key: string): boolean {
+  return !UNSAFE_COMMAND_KEYS.has(key);
 }
 
 function getStoredAgent(): string | undefined {
@@ -129,37 +134,45 @@ export async function initCommand(options: { agent?: string }) {
   if (existsSync(settingsPath)) {
     try {
       const existing = JSON.parse(readFileSync(settingsPath, 'utf-8')) as Record<string, unknown>;
-      const existingCommands = isPlainObject(existing.commands) ? existing.commands : {};
-      const existingCommandDefault = isPlainObject(existingCommands.default)
-        ? existingCommands.default
+      const existingCommandsSource = isPlainObject(existing.commands) ? existing.commands : {};
+      const hasExistingCommands = Object.keys(existingCommandsSource).length > 0;
+      const existingCommandDefault = isPlainObject(existingCommandsSource.default)
+        ? existingCommandsSource.default
         : {};
       const existingAgents = isPlainObject(existing.agents) ? existing.agents : {};
       const existingHeadless = isPlainObject(existing.headless) ? existing.headless : {};
-      const migratedCommands: Record<string, unknown> = {
-        ...existingCommands,
-        default: {
-          ...DEFAULTS.commands.default,
-          ...existingCommandDefault,
-        },
+      const migratedCommands: Record<string, unknown> = {};
+
+      for (const [step, config] of Object.entries(existingCommandsSource)) {
+        if (!isSafeCommandKey(step) || !isPlainObject(config)) continue;
+        migratedCommands[step] = { ...config };
+      }
+      migratedCommands.default = {
+        ...DEFAULTS.commands.default,
+        ...existingCommandDefault,
       };
 
-      if (typeof existingAgents.default === 'string') {
-        migratedCommands.default = {
-          ...(isPlainObject(migratedCommands.default) ? migratedCommands.default : {}),
-          agent: existingAgents.default,
-        };
-      }
+      if (!hasExistingCommands) {
+        if (typeof existingAgents.default === 'string') {
+          migratedCommands.default = {
+            ...(isPlainObject(migratedCommands.default) ? migratedCommands.default : {}),
+            agent: existingAgents.default,
+          };
+        }
 
-      for (const [step, stepAgent] of Object.entries(existingAgents)) {
-        if (step === 'default' || typeof stepAgent !== 'string') continue;
-        const stepConfig = isPlainObject(migratedCommands[step]) ? migratedCommands[step] : {};
-        migratedCommands[step] = { ...stepConfig, agent: stepAgent };
-      }
+        for (const [step, stepAgent] of Object.entries(existingAgents)) {
+          if (step === 'default' || typeof stepAgent !== 'string' || !isSafeCommandKey(step)) {
+            continue;
+          }
+          const stepConfig = isPlainObject(migratedCommands[step]) ? migratedCommands[step] : {};
+          migratedCommands[step] = { ...stepConfig, agent: stepAgent };
+        }
 
-      for (const [step, enabled] of Object.entries(existingHeadless)) {
-        if (enabled !== true) continue;
-        const stepConfig = isPlainObject(migratedCommands[step]) ? migratedCommands[step] : {};
-        migratedCommands[step] = { ...stepConfig, mode: 'headless' };
+        for (const [step, enabled] of Object.entries(existingHeadless)) {
+          if (enabled !== true || !isSafeCommandKey(step)) continue;
+          const stepConfig = isPlainObject(migratedCommands[step]) ? migratedCommands[step] : {};
+          migratedCommands[step] = { ...stepConfig, mode: 'headless' };
+        }
       }
 
       existingAgent =

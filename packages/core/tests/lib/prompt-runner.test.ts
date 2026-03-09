@@ -238,6 +238,22 @@ describe('runPrompt', () => {
     ]);
   });
 
+  it('fills in missing codex headless args when exec is already present', async () => {
+    resolveAgentMock.mockReturnValue('codex');
+    resolveModeMock.mockReturnValue('headless');
+    readFileMock.mockResolvedValueOnce(makePrompt('codex', ['exec']));
+    mockSpawnResult();
+
+    await runPrompt('test', { mode: 'headless' });
+
+    expect(spawnedArgs().slice(0, 4)).toEqual([
+      'exec',
+      '--full-auto',
+      '-c',
+      'sandbox_workspace_write.network_access=true',
+    ]);
+  });
+
   it('strips codex headless args for interactive mode', async () => {
     resolveAgentMock.mockReturnValue('codex');
     resolveModeMock.mockReturnValue('interactive');
@@ -258,5 +274,29 @@ describe('runPrompt', () => {
     expect(spawnedArgs()).not.toContain('-c');
     expect(spawnedArgs()).not.toContain('sandbox_workspace_write.network_access=true');
     expect(spawnedArgs()).toContain('prompt body');
+  });
+
+  it('preserves unrelated codex -c args in interactive mode', async () => {
+    resolveAgentMock.mockReturnValue('codex');
+    resolveModeMock.mockReturnValue('interactive');
+    readFileMock.mockResolvedValueOnce(
+      makePrompt('codex', [
+        '-c',
+        'config1',
+        'exec',
+        '--full-auto',
+        '-c',
+        'sandbox_workspace_write.network_access=true',
+      ])
+    );
+    mockSpawnResult();
+
+    await runPrompt('test', { mode: 'interactive' });
+
+    expect(spawnedArgs()).toContain('-c');
+    expect(spawnedArgs()).toContain('config1');
+    expect(spawnedArgs()).not.toContain('exec');
+    expect(spawnedArgs()).not.toContain('--full-auto');
+    expect(spawnedArgs()).not.toContain('sandbox_workspace_write.network_access=true');
   });
 });
