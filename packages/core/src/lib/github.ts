@@ -66,6 +66,15 @@ export interface ListIssuesOptions {
   state?: 'open' | 'closed' | 'all';
 }
 
+interface RawListIssueData {
+  number: number;
+  title: string;
+  state: string;
+  labels: { name: string }[];
+  author: { login: string };
+  createdAt: string;
+}
+
 export async function resolveBaseBranch(repo: string, configured?: string): Promise<string> {
   if (configured) {
     let result: string;
@@ -184,8 +193,6 @@ export async function listIssues(
 
   if (options?.label) {
     args.push('--label', options.label);
-  } else {
-    args.push('--search', 'label:shipper:');
   }
 
   let json: string;
@@ -197,8 +204,16 @@ export async function listIssues(
     throw new Error(`Failed to list issues for ${repo}: ${msg}`);
   }
 
-  const raw = JSON.parse(json) as IssueData[];
-  return raw.map((issue) => ({
+  let raw: RawListIssueData[];
+  try {
+    raw = JSON.parse(json) as RawListIssueData[];
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const preview = json.length > 200 ? `${json.slice(0, 200)}…` : json;
+    throw new Error(`Failed to list issues for ${repo}: ${msg}. Output: ${preview}`);
+  }
+
+  const mapped = raw.map((issue) => ({
     number: issue.number,
     title: issue.title,
     labels: issue.labels.map((l) => l.name),
@@ -206,6 +221,12 @@ export async function listIssues(
     author: issue.author.login,
     createdAt: issue.createdAt,
   }));
+
+  if (!options?.label) {
+    return mapped.filter((issue) => issue.labels.some((l) => l.startsWith('shipper:')));
+  }
+
+  return mapped;
 }
 
 export function formatIssue(data: IssueData): string {
