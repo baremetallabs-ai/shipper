@@ -110,11 +110,12 @@ describe('shipper-cli', () => {
 
   describe('prompt command mode wiring', () => {
     const originalArgv = [...process.argv];
-    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
-      throw new Error(`process.exit:${code ?? 0}`);
-    }) as typeof process.exit);
+    let exitSpy: ReturnType<typeof vi.spyOn>;
 
     beforeEach(() => {
+      exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+        throw new Error(`process.exit:${code ?? 0}`);
+      }) as typeof process.exit);
       vi.resetModules();
       mockNewCommand.mockReset();
       mockGroomCommand.mockReset();
@@ -127,9 +128,6 @@ describe('shipper-cli', () => {
 
     afterEach(() => {
       process.argv = [...originalArgv];
-    });
-
-    afterAll(() => {
       exitSpy.mockRestore();
     });
 
@@ -184,12 +182,13 @@ describe('shipper-cli', () => {
 
   describe('ship command parallel validation', () => {
     const originalArgv = [...process.argv];
-    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
-      throw new Error(`process.exit:${code ?? 0}`);
-    }) as typeof process.exit);
+    let exitSpy: ReturnType<typeof vi.spyOn>;
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     beforeEach(() => {
+      exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+        throw new Error(`process.exit:${code ?? 0}`);
+      }) as typeof process.exit);
       vi.resetModules();
       mockShipCommand.mockReset();
       mockShipCommand.mockResolvedValue(undefined);
@@ -199,11 +198,7 @@ describe('shipper-cli', () => {
 
     afterEach(() => {
       process.argv = [...originalArgv];
-    });
-
-    afterAll(() => {
       exitSpy.mockRestore();
-      errorSpy.mockRestore();
     });
 
     async function importEntrypoint() {
@@ -213,7 +208,7 @@ describe('shipper-cli', () => {
     it('errors when --parallel is used without --auto', async () => {
       process.argv = ['node', 'src/index.ts', 'ship', '42', '--parallel', '3'];
 
-      await expect(importEntrypoint()).rejects.toThrow();
+      await expect(importEntrypoint()).rejects.toThrow('process.exit:1');
       expect(errorSpy).toHaveBeenCalledWith('Error: --parallel requires --auto');
       expect(mockShipCommand).not.toHaveBeenCalled();
     });
@@ -264,9 +259,13 @@ describe('shipper-cli', () => {
     it('keeps non-ship commands on normal unknown-option handling', async () => {
       process.argv = ['node', 'src/index.ts', 'groom', '--parallel'];
 
-      await expect(importEntrypoint()).rejects.toThrow();
+      await expect(importEntrypoint()).rejects.toThrow('process.exit:1');
       expect(errorSpy).not.toHaveBeenCalledWith('Error: --parallel requires a number');
       expect(mockShipCommand).not.toHaveBeenCalled();
     });
   });
+});
+
+afterAll(() => {
+  vi.restoreAllMocks();
 });

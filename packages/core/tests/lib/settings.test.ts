@@ -74,6 +74,25 @@ describe('loadSettings', () => {
     });
   });
 
+  it('preserves the default agent when migrating headless-only default settings', async () => {
+    readFileMock.mockImplementation(async (p: string) => {
+      if (p === settingsPath) {
+        return JSON.stringify({
+          headless: { default: true, new: true },
+        });
+      }
+      throw enoent(p);
+    });
+
+    const { loadSettings, getSettings } = await loadModule();
+    await loadSettings();
+
+    expect(getSettings().commands).toEqual({
+      default: { agent: 'claude', mode: 'headless' },
+      new: { mode: 'headless' },
+    });
+  });
+
   it('deep-merges commands from base and local settings', async () => {
     readFileMock.mockImplementation(async (p: string) => {
       if (p === settingsPath) {
@@ -123,6 +142,30 @@ describe('loadSettings', () => {
     expect(warnMock).toHaveBeenCalledWith(
       'Warning: Unknown command "banana" in settings.commands.'
     );
+  });
+
+  it('ignores unsafe command keys while loading settings', async () => {
+    readFileMock.mockImplementation(async (p: string) => {
+      if (p === settingsPath) {
+        return JSON.stringify({
+          commands: {
+            default: { agent: 'claude' },
+            __proto__: { mode: 'headless' },
+            groom: { mode: 'interactive' },
+          },
+        });
+      }
+      throw enoent(p);
+    });
+
+    const { loadSettings, getSettings } = await loadModule();
+    await loadSettings();
+
+    expect(getSettings().commands).toEqual({
+      default: { agent: 'claude' },
+      groom: { mode: 'interactive' },
+    });
+    expect((Object.prototype as Record<string, unknown>).mode).toBeUndefined();
   });
 
   it('exits with an error on malformed JSON', async () => {
@@ -299,6 +342,25 @@ describe('resolveAgent', () => {
       expect.stringContaining('Invalid agent "vim" for step "implement"')
     );
   });
+
+  it('preserves invalid legacy default agents for later validation', async () => {
+    readFileMock.mockImplementation(async (p: string) => {
+      if (p === settingsPath) {
+        return JSON.stringify({
+          agents: { default: 'vim' },
+        });
+      }
+      throw enoent(p);
+    });
+
+    const { loadSettings, resolveAgent } = await loadModule();
+    await loadSettings();
+
+    expect(() => resolveAgent('groom')).toThrow('process.exit');
+    expect(stderrMock).toHaveBeenCalledWith(
+      expect.stringContaining('Invalid agent "vim" for step "groom"')
+    );
+  });
 });
 
 describe('resolveMode', () => {
@@ -322,5 +384,27 @@ describe('resolveMode', () => {
     expect(resolveMode('design')).toBe('interactive');
     expect(resolveMode('groom', 'interactive')).toBe('interactive');
     expect(resolveMode('groom', 'default')).toBe('headless');
+  });
+
+  it('exits on an invalid command mode', async () => {
+    readFileMock.mockImplementation(async (p: string) => {
+      if (p === settingsPath) {
+        return JSON.stringify({
+          commands: {
+            default: { agent: 'claude' },
+            groom: { mode: 'banana' },
+          },
+        });
+      }
+      throw enoent(p);
+    });
+
+    const { loadSettings, resolveMode } = await loadModule();
+    await loadSettings();
+
+    expect(() => resolveMode('groom')).toThrow('process.exit');
+    expect(stderrMock).toHaveBeenCalledWith(
+      expect.stringContaining('Invalid mode "banana" for step "groom"')
+    );
   });
 });

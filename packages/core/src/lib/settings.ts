@@ -55,6 +55,7 @@ export const SETTING_DESCRIPTIONS: Record<string, string> = {
 };
 
 let settings: Settings | undefined;
+const UNSAFE_COMMAND_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 const KNOWN_PROMPT_COMMANDS = new Set([
   'new',
@@ -84,13 +85,13 @@ export async function loadSettings(): Promise<void> {
     ? local.commands
     : {};
   const allCommandSteps = new Set([
-    ...Object.keys(baseCommands),
-    ...Object.keys(localCommands),
+    ...Object.keys(baseCommands).filter(isSafeCommandKey),
+    ...Object.keys(localCommands).filter(isSafeCommandKey),
     'default',
   ]);
-  const mergedCommands: Settings['commands'] = {
+  const mergedCommands = {
     default: { ...DEFAULTS.commands.default },
-  };
+  } as Settings['commands'];
 
   for (const step of allCommandSteps) {
     const baseConfig = isPlainObject(baseCommands[step]) ? baseCommands[step] : {};
@@ -149,15 +150,34 @@ export function resolveAgent(step: string): AgentName {
 
 export function resolveMode(step: string, override?: CommandMode): CommandMode {
   if (override && override !== 'default') {
-    return override;
+    return validateMode(override, step);
   }
 
   const s = getSettings();
-  return s.commands[step]?.mode ?? s.commands.default.mode ?? 'default';
+  const mode = s.commands[step]?.mode ?? s.commands.default.mode;
+  if (mode === undefined) {
+    return 'default';
+  }
+  return validateMode(mode, step);
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isSafeCommandKey(key: string): boolean {
+  return !UNSAFE_COMMAND_KEYS.has(key);
+}
+
+function validateMode(mode: unknown, step: string): CommandMode {
+  if (mode === 'headless' || mode === 'interactive' || mode === 'default') {
+    return mode;
+  }
+
+  console.error(
+    `Error: Invalid mode "${String(mode)}" for step "${step}". Must be "headless", "interactive", or "default".`
+  );
+  process.exit(1);
 }
 
 async function readSettingsFile(filepath: string): Promise<Partial<Settings>> {
@@ -187,18 +207,18 @@ async function readSettingsFile(filepath: string): Promise<Partial<Settings>> {
       const agents = isPlainObject(parsed.agents) ? parsed.agents : {};
       const commands: Record<string, CommandConfig> = {
         default: {
-          agent: agents.default === 'codex' ? 'codex' : 'claude',
+          agent: typeof agents.default === 'string' ? (agents.default as AgentName) : 'claude',
         },
       };
 
       for (const [step, agent] of Object.entries(agents)) {
-        if (step === 'default') continue;
+        if (step === 'default' || !isSafeCommandKey(step)) continue;
         commands[step] = { ...commands[step], agent: agent as AgentName };
       }
 
       if (parsed.headless && isPlainObject(parsed.headless)) {
         for (const [step, enabled] of Object.entries(parsed.headless)) {
-          if (enabled === true) {
+          if (enabled === true && isSafeCommandKey(step)) {
             commands[step] = { ...commands[step], mode: 'headless' };
           }
         }
@@ -215,8 +235,8 @@ async function readSettingsFile(filepath: string): Promise<Partial<Settings>> {
       };
 
       for (const [step, enabled] of Object.entries(parsed.headless)) {
-        if (enabled === true) {
-          commands[step] = { mode: 'headless' };
+        if (enabled === true && isSafeCommandKey(step)) {
+          commands[step] = { ...commands[step], mode: 'headless' };
         }
       }
 

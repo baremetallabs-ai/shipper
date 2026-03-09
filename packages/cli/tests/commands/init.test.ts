@@ -107,7 +107,8 @@ describe('initCommand settings', () => {
       (call: unknown[]) => call[0] === settingsPath
     );
     expect(settingsCall).toBeDefined();
-    const written = JSON.parse(settingsCall![1] as string);
+    if (!settingsCall) throw new Error('expected settings.json write');
+    const written = JSON.parse(settingsCall[1] as string);
     expect(written.commands).toEqual({ default: { agent: 'claude' } });
     expect(written.agent).toBeUndefined();
   });
@@ -125,11 +126,68 @@ describe('initCommand settings', () => {
       (call: unknown[]) => call[0] === settingsPath
     );
     expect(settingsCall).toBeDefined();
-    const written = JSON.parse(settingsCall![1] as string);
+    if (!settingsCall) throw new Error('expected settings.json write');
+    const written = JSON.parse(settingsCall[1] as string);
     expect(written.commands).toEqual({
       default: { agent: 'claude' },
       groom: { mode: 'headless' },
     });
+  });
+
+  it('prefers explicit commands over legacy agent overrides during re-init', async () => {
+    existsSyncMock.mockImplementation((p: string) => p === settingsPath);
+    readFileSyncMock.mockImplementation((p: string) => {
+      if (p === settingsPath) {
+        return JSON.stringify({
+          commands: {
+            default: { agent: 'claude' },
+            groom: { agent: 'codex', mode: 'interactive' },
+          },
+          agents: {
+            default: 'codex',
+            groom: 'claude',
+          },
+          headless: {
+            groom: true,
+          },
+        });
+      }
+      return '';
+    });
+
+    await initCommand({ agent: 'claude' });
+
+    const settingsCall = writeFileSyncMock.mock.calls.find(
+      (call: unknown[]) => call[0] === settingsPath
+    );
+    expect(settingsCall).toBeDefined();
+    const written = JSON.parse(settingsCall![1] as string);
+    expect(written.commands).toEqual({
+      default: { agent: 'claude' },
+      groom: { agent: 'codex', mode: 'interactive' },
+    });
+    expect(written.agents).toBeUndefined();
+    expect(written.headless).toBeUndefined();
+  });
+
+  it('ignores unsafe command keys when re-initializing settings', async () => {
+    existsSyncMock.mockImplementation((p: string) => p === settingsPath);
+    readFileSyncMock.mockImplementation((p: string) => {
+      if (p === settingsPath) {
+        return '{"commands":{"default":{"agent":"claude"},"__proto__":{"mode":"headless"}}}';
+      }
+      return '';
+    });
+
+    await initCommand({ agent: 'claude' });
+
+    const settingsCall = writeFileSyncMock.mock.calls.find(
+      (call: unknown[]) => call[0] === settingsPath
+    );
+    expect(settingsCall).toBeDefined();
+    const written = JSON.parse(settingsCall![1] as string);
+    expect(written.commands).toEqual({ default: { agent: 'claude' } });
+    expect((Object.prototype as Record<string, unknown>).mode).toBeUndefined();
   });
 
   it('gitignore includes expected generated entries', async () => {
