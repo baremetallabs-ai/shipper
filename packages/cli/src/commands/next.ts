@@ -1,5 +1,4 @@
-import { execFileSync } from 'node:child_process';
-import { resolveRef, tryResolvePrForIssue } from '@dnsquared/shipper-core';
+import { gh, resolveRef, tryResolvePrForIssue } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
 import { groomCommand } from './groom.js';
 import { designCommand } from './design.js';
@@ -16,14 +15,6 @@ interface IssueLabel {
 interface IssueData {
   number: number;
   labels: IssueLabel[];
-}
-
-function ghJson<T>(args: string[]): T {
-  const output = execFileSync('gh', args, {
-    encoding: 'utf-8',
-    stdio: ['ignore', 'pipe', 'ignore'],
-  }).trim();
-  return JSON.parse(output) as T;
 }
 
 async function resolvePrForIssue(issueNumber: number): Promise<string> {
@@ -48,13 +39,8 @@ export async function nextCommand(ref: string): Promise<void> {
   const cleanRef = ref.replace(/^#/, '');
 
   const resolved = await resolveRef(cleanRef, 'issue');
-  const issueData = ghJson<IssueData>([
-    'issue',
-    'view',
-    resolved.issueNumber,
-    '--json',
-    'number,labels',
-  ]);
+  const { stdout } = await gh(['issue', 'view', resolved.issueNumber, '--json', 'number,labels']);
+  const issueData = JSON.parse(stdout.trim()) as IssueData;
   const issueNumber = issueData.number;
   const allLabels = issueData.labels
     .map((l) => l.name)

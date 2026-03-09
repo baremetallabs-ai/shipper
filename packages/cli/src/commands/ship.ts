@@ -1,9 +1,10 @@
-import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { createWriteStream, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { clearStaleLockIfNeeded, selectIssuesForStage } from '@dnsquared/shipper-core';
+import { gh } from '@dnsquared/shipper-core';
 import { getRepoNwo } from '@dnsquared/shipper-core';
 import { withStageHooks } from '@dnsquared/shipper-core';
 import { releaseIssueLock, withIssueLock } from '@dnsquared/shipper-core';
@@ -86,14 +87,19 @@ function formatLogTimestamp(date = new Date()): string {
   ].join('');
 }
 
-function getCurrentLabel(issueStr: string): string | undefined {
+async function getCurrentLabel(issueStr: string): Promise<string | undefined> {
   let output: string;
   try {
-    output = execFileSync(
-      'gh',
-      ['issue', 'view', issueStr, '--json', 'labels', '--jq', '.labels[].name'],
-      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
-    ).trim();
+    const result = await gh([
+      'issue',
+      'view',
+      issueStr,
+      '--json',
+      'labels',
+      '--jq',
+      '.labels[].name',
+    ]);
+    output = result.stdout.trim();
   } catch {
     return undefined;
   }
@@ -138,23 +144,20 @@ export function printAutoSummary(results: AutoResult[]): void {
   }
 }
 
-function resolvePrForIssue(issueNumber: number, nwo: string): QueuedPR {
+async function resolvePrForIssue(issueNumber: number, nwo: string): Promise<QueuedPR> {
   let output: string;
   try {
-    output = execFileSync(
-      'gh',
-      [
-        'pr',
-        'list',
-        '-R',
-        nwo,
-        '--state',
-        'open',
-        '--json',
-        'number,title,headRefName,baseRefName',
-      ],
-      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }
-    );
+    const result = await gh([
+      'pr',
+      'list',
+      '-R',
+      nwo,
+      '--state',
+      'open',
+      '--json',
+      'number,title,headRefName,baseRefName',
+    ]);
+    output = result.stdout;
   } catch {
     throw new Error(`Failed to look up PRs for issue #${issueNumber}.`);
   }
@@ -192,55 +195,62 @@ function resolvePrForIssue(issueNumber: number, nwo: string): QueuedPR {
   return { ...pr, labeledAt: '' };
 }
 
-function mergePr(pr: QueuedPR, issueNumber: number, nwo: string): boolean {
+async function mergePr(pr: QueuedPR, issueNumber: number, nwo: string): Promise<boolean> {
   try {
-    execFileSync(
-      'gh',
-      ['pr', 'merge', String(pr.number), '-R', nwo, '--rebase', '--delete-branch'],
-      { stdio: 'inherit' }
-    );
+    const { stdout } = await gh([
+      'pr',
+      'merge',
+      String(pr.number),
+      '-R',
+      nwo,
+      '--rebase',
+      '--delete-branch',
+    ]);
+    if (stdout.trim()) {
+      process.stdout.write(stdout);
+    }
     console.log(`PR #${pr.number} merged successfully.`);
-    postMerge(pr, issueNumber, nwo, false);
+    await postMerge(pr, issueNumber, nwo, false);
     return true;
   } catch (err) {
     console.error(`\nMerge failed for PR #${pr.number}. See command output above for details.`);
 
     try {
-      execFileSync(
-        'gh',
-        ['pr', 'edit', String(pr.number), '-R', nwo, '--remove-label', 'shipper:ready'],
-        { stdio: 'ignore' }
-      );
+      await gh(['pr', 'edit', String(pr.number), '-R', nwo, '--remove-label', 'shipper:ready']);
     } catch {
       console.error(`Warning: Failed to remove shipper:ready label from PR #${pr.number}`);
     }
 
     try {
-      execFileSync(
-        'gh',
-        ['pr', 'edit', String(pr.number), '-R', nwo, '--add-label', 'shipper:pr-reviewed'],
-        { stdio: 'ignore' }
-      );
+      await gh(['pr', 'edit', String(pr.number), '-R', nwo, '--add-label', 'shipper:pr-reviewed']);
     } catch {
       console.error(`Warning: Failed to add shipper:pr-reviewed label to PR #${pr.number}`);
     }
 
     try {
-      execFileSync(
-        'gh',
-        ['issue', 'edit', String(issueNumber), '-R', nwo, '--remove-label', 'shipper:ready'],
-        { stdio: 'ignore' }
-      );
+      await gh([
+        'issue',
+        'edit',
+        String(issueNumber),
+        '-R',
+        nwo,
+        '--remove-label',
+        'shipper:ready',
+      ]);
     } catch {
       console.error(`Warning: Failed to remove shipper:ready label from issue #${issueNumber}`);
     }
 
     try {
-      execFileSync(
-        'gh',
-        ['issue', 'edit', String(issueNumber), '-R', nwo, '--add-label', 'shipper:pr-reviewed'],
-        { stdio: 'ignore' }
-      );
+      await gh([
+        'issue',
+        'edit',
+        String(issueNumber),
+        '-R',
+        nwo,
+        '--add-label',
+        'shipper:pr-reviewed',
+      ]);
     } catch {
       console.error(`Warning: Failed to add shipper:pr-reviewed label to issue #${issueNumber}`);
     }
@@ -255,9 +265,7 @@ function mergePr(pr: QueuedPR, issueNumber: number, nwo: string): boolean {
     ].join('\n');
 
     try {
-      execFileSync('gh', ['pr', 'comment', String(pr.number), '-R', nwo, '--body', comment], {
-        stdio: 'ignore',
-      });
+      await gh(['pr', 'comment', String(pr.number), '-R', nwo, '--body', comment]);
     } catch {
       console.error(`Warning: Failed to post failure comment on PR #${pr.number}`);
     }
@@ -273,7 +281,7 @@ async function shipOneIssue(
   const issueStr = issue.replace(/^#/, '');
 
   return await withIssueLock(issueStr, async () => {
-    let label = getCurrentLabel(issueStr);
+    let label = await getCurrentLabel(issueStr);
 
     if (!label) {
       const msg = `Issue #${issueStr} has no shipper label. Run \`shipper next\` or add a label first.`;
@@ -330,7 +338,7 @@ async function shipOneIssue(
 
         results.push({ stage: stageName, status: 'pass' });
 
-        label = getCurrentLabel(issueStr);
+        label = await getCurrentLabel(issueStr);
 
         if (label === 'shipper:ready') {
           break;
@@ -378,7 +386,7 @@ async function shipOneIssue(
 
       let pr: QueuedPR;
       try {
-        pr = resolvePrForIssue(issueNumber, nwo);
+        pr = await resolvePrForIssue(issueNumber, nwo);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(msg);
@@ -390,7 +398,7 @@ async function shipOneIssue(
       const merged = await withStageHooks(
         'merge',
         { issueNumber: issueStr, branchName: pr.headRefName },
-        async () => mergePr(pr, issueNumber, nwo)
+        async () => await mergePr(pr, issueNumber, nwo)
       );
 
       if (merged) {
@@ -537,27 +545,24 @@ export async function selectNextCandidate(
   return null;
 }
 
-export function selectBlockedIssues(): { number: number; title: string }[] {
+export async function selectBlockedIssues(): Promise<{ number: number; title: string }[]> {
   let output: string;
   try {
-    output = execFileSync(
-      'gh',
-      [
-        'issue',
-        'list',
-        '--label',
-        'shipper:blocked',
-        '--state',
-        'open',
-        '--search',
-        '-label:shipper:locked',
-        '--json',
-        'number,title,labels',
-        '--limit',
-        '1000',
-      ],
-      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
-    ).trim();
+    const result = await gh([
+      'issue',
+      'list',
+      '--label',
+      'shipper:blocked',
+      '--state',
+      'open',
+      '--search',
+      '-label:shipper:locked',
+      '--json',
+      'number,title,labels',
+      '--limit',
+      '1000',
+    ]);
+    output = result.stdout.trim();
   } catch {
     return [];
   }
@@ -595,11 +600,16 @@ async function attemptUnblock(issueStr: string): Promise<boolean> {
   // Check whether shipper:blocked was removed — this is the only reliable signal
   let output: string;
   try {
-    output = execFileSync(
-      'gh',
-      ['issue', 'view', issueStr, '--json', 'labels', '--jq', '.labels[].name'],
-      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
-    ).trim();
+    const result = await gh([
+      'issue',
+      'view',
+      issueStr,
+      '--json',
+      'labels',
+      '--jq',
+      '.labels[].name',
+    ]);
+    output = result.stdout.trim();
   } catch {
     return false;
   }
@@ -649,7 +659,7 @@ async function shipAutoSequential(): Promise<void> {
     }
 
     // Unblock pass
-    const blocked = selectBlockedIssues();
+    const blocked = await selectBlockedIssues();
     if (blocked.length === 0) break;
 
     let progress = false;
@@ -750,7 +760,7 @@ async function shipAutoParallel(parallel: number): Promise<void> {
       if (shuttingDown) break;
 
       if (activeRuns.size === 0) {
-        const blocked = selectBlockedIssues();
+        const blocked = await selectBlockedIssues();
         if (blocked.length === 0) break;
 
         let progress = false;

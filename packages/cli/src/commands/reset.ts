@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { confirm, promptChoice } from '../lib/confirm.js';
+import { gh } from '@dnsquared/shipper-core';
 import { isLockStale } from '@dnsquared/shipper-core';
 import { getRepoNwo } from '@dnsquared/shipper-core';
 
@@ -70,19 +71,20 @@ function getCurrentStage(labels: string[]): CurrentStage {
   return { stage: 'new', hasPrLabels: false };
 }
 
-function getStageTimestamp(issueNum: number, nwo: string, stage: WorkflowStage): string | null {
+async function getStageTimestamp(
+  issueNum: number,
+  nwo: string,
+  stage: WorkflowStage
+): Promise<string | null> {
   try {
-    const output = execFileSync(
-      'gh',
-      [
-        'api',
-        `repos/${nwo}/issues/${issueNum}/timeline`,
-        '--paginate',
-        '--jq',
-        `.[] | select(.event == "labeled" and .label.name? == "${getStageLabel(stage)}") | .created_at`,
-      ],
-      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
-    ).trim();
+    const { stdout } = await gh([
+      'api',
+      `repos/${nwo}/issues/${issueNum}/timeline`,
+      '--paginate',
+      '--jq',
+      `.[] | select(.event == "labeled" and .label.name? == "${getStageLabel(stage)}") | .created_at`,
+    ]);
+    const output = stdout.trim();
 
     if (!output) return null;
 
@@ -117,12 +119,12 @@ function getValidTargets(currentStage: CurrentStage): WorkflowStage[] {
   return targets;
 }
 
-function scanArtifacts(
+async function scanArtifacts(
   issueNum: number,
   nwo: string,
   targetStage: WorkflowStage,
   labels: string[]
-): ArtifactScan {
+): Promise<ArtifactScan> {
   const targetIndex = getStageIndex(targetStage);
   const targetLabel = getStageLabel(targetStage);
   const labelsToRemove = labels.filter((label) => {
@@ -146,11 +148,13 @@ function scanArtifacts(
   let commentIds: number[] = [];
   if (targetStage === 'new') {
     try {
-      const raw = execFileSync(
-        'gh',
-        ['api', `repos/${nwo}/issues/${issueNum}/comments`, '--paginate', '--jq', '.[].id'],
-        { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
-      );
+      const { stdout: raw } = await gh([
+        'api',
+        `repos/${nwo}/issues/${issueNum}/comments`,
+        '--paginate',
+        '--jq',
+        '.[].id',
+      ]);
       commentIds = raw
         .trim()
         .split('\n')
@@ -161,7 +165,7 @@ function scanArtifacts(
       console.warn(`Warning: Could not fetch comments for issue #${issueNum}: ${msg}`);
     }
   } else {
-    const stageTimestamp = getStageTimestamp(issueNum, nwo, targetStage);
+    const stageTimestamp = await getStageTimestamp(issueNum, nwo, targetStage);
     if (stageTimestamp) {
       const cutoffDate = new Date(stageTimestamp);
       if (Number.isNaN(cutoffDate.getTime())) {
@@ -171,17 +175,13 @@ function scanArtifacts(
       } else {
         const cutoff = cutoffDate.getTime() + 60_000;
         try {
-          const raw = execFileSync(
-            'gh',
-            [
-              'api',
-              `repos/${nwo}/issues/${issueNum}/comments`,
-              '--paginate',
-              '--jq',
-              '.[] | {id, created_at}',
-            ],
-            { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
-          );
+          const { stdout: raw } = await gh([
+            'api',
+            `repos/${nwo}/issues/${issueNum}/comments`,
+            '--paginate',
+            '--jq',
+            '.[] | {id, created_at}',
+          ]);
           const lines = raw
             .trim()
             .split('\n')
@@ -206,20 +206,16 @@ function scanArtifacts(
 
   let prs: PREntry[] = [];
   try {
-    const prJson = execFileSync(
-      'gh',
-      [
-        'pr',
-        'list',
-        '--search',
-        String(issueNum),
-        '--state',
-        'open',
-        '--json',
-        'number,headRefName',
-      ],
-      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
-    );
+    const { stdout: prJson } = await gh([
+      'pr',
+      'list',
+      '--search',
+      String(issueNum),
+      '--state',
+      'open',
+      '--json',
+      'number,headRefName',
+    ]);
     const allPrs: PREntry[] = JSON.parse(prJson);
     prs = allPrs.filter(
       (pr) =>
@@ -279,15 +275,13 @@ function printDryRun(issueNum: number, scan: ArtifactScan): void {
   console.log('');
 }
 
-function executeReset(issueNum: number, scan: ArtifactScan, nwo: string): void {
+async function executeReset(issueNum: number, scan: ArtifactScan, nwo: string): Promise<void> {
   const actions: string[] = [];
 
   const closedPrBranches = new Set<string>();
   for (const pr of scan.prs) {
     try {
-      execFileSync('gh', ['pr', 'close', String(pr.number)], {
-        stdio: ['ignore', 'ignore', 'ignore'],
-      });
+      await gh(['pr', 'close', String(pr.number)]);
       closedPrBranches.add(pr.headRefName);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -317,9 +311,7 @@ function executeReset(issueNum: number, scan: ArtifactScan, nwo: string): void {
 
   for (const id of scan.commentIds) {
     try {
-      execFileSync('gh', ['api', '-X', 'DELETE', `repos/${nwo}/issues/comments/${id}`], {
-        stdio: ['ignore', 'ignore', 'ignore'],
-      });
+      await gh(['api', '-X', 'DELETE', `repos/${nwo}/issues/comments/${id}`]);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(`  Warning: Failed to delete comment ${id}: ${msg}`);
@@ -338,7 +330,7 @@ function executeReset(issueNum: number, scan: ArtifactScan, nwo: string): void {
       args.push('--add-label', scan.targetLabel);
     }
     try {
-      execFileSync('gh', args, { stdio: ['ignore', 'ignore', 'ignore'] });
+      await gh(args);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(`  Warning: Failed to update labels: ${msg}`);
@@ -361,9 +353,7 @@ function executeReset(issueNum: number, scan: ArtifactScan, nwo: string): void {
   }
 
   try {
-    execFileSync('gh', ['issue', 'comment', String(issueNum), '--body', resetBody], {
-      stdio: ['ignore', 'ignore', 'ignore'],
-    });
+    await gh(['issue', 'comment', String(issueNum), '--body', resetBody]);
     actions.push('Posted reset notice comment');
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -392,11 +382,8 @@ export async function resetCommand(
 
   let issueJson: string;
   try {
-    issueJson = execFileSync(
-      'gh',
-      ['issue', 'view', String(issueNum), '--json', 'number,state,labels'],
-      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
-    );
+    const result = await gh(['issue', 'view', String(issueNum), '--json', 'number,state,labels']);
+    issueJson = result.stdout;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`Error: Failed to fetch issue #${issueNum}: ${msg}`);
@@ -472,7 +459,7 @@ export async function resetCommand(
     targetStage = selectedStage;
   }
 
-  const scan = scanArtifacts(issueNum, nwo, targetStage, labels);
+  const scan = await scanArtifacts(issueNum, nwo, targetStage, labels);
 
   if (isClean(scan)) {
     console.log(
@@ -491,5 +478,5 @@ export async function resetCommand(
     }
   }
 
-  executeReset(issueNum, scan, nwo);
+  await executeReset(issueNum, scan, nwo);
 }

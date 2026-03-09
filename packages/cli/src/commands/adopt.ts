@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { gh } from '@dnsquared/shipper-core';
 
 interface IssueLabel {
   name: string;
@@ -9,7 +9,7 @@ interface IssueData {
   labels: IssueLabel[];
 }
 
-export function adoptCommand(issue: string): void {
+export async function adoptCommand(issue: string): Promise<void> {
   const cleanRef = issue.replace(/^#/, '');
   if (!/^\d+$/.test(cleanRef)) {
     console.error('Error: Please provide a valid issue number.');
@@ -20,10 +20,8 @@ export function adoptCommand(issue: string): void {
   // Fetch issue data
   let issueData: IssueData;
   try {
-    const output = execFileSync('gh', ['issue', 'view', cleanRef, '--json', 'number,labels'], {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
+    const { stdout } = await gh(['issue', 'view', cleanRef, '--json', 'number,labels']);
+    const output = stdout.trim();
     issueData = JSON.parse(output) as IssueData;
   } catch {
     console.error(`Error: Issue #${cleanRef} not found.`);
@@ -33,10 +31,7 @@ export function adoptCommand(issue: string): void {
   // Check if it's a PR
   let isPr = false;
   try {
-    execFileSync('gh', ['pr', 'view', cleanRef, '--json', 'number,url'], {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
+    await gh(['pr', 'view', cleanRef, '--json', 'number,url']);
     isPr = true;
   } catch {
     // Not a PR — continue
@@ -60,9 +55,7 @@ export function adoptCommand(issue: string): void {
 
   // Add the shipper:new label
   try {
-    execFileSync('gh', ['issue', 'edit', cleanRef, '--add-label', 'shipper:new'], {
-      stdio: ['ignore', 'ignore', 'ignore'],
-    });
+    await gh(['issue', 'edit', cleanRef, '--add-label', 'shipper:new']);
   } catch {
     console.error(`Error: Failed to add 'shipper:new' label to issue #${cleanRef}.`);
     process.exit(1);
@@ -71,14 +64,20 @@ export function adoptCommand(issue: string): void {
   console.log(`Issue #${cleanRef} adopted into shipper workflow.`);
 }
 
-export function adoptAllCommand(): void {
+export async function adoptAllCommand(): Promise<void> {
   let issues: IssueData[];
   try {
-    const output = execFileSync(
-      'gh',
-      ['issue', 'list', '--state', 'open', '--limit', '1000', '--json', 'number,labels'],
-      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
-    ).trim();
+    const { stdout } = await gh([
+      'issue',
+      'list',
+      '--state',
+      'open',
+      '--limit',
+      '1000',
+      '--json',
+      'number,labels',
+    ]);
+    const output = stdout.trim();
     issues = JSON.parse(output) as IssueData[];
   } catch {
     console.error('Error: Failed to fetch issues.');
@@ -99,9 +98,7 @@ export function adoptAllCommand(): void {
 
   for (const issue of eligible) {
     try {
-      execFileSync('gh', ['issue', 'edit', String(issue.number), '--add-label', 'shipper:new'], {
-        stdio: ['ignore', 'ignore', 'ignore'],
-      });
+      await gh(['issue', 'edit', String(issue.number), '--add-label', 'shipper:new']);
       adopted.push(issue.number);
     } catch {
       console.error(`Error: Failed to add 'shipper:new' label to issue #${issue.number}.`);

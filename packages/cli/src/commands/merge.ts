@@ -1,8 +1,8 @@
-import { execFileSync } from 'node:child_process';
 import { openSync, closeSync, readFileSync, writeFileSync, unlinkSync, constants } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fetchChecks, classifyChecks } from '@dnsquared/shipper-core';
+import { gh } from '@dnsquared/shipper-core';
 import { tryResolvePrForIssue } from '@dnsquared/shipper-core';
 import { getRepoNwo } from '@dnsquared/shipper-core';
 import { withStageHooks } from '@dnsquared/shipper-core';
@@ -66,12 +66,16 @@ interface PRViewResult {
   labels: { name: string }[];
 }
 
-function fetchPRView(ref: string, nwo: string): PRViewResult {
-  const json = execFileSync(
-    'gh',
-    ['pr', 'view', ref, '-R', nwo, '--json', 'number,title,headRefName,baseRefName,state,labels'],
-    { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }
-  );
+async function fetchPRView(ref: string, nwo: string): Promise<PRViewResult> {
+  const { stdout: json } = await gh([
+    'pr',
+    'view',
+    ref,
+    '-R',
+    nwo,
+    '--json',
+    'number,title,headRefName,baseRefName,state,labels',
+  ]);
   return JSON.parse(json) as PRViewResult;
 }
 
@@ -79,7 +83,7 @@ export async function lookupPR(ref: string, nwo: string): Promise<QueuedPR> {
   let data: PRViewResult;
 
   try {
-    data = fetchPRView(ref, nwo);
+    data = await fetchPRView(ref, nwo);
   } catch {
     // Not a PR — try resolving as an issue number
     const resolved = await tryResolvePrForIssue(Number(ref));
@@ -88,7 +92,7 @@ export async function lookupPR(ref: string, nwo: string): Promise<QueuedPR> {
       process.exit(1);
     }
     try {
-      data = fetchPRView(resolved, nwo);
+      data = await fetchPRView(resolved, nwo);
     } catch {
       console.error(`Error: Failed to fetch resolved PR #${resolved}.`);
       process.exit(1);
@@ -178,7 +182,7 @@ function releaseLock(lockPath: string): void {
   }
 }
 
-function getQueue(nwo: string): QueuedPR[] {
+async function getQueue(nwo: string): Promise<QueuedPR[]> {
   const query = `
     query($q: String!, $cursor: String) {
       search(query: $q, type: ISSUE, first: 50, after: $cursor) {
@@ -217,10 +221,8 @@ function getQueue(nwo: string): QueuedPR[] {
 
     let output: string;
     try {
-      output = execFileSync('gh', args, {
-        encoding: 'utf-8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
+      const result = await gh(args);
+      output = result.stdout;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`Error: Failed to query merge queue: ${msg}`);
@@ -254,7 +256,7 @@ function getQueue(nwo: string): QueuedPR[] {
   return prs;
 }
 
-function failPR(pr: QueuedPR, reason: string, nwo: string, dryRun: boolean): void {
+async function failPR(pr: QueuedPR, reason: string, nwo: string, dryRun: boolean): Promise<void> {
   console.log(`  PR #${pr.number} failed: ${reason}`);
   if (dryRun) {
     console.log(`  [dry-run] Would remove shipper:ready, add shipper:pr-reviewed, comment on PR`);
@@ -265,34 +267,26 @@ function failPR(pr: QueuedPR, reason: string, nwo: string, dryRun: boolean): voi
   const repoArgs = ['-R', nwo];
 
   try {
-    execFileSync('gh', ['pr', 'edit', prRef, ...repoArgs, '--remove-label', 'shipper:ready'], {
-      stdio: 'ignore',
-    });
+    await gh(['pr', 'edit', prRef, ...repoArgs, '--remove-label', 'shipper:ready']);
   } catch {
     console.error(`  Warning: Failed to remove shipper:ready label from PR #${pr.number}`);
   }
 
   try {
-    execFileSync('gh', ['pr', 'edit', prRef, ...repoArgs, '--add-label', 'shipper:pr-reviewed'], {
-      stdio: 'ignore',
-    });
+    await gh(['pr', 'edit', prRef, ...repoArgs, '--add-label', 'shipper:pr-reviewed']);
   } catch {
     console.error(`  Warning: Failed to add shipper:pr-reviewed label to PR #${pr.number}`);
   }
 
   try {
-    execFileSync(
-      'gh',
-      [
-        'pr',
-        'comment',
-        prRef,
-        ...repoArgs,
-        '--body',
-        `Merge queue removed this PR from the queue.\n\n**Reason:** ${reason}\n\nThe \`shipper:pr-reviewed\` label has been re-applied so the PR can be remediated and re-queued.`,
-      ],
-      { stdio: 'ignore' }
-    );
+    await gh([
+      'pr',
+      'comment',
+      prRef,
+      ...repoArgs,
+      '--body',
+      `Merge queue removed this PR from the queue.\n\n**Reason:** ${reason}\n\nThe \`shipper:pr-reviewed\` label has been re-applied so the PR can be remediated and re-queued.`,
+    ]);
   } catch {
     console.error(`  Warning: Failed to comment on PR #${pr.number}`);
   }
@@ -300,10 +294,15 @@ function failPR(pr: QueuedPR, reason: string, nwo: string, dryRun: boolean): voi
 
 export async function getLinkedIssueNumber(prNumber: number, nwo: string): Promise<number | null> {
   try {
-    const json = execFileSync('gh', ['pr', 'view', String(prNumber), '-R', nwo, '--json', 'body'], {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    const { stdout: json } = await gh([
+      'pr',
+      'view',
+      String(prNumber),
+      '-R',
+      nwo,
+      '--json',
+      'body',
+    ]);
     const { body } = JSON.parse(json) as { body: string };
     const match = /(?:^|\s)(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/im.exec(body);
     return match?.[1] ? Number(match[1]) : null;
@@ -312,7 +311,12 @@ export async function getLinkedIssueNumber(prNumber: number, nwo: string): Promi
   }
 }
 
-export function postMerge(_pr: QueuedPR, issueNumber: number, nwo: string, dryRun: boolean): void {
+export async function postMerge(
+  _pr: QueuedPR,
+  issueNumber: number,
+  nwo: string,
+  dryRun: boolean
+): Promise<void> {
   // Clean up label and close issue
   if (dryRun) {
     console.log(`  [dry-run] Would remove shipper:ready and close issue #${issueNumber}`);
@@ -321,11 +325,14 @@ export function postMerge(_pr: QueuedPR, issueNumber: number, nwo: string, dryRu
 
   const repoArgs = ['-R', nwo];
   try {
-    execFileSync(
-      'gh',
-      ['issue', 'edit', String(issueNumber), ...repoArgs, '--remove-label', 'shipper:ready'],
-      { stdio: 'ignore' }
-    );
+    await gh([
+      'issue',
+      'edit',
+      String(issueNumber),
+      ...repoArgs,
+      '--remove-label',
+      'shipper:ready',
+    ]);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.warn(
@@ -334,9 +341,7 @@ export function postMerge(_pr: QueuedPR, issueNumber: number, nwo: string, dryRu
   }
 
   try {
-    execFileSync('gh', ['issue', 'close', String(issueNumber), ...repoArgs], {
-      stdio: 'ignore',
-    });
+    await gh(['issue', 'close', String(issueNumber), ...repoArgs]);
     console.log(`  Issue #${issueNumber} closed.`);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -352,7 +357,7 @@ async function runPostMergeActions(pr: QueuedPR, nwo: string, dryRun: boolean): 
     );
     return;
   }
-  postMerge(pr, issueNumber, nwo, dryRun);
+  await postMerge(pr, issueNumber, nwo, dryRun);
 }
 
 async function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): Promise<boolean> {
@@ -361,16 +366,20 @@ async function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): Promise<bo
   // Check merge state
   let mergeState: string;
   try {
-    const json = execFileSync(
-      'gh',
-      ['pr', 'view', String(pr.number), '-R', nwo, '--json', 'mergeStateStatus'],
-      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }
-    );
+    const { stdout: json } = await gh([
+      'pr',
+      'view',
+      String(pr.number),
+      '-R',
+      nwo,
+      '--json',
+      'mergeStateStatus',
+    ]);
     const data: PRViewData = JSON.parse(json);
     mergeState = data.mergeStateStatus;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    failPR(pr, `Could not determine merge state: ${msg}`, nwo, dryRun);
+    await failPR(pr, `Could not determine merge state: ${msg}`, nwo, dryRun);
     return false;
   }
 
@@ -383,19 +392,27 @@ async function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): Promise<bo
       return false;
     }
     try {
-      execFileSync('gh', ['pr', 'update-branch', String(pr.number), '-R', nwo, '--rebase'], {
-        stdio: 'ignore',
-      });
+      const { stdout } = await gh([
+        'pr',
+        'update-branch',
+        String(pr.number),
+        '-R',
+        nwo,
+        '--rebase',
+      ]);
+      if (stdout.trim()) {
+        process.stdout.write(stdout);
+      }
       console.log(`  Branch updated. Will check again next cycle.`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      failPR(pr, `Failed to update branch: ${msg}`, nwo, dryRun);
+      await failPR(pr, `Failed to update branch: ${msg}`, nwo, dryRun);
     }
     return false;
   }
 
   if (mergeState === 'DIRTY') {
-    failPR(pr, 'PR has merge conflicts that must be resolved manually.', nwo, dryRun);
+    await failPR(pr, 'PR has merge conflicts that must be resolved manually.', nwo, dryRun);
     return false;
   }
 
@@ -406,7 +423,7 @@ async function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): Promise<bo
       checks = await fetchChecks(String(pr.number), nwo);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      failPR(pr, `Could not fetch CI checks: ${msg}`, nwo, dryRun);
+      await failPR(pr, `Could not fetch CI checks: ${msg}`, nwo, dryRun);
       return false;
     }
 
@@ -414,7 +431,7 @@ async function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): Promise<bo
 
     if (failed.length > 0) {
       const names = failed.map((c) => c.name).join(', ');
-      failPR(pr, `CI checks failed: ${names}`, nwo, dryRun);
+      await failPR(pr, `CI checks failed: ${names}`, nwo, dryRun);
       return false;
     }
 
@@ -447,23 +464,30 @@ async function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): Promise<bo
   }
 
   try {
-    execFileSync(
-      'gh',
-      ['pr', 'merge', String(pr.number), '-R', nwo, '--rebase', '--delete-branch'],
-      { stdio: 'inherit' }
-    );
+    const { stdout } = await gh([
+      'pr',
+      'merge',
+      String(pr.number),
+      '-R',
+      nwo,
+      '--rebase',
+      '--delete-branch',
+    ]);
+    if (stdout.trim()) {
+      process.stdout.write(stdout);
+    }
     console.log(`  PR #${pr.number} merged successfully.`);
     await runPostMergeActions(pr, nwo, false);
     return true;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    failPR(pr, `Merge failed: ${msg}`, nwo, dryRun);
+    await failPR(pr, `Merge failed: ${msg}`, nwo, dryRun);
     return false;
   }
 }
 
 async function processQueue(nwo: string, dryRun: boolean): Promise<void> {
-  const queue = getQueue(nwo);
+  const queue = await getQueue(nwo);
 
   if (queue.length === 0) {
     console.log('No PRs in merge queue.');

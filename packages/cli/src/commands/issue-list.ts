@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { gh } from '@dnsquared/shipper-core';
 
 const STATUS_LABELS = [
   'shipper:new',
@@ -32,7 +32,7 @@ interface Issue {
   labels: { name: string }[];
 }
 
-export function issueListCommand(options: { status?: string }): void {
+export async function issueListCommand(options: { status?: string }): Promise<void> {
   if (options.status) {
     if (!VALID_SHORT_NAMES.includes(options.status)) {
       console.error(
@@ -44,22 +44,18 @@ export function issueListCommand(options: { status?: string }): void {
 
   let issues: Issue[];
   try {
-    const output = execFileSync(
-      'gh',
-      [
-        'issue',
-        'list',
-        '--state',
-        'open',
-        '--search',
-        `label:${STATUS_LABELS.join(',')}`,
-        '--limit',
-        '1000',
-        '--json',
-        'number,title,labels',
-      ],
-      { encoding: 'utf-8' }
-    );
+    const { stdout: output } = await gh([
+      'issue',
+      'list',
+      '--state',
+      'open',
+      '--search',
+      `label:${STATUS_LABELS.join(',')}`,
+      '--limit',
+      '1000',
+      '--json',
+      'number,title,labels',
+    ]);
     issues = JSON.parse(output) as Issue[];
   } catch {
     console.error('Error: Failed to fetch issues.');
