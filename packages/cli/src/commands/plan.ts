@@ -14,15 +14,15 @@ export async function planCommand(issue?: string): Promise<void> {
     issue = String(selected.number);
   }
 
-  process.exit(
-    await withIssueLock(
-      issue,
-      async () =>
-        await withStageHooks(
-          'plan',
-          { issueNumber: issue },
-          async () => await runPrompt('plan', { issueRef: issue })
-        )
-    )
+  const code = await withIssueLock(
+    issue,
+    async () =>
+      await withStageHooks(
+        'plan',
+        { issueNumber: issue },
+        async () => await runPrompt('plan', { issueRef: issue })
+      )
   );
+
+  process.exitCode = code;
 }

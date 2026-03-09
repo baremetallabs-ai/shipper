@@ -46,7 +46,8 @@ export async function groomCommand(
     }
 
     printAutoSummary(results);
-    process.exit(results.some((r) => r.outcome === 'fail') ? 1 : 0);
+    process.exitCode = results.some((r) => r.outcome === 'fail') ? 1 : 0;
+    return;
   }
 
   if (!issue) {
@@ -59,5 +60,5 @@ export async function groomCommand(
     issue = String(selected.number);
   }
 
-  process.exit((await groomOneIssue(issue)).success ? 0 : 1);
+  process.exitCode = (await groomOneIssue(issue)).success ? 0 : 1;
 }

@@ -704,12 +704,20 @@ async function shipAutoParallel(parallel: number): Promise<void> {
 
       await wait(3000);
 
-      for (const [issueNumber, run] of activeRuns) {
+      for (const [, run] of activeRuns) {
         if (run.child.exitCode === null && run.child.signalCode === null) {
           run.child.kill('SIGKILL');
         }
-        void releaseIssueLock(String(issueNumber));
       }
+
+      await Promise.allSettled(
+        Array.from(activeRuns, ([issueNumber, run]) => {
+          if (run.child.exitCode !== null || run.child.signalCode !== null) {
+            return Promise.resolve();
+          }
+          return releaseIssueLock(String(issueNumber));
+        })
+      );
 
       process.exit(1);
     })();

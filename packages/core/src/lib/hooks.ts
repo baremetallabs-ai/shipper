@@ -108,16 +108,7 @@ function warnNonExecutableHook(foundPath: string, chmodPath = foundPath): void {
   );
 }
 
-function runFileHook(
-  hookPath: string,
-  label: string,
-  env: Record<string, string>,
-  options: { blocking: boolean; cwd?: string; resultLabel?: string }
-): Promise<void> {
-  return runFileHookImpl(hookPath, label, env, options);
-}
-
-async function runFileHookImpl(
+async function runFileHook(
   hookPath: string,
   label: string,
   env: Record<string, string>,

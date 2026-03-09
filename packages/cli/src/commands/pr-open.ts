@@ -23,11 +23,11 @@ export async function prOpenCommand(issue?: string): Promise<void> {
   const settings = getSettings();
   const baseBranch = await resolveBaseBranch(settings.defaultBaseBranch);
 
-  await withIssueLock(issue, async () => {
+  const code = await withIssueLock(issue, async () => {
     const repoRoot = await getRepoRoot();
     const branch = await findBranchForIssue(issue);
 
-    const code = await withStageHooks(
+    return await withStageHooks(
       'pr-open',
       { issueNumber: issue, branchName: branch },
       async () =>
@@ -38,7 +38,7 @@ export async function prOpenCommand(issue?: string): Promise<void> {
           }
         )
     );
-
-    process.exit(code);
   });
+
+  process.exitCode = code;
 }

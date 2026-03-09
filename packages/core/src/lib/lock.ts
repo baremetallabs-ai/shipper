@@ -94,6 +94,12 @@ export async function releaseIssueLock(issueNumber: string): Promise<void> {
   }
 }
 
+function releaseIssueLockWithoutAwait(issueNumber: string): void {
+  execFile('gh', ['issue', 'edit', issueNumber, '--remove-label', 'shipper:locked'], () => {
+    // Idempotent — ignore errors if label already removed
+  });
+}
+
 export async function withIssueLock<T>(issueNumber: string, fn: () => Promise<T>): Promise<T> {
   if (process.env.SHIPPER_LOCK_HELD === issueNumber) {
     return await fn();
@@ -108,7 +114,7 @@ export async function withIssueLock<T>(issueNumber: string, fn: () => Promise<T>
   };
 
   const cleanupWithoutAwait = () => {
-    void releaseIssueLock(issueNumber);
+    releaseIssueLockWithoutAwait(issueNumber);
     delete process.env.SHIPPER_LOCK_HELD;
   };
 
@@ -116,8 +122,8 @@ export async function withIssueLock<T>(issueNumber: string, fn: () => Promise<T>
     cleanupWithoutAwait();
   };
 
-  // process.exit() bypasses finally blocks, so register an exit handler
-  // to ensure the lock is always released (e.g. when inner code calls process.exit).
+  // process.exit() bypasses finally blocks, so keep a best-effort fallback
+  // that fires off the gh subprocess before Node finishes exiting.
   const onExit = () => {
     cleanupWithoutAwait();
   };

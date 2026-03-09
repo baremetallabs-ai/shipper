@@ -22,15 +22,15 @@ export async function prReviewCommand(pr?: string): Promise<void> {
     issueNumber = resolved.issueNumber;
   }
 
-  process.exit(
-    await withIssueLock(
-      issueNumber,
-      async () =>
-        await withStageHooks(
-          'pr-review',
-          { issueNumber },
-          async () => await runPrompt('pr_review', { issueRef: issueNumber, prRef: pr })
-        )
-    )
+  const code = await withIssueLock(
+    issueNumber,
+    async () =>
+      await withStageHooks(
+        'pr-review',
+        { issueNumber },
+        async () => await runPrompt('pr_review', { issueRef: issueNumber, prRef: pr })
+      )
   );
+
+  process.exitCode = code;
 }

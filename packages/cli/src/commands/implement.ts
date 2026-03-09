@@ -16,11 +16,11 @@ export async function implementCommand(issue?: string): Promise<void> {
     issue = String(selected.number);
   }
 
-  await withIssueLock(issue, async () => {
+  const code = await withIssueLock(issue, async () => {
     const repoRoot = await getRepoRoot();
     const branch = await generateBranchName(issue);
 
-    const code = await withStageHooks(
+    return await withStageHooks(
       'implement',
       { issueNumber: issue, branchName: branch },
       async () =>
@@ -31,7 +31,7 @@ export async function implementCommand(issue?: string): Promise<void> {
           }
         )
     );
-
-    process.exit(code);
   });
+
+  process.exitCode = code;
 }
