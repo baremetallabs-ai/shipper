@@ -198,6 +198,73 @@ describe('formatPR', () => {
     expect(result).not.toContain('<comments>');
     expect(result).toContain('</pr>');
   });
+
+  it('formats a PR review with an empty body without placeholder text', () => {
+    const result = formatPR({
+      number: 4,
+      title: 'Empty review body',
+      state: 'OPEN',
+      labels: [],
+      body: 'Please review.',
+      comments: [],
+      author: { login: 'dev' },
+      createdAt: '2025-01-02T00:00:00Z',
+      headRefName: 'feature-empty-review',
+      baseRefName: 'main',
+      reviews: [
+        {
+          body: '',
+          author: { login: 'reviewer' },
+          state: 'APPROVED',
+          submittedAt: '2025-01-02T01:00:00Z',
+        },
+      ],
+    } as any);
+
+    expect(result).toContain('<review author="reviewer" state="APPROVED"');
+    expect(result).toContain('></review>');
+    expect(result).not.toContain('*No review body.*');
+  });
+
+  it('escapes special characters in title and labels', () => {
+    const result = formatPR({
+      number: 5,
+      title: 'Fix "login" & <session> bug',
+      state: 'OPEN',
+      labels: [{ name: 'P0 & critical' }, { name: '"urgent"' }],
+      body: 'Body with <html> & "quotes".',
+      comments: [],
+      author: { login: 'dev' },
+      createdAt: '2025-01-01T00:00:00Z',
+      headRefName: 'fix/login&session',
+      baseRefName: 'main',
+      reviews: [],
+    } as any);
+
+    expect(result).toContain('title="Fix &quot;login&quot; &amp; &lt;session&gt; bug"');
+    expect(result).toContain('labels="P0 &amp; critical, &quot;urgent&quot;"');
+    expect(result).toContain('head="fix/login&amp;session"');
+    expect(result).toContain('<body>\nBody with <html> & "quotes".\n</body>');
+  });
+});
+
+describe('formatIssue escapeAttr', () => {
+  it('escapes special characters in title and labels', () => {
+    const result = formatIssue({
+      number: 6,
+      title: 'Handle <script> & "injection"',
+      state: 'OPEN',
+      labels: [{ name: 'bug & fix' }],
+      body: 'Content with <tags> & "quotes".',
+      comments: [],
+      author: { login: 'user' },
+      createdAt: '2025-01-01T00:00:00Z',
+    });
+
+    expect(result).toContain('title="Handle &lt;script&gt; &amp; &quot;injection&quot;"');
+    expect(result).toContain('labels="bug &amp; fix"');
+    expect(result).toContain('<body>\nContent with <tags> & "quotes".\n</body>');
+  });
 });
 
 describe('sortIssuesByLabelTime', () => {
