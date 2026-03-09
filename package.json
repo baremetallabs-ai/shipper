@@ -7,7 +7,7 @@
   "scripts": {
     "build": "npm run build --workspace=packages/core && npm run build --workspace=packages/cli",
     "test": "npm run test --workspaces --if-present",
-    "type-check": "npm run type-check --workspaces --if-present",
+    "type-check": "npm run build --workspace=packages/core && npm run type-check --workspaces --if-present",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
