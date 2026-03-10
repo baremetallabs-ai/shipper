@@ -57,7 +57,10 @@ export async function gh(
         throw firstError;
       }
 
-      console.error(`gh call failed, retrying (attempt ${attempt + 1}/${MAX_ATTEMPTS})...`);
+      const reason = stderr.trim();
+      console.error(
+        `gh ${args.join(' ')} failed${reason ? `: ${reason}` : ''}, retrying (attempt ${attempt + 1}/${MAX_ATTEMPTS})...`
+      );
       await sleepMs(BASE_DELAY_MS * 2 ** (attempt - 1));
     }
   }
