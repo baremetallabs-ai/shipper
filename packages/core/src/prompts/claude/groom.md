@@ -90,7 +90,7 @@ Ask targeted questions to close every open product decision. Use the four catego
 - **Acceptance Criteria** — Specific, testable done-conditions? Vague scenarios needing concrete expected behavior?
 - **Scope Boundaries & Follow-ups** — Related work to defer? Adjacent behaviors the issue is silent on?
 
-**Do not ask questions about issue decomposition.** Whether to split the issue into multiple sub-issues or PRs, how to break down the work, or what the decomposition strategy should be — these are agent responsibilities handled autonomously in Phase 4. Decomposition questions waste the product owner's time on decisions that are not theirs to make.
+**Do not ask questions about issue decomposition.** Whether to split the issue into multiple sub-issues or PRs, how to break down the work, or what the decomposition strategy should be — these are agent responsibilities: the agent proposes a decomposition in Phase 4, subject to product-owner confirmation. Decomposition questions waste the product owner's time on decisions that are not theirs to make.
 
 Ask as many or as few questions as the issue demands. Simple issues may need 2–3 questions; complex issues may need 10+. Use judgment.
 
@@ -173,7 +173,7 @@ After producing the final artifacts, you must update GitHub using repo-local tem
 
 If your decomposition recommendation includes additional issues, you must create them:
 
-1. **Present the decomposition plan for confirmation.** Before creating any child issues, present your decomposition plan to the product owner using the interactive question-asking tool. Include the proposed number of child issues, each with its title and a one-line scope description. Offer structured options: "Approve this decomposition," "I want to modify it," or "Skip decomposition — keep as single issue." If the product owner wants modifications, iterate until they approve. If they choose to skip, do not create child issues — proceed with the parent issue as a single-PR recommendation. Only continue to the next step after receiving explicit approval.
+1. **Present the decomposition plan for confirmation.** Before creating any child issues, present your decomposition plan to the product owner using the interactive question-asking tool. Include the proposed number of child issues, each with its title and a one-line scope description. Offer structured options: "Approve this decomposition," "I want to modify it," or "Skip decomposition — keep as single issue." If the product owner wants modifications, update the plan, re-present the revised plan, and explicitly re-ask for approval; repeat this loop until they either approve or choose to skip. If they choose "Skip decomposition — keep as single issue," immediately exit the decomposition flow: do not perform steps 2–5 below, do not create any child issues, and proceed with the parent issue as a single-PR recommendation in the main grooming flow. Only continue to step 2 after receiving an explicit "Approve this decomposition" confirmation.
 
 2. For each new issue, write its body to its own file under `./.shipper/tmp/` (e.g. `split_issue-<number>-1.md`, `split_issue-<number>-2.md`), where `<number>` is the parent issue number.
 3. Create each new issue using `gh issue create --title "<TITLE>" --body-file <FILE> --label "shipper:groomed"`.
