@@ -122,11 +122,11 @@ addAgentOption(
   addModeOption(
     program
       .command('new')
-      .description('Create a new issue from a pitch')
-      .argument('<pitch...>', 'your idea for the new issue')
+      .description('Create a new issue from a request')
+      .argument('<request...>', 'your idea for the new issue')
       .action(
-        wrapAction(async (pitch: string[], options: { mode: string; agent?: string }) => {
-          await newCommand(pitch, {
+        wrapAction(async (request: string[], options: { mode: string; agent?: string }) => {
+          await newCommand(request, {
             mode: options.mode as CommandMode,
             agent: options.agent as AgentName | undefined,
           });

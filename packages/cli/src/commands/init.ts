@@ -287,7 +287,7 @@ export async function initCommand(options: { agent?: string }) {
 
   console.log('\nshipper initialized! You can now run:');
   console.log('  shipper setup          — configure install command and get onboarding help');
-  console.log('  shipper new <pitch>    — create a new issue from an idea');
+  console.log('  shipper new <request>  — create a new issue from an idea');
   console.log('  shipper adopt <issue>  — bring an existing issue into the workflow');
   console.log('  shipper groom <issue>  — groom an issue for implementation');
 }

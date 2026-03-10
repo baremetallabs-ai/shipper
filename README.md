@@ -28,7 +28,7 @@ Prompt files include YAML frontmatter specifying:
 - `cmd`: which agent CLI to run (e.g. `claude`)
 - `args`: arguments (e.g. `--model opus`)
 
-Shipper executes the prompt by launching `cmd` with `args` and feeding the prompt content. The user’s command arguments (e.g. `shipper new <pitch>`) are injected as the initial user message.
+Shipper executes the prompt by launching `cmd` with `args` and feeding the prompt content. The user’s command arguments (e.g. `shipper new <request>`) are injected as the initial user message.
 
 Temporary files created during runs must be stored under:
 
@@ -53,7 +53,7 @@ Control labels:
 
 Stage commands that operate on issues (`groom`, `design`, `plan`, `implement`) accept an optional issue argument and, when omitted, auto-select the first eligible issue. Stage commands that operate on pull requests (`pr open`, `pr review`, `pr remediate`) accept an optional PR argument and, when omitted, auto-select the first eligible PR.
 
-## 1) `shipper new <pitch>`
+## 1) `shipper new <request>`
 
 Purpose: convert a rough idea into a lightweight, high-level GitHub issue.
 
