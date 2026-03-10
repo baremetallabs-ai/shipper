@@ -29,6 +29,7 @@ Extract and internalize:
 - **Requirements** and **acceptance criteria** from the groomed issue body.
 - **Technical design** from the design review comment — the approach, what changes, what to avoid, and the test strategy.
 - Any **open questions for engineering** flagged during grooming.
+- **Prior implementer feedback** — if the issue comments contain feedback from a previous implementation attempt (e.g., file-not-found errors, path mismatches, missing dependencies), identify and address those issues before writing a new plan.
 
 If the issue is missing a design review comment or is not labeled `shipper:designed`, tell the user to run `shipper design` first and stop. When this happens:
 
@@ -48,6 +49,20 @@ Explore the repo to ground every plan step in reality. You are looking for:
 - **Build/config implications** — any changes needed to configuration, dependencies, or build tooling.
 
 Be thorough. An implementation plan that names the wrong file or misunderstands an existing interface wastes more time than it saves.
+
+### Step 3: Gitignore audit
+
+Before writing the plan, verify that every file path you intend to reference is available in a clean worktree. Run:
+
+```bash
+git check-ignore <path1> <path2> ...
+```
+
+For any path that `git check-ignore` confirms is ignored:
+
+- **Use "Create" language** in the plan step, not "Modify" or "Replace" — the file will not exist in the implementer's worktree.
+- **Inline the relevant content** (structure, key values, the specific sections the implementer needs) directly in the plan step. Do not tell the implementer to read a file that won't be there.
+- **State explicitly** that the file is gitignored and absent from the worktree.
 
 ---
 
@@ -96,8 +111,11 @@ Produce a plan comment structured exactly as follows:
 - **Include current state for every file you touch.** The implementer should be able to verify they're looking at the right code before changing it.
 - **Keep the design's constraints.** If the design review said "do not add a new abstraction" or "reuse the existing X," the plan must respect that. Do not smuggle in scope or complexity that the design rejected.
 - **Verification must trace back to acceptance criteria.** Every acceptance criterion from the issue should have at least one corresponding verification step.
-- **The implementer will not have access to gitignored files.** Implementation runs in an ephemeral worktree that only contains tracked files. If a plan step involves reading, modifying, or referencing a gitignored file, the plan must inline the relevant content (current state, structure, key values) directly in the plan comment. Do not write plan steps that assume the implementer can read gitignored files from the working tree.
 - **Name new dependencies explicitly.** If a plan step requires a package that is not already in the project's dependency manifest, the step must name the exact package (e.g., `zod`, `chalk@5`) and instruct the implementer to add it to the manifest file and install it. Do not assume dependencies are pre-installed.
+
+#### Gitignored files
+
+The implementer runs in an ephemeral worktree that only contains tracked files. Any plan step that references a gitignored file must use "Create" language, inline the relevant content, and note the file's absence. Step 3 (Gitignore audit) enforces this — do not skip it.
 
 ### Scope guard
 
