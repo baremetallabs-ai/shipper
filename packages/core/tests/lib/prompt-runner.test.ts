@@ -325,15 +325,16 @@ describe('runPrompt', () => {
 });
 
 describe('agent timeout', () => {
-  const errorMock = vi.spyOn(console, 'error').mockImplementation(() => {});
+  let errorMock: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     vi.useFakeTimers();
+    errorMock = vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
   afterEach(() => {
     vi.useRealTimers();
-    errorMock.mockClear();
+    errorMock.mockRestore();
   });
 
   it('sends SIGTERM after timeout in headless mode', async () => {
@@ -415,6 +416,26 @@ describe('agent timeout', () => {
 
     child.emit('close', 0);
     await expect(promise).resolves.toBe(0);
+  });
+
+  it('forces non-zero exit code when agent exits 0 after timeout', async () => {
+    resolveModeMock.mockReturnValue('headless');
+    getSettingsMock.mockReturnValue({ agentTimeoutMinutes: 60 });
+    readFileMock.mockResolvedValueOnce(makePrompt('claude'));
+
+    const child = Object.assign(new EventEmitter(), { kill: vi.fn() }) as EventEmitter & {
+      kill: ReturnType<typeof vi.fn>;
+    };
+    spawnMock.mockReturnValueOnce(child);
+
+    const promise = runPrompt('test', { mode: 'headless' });
+
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+
+    // Agent handles SIGTERM and exits with 0
+    child.emit('close', 0);
+    await expect(promise).resolves.toBe(1);
   });
 
   it('clears timers on normal exit before timeout', async () => {
