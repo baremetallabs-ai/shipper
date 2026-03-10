@@ -30,8 +30,8 @@ vi.mock('../../src/lib/sleep.js', () => ({
 
 const { gh } = await import('../../src/lib/gh.js');
 
-function transientError(message: string): Error & { stderr: string } {
-  return Object.assign(new Error(message), { stderr: message });
+function transientError(message: string, stderr = message): Error & { stderr: string } {
+  return Object.assign(new Error(message), { stderr });
 }
 
 function permanentError(message: string): Error & { stderr: string } {
@@ -84,12 +84,18 @@ describe('gh', () => {
     const promise = gh(['issue', 'view', '42']);
 
     await Promise.resolve();
-    expect(errorSpy).toHaveBeenNthCalledWith(1, 'gh call failed, retrying (attempt 2/3)...');
+    expect(errorSpy).toHaveBeenNthCalledWith(
+      1,
+      'gh issue view 42 failed: HTTP 500, retrying (attempt 2/3)...'
+    );
     expect(sleepMsMock).toHaveBeenNthCalledWith(1, 1000);
 
     await expect(promise).resolves.toEqual({ stdout: 'done\n', stderr: '' });
     expect(execFileMock).toHaveBeenCalledTimes(3);
-    expect(errorSpy).toHaveBeenNthCalledWith(2, 'gh call failed, retrying (attempt 3/3)...');
+    expect(errorSpy).toHaveBeenNthCalledWith(
+      2,
+      'gh issue view 42 failed: temporary network failure, retrying (attempt 3/3)...'
+    );
     expect(sleepMsMock).toHaveBeenNthCalledWith(2, 2000);
   });
 
@@ -121,8 +127,36 @@ describe('gh', () => {
     await expect(promise).rejects.toBe(first);
     expect(execFileMock).toHaveBeenCalledTimes(3);
     expect(errorSpy).toHaveBeenCalledTimes(2);
+    expect(errorSpy).toHaveBeenNthCalledWith(
+      1,
+      'gh pr view 42 failed: HTTP 500 first, retrying (attempt 2/3)...'
+    );
+    expect(errorSpy).toHaveBeenNthCalledWith(
+      2,
+      'gh pr view 42 failed: HTTP 500 second, retrying (attempt 3/3)...'
+    );
     expect(sleepMsMock).toHaveBeenNthCalledWith(1, 1000);
     expect(sleepMsMock).toHaveBeenNthCalledWith(2, 2000);
+  });
+
+  it('omits the reason segment when stderr is empty on a retry', async () => {
+    execFileMock
+      .mockImplementationOnce((_cmd: string, _args: string[], ...rest: unknown[]) => {
+        const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
+        cb(transientError('temporary network failure', '   '));
+      })
+      .mockImplementationOnce((_cmd: string, _args: string[], ...rest: unknown[]) => {
+        const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
+        cb(null, 'ok\n', '');
+      });
+
+    const promise = gh(['repo', 'list']);
+
+    await Promise.resolve();
+    expect(errorSpy).toHaveBeenCalledOnce();
+    expect(errorSpy).toHaveBeenCalledWith('gh repo list failed, retrying (attempt 2/3)...');
+
+    await expect(promise).resolves.toEqual({ stdout: 'ok\n', stderr: '' });
   });
 
   it.each([
