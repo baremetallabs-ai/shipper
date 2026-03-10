@@ -402,6 +402,32 @@ describe('worktree --add-dir', () => {
     expect(spawnMock).toHaveBeenCalled();
     warnMock.mockRestore();
   });
+
+  it('warns and skips --add-dir when gitdir path does not exist', async () => {
+    resolveAgentMock.mockReturnValue('codex');
+    resolveModeMock.mockReturnValue('headless');
+    readFileMock.mockResolvedValueOnce(makePrompt('codex'));
+
+    let callCount = 0;
+    statSyncMock.mockImplementation((p: string) => {
+      if (callCount === 0 && p.endsWith('.git')) {
+        callCount += 1;
+        return { isFile: () => true };
+      }
+      throw new Error('ENOENT');
+    });
+
+    readFileSyncMock.mockReturnValueOnce('gitdir: /repo/.git/worktrees/my-wt\n');
+    const warnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockSpawnResult();
+
+    await runPrompt('test', { cwd: '/tmp/wt' });
+
+    expect(spawnedArgs()).not.toContain('--add-dir');
+    expect(warnMock).toHaveBeenCalledWith(expect.stringContaining('does not exist'));
+    expect(spawnMock).toHaveBeenCalled();
+    warnMock.mockRestore();
+  });
 });
 
 describe('agent timeout', () => {
