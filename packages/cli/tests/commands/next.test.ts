@@ -99,7 +99,7 @@ describe('nextCommand', () => {
 
     expect(mockResolveRef).toHaveBeenCalledWith(repo, '159', 'issue');
     expect(mockWithIssueLock).toHaveBeenCalledWith(repo, '159', expect.any(Function));
-    expect(mockGroomCommand).toHaveBeenCalledWith(repo, '159');
+    expect(mockGroomCommand).toHaveBeenCalledWith(repo, '159', { auto: false, agent: undefined });
     expect(exitSpy).not.toHaveBeenCalled();
     expect(errorSpy).not.toHaveBeenCalled();
     expect(mockDesignCommand).not.toHaveBeenCalled();

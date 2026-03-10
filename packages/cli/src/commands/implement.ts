@@ -1,6 +1,6 @@
 import { generateBranchName, getRepoRoot } from '@dnsquared/shipper-core';
 import { autoSelectIssue } from '@dnsquared/shipper-core';
-import type { CommandMode } from '@dnsquared/shipper-core';
+import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
 import { withStageHooks } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
 import { withWorktree } from '@dnsquared/shipper-core';
@@ -9,7 +9,8 @@ import { runPrompt } from '@dnsquared/shipper-core';
 export async function implementCommand(
   repo: string,
   issue?: string,
-  mode?: CommandMode
+  mode?: CommandMode,
+  agent?: AgentName
 ): Promise<void> {
   if (!issue) {
     const selected = await autoSelectIssue(repo, 'shipper:planned');
@@ -32,7 +33,13 @@ export async function implementCommand(
         await withWorktree(
           { repoRoot, branch, createBranch: true, issueNumber: issue, stage: 'implement' },
           async (wtPath) => {
-            return await runPrompt('implement', { repo, issueRef: issue, cwd: wtPath, mode });
+            return await runPrompt('implement', {
+              repo,
+              issueRef: issue,
+              cwd: wtPath,
+              mode,
+              agent,
+            });
           }
         )
     );

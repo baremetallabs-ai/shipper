@@ -148,7 +148,10 @@ export function getSettings(): Settings {
   );
 }
 
-export function resolveAgent(step: string): AgentName {
+export function resolveAgent(step: string, override?: AgentName): AgentName {
+  if (override) {
+    return override;
+  }
   const s = getSettings();
   const agent = s.commands[step]?.agent ?? s.commands.default.agent;
   if (agent !== 'claude' && agent !== 'codex') {

@@ -115,7 +115,7 @@ describe('runPrompt', () => {
       path.resolve('.shipper', 'prompts', 'claude', 'test.md'),
       'utf-8'
     );
-    expect(resolveAgentMock).toHaveBeenCalledWith('test');
+    expect(resolveAgentMock).toHaveBeenCalledWith('test', undefined);
     expect(resolveModeMock).toHaveBeenCalledWith('test', undefined);
   });
 

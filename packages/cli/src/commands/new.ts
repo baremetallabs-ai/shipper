@@ -1,8 +1,8 @@
-import { runPrompt, type CommandMode } from '@dnsquared/shipper-core';
+import { runPrompt, type AgentName, type CommandMode } from '@dnsquared/shipper-core';
 
 export async function newCommand(
   pitchWords: string[],
-  options: { mode?: CommandMode } = {}
+  options: { mode?: CommandMode; agent?: AgentName } = {}
 ): Promise<void> {
   const pitch = pitchWords.join(' ').trim();
   if (!pitch) {
@@ -11,6 +11,10 @@ export async function newCommand(
     process.exit(1);
   }
 
-  const exitCode = await runPrompt('new', { userInput: pitch, mode: options.mode });
+  const exitCode = await runPrompt('new', {
+    userInput: pitch,
+    mode: options.mode,
+    agent: options.agent,
+  });
   process.exit(exitCode);
 }

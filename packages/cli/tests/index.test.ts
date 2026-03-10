@@ -161,6 +161,7 @@ describe('shipper-cli', () => {
       expect(mockGroomCommand).toHaveBeenCalledWith('owner/repo', '42', {
         auto: false,
         mode: 'interactive',
+        agent: undefined,
       });
     });
 
@@ -169,7 +170,7 @@ describe('shipper-cli', () => {
 
       await importEntrypoint();
 
-      expect(mockPrReviewCommand).toHaveBeenCalledWith('owner/repo', '7', 'interactive');
+      expect(mockPrReviewCommand).toHaveBeenCalledWith('owner/repo', '7', 'interactive', undefined);
     });
 
     it('loads settings explicitly for setup and does not run preflight', async () => {
@@ -261,6 +262,7 @@ describe('shipper-cli', () => {
         merge: false,
         auto: true,
         parallel: undefined,
+        agent: undefined,
       });
     });
 
@@ -273,6 +275,7 @@ describe('shipper-cli', () => {
         merge: false,
         auto: true,
         parallel: 3,
+        agent: undefined,
       });
     });
 

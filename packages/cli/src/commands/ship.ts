@@ -8,6 +8,7 @@ import { gh } from '@dnsquared/shipper-core';
 import { withStageHooks } from '@dnsquared/shipper-core';
 import { releaseIssueLock, withIssueLock } from '@dnsquared/shipper-core';
 import { runPrompt } from '@dnsquared/shipper-core';
+import type { AgentName } from '@dnsquared/shipper-core';
 import { postMerge } from './merge.js';
 import type { QueuedPR } from './merge.js';
 
@@ -55,6 +56,7 @@ export interface ShipOptions {
   merge: boolean;
   auto: boolean;
   parallel?: number;
+  agent?: AgentName;
 }
 
 interface AsyncIssueRun {
@@ -278,7 +280,8 @@ async function mergePr(pr: QueuedPR, issueNumber: number, nwo: string): Promise<
 async function shipOneIssue(
   repo: string,
   issue: string,
-  merge: boolean
+  merge: boolean,
+  agent?: AgentName
 ): Promise<{ success: boolean; error?: string }> {
   const issueStr = issue.replace(/^#/, '');
 
@@ -327,7 +330,11 @@ async function shipOneIssue(
 
         console.log(`Running stage: ${stageName}`);
 
-        const result = spawnSync(process.execPath, [cliEntrypoint, 'next', issueStr], {
+        const nextArgs = [cliEntrypoint, 'next', issueStr];
+        if (agent) {
+          nextArgs.push('--agent', agent);
+        }
+        const result = spawnSync(process.execPath, nextArgs, {
           stdio: 'inherit',
           env: process.env,
         });
@@ -417,7 +424,7 @@ async function shipOneIssue(
   });
 }
 
-function shipOneIssueAsync(issue: string, logFile?: string): AsyncIssueRun {
+function shipOneIssueAsync(issue: string, logFile?: string, agent?: AgentName): AsyncIssueRun {
   const cliEntrypoint = process.argv[1];
   if (!cliEntrypoint) {
     throw new Error('Missing CLI entrypoint path.');
@@ -426,7 +433,11 @@ function shipOneIssueAsync(issue: string, logFile?: string): AsyncIssueRun {
   const stderr: string[] = [];
   const logStream = logFile ? createWriteStream(logFile) : undefined;
   let logStreamError: string | undefined;
-  const child = spawn(process.execPath, [cliEntrypoint, 'ship', issue, '--merge'], {
+  const shipArgs = [cliEntrypoint, 'ship', issue, '--merge'];
+  if (agent) {
+    shipArgs.push('--agent', agent);
+  }
+  const child = spawn(process.execPath, shipArgs, {
     stdio: logFile ? ['ignore', 'pipe', 'pipe'] : ['ignore', 'ignore', 'pipe'],
     env: process.env,
   });
@@ -601,11 +612,11 @@ export async function selectBlockedIssues(
   return issues.map((i) => ({ number: i.number, title: i.title }));
 }
 
-async function attemptUnblock(repo: string, issueStr: string): Promise<boolean> {
+async function attemptUnblock(repo: string, issueStr: string, agent?: AgentName): Promise<boolean> {
   await withIssueLock(
     repo,
     issueStr,
-    async () => await runPrompt('unblock', { repo, issueRef: issueStr })
+    async () => await runPrompt('unblock', { repo, issueRef: issueStr, agent })
   );
 
   // Check whether shipper:blocked was removed — this is the only reliable signal
@@ -644,7 +655,7 @@ export function printUnblockSummary(attempts: UnblockAttempt[]): void {
   }
 }
 
-async function shipAutoSequential(repo: string): Promise<void> {
+async function shipAutoSequential(repo: string, agent?: AgentName): Promise<void> {
   const skippedIssues = new Set<number>();
   const results: AutoResult[] = [];
   const allUnblockAttempts: UnblockAttempt[] = [];
@@ -656,7 +667,7 @@ async function shipAutoSequential(repo: string): Promise<void> {
       if (!candidate) break;
 
       console.log(`\nAuto: advancing issue #${candidate.number} — ${candidate.title}`);
-      const result = await shipOneIssue(repo, String(candidate.number), true);
+      const result = await shipOneIssue(repo, String(candidate.number), true, agent);
 
       if (result.success) {
         results.push({ issue: candidate.number, title: candidate.title, outcome: 'pass' });
@@ -678,7 +689,7 @@ async function shipAutoSequential(repo: string): Promise<void> {
     let progress = false;
     for (const issue of blocked) {
       console.log(`\nAuto: attempting unblock of #${issue.number} — ${issue.title}`);
-      const unblocked = await attemptUnblock(repo, String(issue.number));
+      const unblocked = await attemptUnblock(repo, String(issue.number), agent);
       allUnblockAttempts.push({
         issue: issue.number,
         title: issue.title,
@@ -698,7 +709,7 @@ async function shipAutoSequential(repo: string): Promise<void> {
   process.exit(0);
 }
 
-async function shipAutoParallel(repo: string, parallel: number): Promise<void> {
+async function shipAutoParallel(repo: string, parallel: number, agent?: AgentName): Promise<void> {
   const skippedIssues = new Set<number>();
   const results: AutoResult[] = [];
   const allUnblockAttempts: UnblockAttempt[] = [];
@@ -765,7 +776,7 @@ async function shipAutoParallel(repo: string, parallel: number): Promise<void> {
         console.log(
           `\n[#${candidate.number}] Auto: advancing issue #${candidate.number} — ${candidate.title}`
         );
-        const run = shipOneIssueAsync(String(candidate.number), logFile);
+        const run = shipOneIssueAsync(String(candidate.number), logFile, agent);
         logFiles.set(candidate.number, logFile);
         activeRuns.set(candidate.number, {
           issue: candidate,
@@ -785,7 +796,7 @@ async function shipAutoParallel(repo: string, parallel: number): Promise<void> {
           console.log(
             `\n[#${issue.number}] Auto: attempting unblock of #${issue.number} — ${issue.title}`
           );
-          const unblocked = await attemptUnblock(repo, String(issue.number));
+          const unblocked = await attemptUnblock(repo, String(issue.number), agent);
           allUnblockAttempts.push({
             issue: issue.number,
             title: issue.title,
@@ -851,11 +862,11 @@ export async function shipCommand(
   if (options.auto) {
     const parallel = options.parallel ?? 0;
     if (parallel >= 2) {
-      await shipAutoParallel(repo, parallel);
+      await shipAutoParallel(repo, parallel, options.agent);
       return;
     }
 
-    await shipAutoSequential(repo);
+    await shipAutoSequential(repo, options.agent);
     return;
   }
 
@@ -864,6 +875,6 @@ export async function shipCommand(
     console.error('Error: an issue number is required unless --auto is used.');
     process.exit(1);
   }
-  const result = await shipOneIssue(repo, issue, options.merge);
+  const result = await shipOneIssue(repo, issue, options.merge, options.agent);
   process.exit(result.success ? 0 : 1);
 }
