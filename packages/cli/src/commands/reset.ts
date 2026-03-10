@@ -1,14 +1,16 @@
 import { execFileSync } from 'node:child_process';
+import { existsSync, readdirSync } from 'node:fs';
+import { homedir } from 'node:os';
+import path from 'node:path';
 import { confirm, promptChoice } from '../lib/confirm.js';
-import { gh } from '@dnsquared/shipper-core';
-import { isLockStale } from '@dnsquared/shipper-core';
-import { getRepoNwo } from '@dnsquared/shipper-core';
+import { getRepoNwo, getRepoRoot, gh, isLockStale, removeWorktree } from '@dnsquared/shipper-core';
 
 const WORKFLOW_STAGES = ['new', 'groomed', 'designed', 'planned', 'implemented'] as const;
 const PR_STAGE_LABELS = ['shipper:pr-open', 'shipper:pr-reviewed', 'shipper:ready'] as const;
 const NON_WORKFLOW_STAGE_NAMES = new Set(['blocked', 'locked', 'pr-open', 'pr-reviewed', 'ready']);
 
 type WorkflowStage = (typeof WORKFLOW_STAGES)[number];
+type ErrnoError = Error & { code?: string };
 
 interface IssueViewData {
   number: number;
@@ -29,6 +31,8 @@ interface ArtifactScan {
   commentIds: number[];
   prs: PREntry[];
   branchesToDelete: string[];
+  localBranches: string[];
+  localWorktrees: string[];
 }
 
 interface CurrentStage {
@@ -123,7 +127,8 @@ async function scanArtifacts(
   issueNum: number,
   nwo: string,
   targetStage: WorkflowStage,
-  labels: string[]
+  labels: string[],
+  repoRoot: string
 ): Promise<ArtifactScan> {
   const targetIndex = getStageIndex(targetStage);
   const targetLabel = getStageLabel(targetStage);
@@ -233,6 +238,75 @@ async function scanArtifacts(
     .map((pr) => pr.headRefName)
     .filter((branchName) => branchName.startsWith('shipper/'));
 
+  const repoName = path.basename(repoRoot);
+  const worktreesRoot = path.join(homedir(), '.shipper', 'worktrees');
+  let localWorktrees: string[] = [];
+  try {
+    const entries = readdirSync(worktreesRoot, { withFileTypes: true });
+    localWorktrees = entries
+      .filter((entry) => {
+        if (!entry.isDirectory()) {
+          return false;
+        }
+
+        return (
+          entry.name === `${repoName}--wt--shipper-${issueNum}` ||
+          entry.name.startsWith(`${repoName}--wt--shipper-${issueNum}-`)
+        );
+      })
+      .map((entry) => path.join(worktreesRoot, entry.name));
+  } catch (err) {
+    const error = err as ErrnoError;
+    if (error.code !== 'ENOENT') {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`Warning: Could not scan local worktrees for issue #${issueNum}: ${msg}`);
+    }
+  }
+
+  let localBranches: string[] = [];
+  try {
+    const raw = execFileSync(
+      'git',
+      ['branch', '--list', `shipper/${issueNum}`, `shipper/${issueNum}-*`],
+      {
+        cwd: repoRoot,
+        encoding: 'utf-8',
+      }
+    );
+    localBranches = raw
+      .split('\n')
+      .map((line) => line.replace(/^\*/, '').trim())
+      .filter((branchName) => branchName !== '');
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`Warning: Could not scan local branches for issue #${issueNum}: ${msg}`);
+  }
+
+  if (localBranches.length > 0) {
+    try {
+      const currentBranch = execFileSync('git', ['branch', '--show-current'], {
+        cwd: repoRoot,
+        encoding: 'utf-8',
+      }).trim();
+
+      if (currentBranch && localBranches.includes(currentBranch)) {
+        console.warn(
+          `Warning: Skipping local branch ${currentBranch} because it is currently checked out.`
+        );
+        localBranches = localBranches.filter((branchName) => branchName !== currentBranch);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `Warning: Could not determine the current branch for issue #${issueNum}: ${msg}`
+      );
+      console.warn(
+        'Warning: Skipping local branch deletion because the checked-out branch is unknown.'
+      );
+      localBranches = [];
+    }
+  }
+
   return {
     labelsToRemove,
     addTarget,
@@ -241,6 +315,8 @@ async function scanArtifacts(
     commentIds,
     prs,
     branchesToDelete,
+    localBranches,
+    localWorktrees,
   };
 }
 
@@ -250,7 +326,9 @@ function isClean(scan: ArtifactScan): boolean {
     !scan.addTarget &&
     scan.commentIds.length === 0 &&
     scan.prs.length === 0 &&
-    scan.branchesToDelete.length === 0
+    scan.branchesToDelete.length === 0 &&
+    scan.localBranches.length === 0 &&
+    scan.localWorktrees.length === 0
   );
 }
 
@@ -272,11 +350,57 @@ function printDryRun(issueNum: number, scan: ArtifactScan): void {
   if (scan.branchesToDelete.length > 0) {
     console.log(`  Branches to delete: ${scan.branchesToDelete.join(', ')}`);
   }
+  if (scan.localWorktrees.length > 0) {
+    console.log(`  Local worktrees to remove: ${scan.localWorktrees.join(', ')}`);
+  }
+  if (scan.localBranches.length > 0) {
+    console.log(`  Local branches to delete: ${scan.localBranches.join(', ')}`);
+  }
   console.log('');
 }
 
-async function executeReset(issueNum: number, scan: ArtifactScan, nwo: string): Promise<void> {
+async function executeReset(
+  issueNum: number,
+  scan: ArtifactScan,
+  nwo: string,
+  repoRoot: string
+): Promise<void> {
   const actions: string[] = [];
+
+  const removedWorktrees: string[] = [];
+  for (const wtPath of scan.localWorktrees) {
+    try {
+      await removeWorktree(repoRoot, wtPath);
+      if (existsSync(wtPath)) {
+        console.warn(`  Warning: Failed to remove local worktree ${wtPath}.`);
+        continue;
+      }
+      removedWorktrees.push(wtPath);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`  Warning: Failed to remove local worktree ${wtPath}: ${msg}`);
+    }
+  }
+  if (removedWorktrees.length > 0) {
+    actions.push(`Removed local worktrees: ${removedWorktrees.join(', ')}`);
+  }
+
+  const deletedLocalBranches: string[] = [];
+  for (const branch of scan.localBranches) {
+    try {
+      execFileSync('git', ['branch', '-D', branch], {
+        cwd: repoRoot,
+        stdio: ['ignore', 'ignore', 'ignore'],
+      });
+      deletedLocalBranches.push(branch);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`  Warning: Failed to delete local branch ${branch}: ${msg}`);
+    }
+  }
+  if (deletedLocalBranches.length > 0) {
+    actions.push(`Deleted local branches: ${deletedLocalBranches.join(', ')}`);
+  }
 
   const closedPrBranches = new Set<string>();
   for (const pr of scan.prs) {
@@ -379,6 +503,7 @@ export async function resetCommand(
   const issueNum = Number(cleaned);
 
   const nwo = await getRepoNwo();
+  const repoRoot = await getRepoRoot();
 
   let issueJson: string;
   try {
@@ -459,7 +584,7 @@ export async function resetCommand(
     targetStage = selectedStage;
   }
 
-  const scan = await scanArtifacts(issueNum, nwo, targetStage, labels);
+  const scan = await scanArtifacts(issueNum, nwo, targetStage, labels, repoRoot);
 
   if (isClean(scan)) {
     console.log(
@@ -478,5 +603,5 @@ export async function resetCommand(
     }
   }
 
-  await executeReset(issueNum, scan, nwo);
+  await executeReset(issueNum, scan, nwo, repoRoot);
 }

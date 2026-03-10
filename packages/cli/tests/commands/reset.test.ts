@@ -1,14 +1,32 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { mockConfirm, mockPromptChoice, mockGetRepoNwo, mockExecFileSync, mockGh, mockIsLockStale } =
-  vi.hoisted(() => ({
-    mockConfirm: vi.fn(),
-    mockPromptChoice: vi.fn(),
-    mockGetRepoNwo: vi.fn(() => 'owner/repo'),
-    mockExecFileSync: vi.fn(),
-    mockGh: vi.fn(),
-    mockIsLockStale: vi.fn(() => true),
-  }));
+type ErrnoError = Error & { code?: string };
+
+const {
+  mockConfirm,
+  mockPromptChoice,
+  mockGetRepoNwo,
+  mockGetRepoRoot,
+  mockRemoveWorktree,
+  mockExecFileSync,
+  mockGh,
+  mockIsLockStale,
+  mockReaddirSync,
+  mockExistsSync,
+  mockHomedir,
+} = vi.hoisted(() => ({
+  mockConfirm: vi.fn(),
+  mockPromptChoice: vi.fn(),
+  mockGetRepoNwo: vi.fn(() => 'owner/repo'),
+  mockGetRepoRoot: vi.fn(async () => '/tmp/fake-repo'),
+  mockRemoveWorktree: vi.fn(async () => {}),
+  mockExecFileSync: vi.fn(),
+  mockGh: vi.fn(),
+  mockIsLockStale: vi.fn(() => true),
+  mockReaddirSync: vi.fn(),
+  mockExistsSync: vi.fn(),
+  mockHomedir: vi.fn(() => '/tmp/home'),
+}));
 
 vi.mock('../../src/lib/confirm.js', () => ({
   confirm: mockConfirm,
@@ -17,12 +35,23 @@ vi.mock('../../src/lib/confirm.js', () => ({
 
 vi.mock('@dnsquared/shipper-core', () => ({
   getRepoNwo: () => mockGetRepoNwo(),
+  getRepoRoot: () => mockGetRepoRoot(),
   gh: (...args: unknown[]) => mockGh(...args),
   isLockStale: (...args: unknown[]) => mockIsLockStale(...args),
+  removeWorktree: (...args: unknown[]) => mockRemoveWorktree(...args),
 }));
 
 vi.mock('node:child_process', () => ({
   execFileSync: (...args: unknown[]) => mockExecFileSync(...args),
+}));
+
+vi.mock('node:fs', () => ({
+  readdirSync: (...args: unknown[]) => mockReaddirSync(...args),
+  existsSync: (...args: unknown[]) => mockExistsSync(...args),
+}));
+
+vi.mock('node:os', () => ({
+  homedir: () => mockHomedir(),
 }));
 
 import { resetCommand } from '../../src/commands/reset.js';
@@ -33,13 +62,18 @@ const _mockExit = vi.spyOn(process, 'exit').mockImplementation((() => {
 
 const mockConsoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
 const mockConsoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-const _mockConsoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+const mockConsoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
 beforeEach(() => {
   vi.clearAllMocks();
   mockConfirm.mockResolvedValue(true);
   mockPromptChoice.mockResolvedValue('1');
   mockIsLockStale.mockReturnValue(true);
+  mockGetRepoRoot.mockResolvedValue('/tmp/fake-repo');
+  mockRemoveWorktree.mockResolvedValue(undefined);
+  mockReaddirSync.mockReturnValue([]);
+  mockExistsSync.mockReturnValue(false);
+  mockHomedir.mockReturnValue('/tmp/home');
 });
 
 function mockIssueView(state: string, labels: string[]) {
@@ -56,21 +90,39 @@ function setupExecMock(overrides?: {
   prJson?: string;
   commentsWithDates?: string;
   timelineByStage?: Record<string, string>;
+  localBranchesOutput?: string;
+  currentBranch?: string;
+  showCurrentError?: string;
+  deleteLocalBranchErrors?: Record<string, string>;
+  worktreeEntries?: Array<{ name: string; isDirectory?: boolean }>;
+  worktreeReadError?: ErrnoError;
+  existingPaths?: string[];
+  persistentWorktreePaths?: string[];
+  operationLog?: string[];
 }) {
   const issueJson = overrides?.issueJson ?? mockIssueView('OPEN', ['shipper:planned']);
   const commentIds = overrides?.commentIds ?? '';
   const prJson = overrides?.prJson ?? '[]';
   const commentsWithDates = overrides?.commentsWithDates ?? '';
   const timelineByStage = overrides?.timelineByStage ?? {};
+  const localBranchesOutput = overrides?.localBranchesOutput ?? '';
+  const currentBranch = overrides?.currentBranch ?? '';
+  const deleteLocalBranchErrors = overrides?.deleteLocalBranchErrors ?? {};
+  const operationLog = overrides?.operationLog;
+  const existingPaths = new Set(overrides?.existingPaths ?? []);
+  const persistentWorktreePaths = new Set(overrides?.persistentWorktreePaths ?? []);
 
   mockGh.mockImplementation(async (args: string[]) => {
-    if (args[0] === 'issue' && args[1] === 'view') return { stdout: issueJson, stderr: '' };
+    if (args[0] === 'issue' && args[1] === 'view') {
+      return { stdout: issueJson, stderr: '' };
+    }
 
     if (args[0] === 'api' && typeof args[1] === 'string' && args[1].includes('/timeline')) {
       const jqIndex = args.indexOf('--jq');
-      const jq = jqIndex === -1 ? '' : args[jqIndex + 1]!;
+      const jq = jqIndex === -1 ? '' : (args[jqIndex + 1] ?? '');
       const match = jq.match(/shipper:([a-z-]+)/);
-      return { stdout: match ? (timelineByStage[match[1]!] ?? '') : '', stderr: '' };
+      const stage = match?.[1];
+      return { stdout: stage ? (timelineByStage[stage] ?? '') : '', stderr: '' };
     }
 
     if (
@@ -80,13 +132,92 @@ function setupExecMock(overrides?: {
       !args.includes('DELETE')
     ) {
       const jqIndex = args.indexOf('--jq');
-      const jq = jqIndex === -1 ? '' : args[jqIndex + 1]!;
+      const jq = jqIndex === -1 ? '' : (args[jqIndex + 1] ?? '');
       return { stdout: jq.includes('created_at') ? commentsWithDates : commentIds, stderr: '' };
     }
 
     if (args[0] === 'pr' && args[1] === 'list') return { stdout: prJson, stderr: '' };
 
+    if (args[0] === 'pr' && args[1] === 'close') {
+      operationLog?.push(`gh pr close ${args[2]}`);
+      return { stdout: '', stderr: '' };
+    }
+
+    if (args[0] === 'api' && args.includes('DELETE')) {
+      operationLog?.push(`gh delete comment ${args[3]}`);
+      return { stdout: '', stderr: '' };
+    }
+
+    if (args[0] === 'issue' && args[1] === 'edit') {
+      operationLog?.push('gh issue edit');
+      return { stdout: '', stderr: '' };
+    }
+
+    if (args[0] === 'issue' && args[1] === 'comment') {
+      operationLog?.push('gh issue comment');
+      return { stdout: '', stderr: '' };
+    }
+
     return { stdout: '', stderr: '' };
+  });
+
+  mockReaddirSync.mockImplementation(() => {
+    if (overrides?.worktreeReadError) {
+      throw overrides.worktreeReadError;
+    }
+
+    return (overrides?.worktreeEntries ?? []).map((entry) => ({
+      name: entry.name,
+      isDirectory: () => entry.isDirectory ?? true,
+    }));
+  });
+
+  mockExistsSync.mockImplementation((candidate: string) => existingPaths.has(candidate));
+
+  mockRemoveWorktree.mockImplementation(async (_repoRoot: string, wtPath: string) => {
+    operationLog?.push(`removeWorktree ${wtPath}`);
+    if (!persistentWorktreePaths.has(wtPath)) {
+      existingPaths.delete(wtPath);
+    }
+  });
+
+  mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+    if (cmd !== 'git') {
+      return '';
+    }
+
+    if (args[0] === 'branch' && args[1] === '--list') {
+      operationLog?.push('git branch --list');
+      return localBranchesOutput;
+    }
+
+    if (args[0] === 'branch' && args[1] === '--show-current') {
+      operationLog?.push('git branch --show-current');
+      if (overrides?.showCurrentError) {
+        throw new Error(overrides.showCurrentError);
+      }
+      return currentBranch;
+    }
+
+    if (args[0] === 'branch' && args[1] === '-D') {
+      const branch = args[2];
+      if (!branch) {
+        throw new Error('Missing branch name');
+      }
+      operationLog?.push(`git branch -D ${branch}`);
+      const error = deleteLocalBranchErrors[branch];
+      if (error) {
+        throw new Error(error);
+      }
+      return '';
+    }
+
+    if (args[0] === 'push' && args[1] === 'origin' && args[2] === '--delete') {
+      operationLog?.push(`git push origin --delete ${args[3]}`);
+      return '';
+    }
+
+    return '';
   });
 }
 
@@ -104,6 +235,10 @@ function getIssueCommentBody(): string {
   );
 
   return ((call?.[0] as string[]) ?? [])[4] ?? '';
+}
+
+function getLocalWorktreePath(name: string): string {
+  return `/tmp/home/.shipper/worktrees/${name}`;
 }
 
 describe('resetCommand', () => {
@@ -336,6 +471,7 @@ describe('resetCommand', () => {
   });
 
   it('prints the dry-run summary before confirmation', async () => {
+    const localWorktree = getLocalWorktreePath('fake-repo--wt--shipper-18-add-reset');
     setupExecMock({
       issueJson: mockIssueView('OPEN', [
         'shipper:new',
@@ -347,6 +483,8 @@ describe('resetCommand', () => {
       commentsWithDates:
         '{"id":101,"created_at":"2024-01-15T12:01:01Z"}\n{"id":102,"created_at":"2024-01-15T12:01:02Z"}\n',
       prJson: JSON.stringify([{ number: 42, headRefName: 'shipper/18-add-reset' }]),
+      localBranchesOutput: '  shipper/18-add-reset\n',
+      worktreeEntries: [{ name: 'fake-repo--wt--shipper-18-add-reset' }],
     });
     mockConfirm.mockResolvedValue(false);
     mockPromptChoice.mockResolvedValue('2');
@@ -361,9 +499,67 @@ describe('resetCommand', () => {
     expect(mockConsoleLog).toHaveBeenCalledWith('  Comments to delete: 2');
     expect(mockConsoleLog).toHaveBeenCalledWith('  PRs to close: #42');
     expect(mockConsoleLog).toHaveBeenCalledWith('  Branches to delete: shipper/18-add-reset');
+    expect(mockConsoleLog).toHaveBeenCalledWith(`  Local worktrees to remove: ${localWorktree}`);
+    expect(mockConsoleLog).toHaveBeenCalledWith('  Local branches to delete: shipper/18-add-reset');
   });
 
-  it('executes cleanup in the expected order', async () => {
+  it('leaves local cleanup inactive when no local artifacts exist', async () => {
+    const missingDirError = new Error('missing') as ErrnoError;
+    missingDirError.code = 'ENOENT';
+
+    setupExecMock({
+      issueJson: mockIssueView('OPEN', ['shipper:planned']),
+      commentIds: '101\n',
+      worktreeReadError: missingDirError,
+    });
+
+    await resetCommand('18', { force: true, to: 'new' });
+
+    expect(mockRemoveWorktree).not.toHaveBeenCalled();
+    expect(mockExecFileSync).not.toHaveBeenCalledWith(
+      'git',
+      ['branch', '-D', expect.any(String)],
+      expect.any(Object)
+    );
+    expect(mockConsoleWarn).not.toHaveBeenCalledWith(
+      expect.stringContaining('Could not scan local worktrees')
+    );
+    expect(mockConsoleWarn).not.toHaveBeenCalledWith(
+      expect.stringContaining('Skipping local branch')
+    );
+  });
+
+  it('warns and skips deleting the checked-out local branch while continuing reset cleanup', async () => {
+    const localWorktree = getLocalWorktreePath('fake-repo--wt--shipper-18-add-reset');
+    setupExecMock({
+      issueJson: mockIssueView('OPEN', ['shipper:implemented', 'shipper:pr-open']),
+      timelineByStage: { implemented: '2024-01-15T12:00:00Z\n' },
+      commentsWithDates: '',
+      prJson: JSON.stringify([{ number: 42, headRefName: 'shipper/18-add-reset' }]),
+      localBranchesOutput: '* shipper/18-add-reset\n',
+      currentBranch: 'shipper/18-add-reset',
+      worktreeEntries: [{ name: 'fake-repo--wt--shipper-18-add-reset' }],
+      existingPaths: [localWorktree],
+    });
+
+    await resetCommand('18', { force: true, to: 'implemented' });
+
+    expect(mockConsoleWarn).toHaveBeenCalledWith(
+      'Warning: Skipping local branch shipper/18-add-reset because it is currently checked out.'
+    );
+    expect(mockRemoveWorktree).toHaveBeenCalledWith('/tmp/fake-repo', localWorktree);
+    expect(mockExecFileSync).not.toHaveBeenCalledWith(
+      'git',
+      ['branch', '-D', 'shipper/18-add-reset'],
+      expect.any(Object)
+    );
+    expect(mockGh).toHaveBeenCalledWith(['pr', 'close', '42']);
+    expect(getIssueCommentBody()).toContain('This issue has been reset to `shipper:implemented`.');
+  });
+
+  it('executes local and remote cleanup in the expected order', async () => {
+    const operations: string[] = [];
+    const localWorktree = getLocalWorktreePath('fake-repo--wt--shipper-18-add-reset');
     setupExecMock({
       issueJson: mockIssueView('OPEN', [
         'shipper:groomed',
@@ -373,35 +569,98 @@ describe('resetCommand', () => {
       ]),
       commentIds: '101\n',
       prJson: JSON.stringify([{ number: 42, headRefName: 'shipper/18-add-reset' }]),
+      localBranchesOutput: '  shipper/18-add-reset\n',
+      currentBranch: 'main',
+      worktreeEntries: [{ name: 'fake-repo--wt--shipper-18-add-reset' }],
+      existingPaths: [localWorktree],
+      operationLog: operations,
     });
 
     await resetCommand('18', { force: true, to: 'new' });
 
-    const ghCleanupCalls = mockGh.mock.calls
-      .map(([args]) => args as string[])
-      .filter(
-        (args) =>
-          (args[0] === 'pr' && args[1] === 'close') ||
-          args.includes('DELETE') ||
-          (args[0] === 'issue' && args[1] === 'edit') ||
-          (args[0] === 'issue' && args[1] === 'comment')
-      );
-    const gitCleanupCalls = mockExecFileSync.mock.calls
-      .map(([cmd, args]) => ({ cmd: cmd as string, args: args as string[] }))
-      .filter((entry) => entry.cmd === 'git' && entry.args.includes('--delete'));
+    expect(operations.indexOf(`removeWorktree ${localWorktree}`)).toBeLessThan(
+      operations.indexOf('git branch -D shipper/18-add-reset')
+    );
+    expect(operations.indexOf('git branch -D shipper/18-add-reset')).toBeLessThan(
+      operations.indexOf('gh pr close 42')
+    );
+    expect(operations.indexOf('gh pr close 42')).toBeLessThan(
+      operations.indexOf('git push origin --delete shipper/18-add-reset')
+    );
+  });
 
-    expect(ghCleanupCalls[0]![1]).toBe('close');
-    expect(gitCleanupCalls[0]!.cmd).toBe('git');
-    expect(gitCleanupCalls[0]!.args).toEqual([
-      'push',
-      'origin',
-      '--delete',
-      'shipper/18-add-reset',
+  it('removes a worktree even when the local branch is already gone', async () => {
+    const localWorktree = getLocalWorktreePath('fake-repo--wt--shipper-18-add-reset');
+    setupExecMock({
+      issueJson: mockIssueView('OPEN', ['shipper:planned']),
+      commentIds: '',
+      worktreeEntries: [{ name: 'fake-repo--wt--shipper-18-add-reset' }],
+      existingPaths: [localWorktree],
+    });
+
+    await resetCommand('18', { force: true, to: 'new' });
+
+    expect(mockRemoveWorktree).toHaveBeenCalledWith('/tmp/fake-repo', localWorktree);
+    expect(mockExecFileSync).not.toHaveBeenCalledWith(
+      'git',
+      ['branch', '-D', expect.any(String)],
+      expect.any(Object)
+    );
+  });
+
+  it('deletes a local branch even when the worktree is already gone', async () => {
+    setupExecMock({
+      issueJson: mockIssueView('OPEN', ['shipper:planned']),
+      commentIds: '',
+      localBranchesOutput: '  shipper/18-add-reset\n',
+      currentBranch: 'main',
+    });
+
+    await resetCommand('18', { force: true, to: 'new' });
+
+    expect(mockRemoveWorktree).not.toHaveBeenCalled();
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      'git',
+      ['branch', '-D', 'shipper/18-add-reset'],
+      expect.objectContaining({
+        cwd: '/tmp/fake-repo',
+        stdio: ['ignore', 'ignore', 'ignore'],
+      })
+    );
+  });
+
+  it('warns on local cleanup failures and still completes the rest of the reset', async () => {
+    const localWorktree = getLocalWorktreePath('fake-repo--wt--shipper-18-add-reset');
+    setupExecMock({
+      issueJson: mockIssueView('OPEN', ['shipper:implemented', 'shipper:pr-open']),
+      timelineByStage: { implemented: '2024-01-15T12:00:00Z\n' },
+      commentsWithDates: '{"id":101,"created_at":"2024-01-15T12:01:01Z"}\n',
+      prJson: JSON.stringify([{ number: 42, headRefName: 'shipper/18-add-reset' }]),
+      localBranchesOutput: '  shipper/18-add-reset\n',
+      currentBranch: 'main',
+      worktreeEntries: [{ name: 'fake-repo--wt--shipper-18-add-reset' }],
+      existingPaths: [localWorktree],
+      persistentWorktreePaths: [localWorktree],
+      deleteLocalBranchErrors: { 'shipper/18-add-reset': 'branch delete failed' },
+    });
+
+    await resetCommand('18', { force: true, to: 'implemented' });
+
+    expect(mockConsoleWarn).toHaveBeenCalledWith(
+      `  Warning: Failed to remove local worktree ${localWorktree}.`
+    );
+    expect(mockConsoleWarn).toHaveBeenCalledWith(
+      '  Warning: Failed to delete local branch shipper/18-add-reset: branch delete failed'
+    );
+    expect(mockGh).toHaveBeenCalledWith(['pr', 'close', '42']);
+    expect(mockGh).toHaveBeenCalledWith([
+      'api',
+      '-X',
+      'DELETE',
+      'repos/owner/repo/issues/comments/101',
     ]);
-    expect(ghCleanupCalls[1]!.includes('DELETE')).toBe(true);
-    expect(ghCleanupCalls[1]![3]).toBe('repos/owner/repo/issues/comments/101');
-    expect(ghCleanupCalls[2]![1]).toBe('edit');
-    expect(ghCleanupCalls[3]![1]).toBe('comment');
+    expect(getIssueEditArgs()).toContain('--remove-label');
+    expect(getIssueCommentBody()).toContain('This issue has been reset to `shipper:implemented`.');
   });
 
   it('rejects resetting to the current stage', async () => {
@@ -511,7 +770,9 @@ describe('resetCommand', () => {
 
     const deleteCalls = mockGh.mock.calls.filter(([args]) => (args as string[]).includes('DELETE'));
     expect(deleteCalls).toHaveLength(1);
-    expect((deleteCalls[0]![0] as string[])[3]).toBe('repos/owner/repo/issues/comments/303');
+    const firstDeleteCall = deleteCalls[0]?.[0] as string[] | undefined;
+    expect(firstDeleteCall).toBeDefined();
+    expect(firstDeleteCall?.[3]).toBe('repos/owner/repo/issues/comments/303');
   });
 
   it('deletes all comments when resetting to new', async () => {
@@ -592,7 +853,9 @@ describe('resetCommand', () => {
 
     const deleteCalls = mockGh.mock.calls.filter(([args]) => (args as string[]).includes('DELETE'));
     expect(deleteCalls).toHaveLength(1);
-    expect((deleteCalls[0]![0] as string[])[3]).toBe('repos/owner/repo/issues/comments/502');
+    const firstDeleteCall = deleteCalls[0]?.[0] as string[] | undefined;
+    expect(firstDeleteCall).toBeDefined();
+    expect(firstDeleteCall?.[3]).toBe('repos/owner/repo/issues/comments/502');
   });
 
   it('filters branches to only shipper-prefixed names for deletion', async () => {
@@ -641,7 +904,9 @@ describe('resetCommand', () => {
       ([args]) => (args as string[])[0] === 'pr' && (args as string[])[1] === 'close'
     );
     expect(closeCalls).toHaveLength(1);
-    expect((closeCalls[0]![0] as string[])[2]).toBe('52');
+    const firstCloseCall = closeCalls[0]?.[0] as string[] | undefined;
+    expect(firstCloseCall).toBeDefined();
+    expect(firstCloseCall?.[2]).toBe('52');
   });
 
   it('posts a generalized reset notice for implemented targets', async () => {
