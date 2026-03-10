@@ -42,6 +42,7 @@ describe('loadSettings', () => {
     expect(getSettings()).toEqual({
       prReviewWait: { mode: 'checks', timeoutMinutes: 15 },
       lockTimeoutMinutes: 30,
+      agentTimeoutMinutes: 60,
       commands: { default: { agent: 'claude' } },
       hooks: {},
       merge: { requirePassingChecks: true },
@@ -190,6 +191,7 @@ describe('getSettings', () => {
     expect(getSettings()).toEqual({
       prReviewWait: { mode: 'checks', timeoutMinutes: 15 },
       lockTimeoutMinutes: 30,
+      agentTimeoutMinutes: 60,
       commands: { default: { agent: 'claude' } },
       hooks: {},
       merge: { requirePassingChecks: true },
@@ -260,6 +262,37 @@ describe('lockTimeoutMinutes', () => {
     const { loadSettings, getSettings } = await loadModule();
     await loadSettings();
     expect(getSettings().lockTimeoutMinutes).toBe(5);
+  });
+});
+
+describe('agentTimeoutMinutes', () => {
+  it('defaults to 60', async () => {
+    readFileMock.mockImplementation(async (p: string) => {
+      throw enoent(p);
+    });
+    const { loadSettings, getSettings } = await loadModule();
+    await loadSettings();
+    expect(getSettings().agentTimeoutMinutes).toBe(60);
+  });
+
+  it('can be overridden via settings file', async () => {
+    readFileMock.mockImplementation(async (p: string) => {
+      if (p === settingsPath) return '{"agentTimeoutMinutes": 120}';
+      throw enoent(p);
+    });
+    const { loadSettings, getSettings } = await loadModule();
+    await loadSettings();
+    expect(getSettings().agentTimeoutMinutes).toBe(120);
+  });
+
+  it('can be set to 0 to disable', async () => {
+    readFileMock.mockImplementation(async (p: string) => {
+      if (p === settingsPath) return '{"agentTimeoutMinutes": 0}';
+      throw enoent(p);
+    });
+    const { loadSettings, getSettings } = await loadModule();
+    await loadSettings();
+    expect(getSettings().agentTimeoutMinutes).toBe(0);
   });
 });
 

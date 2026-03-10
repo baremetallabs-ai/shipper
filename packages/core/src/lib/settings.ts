@@ -21,6 +21,7 @@ export interface MergeSettings {
 export interface Settings {
   prReviewWait: PrReviewWait;
   lockTimeoutMinutes: number;
+  agentTimeoutMinutes: number;
   commands: {
     default: CommandConfig & { agent: AgentName };
     [step: string]: CommandConfig | undefined;
@@ -38,6 +39,7 @@ export interface Settings {
 export const DEFAULTS: Settings = {
   prReviewWait: { mode: 'checks', timeoutMinutes: 15 },
   lockTimeoutMinutes: 30,
+  agentTimeoutMinutes: 60,
   commands: { default: { agent: 'claude' as const } },
   hooks: {},
   merge: { requirePassingChecks: true },
@@ -46,6 +48,7 @@ export const DEFAULTS: Settings = {
 export const SETTING_DESCRIPTIONS: Record<string, string> = {
   prReviewWait: 'PR review wait strategy: { mode: "checks" | "timer", timeoutMinutes: number }',
   lockTimeoutMinutes: 'stale lock timeout (minutes) before auto-clearing shipper:locked',
+  agentTimeoutMinutes: 'agent process timeout in headless mode (minutes); 0 to disable',
   commands:
     'per-command settings map (e.g. { "default": { "agent": "claude" }, "groom": { "mode": "headless" } })',
   'commands.default.agent':
