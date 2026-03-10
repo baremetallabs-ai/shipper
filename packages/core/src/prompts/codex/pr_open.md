@@ -237,6 +237,56 @@ When complete, report:
 
 ---
 
+## Environment failure escape hatch
+
+If a failure is caused by the **environment, sandbox, or repository configuration** — not by a code problem you can fix — stop immediately and escalate. Do not retry.
+
+Use a general heuristic to distinguish environment failures from code failures. Examples of environment failures include:
+
+- Sandbox permission denials (file system, network, or process restrictions)
+- Missing CLI tools, language runtimes, or build toolchains
+- Dependency install failures (`npm install`, `pip install`, etc.) caused by registry issues, auth errors, or missing system libraries
+- Build system misconfiguration that predates the current change
+- File system permission errors unrelated to the current change
+- Network or credential issues the agent cannot resolve
+
+**When you detect an environment failure:**
+
+1. Stop the current operation immediately. Do not retry or attempt workarounds.
+2. Write a structured failure report to `./.shipper/tmp/env-failure-<number>.md` (using the issue number):
+
+   ````markdown
+   ## Environment Failure
+
+   ### What failed
+
+   [Description of the command or operation that failed]
+
+   ### Error output
+
+   ```
+   [Relevant error output, trimmed to the essential lines]
+   ```
+
+   ### Likely cause
+
+   [Your assessment of why this is an environment/config issue, not a code issue]
+
+   ### Suggested fix
+
+   [What the human should check or fix before re-running]
+
+   ### How to re-run
+
+   Remove the `shipper:failed` label, then run `shipper pr open` again.
+   ````
+
+3. Post the comment: `gh issue comment <ISSUE> --body-file ./.shipper/tmp/env-failure-<number>.md`
+4. Update labels: `gh issue edit <ISSUE> --add-label "shipper:failed" --remove-label "shipper:locked"`
+5. Stop. Do **not** roll back the stage label — the plan/design is not what failed.
+
+---
+
 ## Stop conditions
 
 - If the implementation is fundamentally broken (build fails due to architecture, tests reveal incorrect behavior), post a comment on the issue explaining the problem, roll back labels (`gh issue edit <ISSUE> --add-label "shipper:planned" --remove-label "shipper:pr-open"`), and stop. Recommend the user run `shipper implement` again.
