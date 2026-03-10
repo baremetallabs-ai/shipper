@@ -14,6 +14,10 @@ export interface CommandConfig {
   agent?: AgentName;
 }
 
+export interface MergeSettings {
+  requirePassingChecks: boolean;
+}
+
 export interface Settings {
   prReviewWait: PrReviewWait;
   lockTimeoutMinutes: number;
@@ -27,6 +31,7 @@ export interface Settings {
     worktreeSetup?: string;
     worktreeTeardown?: string;
   };
+  merge: MergeSettings;
   cliVersion?: string;
 }
 
@@ -35,6 +40,7 @@ export const DEFAULTS: Settings = {
   lockTimeoutMinutes: 30,
   commands: { default: { agent: 'claude' as const } },
   hooks: {},
+  merge: { requirePassingChecks: true },
 };
 
 export const SETTING_DESCRIPTIONS: Record<string, string> = {
@@ -52,6 +58,7 @@ export const SETTING_DESCRIPTIONS: Record<string, string> = {
   'hooks.worktreeSetup':
     'shell command to run after a worktree is created (before the agent starts)',
   'hooks.worktreeTeardown': 'shell command to run before a worktree is removed',
+  'merge.requirePassingChecks': 'require all CI checks to pass before auto-merging (default: true)',
 };
 
 let settings: Settings | undefined;
@@ -116,6 +123,7 @@ export async function loadSettings(): Promise<void> {
     ...base,
     ...local,
     hooks: { ...DEFAULTS.hooks, ...base?.hooks, ...local?.hooks },
+    merge: { ...DEFAULTS.merge, ...base?.merge, ...local?.merge },
     commands: mergedCommands,
   };
 
@@ -132,6 +140,7 @@ export function getSettings(): Settings {
       ...DEFAULTS,
       commands: { default: { ...DEFAULTS.commands.default } },
       hooks: { ...DEFAULTS.hooks },
+      merge: { ...DEFAULTS.merge },
     }
   );
 }

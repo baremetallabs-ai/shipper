@@ -44,6 +44,7 @@ describe('loadSettings', () => {
       lockTimeoutMinutes: 30,
       commands: { default: { agent: 'claude' } },
       hooks: {},
+      merge: { requirePassingChecks: true },
     });
   });
 
@@ -191,6 +192,7 @@ describe('getSettings', () => {
       lockTimeoutMinutes: 30,
       commands: { default: { agent: 'claude' } },
       hooks: {},
+      merge: { requirePassingChecks: true },
     });
   });
 });
@@ -380,5 +382,37 @@ describe('resolveMode', () => {
     await loadSettings();
 
     expect(() => resolveMode('groom')).toThrow('Invalid mode "banana" for step "groom"');
+  });
+});
+
+describe('merge settings', () => {
+  it('defaults requirePassingChecks to true', async () => {
+    readFileMock.mockImplementation(async (p: string) => {
+      throw enoent(p);
+    });
+    const { loadSettings, getSettings } = await loadModule();
+    await loadSettings();
+    expect(getSettings().merge).toEqual({ requirePassingChecks: true });
+  });
+
+  it('can be overridden to false', async () => {
+    readFileMock.mockImplementation(async (p: string) => {
+      if (p === settingsPath) return '{"merge": {"requirePassingChecks": false}}';
+      throw enoent(p);
+    });
+    const { loadSettings, getSettings } = await loadModule();
+    await loadSettings();
+    expect(getSettings().merge.requirePassingChecks).toBe(false);
+  });
+
+  it('local overrides base merge settings', async () => {
+    readFileMock.mockImplementation(async (p: string) => {
+      if (p === settingsPath) return '{"merge": {"requirePassingChecks": true}}';
+      if (p === localPath) return '{"merge": {"requirePassingChecks": false}}';
+      throw enoent(p);
+    });
+    const { loadSettings, getSettings } = await loadModule();
+    await loadSettings();
+    expect(getSettings().merge.requirePassingChecks).toBe(false);
   });
 });

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fetchChecks, classifyChecks } from '@dnsquared/shipper-core';
 import { gh } from '@dnsquared/shipper-core';
+import { getSettings } from '@dnsquared/shipper-core';
 import { tryResolvePrForIssue } from '@dnsquared/shipper-core';
 import { getRepoNwo } from '@dnsquared/shipper-core';
 import { withStageHooks } from '@dnsquared/shipper-core';
@@ -454,6 +455,34 @@ async function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): Promise<bo
   if (mergeState !== 'CLEAN' && mergeState !== 'HAS_HOOKS' && mergeState !== 'UNSTABLE') {
     console.log(`  Unexpected merge state: ${mergeState}. Will retry next cycle.`);
     return false;
+  }
+
+  // Verify all checks pass when required by settings
+  if (getSettings().merge.requirePassingChecks) {
+    let checks;
+    try {
+      checks = await fetchChecks(nwo, String(pr.number));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await failPR(pr, `Could not fetch CI checks: ${msg}`, nwo, dryRun);
+      return false;
+    }
+
+    if (checks.length > 0) {
+      const { pending, failed } = classifyChecks(checks);
+
+      if (failed.length > 0) {
+        const names = failed.map((c) => c.name).join(', ');
+        await failPR(pr, `CI checks failed: ${names}`, nwo, dryRun);
+        return false;
+      }
+
+      if (pending.length > 0) {
+        const names = pending.map((c) => c.name).join(', ');
+        console.log(`  Checks still running: ${names}. Will retry next cycle.`);
+        return false;
+      }
+    }
   }
 
   // Ready to merge

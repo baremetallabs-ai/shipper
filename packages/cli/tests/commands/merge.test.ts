@@ -3,6 +3,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 const tryResolvePrForIssueMock = vi.fn();
 const getSettingsMock = vi.fn();
 const ghMock = vi.fn();
+const fetchChecksMock = vi.fn();
+const classifyChecksMock = vi.fn();
 vi.mock('@dnsquared/shipper-core', () => ({
   getSettings: () => getSettingsMock(),
   gh: (...args: unknown[]) => ghMock(...args),
@@ -11,8 +13,8 @@ vi.mock('@dnsquared/shipper-core', () => ({
   withStageHooks: vi.fn(
     async (_stage: unknown, _env: unknown, fn: () => Promise<unknown>) => await fn()
   ),
-  fetchChecks: vi.fn(),
-  classifyChecks: vi.fn(),
+  fetchChecks: (...args: unknown[]) => fetchChecksMock(...args),
+  classifyChecks: (...args: unknown[]) => classifyChecksMock(...args),
 }));
 
 const logMock = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -23,16 +25,20 @@ beforeEach(() => {
   ghMock.mockReset();
   getSettingsMock.mockReset();
   tryResolvePrForIssueMock.mockReset();
+  fetchChecksMock.mockReset();
+  classifyChecksMock.mockReset();
   logMock.mockClear();
   warnMock.mockClear();
   errorMock.mockClear();
   getSettingsMock.mockReturnValue({
     prReviewWait: { mode: 'checks', timeoutMinutes: 30 },
     hooks: {},
+    merge: { requirePassingChecks: true },
   });
 });
 
-const { getLinkedIssueNumber, postMerge, lookupPR } = await import('../../src/commands/merge.js');
+const { getLinkedIssueNumber, postMerge, lookupPR, mergeCommand } =
+  await import('../../src/commands/merge.js');
 
 const mockPR = {
   number: 42,
@@ -207,5 +213,158 @@ describe('lookupPR', () => {
 
     await expect(lookupPR('99', 'owner/repo')).rejects.toThrow('exit:1');
     expect(errorMock).toHaveBeenCalledWith('Error: #99 is not a PR and no linked PR was found.');
+  });
+});
+
+describe('requirePassingChecks', () => {
+  let exitSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    exitSpy = vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
+      throw new Error(`exit:${code}`);
+    });
+  });
+
+  afterEach(() => {
+    exitSpy.mockRestore();
+  });
+
+  function mockPRLookup(mergeStateStatus: string) {
+    ghMock.mockImplementation(async (args: string[]) => {
+      if (args[0] === 'pr' && args[1] === 'view') {
+        const jsonFields = args[args.indexOf('--json') + 1] ?? '';
+        if (jsonFields.includes('mergeStateStatus')) {
+          return { stdout: JSON.stringify({ mergeStateStatus }), stderr: '' };
+        }
+        if (jsonFields.includes('state')) {
+          return {
+            stdout: JSON.stringify({
+              number: 42,
+              title: 'Test PR',
+              headRefName: 'feat',
+              baseRefName: 'main',
+              state: 'OPEN',
+              labels: [{ name: 'shipper:ready' }],
+            }),
+            stderr: '',
+          };
+        }
+        if (jsonFields.includes('body')) {
+          return { stdout: JSON.stringify({ body: 'Closes #10' }), stderr: '' };
+        }
+      }
+      if (args[0] === 'pr' && args[1] === 'merge') {
+        return { stdout: '', stderr: '' };
+      }
+      if (args[0] === 'issue') {
+        return { stdout: '', stderr: '' };
+      }
+      return { stdout: '', stderr: '' };
+    });
+  }
+
+  it('merges when all checks pass and requirePassingChecks is true', async () => {
+    mockPRLookup('CLEAN');
+    fetchChecksMock.mockResolvedValue([{ name: 'ci', state: 'SUCCESS', bucket: 'pass' }]);
+    classifyChecksMock.mockReturnValue({
+      pending: [],
+      failed: [],
+      passed: [{ name: 'ci', state: 'SUCCESS', bucket: 'pass' }],
+      total: 1,
+    });
+
+    await mergeCommand({ interval: '30', once: true, dryRun: false, number: '42' });
+
+    expect(ghMock).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        'pr',
+        'merge',
+        '42',
+        '-R',
+        'owner/repo',
+        '--rebase',
+        '--delete-branch',
+      ])
+    );
+  });
+
+  it('fails PR when checks are failing and requirePassingChecks is true', async () => {
+    mockPRLookup('CLEAN');
+    fetchChecksMock.mockResolvedValue([{ name: 'ci', state: 'FAILURE', bucket: 'fail' }]);
+    classifyChecksMock.mockReturnValue({
+      pending: [],
+      failed: [{ name: 'ci', state: 'FAILURE', bucket: 'fail' }],
+      passed: [],
+      total: 1,
+    });
+
+    await expect(
+      mergeCommand({ interval: '30', once: true, dryRun: false, number: '42' })
+    ).rejects.toThrow('exit:1');
+
+    expect(logMock).toHaveBeenCalledWith(expect.stringContaining('CI checks failed: ci'));
+  });
+
+  it('retries when checks are pending and requirePassingChecks is true', async () => {
+    mockPRLookup('CLEAN');
+    fetchChecksMock.mockResolvedValue([{ name: 'ci', state: 'PENDING', bucket: 'pending' }]);
+    classifyChecksMock.mockReturnValue({
+      pending: [{ name: 'ci', state: 'PENDING', bucket: 'pending' }],
+      failed: [],
+      passed: [],
+      total: 1,
+    });
+
+    await expect(
+      mergeCommand({ interval: '30', once: true, dryRun: false, number: '42' })
+    ).rejects.toThrow('exit:1');
+
+    expect(logMock).toHaveBeenCalledWith(
+      expect.stringContaining('Checks still running: ci. Will retry next cycle.')
+    );
+  });
+
+  it('merges when no checks exist and requirePassingChecks is true', async () => {
+    mockPRLookup('CLEAN');
+    fetchChecksMock.mockResolvedValue([]);
+    classifyChecksMock.mockReturnValue({ pending: [], failed: [], passed: [], total: 0 });
+
+    await mergeCommand({ interval: '30', once: true, dryRun: false, number: '42' });
+
+    expect(ghMock).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        'pr',
+        'merge',
+        '42',
+        '-R',
+        'owner/repo',
+        '--rebase',
+        '--delete-branch',
+      ])
+    );
+  });
+
+  it('skips check verification when requirePassingChecks is false', async () => {
+    getSettingsMock.mockReturnValue({
+      prReviewWait: { mode: 'checks', timeoutMinutes: 30 },
+      hooks: {},
+      merge: { requirePassingChecks: false },
+    });
+    mockPRLookup('CLEAN');
+
+    await mergeCommand({ interval: '30', once: true, dryRun: false, number: '42' });
+
+    expect(fetchChecksMock).not.toHaveBeenCalled();
+    expect(ghMock).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        'pr',
+        'merge',
+        '42',
+        '-R',
+        'owner/repo',
+        '--rebase',
+        '--delete-branch',
+      ])
+    );
   });
 });
