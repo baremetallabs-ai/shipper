@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import path from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const spawnMock = vi.fn();
 const readFileMock = vi.fn();
@@ -8,6 +8,7 @@ const fetchIssueMock = vi.fn();
 const fetchPRMock = vi.fn();
 const resolveAgentMock = vi.fn().mockReturnValue('claude');
 const resolveModeMock = vi.fn().mockReturnValue('default');
+const getSettingsMock = vi.fn().mockReturnValue({ agentTimeoutMinutes: 60 });
 
 vi.mock('node:child_process', async () => {
   const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
@@ -27,6 +28,7 @@ vi.mock('../../src/lib/github.js', () => ({
 vi.mock('../../src/lib/settings.js', () => ({
   resolveAgent: (...args: unknown[]) => resolveAgentMock(...args),
   resolveMode: (...args: unknown[]) => resolveModeMock(...args),
+  getSettings: () => getSettingsMock(),
 }));
 vi.mock('../../src/lib/prompts.js', () => ({
   agentPrompts: {
@@ -74,6 +76,7 @@ afterEach(() => {
   vi.clearAllMocks();
   resolveAgentMock.mockReturnValue('claude');
   resolveModeMock.mockReturnValue('default');
+  getSettingsMock.mockReturnValue({ agentTimeoutMinutes: 60 });
   fetchIssueMock.mockResolvedValue('issue body');
   fetchPRMock.mockResolvedValue('pr body');
 });
@@ -318,5 +321,123 @@ describe('runPrompt', () => {
     expect(spawnedArgs()).not.toContain('exec');
     expect(spawnedArgs()).not.toContain('--full-auto');
     expect(spawnedArgs()).not.toContain('sandbox_workspace_write.network_access=true');
+  });
+});
+
+describe('agent timeout', () => {
+  const errorMock = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    errorMock.mockClear();
+  });
+
+  it('sends SIGTERM after timeout in headless mode', async () => {
+    resolveModeMock.mockReturnValue('headless');
+    getSettingsMock.mockReturnValue({ agentTimeoutMinutes: 60 });
+    readFileMock.mockResolvedValueOnce(makePrompt('claude'));
+
+    const child = Object.assign(new EventEmitter(), { kill: vi.fn() }) as EventEmitter & {
+      kill: ReturnType<typeof vi.fn>;
+    };
+    spawnMock.mockReturnValueOnce(child);
+
+    const promise = runPrompt('test', { mode: 'headless' });
+
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(errorMock).toHaveBeenCalledWith('Agent timed out after 60 minutes');
+
+    child.emit('close', 143);
+    await expect(promise).resolves.toBe(143);
+  });
+
+  it('sends SIGKILL after 10s grace period if process does not exit', async () => {
+    resolveModeMock.mockReturnValue('headless');
+    getSettingsMock.mockReturnValue({ agentTimeoutMinutes: 60 });
+    readFileMock.mockResolvedValueOnce(makePrompt('claude'));
+
+    const child = Object.assign(new EventEmitter(), { kill: vi.fn() }) as EventEmitter & {
+      kill: ReturnType<typeof vi.fn>;
+    };
+    spawnMock.mockReturnValueOnce(child);
+
+    const promise = runPrompt('test', { mode: 'headless' });
+
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+
+    child.emit('close', 137);
+    await expect(promise).resolves.toBe(137);
+  });
+
+  it('does not set timeout in interactive mode', async () => {
+    resolveModeMock.mockReturnValue('interactive');
+    getSettingsMock.mockReturnValue({ agentTimeoutMinutes: 60 });
+    readFileMock.mockResolvedValueOnce(makePrompt('claude'));
+
+    const child = Object.assign(new EventEmitter(), { kill: vi.fn() }) as EventEmitter & {
+      kill: ReturnType<typeof vi.fn>;
+    };
+    spawnMock.mockReturnValueOnce(child);
+
+    const promise = runPrompt('test', { mode: 'interactive' });
+
+    await vi.advanceTimersByTimeAsync(60 * 60_000 + 10_000);
+    expect(child.kill).not.toHaveBeenCalled();
+
+    child.emit('close', 0);
+    await expect(promise).resolves.toBe(0);
+  });
+
+  it('does not set timeout when agentTimeoutMinutes is 0', async () => {
+    resolveModeMock.mockReturnValue('headless');
+    getSettingsMock.mockReturnValue({ agentTimeoutMinutes: 0 });
+    readFileMock.mockResolvedValueOnce(makePrompt('claude'));
+
+    const child = Object.assign(new EventEmitter(), { kill: vi.fn() }) as EventEmitter & {
+      kill: ReturnType<typeof vi.fn>;
+    };
+    spawnMock.mockReturnValueOnce(child);
+
+    const promise = runPrompt('test', { mode: 'headless' });
+
+    await vi.advanceTimersByTimeAsync(120 * 60_000);
+    expect(child.kill).not.toHaveBeenCalled();
+
+    child.emit('close', 0);
+    await expect(promise).resolves.toBe(0);
+  });
+
+  it('clears timers on normal exit before timeout', async () => {
+    resolveModeMock.mockReturnValue('headless');
+    getSettingsMock.mockReturnValue({ agentTimeoutMinutes: 60 });
+    readFileMock.mockResolvedValueOnce(makePrompt('claude'));
+
+    const child = Object.assign(new EventEmitter(), { kill: vi.fn() }) as EventEmitter & {
+      kill: ReturnType<typeof vi.fn>;
+    };
+    spawnMock.mockReturnValueOnce(child);
+
+    const promise = runPrompt('test', { mode: 'headless' });
+
+    // Flush microtasks so runPrompt reaches the spawn call
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Process exits normally before timeout
+    child.emit('close', 0);
+    await expect(promise).resolves.toBe(0);
+
+    // Advance past the timeout — should not fire
+    await vi.advanceTimersByTimeAsync(60 * 60_000 + 10_000);
+    expect(child.kill).not.toHaveBeenCalled();
   });
 });

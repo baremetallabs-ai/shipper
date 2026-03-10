@@ -4,7 +4,7 @@ import path from 'node:path';
 import { parseFrontmatter } from './frontmatter.js';
 import { fetchIssue, fetchPR } from './github.js';
 import { agentPrompts } from './prompts.js';
-import { resolveAgent, resolveMode, type CommandMode } from './settings.js';
+import { getSettings, resolveAgent, resolveMode, type CommandMode } from './settings.js';
 
 export interface RunPromptOpts {
   userInput?: string;
@@ -19,7 +19,11 @@ export interface RunPromptOpts {
 const CODEX_HEADLESS_CONFIG = 'sandbox_workspace_write.network_access=true';
 const CODEX_HEADLESS_ARGS = ['exec', '--full-auto', '-c', CODEX_HEADLESS_CONFIG] as const;
 
-function spawnAsync(command: string, args: string[], opts: { cwd?: string }): Promise<number> {
+function spawnAsync(
+  command: string,
+  args: string[],
+  opts: { cwd?: string; timeoutMs?: number }
+): Promise<number> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       stdio: 'inherit',
@@ -27,8 +31,31 @@ function spawnAsync(command: string, args: string[], opts: { cwd?: string }): Pr
       cwd: opts.cwd,
     });
 
-    child.on('error', reject);
-    child.on('close', (code) => resolve(code ?? 1));
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    let graceTimer: ReturnType<typeof setTimeout> | undefined;
+
+    if (opts.timeoutMs && opts.timeoutMs > 0) {
+      killTimer = setTimeout(() => {
+        const minutes = Math.round(opts.timeoutMs! / 60_000);
+        console.error(`Agent timed out after ${minutes} minutes`);
+        child.kill('SIGTERM');
+        graceTimer = setTimeout(() => {
+          child.kill('SIGKILL');
+        }, 10_000);
+      }, opts.timeoutMs);
+    }
+
+    child.on('error', (err) => {
+      clearTimeout(killTimer);
+      clearTimeout(graceTimer);
+      reject(err);
+    });
+
+    child.on('close', (code) => {
+      clearTimeout(killTimer);
+      clearTimeout(graceTimer);
+      resolve(code ?? 1);
+    });
   });
 }
 
@@ -68,6 +95,9 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
 
   const args = [...frontmatter.args];
   const effectiveMode = resolveMode(name, opts.mode);
+  const timeoutMinutes = getSettings().agentTimeoutMinutes;
+  const timeoutMs =
+    effectiveMode === 'headless' && timeoutMinutes > 0 ? timeoutMinutes * 60_000 : undefined;
 
   if (effectiveMode === 'headless') {
     if (agent === 'claude' && !args.includes('-p')) {
@@ -131,7 +161,7 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
   }
 
   try {
-    return await spawnAsync(agent, args, { cwd: opts.cwd });
+    return await spawnAsync(agent, args, { cwd: opts.cwd, timeoutMs });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`Error: Failed to spawn ${agent}: ${message}`);
