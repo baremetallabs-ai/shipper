@@ -196,6 +196,7 @@ describe('initCommand settings', () => {
     expect(gitignoreCall![1]).toContain('settings.local.json');
     expect(gitignoreCall![1]).toContain('tmp/');
     expect(gitignoreCall![1]).toContain('README.md');
+    expect(gitignoreCall![1]).not.toContain('scripts/');
   });
 
   it('writes cliVersion to settings.json', async () => {
