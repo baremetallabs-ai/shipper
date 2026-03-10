@@ -4,7 +4,7 @@ This folder is managed by [Shipper CLI](https://github.com/anthropics/shipper-cl
 
 ## Quick Start
 
-1. **Create an issue from a pitch:**
+1. **Create an issue from a request:**
 
    ```bash
    shipper new "Your feature idea or bug description"
