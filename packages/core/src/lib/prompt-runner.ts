@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { readFileSync, statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseFrontmatter } from './frontmatter.js';
@@ -25,6 +26,34 @@ export interface RunPromptOpts {
 
 const CODEX_HEADLESS_CONFIG = 'sandbox_workspace_write.network_access=true';
 const CODEX_HEADLESS_ARGS = ['exec', '--full-auto', '-c', CODEX_HEADLESS_CONFIG] as const;
+
+function resolveWorktreeGitDir(cwd: string): string | undefined {
+  const dotGit = path.join(cwd, '.git');
+  try {
+    if (!statSync(dotGit).isFile()) return undefined;
+  } catch {
+    return undefined;
+  }
+  try {
+    const content = readFileSync(dotGit, 'utf-8');
+    const match = content.match(/^gitdir:\s*(.+)$/m);
+    if (!match?.[1]) {
+      console.warn(`Warning: .git file at ${dotGit} has no gitdir: line. Skipping --add-dir.`);
+      return undefined;
+    }
+    const resolved = path.resolve(cwd, match[1].trim());
+    try {
+      statSync(resolved);
+    } catch {
+      console.warn(`Warning: gitdir path ${resolved} does not exist. Skipping --add-dir.`);
+      return undefined;
+    }
+    return resolved;
+  } catch {
+    console.warn(`Warning: Failed to read .git file at ${dotGit}. Skipping --add-dir.`);
+    return undefined;
+  }
+}
 
 function spawnAsync(
   command: string,
@@ -120,6 +149,15 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
       if (pIdx !== -1) args.splice(pIdx, 1);
     } else if (agent === 'codex') {
       stripCodexHeadlessArgs(args);
+    }
+  }
+
+  if (agent === 'codex' && opts.cwd) {
+    const gitDir = resolveWorktreeGitDir(opts.cwd);
+    if (gitDir) {
+      const execIdx = args.indexOf('exec');
+      const insertIdx = execIdx === -1 ? 0 : execIdx;
+      args.splice(insertIdx, 0, '--add-dir', gitDir);
     }
   }
 

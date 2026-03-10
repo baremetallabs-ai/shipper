@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const spawnMock = vi.fn();
 const readFileMock = vi.fn();
+const statSyncMock = vi.fn();
+const readFileSyncMock = vi.fn();
 const fetchIssueMock = vi.fn();
 const fetchPRMock = vi.fn();
 const resolveAgentMock = vi.fn().mockReturnValue('claude');
@@ -18,6 +20,15 @@ vi.mock('node:child_process', async () => {
 vi.mock('node:fs/promises', async () => {
   const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
   return { ...actual, readFile: (...args: unknown[]) => readFileMock(...args) };
+});
+
+vi.mock('node:fs', async () => {
+  const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+  return {
+    ...actual,
+    statSync: (...args: unknown[]) => statSyncMock(...args),
+    readFileSync: (...args: unknown[]) => readFileSyncMock(...args),
+  };
 });
 
 vi.mock('../../src/lib/github.js', () => ({
@@ -79,6 +90,9 @@ afterEach(() => {
   getSettingsMock.mockReturnValue({ agentTimeoutMinutes: 60 });
   fetchIssueMock.mockResolvedValue('issue body');
   fetchPRMock.mockResolvedValue('pr body');
+  statSyncMock.mockImplementation(() => {
+    throw new Error('ENOENT');
+  });
 });
 
 describe('runPrompt', () => {
@@ -321,6 +335,72 @@ describe('runPrompt', () => {
     expect(spawnedArgs()).not.toContain('exec');
     expect(spawnedArgs()).not.toContain('--full-auto');
     expect(spawnedArgs()).not.toContain('sandbox_workspace_write.network_access=true');
+  });
+});
+
+describe('worktree --add-dir', () => {
+  it('adds --add-dir before exec for codex in a worktree', async () => {
+    resolveAgentMock.mockReturnValue('codex');
+    resolveModeMock.mockReturnValue('headless');
+    readFileMock.mockResolvedValueOnce(makePrompt('codex'));
+    statSyncMock.mockImplementation((p: string) => {
+      if (p.endsWith('.git')) return { isFile: () => true };
+      return { isFile: () => false };
+    });
+    readFileSyncMock.mockReturnValueOnce('gitdir: /repo/.git/worktrees/my-wt\n');
+    mockSpawnResult();
+
+    await runPrompt('test', { cwd: '/tmp/wt' });
+
+    const args = spawnedArgs();
+    const addDirIdx = args.indexOf('--add-dir');
+    expect(addDirIdx).toBeGreaterThanOrEqual(0);
+    expect(args[addDirIdx + 1]).toBe('/repo/.git/worktrees/my-wt');
+    expect(addDirIdx).toBeLessThan(args.indexOf('exec'));
+  });
+
+  it('does not add --add-dir when .git is a directory (non-worktree)', async () => {
+    resolveAgentMock.mockReturnValue('codex');
+    resolveModeMock.mockReturnValue('headless');
+    readFileMock.mockResolvedValueOnce(makePrompt('codex'));
+    statSyncMock.mockImplementation(() => ({ isFile: () => false }));
+    mockSpawnResult();
+
+    await runPrompt('test', { cwd: '/tmp/wt' });
+
+    expect(spawnedArgs()).not.toContain('--add-dir');
+  });
+
+  it('does not add --add-dir for claude agent regardless of .git status', async () => {
+    resolveAgentMock.mockReturnValue('claude');
+    resolveModeMock.mockReturnValue('headless');
+    readFileMock.mockResolvedValueOnce(makePrompt('claude'));
+    mockSpawnResult();
+
+    await runPrompt('test', { cwd: '/tmp/wt' });
+
+    expect(spawnedArgs()).not.toContain('--add-dir');
+    expect(statSyncMock).not.toHaveBeenCalled();
+  });
+
+  it('warns and skips --add-dir when .git file has no gitdir line', async () => {
+    resolveAgentMock.mockReturnValue('codex');
+    resolveModeMock.mockReturnValue('headless');
+    readFileMock.mockResolvedValueOnce(makePrompt('codex'));
+    statSyncMock.mockImplementation((p: string) => {
+      if (p.endsWith('.git')) return { isFile: () => true };
+      return { isFile: () => false };
+    });
+    readFileSyncMock.mockReturnValueOnce('invalid content\n');
+    const warnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockSpawnResult();
+
+    await runPrompt('test', { cwd: '/tmp/wt' });
+
+    expect(spawnedArgs()).not.toContain('--add-dir');
+    expect(warnMock).toHaveBeenCalledWith(expect.stringContaining('no gitdir: line'));
+    expect(spawnMock).toHaveBeenCalled();
+    warnMock.mockRestore();
   });
 });
 
