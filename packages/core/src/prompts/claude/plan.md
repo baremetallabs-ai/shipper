@@ -100,6 +100,7 @@ Produce a plan comment structured exactly as follows:
 - **Keep the design's constraints.** If the design review said "do not add a new abstraction" or "reuse the existing X," the plan must respect that. Do not smuggle in scope or complexity that the design rejected.
 - **Verification must trace back to acceptance criteria.** Every acceptance criterion from the issue should have at least one corresponding verification step.
 - **The implementer will not have access to gitignored files.** Implementation runs in an ephemeral worktree that only contains tracked files. If a plan step involves reading, modifying, or referencing a gitignored file, the plan must inline the relevant content (current state, structure, key values) directly in the plan comment. Do not write plan steps that assume the implementer can read gitignored files from the working tree.
+- **Name new dependencies explicitly.** If a plan step requires a package that is not already in the project's dependency manifest, the step must name the exact package (e.g., `zod`, `chalk@5`) and instruct the implementer to add it to the manifest file and install it. Do not assume dependencies are pre-installed.
 
 ### Scope guard
 
