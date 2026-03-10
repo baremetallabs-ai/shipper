@@ -28,32 +28,32 @@ afterAll(() => {
 
 describe('newCommand', () => {
   it('passes the selected mode through to runPrompt', async () => {
-    await expect(newCommand(['my', 'pitch'], { mode: 'headless' })).rejects.toThrow(
+    await expect(newCommand(['my', 'request'], { mode: 'headless' })).rejects.toThrow(
       'process.exit:0'
     );
 
     expect(mockRunPrompt).toHaveBeenCalledWith('new', {
-      userInput: 'my pitch',
+      userInput: 'my request',
       mode: 'headless',
     });
     expect(process.env.SHIPPER_HEADLESS).toBeUndefined();
   });
 
   it('uses runPrompt without a mode override when none is provided', async () => {
-    await expect(newCommand(['my', 'pitch'])).rejects.toThrow('process.exit:0');
+    await expect(newCommand(['my', 'request'])).rejects.toThrow('process.exit:0');
 
     expect(mockRunPrompt).toHaveBeenCalledWith('new', {
-      userInput: 'my pitch',
+      userInput: 'my request',
       mode: undefined,
     });
     expect(process.env.SHIPPER_HEADLESS).toBeUndefined();
   });
 
-  it('exits with the existing usage error when the pitch is empty', async () => {
+  it('exits with the existing usage error when the request is empty', async () => {
     await expect(newCommand(['   '], { mode: 'interactive' })).rejects.toThrow('process.exit:1');
 
-    expect(errorMock).toHaveBeenCalledWith('Error: Please provide a pitch for the new issue.');
-    expect(errorMock).toHaveBeenCalledWith('Usage: shipper new <pitch>');
+    expect(errorMock).toHaveBeenCalledWith('Error: Please provide a request for the new issue.');
+    expect(errorMock).toHaveBeenCalledWith('Usage: shipper new <request>');
     expect(mockRunPrompt).not.toHaveBeenCalled();
   });
 });

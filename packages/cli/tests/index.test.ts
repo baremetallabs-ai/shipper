@@ -145,11 +145,11 @@ describe('shipper-cli', () => {
     }
 
     it('passes mode to newCommand', async () => {
-      process.argv = ['node', 'src/index.ts', 'new', 'pitch', '--mode', 'headless'];
+      process.argv = ['node', 'src/index.ts', 'new', 'request', '--mode', 'headless'];
 
       await importEntrypoint();
 
-      expect(mockNewCommand).toHaveBeenCalledWith(['pitch'], { mode: 'headless' });
+      expect(mockNewCommand).toHaveBeenCalledWith(['request'], { mode: 'headless' });
     });
 
     it('passes mode through groomCommand options', async () => {
@@ -184,7 +184,7 @@ describe('shipper-cli', () => {
     });
 
     it('rejects the removed --headless option on new', async () => {
-      process.argv = ['node', 'src/index.ts', 'new', 'pitch', '--headless'];
+      process.argv = ['node', 'src/index.ts', 'new', 'request', '--headless'];
 
       await expect(importEntrypoint()).rejects.toThrow('process.exit:1');
       expect(mockNewCommand).not.toHaveBeenCalled();
