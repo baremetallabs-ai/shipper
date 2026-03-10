@@ -90,11 +90,22 @@ Work through the plan steps **in order**, one at a time. For each step:
 
 - **Install dependencies after modifying dependency files.** After modifying any dependency file (package.json, Cargo.toml, requirements.txt, etc.), run `./.shipper/scripts/install-deps.sh` to install dependencies.
 
+### Recovering from a partial prior run
+
+Sometimes a previous implementation attempt completed some plan steps before being interrupted (e.g., network failure, timeout, crash). When you find that files or changes the plan says to create **already exist on the branch**, do not treat this as a plan mismatch. Instead:
+
+1. **Assess what's already done.** For each plan step, check whether the described changes are already present and correct.
+2. **Mark completed steps as `completed`** in your todo list without redoing the work.
+3. **Continue from the first incomplete step.** Pick up implementation where the prior run left off.
+4. **Fix any half-finished work.** If a step was partially completed (e.g., file created but contents incomplete), finish it rather than starting over.
+
+The key distinction: if existing code **matches what the plan calls for**, a prior run did it and you should continue. If existing code **contradicts the plan** in ways that can't be explained by partial completion, that's a real plan mismatch — flag it via the scope guard below.
+
 ### Scope guard
 
 If during implementation you discover any of the following, **stop and flag it** — do not work around it:
 
-- **The plan step doesn't match reality.** A file path is wrong, an interface has changed, a function the plan references doesn't exist.
+- **The plan contradicts the codebase in ways a prior run can't explain.** An interface the plan targets has a fundamentally different shape, a dependency it relies on was removed, or the architectural assumptions are wrong. (But if files the plan says to "create" already exist with the expected content, that's a prior partial run — see above.)
 - **A product question surfaces.** The plan step requires a decision about user-facing behavior that wasn't resolved.
 - **A design flaw emerges.** The approach doesn't work as designed — edge cases the design missed, performance issues, or architectural conflicts.
 - **Scope creep.** You notice something adjacent that "should" be fixed. Don't fix it. If it matters, it gets its own issue. (No comment or label change needed for scope creep — just skip it.)
@@ -193,7 +204,7 @@ Mark the final commit-and-push task as `completed`. Verify the todo list shows a
 ## Stop conditions
 
 - If the issue is missing an implementation plan, tell the user to run `shipper plan` and stop.
-- If the plan doesn't match the codebase, a design flaw surfaces, or product questions are unresolved, follow the scope guard procedure: post a comment, roll back labels, then stop.
+- If the plan contradicts the codebase in ways that can't be explained by a partial prior run, a design flaw surfaces, or product questions are unresolved, follow the scope guard procedure: post a comment, roll back labels, then stop.
 - If any GitHub command fails, report the error **and which prior steps (if any) already completed** (e.g., "the comment was posted but the label change failed").
 
 ---
