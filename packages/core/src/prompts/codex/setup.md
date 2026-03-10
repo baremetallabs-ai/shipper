@@ -13,7 +13,7 @@ Inspect the repository to determine the correct dependency install command:
 
 - Look for lockfiles and package manager configuration at the repo root: `package-lock.json` (npm), `yarn.lock` (yarn), `pnpm-lock.yaml` (pnpm), `bun.lockb` (bun), `Cargo.lock` (cargo), `go.sum` (go), `requirements.txt` / `Pipfile.lock` / `poetry.lock` (python), etc.
 - Read `.shipper/settings.json` to check if `installCommand` is already configured.
-- Determine the appropriate install command (e.g., `npm ci`, `pnpm install --frozen-lockfile`, `yarn install --frozen-lockfile`, `bun install --frozen-lockfile`, `cargo build`, `pip install -r requirements.txt`).
+- Determine the appropriate install command (e.g., `npm install`, `pnpm install`, `yarn install`, `bun install`, `cargo build`, `pip install -r requirements.txt`). The command must be able to resolve and install new packages — do not use frozen-lockfile or CI-only variants (`npm ci`, `--frozen-lockfile`) since agents may need to add dependencies during implementation.
 - Write the `installCommand` to `.shipper/settings.json`, preserving all other existing settings.
 - Verify the command works by running `./.shipper/scripts/install-deps.sh`.
 - Report what you configured and why.
