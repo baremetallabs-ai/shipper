@@ -52,10 +52,10 @@ Be thorough. An implementation plan that names the wrong file or misunderstands 
 
 ### Step 3: Gitignore audit
 
-Before writing the plan, verify that every file path you intend to reference is available in a clean worktree. Run:
+Before writing the plan, verify that every file path you intend to reference is **not ignored by Git** (i.e., is eligible to exist in a clean worktree). Run:
 
 ```bash
-git check-ignore <path1> <path2> ...
+git check-ignore <path1> <path2> ... || true
 ```
 
 For any path that `git check-ignore` confirms is ignored:
