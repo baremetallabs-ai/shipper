@@ -358,6 +358,23 @@ describe('resolveAgent', () => {
     expect(() => resolveAgent('implement')).toThrow('Invalid agent "vim" for step "implement"');
   });
 
+  it('returns the override when provided', async () => {
+    readFileMock.mockImplementation(async (p: string) => {
+      if (p === settingsPath) {
+        return JSON.stringify({
+          commands: { default: { agent: 'claude' } },
+        });
+      }
+      throw enoent(p);
+    });
+
+    const { loadSettings, resolveAgent } = await loadModule();
+    await loadSettings();
+
+    expect(resolveAgent('groom', 'codex')).toBe('codex');
+    expect(resolveAgent('groom')).toBe('claude');
+  });
+
   it('preserves invalid legacy default agents for later validation', async () => {
     readFileMock.mockImplementation(async (p: string) => {
       if (p === settingsPath) {

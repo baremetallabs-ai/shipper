@@ -4,7 +4,13 @@ import path from 'node:path';
 import { parseFrontmatter } from './frontmatter.js';
 import { fetchIssue, fetchPR } from './github.js';
 import { agentPrompts } from './prompts.js';
-import { getSettings, resolveAgent, resolveMode, type CommandMode } from './settings.js';
+import {
+  getSettings,
+  resolveAgent,
+  resolveMode,
+  type AgentName,
+  type CommandMode,
+} from './settings.js';
 
 export interface RunPromptOpts {
   userInput?: string;
@@ -14,6 +20,7 @@ export interface RunPromptOpts {
   cwd?: string;
   baseBranch?: string;
   mode?: CommandMode;
+  agent?: AgentName;
 }
 
 const CODEX_HEADLESS_CONFIG = 'sandbox_workspace_write.network_access=true';
@@ -62,7 +69,7 @@ function spawnAsync(
 }
 
 export async function runPrompt(name: string, opts: RunPromptOpts): Promise<number> {
-  const agent = resolveAgent(name);
+  const agent = resolveAgent(name, opts.agent);
   const promptPath = path.resolve('.shipper', 'prompts', agent, `${name}.md`);
 
   let raw: string;

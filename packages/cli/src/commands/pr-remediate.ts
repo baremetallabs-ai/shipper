@@ -1,7 +1,7 @@
 import { getBranchForPR, getRepoRoot } from '@dnsquared/shipper-core';
 import { fetchChecks, classifyChecks } from '@dnsquared/shipper-core';
 import { autoSelectPrForStage, resolveRef } from '@dnsquared/shipper-core';
-import type { CommandMode } from '@dnsquared/shipper-core';
+import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
 import { gh } from '@dnsquared/shipper-core';
 import { withStageHooks } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
@@ -94,7 +94,8 @@ async function fetchChecksGraceful(
 export async function prRemediateCommand(
   repo: string,
   pr?: string,
-  mode?: CommandMode
+  mode?: CommandMode,
+  agent?: AgentName
 ): Promise<void> {
   let issueNumber: string;
 
@@ -159,6 +160,7 @@ export async function prRemediateCommand(
             prRef,
             cwd: wtPath,
             mode,
+            agent,
           });
         }
       );

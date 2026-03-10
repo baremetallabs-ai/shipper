@@ -1,4 +1,5 @@
 import { gh, resolveRef, tryResolvePrForIssue } from '@dnsquared/shipper-core';
+import type { AgentName } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
 import { groomCommand } from './groom.js';
 import { designCommand } from './design.js';
@@ -28,7 +29,7 @@ async function resolvePrForIssue(repo: string, issueNumber: number): Promise<str
   return pr;
 }
 
-export async function nextCommand(repo: string, ref: string): Promise<void> {
+export async function nextCommand(repo: string, ref: string, agent?: AgentName): Promise<void> {
   if (!ref) {
     console.error('Error: Please provide an issue or PR number.');
     console.error('Usage: shipper next <issue-or-pr>');
@@ -94,34 +95,34 @@ export async function nextCommand(repo: string, ref: string): Promise<void> {
     switch (label) {
       case 'shipper:new':
         console.log(`Running: shipper groom ${issueStr}`);
-        await groomCommand(repo, issueStr);
+        await groomCommand(repo, issueStr, { auto: false, agent });
         break;
       case 'shipper:groomed':
         console.log(`Running: shipper design ${issueStr}`);
-        await designCommand(repo, issueStr);
+        await designCommand(repo, issueStr, undefined, agent);
         break;
       case 'shipper:designed':
         console.log(`Running: shipper plan ${issueStr}`);
-        await planCommand(repo, issueStr);
+        await planCommand(repo, issueStr, undefined, agent);
         break;
       case 'shipper:planned':
         console.log(`Running: shipper implement ${issueStr}`);
-        await implementCommand(repo, issueStr);
+        await implementCommand(repo, issueStr, undefined, agent);
         break;
       case 'shipper:implemented':
         console.log(`Running: shipper pr open ${issueStr}`);
-        await prOpenCommand(repo, issueStr);
+        await prOpenCommand(repo, issueStr, undefined, agent);
         break;
       case 'shipper:pr-open': {
         const prNum = await resolvePrForIssue(repo, issueNumber);
         console.log(`Running: shipper pr review ${prNum}`);
-        await prReviewCommand(repo, prNum);
+        await prReviewCommand(repo, prNum, undefined, agent);
         break;
       }
       case 'shipper:pr-reviewed': {
         const prNum = await resolvePrForIssue(repo, issueNumber);
         console.log(`Running: shipper pr remediate ${prNum}`);
-        await prRemediateCommand(repo, prNum);
+        await prRemediateCommand(repo, prNum, undefined, agent);
         break;
       }
       case 'shipper:ready':

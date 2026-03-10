@@ -1,5 +1,5 @@
 import { autoSelectPrForStage, resolveRef } from '@dnsquared/shipper-core';
-import type { CommandMode } from '@dnsquared/shipper-core';
+import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
 import { withStageHooks } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
 import { runPrompt } from '@dnsquared/shipper-core';
@@ -7,7 +7,8 @@ import { runPrompt } from '@dnsquared/shipper-core';
 export async function prReviewCommand(
   repo: string,
   pr?: string,
-  mode?: CommandMode
+  mode?: CommandMode,
+  agent?: AgentName
 ): Promise<void> {
   let issueNumber: string;
 
@@ -35,7 +36,8 @@ export async function prReviewCommand(
       await withStageHooks(
         'pr-review',
         { issueNumber },
-        async () => await runPrompt('pr_review', { repo, issueRef: issueNumber, prRef: pr, mode })
+        async () =>
+          await runPrompt('pr_review', { repo, issueRef: issueNumber, prRef: pr, mode, agent })
       )
   );
 

@@ -1,11 +1,12 @@
-import type { CommandMode } from '@dnsquared/shipper-core';
+import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
 import { runPrompt } from '@dnsquared/shipper-core';
 
 export async function unblockCommand(
   repo: string,
   issue: string,
-  mode?: CommandMode
+  mode?: CommandMode,
+  agent?: AgentName
 ): Promise<void> {
   if (!issue) {
     console.error('Error: Please provide an issue number.');
@@ -16,7 +17,7 @@ export async function unblockCommand(
   const code = await withIssueLock(
     repo,
     issue,
-    async () => await runPrompt('unblock', { repo, issueRef: issue, mode })
+    async () => await runPrompt('unblock', { repo, issueRef: issue, mode, agent })
   );
   process.exitCode = code;
 }
