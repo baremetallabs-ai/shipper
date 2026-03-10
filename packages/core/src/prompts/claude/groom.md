@@ -90,6 +90,8 @@ Ask targeted questions to close every open product decision. Use the four catego
 - **Acceptance Criteria** — Specific, testable done-conditions? Vague scenarios needing concrete expected behavior?
 - **Scope Boundaries & Follow-ups** — Related work to defer? Adjacent behaviors the issue is silent on?
 
+**Do not ask questions about issue decomposition.** Whether to split the issue into multiple sub-issues or PRs, how to break down the work, or what the decomposition strategy should be — these are agent responsibilities handled autonomously in Phase 4. Decomposition questions waste the product owner's time on decisions that are not theirs to make.
+
 Ask as many or as few questions as the issue demands. Simple issues may need 2–3 questions; complex issues may need 10+. Use judgment.
 
 **Ask questions using the interactive question-asking tool.** Do not output questions as formatted text. Each question must include:
@@ -171,15 +173,17 @@ After producing the final artifacts, you must update GitHub using repo-local tem
 
 If your decomposition recommendation includes additional issues, you must create them:
 
-1. For each new issue, write its body to its own file under `./.shipper/tmp/` (e.g. `split_issue-<number>-1.md`, `split_issue-<number>-2.md`), where `<number>` is the parent issue number.
-2. Create each new issue using `gh issue create --title "<TITLE>" --body-file <FILE> --label "shipper:groomed"`.
+1. **Present the decomposition plan for confirmation.** Before creating any child issues, present your decomposition plan to the product owner using the interactive question-asking tool. Include the proposed number of child issues, each with its title and a one-line scope description. Offer structured options: "Approve this decomposition," "I want to modify it," or "Skip decomposition — keep as single issue." If the product owner wants modifications, iterate until they approve. If they choose to skip, do not create child issues — proceed with the parent issue as a single-PR recommendation. Only continue to the next step after receiving explicit approval.
+
+2. For each new issue, write its body to its own file under `./.shipper/tmp/` (e.g. `split_issue-<number>-1.md`, `split_issue-<number>-2.md`), where `<number>` is the parent issue number.
+3. Create each new issue using `gh issue create --title "<TITLE>" --body-file <FILE> --label "shipper:groomed"`.
    - These child issues must start in the **groomed** status, since they are written with full groomed-quality content during decomposition.
    - Each child issue body **must** include all groomed-format sections (`Summary`, `Requirements`, `Acceptance Criteria`, `Related Issues`, `Out of Scope`, `Open Questions`) and must not be a placeholder, because child issues will skip the grooming stage.
    - If this issue depends on another sibling being completed first, also add `shipper:blocked`: `--label "shipper:groomed" --label "shipper:blocked"`.
    - For each blocked issue, post a comment starting with `## Blocked` that explains the unblock condition in natural language. Example: `## Blocked\n\nBlocked until #35 is merged — reset's branch cleanup depends on the shipper/ prefix convention being in place.`
    - The original issue can also receive `shipper:blocked` if grooming determines a sibling should go first. In that case, add the label and post the blocking-condition comment on the original issue too.
-3. After creating them, include the created URLs in your final response, and (optionally) add them as links in the original issue comment if appropriate.
-4. **Handle the parent issue** after creating child issues:
+4. After creating them, include the created URLs in your final response, and (optionally) add them as links in the original issue comment if appropriate.
+5. **Handle the parent issue** after creating child issues:
 
    **If the child issues collectively cover the parent's entire original scope (full replacement):**
    - Post a comment on the parent issue listing and linking to all created child issues (e.g., "Decomposed into #X, #Y, #Z."). Save to `./.shipper/tmp/decomposition_comment-<number>.md` and post with `gh issue comment <ISSUE> --body-file ./.shipper/tmp/decomposition_comment-<number>.md`.
