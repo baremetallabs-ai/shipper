@@ -4,11 +4,7 @@
     "timeoutMinutes": 15
   },
   "lockTimeoutMinutes": 30,
-  "agents": {
-    "default": "claude"
-  },
-  "headless": {},
-  "hooks": {},
+  "agentTimeoutMinutes": 60,
   "commands": {
     "default": {
       "agent": "claude"
@@ -22,6 +18,10 @@
     "plan": {
       "agent": "codex"
     }
+  },
+  "hooks": {},
+  "merge": {
+    "requirePassingChecks": true
   },
   "cliVersion": "1.0.0"
 }
