@@ -419,8 +419,6 @@ export async function selectIssuesForStage(
     try {
       const result = await gh([
         'api',
-        '-R',
-        repo,
         `repos/${repo}/issues/${issue.number}/timeline`,
         '--paginate',
         '--jq',

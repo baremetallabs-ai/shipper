@@ -69,15 +69,7 @@ describe('isLockStale', () => {
     await expect(isLockStale(repo, '42')).resolves.toBe(false);
     expect(execFileMock).toHaveBeenCalledWith(
       'gh',
-      [
-        'api',
-        '-R',
-        repo,
-        `repos/${repo}/issues/42/timeline`,
-        '--paginate',
-        '--jq',
-        expect.any(String),
-      ],
+      ['api', `repos/${repo}/issues/42/timeline`, '--paginate', '--jq', expect.any(String)],
       expect.objectContaining({ encoding: 'utf-8' }),
       expect.any(Function)
     );

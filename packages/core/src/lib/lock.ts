@@ -7,8 +7,6 @@ export async function isLockStale(repo: string, issueNumber: string): Promise<bo
   try {
     const result = await gh([
       'api',
-      '-R',
-      repo,
       `repos/${repo}/issues/${issueNumber}/timeline`,
       '--paginate',
       '--jq',
