@@ -123,6 +123,29 @@ function getValidTargets(currentStage: CurrentStage): WorkflowStage[] {
   return targets;
 }
 
+function getWorktreeRepoName(repoRoot: string): string {
+  try {
+    const gitCommonDirOutput = execFileSync('git', ['rev-parse', '--git-common-dir'], {
+      cwd: repoRoot,
+      encoding: 'utf-8',
+    }).trim();
+
+    if (gitCommonDirOutput) {
+      const gitCommonDir = path.isAbsolute(gitCommonDirOutput)
+        ? gitCommonDirOutput
+        : path.resolve(repoRoot, gitCommonDirOutput);
+      const repoName = path.basename(path.dirname(gitCommonDir));
+      if (repoName) {
+        return repoName;
+      }
+    }
+  } catch {
+    // Fall back to the current repo root basename if git common-dir lookup fails.
+  }
+
+  return path.basename(repoRoot);
+}
+
 async function scanArtifacts(
   issueNum: number,
   nwo: string,
@@ -238,7 +261,7 @@ async function scanArtifacts(
     .map((pr) => pr.headRefName)
     .filter((branchName) => branchName.startsWith('shipper/'));
 
-  const repoName = path.basename(repoRoot);
+  const repoName = getWorktreeRepoName(repoRoot);
   const worktreesRoot = path.join(homedir(), '.shipper', 'worktrees');
   let localWorktrees: string[] = [];
   try {
@@ -275,7 +298,12 @@ async function scanArtifacts(
     );
     localBranches = raw
       .split('\n')
-      .map((line) => line.replace(/^\*/, '').trim())
+      .map((line) =>
+        line
+          .trim()
+          .replace(/^[*+]\s*/, '')
+          .trim()
+      )
       .filter((branchName) => branchName !== '');
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
