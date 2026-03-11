@@ -251,30 +251,20 @@ export async function initCommand(options: { agent?: string }) {
   writeFileSync(readmePath, readmeTemplate);
   console.log('Wrote .shipper/README.md');
 
-  // Ensure labels exist
-  let labelCount = 0;
+  // Ensure labels match the canonical shipper definitions
   for (const label of LABELS) {
-    try {
-      await gh([
-        'label',
-        'create',
-        label.name,
-        '--color',
-        label.color,
-        '--description',
-        label.description,
-      ]);
-      labelCount++;
-    } catch {
-      // Label already exists — that's fine
-    }
+    await gh([
+      'label',
+      'create',
+      label.name,
+      '--force',
+      '--color',
+      label.color,
+      '--description',
+      label.description,
+    ]);
   }
-
-  if (labelCount > 0) {
-    console.log(`Created ${labelCount} new label(s)`);
-  } else {
-    console.log('All labels already exist');
-  }
+  console.log(`Synced ${LABELS.length} labels`);
 
   // Check if .shipper is gitignored or tracked
   const rootGitignore = path.resolve('.gitignore');
