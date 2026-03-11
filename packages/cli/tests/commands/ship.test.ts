@@ -11,6 +11,28 @@ const fsMockState = vi.hoisted(() => ({
 const osMockState = vi.hoisted(() => ({
   mockHomedir: vi.fn(() => '/mock-home'),
 }));
+const labelFixtures = vi.hoisted(() => ({
+  stageLabelNames: [
+    'shipper:new',
+    'shipper:groomed',
+    'shipper:designed',
+    'shipper:planned',
+    'shipper:implemented',
+    'shipper:pr-open',
+    'shipper:pr-reviewed',
+    'shipper:ready',
+  ],
+  stageNameMap: {
+    'shipper:new': 'groom',
+    'shipper:groomed': 'design',
+    'shipper:designed': 'plan',
+    'shipper:planned': 'implement',
+    'shipper:implemented': 'pr open',
+    'shipper:pr-open': 'pr review',
+    'shipper:pr-reviewed': 'pr remediate',
+    'shipper:ready': 'ready',
+  },
+}));
 import {
   STAGE_NAME,
   AUTO_PRIORITY_LABELS,
@@ -25,6 +47,13 @@ vi.mock('@dnsquared/shipper-core', () => ({
   selectIssuesForStage: vi.fn(async () => []),
   clearStaleLockIfNeeded: vi.fn(async () => {}),
   gh: vi.fn(),
+  STAGE_NAME_MAP: labelFixtures.stageNameMap,
+  STAGE_LABEL_NAMES: labelFixtures.stageLabelNames,
+  NEW_LABEL: 'shipper:new',
+  PR_REVIEWED_LABEL: 'shipper:pr-reviewed',
+  READY_LABEL: 'shipper:ready',
+  BLOCKED_LABEL: 'shipper:blocked',
+  LOCKED_LABEL: 'shipper:locked',
   withStageHooks: vi.fn(
     async (_stage: string, _env: unknown, fn: () => Promise<unknown>) => await fn()
   ),
@@ -133,13 +162,14 @@ describe('STAGE_NAME', () => {
       'shipper:implemented',
       'shipper:pr-open',
       'shipper:pr-reviewed',
+      'shipper:ready',
     ];
 
     expect(Object.keys(STAGE_NAME).sort()).toEqual(expectedLabels.sort());
   });
 
-  it('does not include shipper:ready (terminal state)', () => {
-    expect(STAGE_NAME).not.toHaveProperty('shipper:ready');
+  it('includes shipper:ready with a stage name', () => {
+    expect(STAGE_NAME).toHaveProperty('shipper:ready', 'ready');
   });
 
   it('does not include shipper:blocked (orthogonal modifier, not a stage)', () => {

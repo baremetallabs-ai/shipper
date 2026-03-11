@@ -12,6 +12,16 @@ vi.mock('@dnsquared/shipper-core', () => ({
   gh: vi.fn(),
   resolveRef: vi.fn(),
   tryResolvePrForIssue: vi.fn(),
+  BLOCKED_LABEL: 'shipper:blocked',
+  LOCKED_LABEL: 'shipper:locked',
+  NEW_LABEL: 'shipper:new',
+  GROOMED_LABEL: 'shipper:groomed',
+  DESIGNED_LABEL: 'shipper:designed',
+  PLANNED_LABEL: 'shipper:planned',
+  IMPLEMENTED_LABEL: 'shipper:implemented',
+  PR_OPEN_LABEL: 'shipper:pr-open',
+  PR_REVIEWED_LABEL: 'shipper:pr-reviewed',
+  READY_LABEL: 'shipper:ready',
   withIssueLock: vi.fn(
     async (_repo: string, _issue: string, fn: () => Promise<void>) => await fn()
   ),

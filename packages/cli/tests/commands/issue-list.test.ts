@@ -1,11 +1,35 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { mockGh } = vi.hoisted(() => ({
+const { mockGh, stageLabels, displayNameMap, controlLabelNames } = vi.hoisted(() => ({
   mockGh: vi.fn(),
+  stageLabels: [
+    'shipper:new',
+    'shipper:groomed',
+    'shipper:designed',
+    'shipper:planned',
+    'shipper:implemented',
+    'shipper:pr-open',
+    'shipper:pr-reviewed',
+    'shipper:ready',
+  ],
+  displayNameMap: {
+    'shipper:new': 'New',
+    'shipper:groomed': 'Groomed',
+    'shipper:designed': 'Designed',
+    'shipper:planned': 'Planned',
+    'shipper:implemented': 'Implemented',
+    'shipper:pr-open': 'PR Open',
+    'shipper:pr-reviewed': 'PR Reviewed',
+    'shipper:ready': 'Ready',
+  },
+  controlLabelNames: ['shipper:blocked', 'shipper:locked'],
 }));
 
 vi.mock('@dnsquared/shipper-core', () => ({
   gh: (...args: unknown[]) => mockGh(...args),
+  STAGE_LABEL_NAMES: stageLabels,
+  DISPLAY_NAME_MAP: displayNameMap,
+  CONTROL_LABEL_NAMES: controlLabelNames,
 }));
 
 import { issueListCommand } from '../../src/commands/issue-list.js';
