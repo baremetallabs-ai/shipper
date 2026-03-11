@@ -1,4 +1,18 @@
-import { gh, resolveRef, tryResolvePrForIssue } from '@dnsquared/shipper-core';
+import {
+  gh,
+  resolveRef,
+  tryResolvePrForIssue,
+  BLOCKED_LABEL,
+  LOCKED_LABEL,
+  NEW_LABEL,
+  GROOMED_LABEL,
+  DESIGNED_LABEL,
+  PLANNED_LABEL,
+  IMPLEMENTED_LABEL,
+  PR_OPEN_LABEL,
+  PR_REVIEWED_LABEL,
+  READY_LABEL,
+} from '@dnsquared/shipper-core';
 import type { AgentName } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
 import { groomCommand } from './groom.js';
@@ -54,10 +68,8 @@ export async function nextCommand(repo: string, ref: string, agent?: AgentName):
   const allLabels = issueData.labels
     .map((l) => l.name)
     .filter((name) => name.startsWith('shipper:'));
-  const isBlocked = allLabels.includes('shipper:blocked');
-  const shipperLabels = allLabels.filter(
-    (name) => name !== 'shipper:blocked' && name !== 'shipper:locked'
-  );
+  const isBlocked = allLabels.includes(BLOCKED_LABEL);
+  const shipperLabels = allLabels.filter((name) => name !== BLOCKED_LABEL && name !== LOCKED_LABEL);
 
   // Validate labels
   if (shipperLabels.length === 0) {
@@ -82,7 +94,7 @@ export async function nextCommand(repo: string, ref: string, agent?: AgentName):
     process.exit(1);
   }
 
-  if (isBlocked && label !== 'shipper:new') {
+  if (isBlocked && label !== NEW_LABEL) {
     console.error(
       `Issue #${issueNumber} is blocked. Run 'shipper unblock ${issueNumber}' to check if it can proceed.`
     );
@@ -93,39 +105,39 @@ export async function nextCommand(repo: string, ref: string, agent?: AgentName):
   // Dispatch (wrapped in lock so inner commands become passthroughs)
   await withIssueLock(repo, issueStr, async () => {
     switch (label) {
-      case 'shipper:new':
+      case NEW_LABEL:
         console.log(`Running: shipper groom ${issueStr}`);
         await groomCommand(repo, issueStr, { auto: false, agent });
         break;
-      case 'shipper:groomed':
+      case GROOMED_LABEL:
         console.log(`Running: shipper design ${issueStr}`);
         await designCommand(repo, issueStr, undefined, agent);
         break;
-      case 'shipper:designed':
+      case DESIGNED_LABEL:
         console.log(`Running: shipper plan ${issueStr}`);
         await planCommand(repo, issueStr, undefined, agent);
         break;
-      case 'shipper:planned':
+      case PLANNED_LABEL:
         console.log(`Running: shipper implement ${issueStr}`);
         await implementCommand(repo, issueStr, undefined, agent);
         break;
-      case 'shipper:implemented':
+      case IMPLEMENTED_LABEL:
         console.log(`Running: shipper pr open ${issueStr}`);
         await prOpenCommand(repo, issueStr, undefined, agent);
         break;
-      case 'shipper:pr-open': {
+      case PR_OPEN_LABEL: {
         const prNum = await resolvePrForIssue(repo, issueNumber);
         console.log(`Running: shipper pr review ${prNum}`);
         await prReviewCommand(repo, prNum, undefined, agent);
         break;
       }
-      case 'shipper:pr-reviewed': {
+      case PR_REVIEWED_LABEL: {
         const prNum = await resolvePrForIssue(repo, issueNumber);
         console.log(`Running: shipper pr remediate ${prNum}`);
         await prRemediateCommand(repo, prNum, undefined, agent);
         break;
       }
-      case 'shipper:ready':
+      case READY_LABEL:
         console.log(`Issue #${issueNumber} is ready — no remaining workflow steps.`);
         break;
       default:

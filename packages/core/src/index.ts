@@ -5,6 +5,7 @@ export * from './lib/frontmatter.js';
 export * from './lib/gh.js';
 export * from './lib/github.js';
 export * from './lib/hooks.js';
+export * from './lib/labels.js';
 export * from './lib/lock.js';
 export * from './lib/prerequisites.js';
 export * from './lib/prompt-runner.js';

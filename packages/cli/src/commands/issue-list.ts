@@ -1,30 +1,11 @@
-import { gh } from '@dnsquared/shipper-core';
+import {
+  gh,
+  STAGE_LABEL_NAMES,
+  DISPLAY_NAME_MAP,
+  CONTROL_LABEL_NAMES,
+} from '@dnsquared/shipper-core';
 
-const STATUS_LABELS = [
-  'shipper:new',
-  'shipper:groomed',
-  'shipper:designed',
-  'shipper:planned',
-  'shipper:implemented',
-  'shipper:pr-open',
-  'shipper:pr-reviewed',
-  'shipper:ready',
-] as const;
-
-const DISPLAY_NAMES: Record<(typeof STATUS_LABELS)[number], string> = {
-  'shipper:new': 'New',
-  'shipper:groomed': 'Groomed',
-  'shipper:designed': 'Designed',
-  'shipper:planned': 'Planned',
-  'shipper:implemented': 'Implemented',
-  'shipper:pr-open': 'PR Open',
-  'shipper:pr-reviewed': 'PR Reviewed',
-  'shipper:ready': 'Ready',
-};
-
-const CONTROL_LABELS = ['shipper:blocked', 'shipper:locked'] as const;
-
-const VALID_SHORT_NAMES = STATUS_LABELS.map((l) => l.replace('shipper:', ''));
+const VALID_SHORT_NAMES = STAGE_LABEL_NAMES.map((label) => label.replace('shipper:', ''));
 
 interface Issue {
   number: number;
@@ -50,7 +31,7 @@ export async function issueListCommand(options: { status?: string }): Promise<vo
       '--state',
       'open',
       '--search',
-      `label:${STATUS_LABELS.join(',')}`,
+      `label:${STAGE_LABEL_NAMES.join(',')}`,
       '--limit',
       '1000',
       '--json',
@@ -64,15 +45,15 @@ export async function issueListCommand(options: { status?: string }): Promise<vo
 
   // Group issues by their most-advanced status label
   const groups = new Map<string, Issue[]>();
-  for (const label of STATUS_LABELS) {
+  for (const label of STAGE_LABEL_NAMES) {
     groups.set(label, []);
   }
 
   for (const issue of issues) {
     const issueLabels = issue.labels.map((l) => l.name);
-    const bestIndex = STATUS_LABELS.findLastIndex((label) => issueLabels.includes(label));
+    const bestIndex = STAGE_LABEL_NAMES.findLastIndex((label) => issueLabels.includes(label));
     if (bestIndex >= 0) {
-      groups.get(STATUS_LABELS[bestIndex]!)!.push(issue);
+      groups.get(STAGE_LABEL_NAMES[bestIndex]!)!.push(issue);
     }
   }
 
@@ -82,10 +63,7 @@ export async function issueListCommand(options: { status?: string }): Promise<vo
   }
 
   // Determine which labels to display
-  type StatusLabel = (typeof STATUS_LABELS)[number];
-  const labelsToShow: StatusLabel[] = options.status
-    ? [`shipper:${options.status}` as StatusLabel]
-    : [...STATUS_LABELS];
+  const labelsToShow = options.status ? [`shipper:${options.status}`] : [...STAGE_LABEL_NAMES];
 
   let hasOutput = false;
   for (const label of labelsToShow) {
@@ -93,12 +71,12 @@ export async function issueListCommand(options: { status?: string }): Promise<vo
     if (!group || group.length === 0) continue;
 
     hasOutput = true;
-    console.log(`\n${DISPLAY_NAMES[label]} (${group.length})`);
+    console.log(`\n${DISPLAY_NAME_MAP[label]} (${group.length})`);
 
     for (const issue of group) {
       const issueLabels = issue.labels.map((l) => l.name);
       let suffixes = '';
-      for (const controlLabel of CONTROL_LABELS) {
+      for (const controlLabel of CONTROL_LABEL_NAMES) {
         if (issueLabels.includes(controlLabel)) {
           suffixes += ` [${controlLabel.replace('shipper:', '')}]`;
         }

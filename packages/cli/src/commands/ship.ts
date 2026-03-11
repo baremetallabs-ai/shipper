@@ -3,36 +3,33 @@ import type { ChildProcess } from 'node:child_process';
 import { createWriteStream, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { clearStaleLockIfNeeded, selectIssuesForStage } from '@dnsquared/shipper-core';
-import { gh } from '@dnsquared/shipper-core';
-import { withStageHooks } from '@dnsquared/shipper-core';
-import { releaseIssueLock, withIssueLock } from '@dnsquared/shipper-core';
-import { runPrompt } from '@dnsquared/shipper-core';
+import {
+  clearStaleLockIfNeeded,
+  selectIssuesForStage,
+  gh,
+  withStageHooks,
+  releaseIssueLock,
+  withIssueLock,
+  runPrompt,
+  STAGE_NAME_MAP,
+  STAGE_LABEL_NAMES,
+  NEW_LABEL,
+  PR_REVIEWED_LABEL,
+  READY_LABEL,
+  BLOCKED_LABEL,
+  LOCKED_LABEL,
+} from '@dnsquared/shipper-core';
 import type { AgentName } from '@dnsquared/shipper-core';
 import { postMerge } from './merge.js';
 import type { QueuedPR } from './merge.js';
 
 const MAX_REVIEW_CYCLES = 3;
 
-export const STAGE_NAME: Record<string, string> = {
-  'shipper:new': 'groom',
-  'shipper:groomed': 'design',
-  'shipper:designed': 'plan',
-  'shipper:planned': 'implement',
-  'shipper:implemented': 'pr open',
-  'shipper:pr-open': 'pr review',
-  'shipper:pr-reviewed': 'pr remediate',
-};
+export const STAGE_NAME: Record<string, string> = { ...STAGE_NAME_MAP };
 
-export const AUTO_PRIORITY_LABELS: string[] = [
-  'shipper:ready',
-  'shipper:pr-reviewed',
-  'shipper:pr-open',
-  'shipper:implemented',
-  'shipper:planned',
-  'shipper:designed',
-  'shipper:groomed',
-];
+export const AUTO_PRIORITY_LABELS: string[] = STAGE_LABEL_NAMES.filter(
+  (label) => label !== NEW_LABEL
+).reverse();
 
 interface StageResult {
   stage: string;
@@ -112,8 +109,7 @@ async function getCurrentLabel(repo: string, issueStr: string): Promise<string |
   const shipperLabels = output
     .split(/\r?\n/)
     .filter(
-      (name) =>
-        name.startsWith('shipper:') && name !== 'shipper:blocked' && name !== 'shipper:locked'
+      (name) => name.startsWith('shipper:') && name !== BLOCKED_LABEL && name !== LOCKED_LABEL
     );
 
   if (shipperLabels.length !== 1) return undefined;
@@ -220,43 +216,27 @@ async function mergePr(pr: QueuedPR, issueNumber: number, nwo: string): Promise<
     console.error(`\nMerge failed for PR #${pr.number}: ${reason}`);
 
     try {
-      await gh(['pr', 'edit', String(pr.number), '-R', nwo, '--remove-label', 'shipper:ready']);
+      await gh(['pr', 'edit', String(pr.number), '-R', nwo, '--remove-label', READY_LABEL]);
     } catch {
-      console.error(`Warning: Failed to remove shipper:ready label from PR #${pr.number}`);
+      console.error(`Warning: Failed to remove ${READY_LABEL} label from PR #${pr.number}`);
     }
 
     try {
-      await gh(['pr', 'edit', String(pr.number), '-R', nwo, '--add-label', 'shipper:pr-reviewed']);
+      await gh(['pr', 'edit', String(pr.number), '-R', nwo, '--add-label', PR_REVIEWED_LABEL]);
     } catch {
-      console.error(`Warning: Failed to add shipper:pr-reviewed label to PR #${pr.number}`);
+      console.error(`Warning: Failed to add ${PR_REVIEWED_LABEL} label to PR #${pr.number}`);
     }
 
     try {
-      await gh([
-        'issue',
-        'edit',
-        String(issueNumber),
-        '-R',
-        nwo,
-        '--remove-label',
-        'shipper:ready',
-      ]);
+      await gh(['issue', 'edit', String(issueNumber), '-R', nwo, '--remove-label', READY_LABEL]);
     } catch {
-      console.error(`Warning: Failed to remove shipper:ready label from issue #${issueNumber}`);
+      console.error(`Warning: Failed to remove ${READY_LABEL} label from issue #${issueNumber}`);
     }
 
     try {
-      await gh([
-        'issue',
-        'edit',
-        String(issueNumber),
-        '-R',
-        nwo,
-        '--add-label',
-        'shipper:pr-reviewed',
-      ]);
+      await gh(['issue', 'edit', String(issueNumber), '-R', nwo, '--add-label', PR_REVIEWED_LABEL]);
     } catch {
-      console.error(`Warning: Failed to add shipper:pr-reviewed label to issue #${issueNumber}`);
+      console.error(`Warning: Failed to add ${PR_REVIEWED_LABEL} label to issue #${issueNumber}`);
     }
 
     const comment = [
@@ -264,7 +244,7 @@ async function mergePr(pr: QueuedPR, issueNumber: number, nwo: string): Promise<
       '',
       `**Reason:** ${reason}`,
       '',
-      'The `shipper:pr-reviewed` label has been re-applied so the PR can be remediated and re-queued.',
+      `The \`${PR_REVIEWED_LABEL}\` label has been re-applied so the PR can be remediated and re-queued.`,
     ].join('\n');
 
     try {
@@ -294,15 +274,15 @@ async function shipOneIssue(
       return { success: false, error: msg };
     }
 
-    if (label === 'shipper:ready') {
+    if (label === READY_LABEL) {
       if (!merge) {
-        console.log(`Issue #${issueStr} is already at shipper:ready.`);
+        console.log(`Issue #${issueStr} is already at ${READY_LABEL}.`);
         return { success: true };
       }
       // Fall through to merge logic below the loop
     }
 
-    if (label !== 'shipper:ready' && !(label in STAGE_NAME)) {
+    if (label !== READY_LABEL && !(label in STAGE_NAME)) {
       const msg = `Unrecognized shipper label "${label}" on issue #${issueStr}.`;
       console.error(msg);
       return { success: false, error: msg };
@@ -310,7 +290,7 @@ async function shipOneIssue(
 
     const results: StageResult[] = [];
 
-    if (label !== 'shipper:ready') {
+    if (label !== READY_LABEL) {
       let reviewCycles = 0;
       let seenPrReviewed = false;
       const cliEntrypoint = process.argv[1];
@@ -349,7 +329,7 @@ async function shipOneIssue(
 
         label = await getCurrentLabel(repo, issueStr);
 
-        if (label === 'shipper:ready') {
+        if (label === READY_LABEL) {
           break;
         }
 
@@ -372,11 +352,11 @@ async function shipOneIssue(
           return { success: false, error: msg };
         }
 
-        if (label === 'shipper:pr-reviewed') {
+        if (label === PR_REVIEWED_LABEL) {
           if (seenPrReviewed) {
             reviewCycles++;
             if (reviewCycles >= MAX_REVIEW_CYCLES) {
-              const msg = `Review loop cap reached after ${MAX_REVIEW_CYCLES} cycles. Issue is at shipper:pr-reviewed. Continue manually.`;
+              const msg = `Review loop cap reached after ${MAX_REVIEW_CYCLES} cycles. Issue is at ${PR_REVIEWED_LABEL}. Continue manually.`;
               console.error(msg);
               results.push({ stage: 'pr remediate', status: 'fail' });
               printSummary(results);
@@ -570,11 +550,11 @@ export async function selectBlockedIssues(
       '-R',
       repo,
       '--label',
-      'shipper:blocked',
+      BLOCKED_LABEL,
       '--state',
       'open',
       '--search',
-      '-label:shipper:locked',
+      `-label:${LOCKED_LABEL}`,
       '--json',
       'number,title,labels',
       '--limit',
@@ -619,7 +599,7 @@ async function attemptUnblock(repo: string, issueStr: string, agent?: AgentName)
     async () => await runPrompt('unblock', { repo, issueRef: issueStr, agent })
   );
 
-  // Check whether shipper:blocked was removed — this is the only reliable signal
+  // Check whether the blocked label was removed; that is the reliable unblock signal.
   let output: string;
   try {
     const result = await gh([
@@ -639,7 +619,7 @@ async function attemptUnblock(repo: string, issueStr: string, agent?: AgentName)
   }
 
   const labels = output.split(/\r?\n/).filter(Boolean);
-  return !labels.includes('shipper:blocked');
+  return !labels.includes(BLOCKED_LABEL);
 }
 
 export function printUnblockSummary(attempts: UnblockAttempt[]): void {

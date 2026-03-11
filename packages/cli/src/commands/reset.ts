@@ -3,13 +3,31 @@ import { existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { confirm, promptChoice } from '../lib/confirm.js';
-import { getRepoNwo, getRepoRoot, gh, isLockStale, removeWorktree } from '@dnsquared/shipper-core';
+import {
+  getRepoNwo,
+  getRepoRoot,
+  gh,
+  isLockStale,
+  removeWorktree,
+  STAGE_LABEL_NAMES,
+  IMPLEMENTED_LABEL,
+  BLOCKED_LABEL,
+  LOCKED_LABEL,
+} from '@dnsquared/shipper-core';
 
-const WORKFLOW_STAGES = ['new', 'groomed', 'designed', 'planned', 'implemented'] as const;
-const PR_STAGE_LABELS = ['shipper:pr-open', 'shipper:pr-reviewed', 'shipper:ready'] as const;
-const NON_WORKFLOW_STAGE_NAMES = new Set(['blocked', 'locked', 'pr-open', 'pr-reviewed', 'ready']);
+const IMPLEMENTED_STAGE_INDEX = STAGE_LABEL_NAMES.indexOf(IMPLEMENTED_LABEL);
+const RESETTABLE_STAGE_LABELS = STAGE_LABEL_NAMES.slice(0, IMPLEMENTED_STAGE_INDEX + 1);
+const POST_IMPLEMENTATION_STAGE_LABELS = STAGE_LABEL_NAMES.slice(IMPLEMENTED_STAGE_INDEX + 1);
+const RESETTABLE_STAGE_NAMES = RESETTABLE_STAGE_LABELS.map((label) =>
+  label.replace(/^shipper:/, '')
+);
+const NON_RESETTABLE_STAGE_NAMES = new Set(
+  [BLOCKED_LABEL, LOCKED_LABEL, ...POST_IMPLEMENTATION_STAGE_LABELS].map((label) =>
+    label.replace(/^shipper:/, '')
+  )
+);
 
-type WorkflowStage = (typeof WORKFLOW_STAGES)[number];
+type WorkflowStage = 'new' | 'groomed' | 'designed' | 'planned' | 'implemented';
 type ErrnoError = Error & { code?: string };
 
 interface IssueViewData {
@@ -45,27 +63,25 @@ function getStageLabel(stage: WorkflowStage): string {
 }
 
 function getStageIndex(stage: WorkflowStage): number {
-  return WORKFLOW_STAGES.indexOf(stage);
+  return RESETTABLE_STAGE_NAMES.indexOf(stage);
 }
 
 function parseStage(input: string): WorkflowStage | null {
   const normalized = input.replace(/^shipper:/, '');
-  return WORKFLOW_STAGES.includes(normalized as WorkflowStage)
+  return RESETTABLE_STAGE_NAMES.includes(normalized as WorkflowStage)
     ? (normalized as WorkflowStage)
     : null;
 }
 
 function getCurrentStage(labels: string[]): CurrentStage {
-  const hasPrLabels = labels.some((label) =>
-    PR_STAGE_LABELS.includes(label as (typeof PR_STAGE_LABELS)[number])
-  );
+  const hasPrLabels = labels.some((label) => POST_IMPLEMENTATION_STAGE_LABELS.includes(label));
 
   if (hasPrLabels) {
     return { stage: 'implemented', hasPrLabels: true };
   }
 
-  for (let i = WORKFLOW_STAGES.length - 1; i >= 0; i -= 1) {
-    const stage = WORKFLOW_STAGES[i];
+  for (let i = RESETTABLE_STAGE_NAMES.length - 1; i >= 0; i -= 1) {
+    const stage = RESETTABLE_STAGE_NAMES[i] as WorkflowStage | undefined;
     if (!stage) continue;
     if (labels.includes(getStageLabel(stage))) {
       return { stage, hasPrLabels };
@@ -103,9 +119,9 @@ async function getStageTimestamp(
 
 function getInvalidStageError(input: string): string {
   const normalized = input.replace(/^shipper:/, '');
-  const validStages = WORKFLOW_STAGES.join(', ');
+  const validStages = RESETTABLE_STAGE_NAMES.join(', ');
 
-  if (NON_WORKFLOW_STAGE_NAMES.has(normalized)) {
+  if (NON_RESETTABLE_STAGE_NAMES.has(normalized)) {
     return `Error: ${input} is not a valid workflow stage. Valid stages: ${validStages}.`;
   }
 
@@ -114,7 +130,7 @@ function getInvalidStageError(input: string): string {
 
 function getValidTargets(currentStage: CurrentStage): WorkflowStage[] {
   const currentIndex = getStageIndex(currentStage.stage);
-  const targets = WORKFLOW_STAGES.slice(0, currentIndex);
+  const targets = RESETTABLE_STAGE_NAMES.slice(0, currentIndex) as WorkflowStage[];
 
   if (currentStage.hasPrLabels) {
     targets.push('implemented');
@@ -157,10 +173,10 @@ async function scanArtifacts(
   const targetLabel = getStageLabel(targetStage);
   const labelsToRemove = labels.filter((label) => {
     if (targetStage === 'new') {
-      return label.startsWith('shipper:') && label !== 'shipper:new';
+      return label.startsWith('shipper:') && label !== getStageLabel(targetStage);
     }
 
-    if (PR_STAGE_LABELS.includes(label as (typeof PR_STAGE_LABELS)[number])) {
+    if (POST_IMPLEMENTATION_STAGE_LABELS.includes(label)) {
       return true;
     }
 
