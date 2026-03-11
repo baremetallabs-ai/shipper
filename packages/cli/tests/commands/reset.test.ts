@@ -39,6 +39,19 @@ vi.mock('@dnsquared/shipper-core', () => ({
   gh: (...args: unknown[]) => mockGh(...args),
   isLockStale: (...args: unknown[]) => mockIsLockStale(...args),
   removeWorktree: (...args: unknown[]) => mockRemoveWorktree(...args),
+  STAGE_LABEL_NAMES: [
+    'shipper:new',
+    'shipper:groomed',
+    'shipper:designed',
+    'shipper:planned',
+    'shipper:implemented',
+    'shipper:pr-open',
+    'shipper:pr-reviewed',
+    'shipper:ready',
+  ],
+  IMPLEMENTED_LABEL: 'shipper:implemented',
+  BLOCKED_LABEL: 'shipper:blocked',
+  LOCKED_LABEL: 'shipper:locked',
 }));
 
 vi.mock('node:child_process', () => ({
