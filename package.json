@@ -5,7 +5,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspace=packages/core && npm run build --workspace=packages/cli",
+    "build": "npm run build --workspace=packages/core && npm run build --workspace=packages/cli && npm run build --workspace=packages/desktop",
     "test": "npm run test --workspaces --if-present",
     "type-check": "npm run build --workspace=packages/core && npm run type-check --workspaces --if-present",
     "lint": "eslint .",
