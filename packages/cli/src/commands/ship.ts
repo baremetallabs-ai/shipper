@@ -4,7 +4,9 @@ import { createWriteStream, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import {
+  classifyChecks,
   clearStaleLockIfNeeded,
+  fetchChecks,
   selectIssuesForStage,
   gh,
   withStageHooks,
@@ -24,6 +26,7 @@ import { postMerge } from './merge.js';
 import type { QueuedPR } from './merge.js';
 
 const MAX_REVIEW_CYCLES = 3;
+const MERGE_FAILURE_PREFIX = 'Merge failed for PR #';
 
 export const STAGE_NAME: Record<string, string> = { ...STAGE_NAME_MAP };
 
@@ -56,9 +59,15 @@ export interface ShipOptions {
   agent?: AgentName;
 }
 
+interface ShipIssueResult {
+  success: boolean;
+  error?: string;
+  retriable?: boolean;
+}
+
 interface AsyncIssueRun {
   child: ChildProcess;
-  result: Promise<{ success: boolean; error?: string }>;
+  result: Promise<ShipIssueResult>;
 }
 
 interface ActiveIssueRun {
@@ -66,11 +75,15 @@ interface ActiveIssueRun {
   child: ChildProcess;
   completion: Promise<{
     issue: { number: number; title: string };
-    result: { success: boolean; error?: string };
+    result: ShipIssueResult;
   }>;
 }
 
 type ShipSignal = 'SIGINT' | 'SIGTERM' | 'SIGKILL';
+
+interface PRMergeStateViewData {
+  mergeStateStatus: string;
+}
 
 function formatLogTimestamp(date = new Date()): string {
   const pad = (value: number) => String(value).padStart(2, '0');
@@ -194,8 +207,185 @@ async function resolvePrForIssue(issueNumber: number, nwo: string): Promise<Queu
   return { ...pr, labeledAt: '' };
 }
 
-async function mergePr(pr: QueuedPR, issueNumber: number, nwo: string): Promise<boolean> {
+function normalizeError(err: unknown): Error {
+  return err instanceof Error ? err : new Error(String(err));
+}
+
+function formatMergeFailureMessage(prNumber: number, reason: string): string {
+  const prefix = `${MERGE_FAILURE_PREFIX}${prNumber}:`;
+  return reason.startsWith(prefix) ? reason : `${prefix} ${reason}`;
+}
+
+function isMergeReadyState(mergeState: string): boolean {
+  return mergeState === 'CLEAN' || mergeState === 'HAS_HOOKS' || mergeState === 'UNSTABLE';
+}
+
+function isRetriableMergeFailure(error?: string): boolean {
+  return error?.includes(MERGE_FAILURE_PREFIX) ?? false;
+}
+
+async function getMergeStateStatus(prNumber: number, nwo: string): Promise<string> {
+  let output: string;
   try {
+    const result = await gh([
+      'pr',
+      'view',
+      String(prNumber),
+      '-R',
+      nwo,
+      '--json',
+      'mergeStateStatus',
+    ]);
+    output = result.stdout;
+  } catch (err) {
+    throw new Error(
+      `Could not determine merge state for PR #${prNumber}: ${normalizeError(err).message}`
+    );
+  }
+
+  try {
+    const data = JSON.parse(output) as PRMergeStateViewData;
+    return data.mergeStateStatus;
+  } catch (err) {
+    throw new Error(
+      `Could not determine merge state for PR #${prNumber}: ${normalizeError(err).message}`
+    );
+  }
+}
+
+async function getBlockedMergeStateReason(pr: QueuedPR, nwo: string): Promise<string> {
+  let checks;
+  try {
+    checks = await fetchChecks(nwo, String(pr.number));
+  } catch (err) {
+    throw new Error(
+      `Could not fetch CI checks for PR #${pr.number}: ${normalizeError(err).message}`
+    );
+  }
+
+  const { pending, failed } = classifyChecks(checks);
+
+  if (failed.length > 0) {
+    const names = failed.map((check) => check.name).join(', ');
+    return `PR #${pr.number} is blocked by failed CI checks: ${names}.`;
+  }
+
+  if (pending.length > 0) {
+    const names = pending.map((check) => check.name).join(', ');
+    return `PR #${pr.number} is blocked by pending CI checks: ${names}. Retry when they complete.`;
+  }
+
+  return `PR #${pr.number} is blocked, likely due to required reviews or branch protection requirements.`;
+}
+
+async function getMergeStateFailureReason(
+  pr: QueuedPR,
+  nwo: string,
+  mergeState: string,
+  afterRebase = false
+): Promise<string> {
+  if (mergeState === 'BEHIND') {
+    if (afterRebase) {
+      return `PR #${pr.number} is still behind its base branch after rebasing. Retry shortly.`;
+    }
+    return `PR #${pr.number} is behind its base branch and must be rebased before merging.`;
+  }
+
+  if (mergeState === 'DIRTY') {
+    return `PR #${pr.number} has merge conflicts that must be resolved.`;
+  }
+
+  if (mergeState === 'BLOCKED') {
+    return await getBlockedMergeStateReason(pr, nwo);
+  }
+
+  if (mergeState === 'UNKNOWN') {
+    return `GitHub has not computed merge state for PR #${pr.number} yet. Retry shortly.`;
+  }
+
+  return `Unrecognized merge state '${mergeState}' for PR #${pr.number}.`;
+}
+
+async function remediateMergeFailure(
+  pr: QueuedPR,
+  issueNumber: number,
+  nwo: string,
+  reason: string
+): Promise<void> {
+  console.error(`\n${formatMergeFailureMessage(pr.number, reason)}`);
+
+  try {
+    await gh(['pr', 'edit', String(pr.number), '-R', nwo, '--remove-label', READY_LABEL]);
+  } catch {
+    console.error(`Warning: Failed to remove ${READY_LABEL} label from PR #${pr.number}`);
+  }
+
+  try {
+    await gh(['pr', 'edit', String(pr.number), '-R', nwo, '--add-label', PR_REVIEWED_LABEL]);
+  } catch {
+    console.error(`Warning: Failed to add ${PR_REVIEWED_LABEL} label to PR #${pr.number}`);
+  }
+
+  try {
+    await gh(['issue', 'edit', String(issueNumber), '-R', nwo, '--remove-label', READY_LABEL]);
+  } catch {
+    console.error(`Warning: Failed to remove ${READY_LABEL} label from issue #${issueNumber}`);
+  }
+
+  try {
+    await gh(['issue', 'edit', String(issueNumber), '-R', nwo, '--add-label', PR_REVIEWED_LABEL]);
+  } catch {
+    console.error(`Warning: Failed to add ${PR_REVIEWED_LABEL} label to issue #${issueNumber}`);
+  }
+
+  const comment = [
+    `Merge failed for PR #${pr.number}.`,
+    '',
+    `**Reason:** ${reason}`,
+    '',
+    `The \`${PR_REVIEWED_LABEL}\` label has been re-applied so the PR can be remediated and re-queued.`,
+  ].join('\n');
+
+  try {
+    await gh(['pr', 'comment', String(pr.number), '-R', nwo, '--body', comment]);
+  } catch {
+    console.error(`Warning: Failed to post failure comment on PR #${pr.number}`);
+  }
+}
+
+async function mergePr(pr: QueuedPR, issueNumber: number, nwo: string): Promise<void> {
+  try {
+    let mergeState = await getMergeStateStatus(pr.number, nwo);
+    let rebased = false;
+
+    if (mergeState === 'BEHIND') {
+      console.log(`PR #${pr.number} is behind its base branch. Rebasing before merge.`);
+      try {
+        const { stdout } = await gh([
+          'pr',
+          'update-branch',
+          String(pr.number),
+          '-R',
+          nwo,
+          '--rebase',
+        ]);
+        if (stdout.trim()) {
+          process.stdout.write(stdout);
+        }
+      } catch (err) {
+        throw new Error(
+          `Failed to rebase PR #${pr.number} onto its base branch: ${normalizeError(err).message}`
+        );
+      }
+
+      rebased = true;
+      mergeState = await getMergeStateStatus(pr.number, nwo);
+    }
+
+    if (!isMergeReadyState(mergeState)) {
+      throw new Error(await getMergeStateFailureReason(pr, nwo, mergeState, rebased));
+    }
+
     const { stdout } = await gh([
       'pr',
       'merge',
@@ -210,50 +400,10 @@ async function mergePr(pr: QueuedPR, issueNumber: number, nwo: string): Promise<
     }
     console.log(`PR #${pr.number} merged successfully.`);
     await postMerge(pr, issueNumber, nwo, false);
-    return true;
   } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    console.error(`\nMerge failed for PR #${pr.number}: ${reason}`);
-
-    try {
-      await gh(['pr', 'edit', String(pr.number), '-R', nwo, '--remove-label', READY_LABEL]);
-    } catch {
-      console.error(`Warning: Failed to remove ${READY_LABEL} label from PR #${pr.number}`);
-    }
-
-    try {
-      await gh(['pr', 'edit', String(pr.number), '-R', nwo, '--add-label', PR_REVIEWED_LABEL]);
-    } catch {
-      console.error(`Warning: Failed to add ${PR_REVIEWED_LABEL} label to PR #${pr.number}`);
-    }
-
-    try {
-      await gh(['issue', 'edit', String(issueNumber), '-R', nwo, '--remove-label', READY_LABEL]);
-    } catch {
-      console.error(`Warning: Failed to remove ${READY_LABEL} label from issue #${issueNumber}`);
-    }
-
-    try {
-      await gh(['issue', 'edit', String(issueNumber), '-R', nwo, '--add-label', PR_REVIEWED_LABEL]);
-    } catch {
-      console.error(`Warning: Failed to add ${PR_REVIEWED_LABEL} label to issue #${issueNumber}`);
-    }
-
-    const comment = [
-      `Merge failed for PR #${pr.number}.`,
-      '',
-      `**Reason:** ${reason}`,
-      '',
-      `The \`${PR_REVIEWED_LABEL}\` label has been re-applied so the PR can be remediated and re-queued.`,
-    ].join('\n');
-
-    try {
-      await gh(['pr', 'comment', String(pr.number), '-R', nwo, '--body', comment]);
-    } catch {
-      console.error(`Warning: Failed to post failure comment on PR #${pr.number}`);
-    }
-
-    return false;
+    const reason = normalizeError(err).message;
+    await remediateMergeFailure(pr, issueNumber, nwo, reason);
+    throw new Error(formatMergeFailureMessage(pr.number, reason));
   }
 }
 
@@ -262,7 +412,7 @@ async function shipOneIssue(
   issue: string,
   merge: boolean,
   agent?: AgentName
-): Promise<{ success: boolean; error?: string }> {
+): Promise<ShipIssueResult> {
   const issueStr = issue.replace(/^#/, '');
 
   return await withIssueLock(repo, issueStr, async () => {
@@ -384,18 +534,18 @@ async function shipOneIssue(
         return { success: false, error: msg };
       }
 
-      const merged = await withStageHooks(
-        'merge',
-        { issueNumber: issueStr, branchName: pr.headRefName },
-        async () => await mergePr(pr, issueNumber, nwo)
-      );
-
-      if (merged) {
+      try {
+        await withStageHooks(
+          'merge',
+          { issueNumber: issueStr, branchName: pr.headRefName },
+          async () => await mergePr(pr, issueNumber, nwo)
+        );
         results.push({ stage: 'merge', status: 'pass' });
-      } else {
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
         results.push({ stage: 'merge', status: 'fail' });
         printSummary(results);
-        return { success: false, error: 'merge failed' };
+        return { success: false, error: msg, retriable: true };
       }
     }
 
@@ -442,11 +592,11 @@ function shipOneIssueAsync(issue: string, logFile?: string, agent?: AgentName): 
     });
   }
 
-  const result = new Promise<{ success: boolean; error?: string }>((resolve) => {
+  const result = new Promise<ShipIssueResult>((resolve) => {
     let settled = false;
     let logStreamClosed = false;
 
-    const resolveResult = (value: { success: boolean; error?: string }) => {
+    const resolveResult = (value: ShipIssueResult) => {
       if (settled) return;
       settled = true;
       resolve(value);
@@ -652,7 +802,9 @@ async function shipAutoSequential(repo: string, agent?: AgentName): Promise<void
       if (result.success) {
         results.push({ issue: candidate.number, title: candidate.title, outcome: 'pass' });
       } else {
-        skippedIssues.add(candidate.number);
+        if (result.retriable !== true) {
+          skippedIssues.add(candidate.number);
+        }
         results.push({
           issue: candidate.number,
           title: candidate.title,
@@ -802,7 +954,9 @@ async function shipAutoParallel(repo: string, parallel: number, agent?: AgentNam
           outcome: 'pass',
         });
       } else {
-        skippedIssues.add(completed.issue.number);
+        if (!isRetriableMergeFailure(completed.result.error)) {
+          skippedIssues.add(completed.issue.number);
+        }
         results.push({
           issue: completed.issue.number,
           title: completed.issue.title,
