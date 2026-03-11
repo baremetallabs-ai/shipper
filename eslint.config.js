@@ -8,7 +8,7 @@ export default [
   },
   eslint.configs.recommended,
   {
-    files: ['**/*.ts'],
+    files: ['**/*.ts', '**/*.tsx'],
     languageOptions: {
       parser: tsparser,
       parserOptions: {
@@ -47,6 +47,21 @@ export default [
       'no-console': 'off',
       'prefer-const': 'error',
       'no-var': 'error',
+    },
+  },
+  {
+    files: ['packages/desktop/src/renderer/**/*.{ts,tsx}'],
+    languageOptions: {
+      globals: {
+        document: 'readonly',
+        Event: 'readonly',
+        HTMLElement: 'readonly',
+        HTMLButtonElement: 'readonly',
+        HTMLInputElement: 'readonly',
+        KeyboardEvent: 'readonly',
+        navigator: 'readonly',
+        window: 'readonly',
+      },
     },
   },
 ];
