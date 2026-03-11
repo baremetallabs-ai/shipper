@@ -104,7 +104,7 @@ A review cycle cap (`MAX_REVIEW_CYCLES = 3`) prevents infinite tight `pr-reviewe
 - Without `--to`, it presents an interactive picker of valid earlier targets.
 - With `--to <stage>`, it resets directly to the specified earlier stage.
 - Valid reset targets are `new`, `groomed`, `designed`, `planned`, and `implemented`, as long as the target is behind the current stage.
-- Reset removes later shipper labels, closes matching open PRs, deletes shipper-prefixed remote branches, removes matching local branches and local worktrees, deletes later-stage issue comments, and posts a reset notice comment after re-applying the target label.
+- Reset removes later shipper labels, closes matching open PRs, and for any closed PR whose head ref starts with `shipper/` attempts to delete that remote branch; it also removes matching local branches and local worktrees, deletes later-stage issue comments, and posts a reset notice comment after re-applying the target label.
 
 ## Locking
 
