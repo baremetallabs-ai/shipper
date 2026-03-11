@@ -116,8 +116,10 @@ Use `packages/core/src/lib/settings.ts` as the source of truth. The current cano
 | `commands`                   | Object map. See `### Commands map` below.               | `{ default: { agent: "claude" } }`       | Per-command agent and mode settings.                                                |
 | `defaultBaseBranch`          | Optional `string`                                       | auto-detected from GitHub                | Default base branch for PRs.                                                        |
 | `installCommand`             | Optional `string`                                       | none                                     | Shell command used to install project dependencies.                                 |
-| `hooks.worktreeSetup`        | Optional `string`                                       | none                                     | Shell command to run after a worktree is created.                                   |
-| `hooks.worktreeTeardown`     | Optional `string`                                       | none                                     | Shell command to run before a worktree is removed.                                  |
+| `hooks`                      | `{ worktreeSetup?: string, worktreeTeardown?: string }` | `{}`                                     | Worktree lifecycle hook commands.                                                   |
+| `hooks.worktreeSetup`        | Optional `string`                                       | none                                     | Deprecated settings-based setup hook. Prefer `.shipper/hooks/worktree-setup`.       |
+| `hooks.worktreeTeardown`     | Optional `string`                                       | none                                     | Deprecated settings-based teardown hook. Prefer `.shipper/hooks/worktree-teardown`. |
+| `merge`                      | `{ requirePassingChecks: boolean }`                     | `{ requirePassingChecks: true }`         | Merge behavior settings.                                                            |
 | `merge.requirePassingChecks` | `boolean`                                               | `true`                                   | Require all CI checks to pass before auto-merging.                                  |
 | `cliVersion`                 | Optional `string`                                       | none                                     | Pin Shipper CLI to a specific version.                                              |
 
@@ -153,6 +155,6 @@ Use `packages/core/src/lib/settings.ts` as the source of truth. The current cano
 
 1. Check the issue's current labels and confirm it is not stuck on an unexpected state or carrying a stale `shipper:locked` label.
 2. Read recent issue comments for error context, failure reports, or notes from prior agent runs.
-3. Check whether a branch exists for the issue, for example with `git branch -a | grep <issue-number>`.
+3. Check whether a branch exists for the issue, for example with `git branch -a | grep 'shipper/<issue-number>'` or `git branch -a | grep 'origin/shipper/<issue-number>'`.
 4. Check whether a matching worktree exists under `~/.shipper/worktrees/`.
-5. If `shipper:locked` is stale and no active agent is running, remove it manually or wait for it to auto-clear after `lockTimeoutMinutes`.
+5. If `shipper:locked` is stale and no active agent is running, rerun the relevant Shipper command to trigger stale-lock detection, or remove it manually or via `shipper unlock`.
