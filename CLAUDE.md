@@ -4,12 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is Shipper CLI
 
-A CLI workflow orchestrator for GitHub-hosted repos. Each command launches a coding agent (e.g. `claude`) with a Markdown prompt file from `.shipper/prompts/`. Shipper handles orchestration; GitHub issues/labels are the source of truth for workflow state.
+A CLI workflow orchestrator for GitHub-hosted repos. Prompt-driven commands use prompts bundled with the CLI, with optional repo-local overrides under `.shipper/prompts/<agent>/`. Shipper handles orchestration; GitHub issues and labels are the source of truth for workflow state.
+
+This repo is a small monorepo:
+
+- `packages/cli` - the CLI entrypoint and command implementations
+- `packages/core` - shared library code for prompts, settings, GitHub integration, worktrees, and locking
+- `packages/desktop` - Electron desktop app in early development
 
 ## Commands
 
 ```bash
-npm run build          # Bundle with tsup → packages/cli/dist/
+npm run build          # Bundle with tsup -> packages/cli/dist/
 npm run dev            # Run via tsx (no build needed)
 npm run type-check     # tsc --noEmit
 npm run lint           # eslint .
@@ -22,22 +28,22 @@ npx vitest run packages/cli/tests/lib/branch.test.ts   # Run a single test file
 
 ## Architecture
 
-**Command pattern:** Each CLI command lives in `packages/cli/src/commands/<name>.ts` and exports a single async function. Commands follow: validate input → check prerequisites → execute action (usually `runPrompt()`).
+**Command pattern:** Each CLI command lives in `packages/cli/src/commands/<name>.ts` and exports a single async function. Commands follow: validate input -> check prerequisites -> execute action, usually by dispatching to shared core helpers.
 
-**Prompt-driven execution:** Commands map to Markdown files in `packages/cli/src/prompts/`. Prompts have YAML frontmatter (`cmd`, `args`, `append-issue`, etc.). `runPrompt()` in `packages/cli/src/lib/prompt-runner.ts` spawns the configured agent CLI with the prompt as system message.
+**Prompt-driven execution:** Bundled prompts live in `packages/core/src/prompts/`. `runPrompt()` in `packages/core/src/lib/prompt-runner.ts` resolves a repo-local override in `.shipper/prompts/<agent>/` before falling back to the bundled prompt, then spawns the configured agent CLI.
 
-**Ephemeral worktrees:** Implementation/PR commands use temporary git worktrees stored in `~/.shipper/worktrees/`. `withWorktree()` in `packages/cli/src/lib/worktree.ts` handles create → callback → cleanup with signal handler support (SIGINT/SIGTERM).
+**Ephemeral worktrees:** Implementation and PR commands use temporary git worktrees stored in `~/.shipper/worktrees/`. `withWorktree()` in `packages/core/src/lib/worktree.ts` handles create -> callback -> cleanup with signal handler support.
 
-**GitHub integration:** All GitHub interaction goes through the `gh` CLI (no REST API). See `packages/cli/src/lib/github.ts`.
+**GitHub integration:** All GitHub interaction goes through the `gh` CLI. See `packages/core/src/lib/github.ts`.
 
-**Workflow state machine via labels:** `shipper:new` → `shipper:groomed` → `shipper:designed` → `shipper:planned` → `shipper:implemented` → `shipper:pr-open` → `shipper:pr-reviewed` → `shipper:ready`. Control labels: `shipper:blocked` (dependency block), `shipper:locked` (active instance lock). The `next` command auto-advances based on current label.
+**Workflow state machine via labels:** `shipper:new` -> `shipper:groomed` -> `shipper:designed` -> `shipper:planned` -> `shipper:implemented` -> `shipper:pr-open` -> `shipper:pr-reviewed` -> `shipper:ready`. Control labels: `shipper:blocked` and `shipper:locked`. The `next` command auto-advances based on the current workflow label.
 
 ## Code Conventions
 
-- **ESM-only** with `.js` extensions on relative imports (required for Node ESM resolution)
-- **Strict TypeScript** — `noUncheckedIndexedAccess`, `noUnusedLocals`, `noUnusedParameters`, `verbatimModuleSyntax`
-- **Single runtime dependency:** `commander`. Everything else uses Node built-ins (`child_process`, `fs`, `path`, `os`)
-- **Conventional commits** enforced via Husky + Commitlint: `type(scope): subject`
+- **ESM-only** with `.js` extensions on relative imports
+- **Strict TypeScript** with `noUncheckedIndexedAccess`, `noUnusedLocals`, `noUnusedParameters`, and `verbatimModuleSyntax`
+- **Runtime dependencies:** the CLI package depends on `commander` and `@dnsquared/shipper-core`; the core package uses only Node built-ins at runtime
+- **Conventional commits** enforced via Husky and Commitlint: `type(scope): subject`
 - **Prettier:** single quotes, trailing commas (es5), 100 char width, semicolons
 - **File naming:** kebab-case for files, camelCase for functions, PascalCase for interfaces
 - **Unused variables:** prefix with `_` to satisfy lint
