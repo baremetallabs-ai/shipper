@@ -78,7 +78,7 @@ Agents can roll back to an earlier stage if the work is insufficient:
 
 ## The `next` command
 
-Auto-advances an issue by reading its current label and dispatching to the corresponding command. Validates that exactly one workflow label is present and that the issue is not blocked (except `shipper:new`, which can always be groomed).
+Auto-advances an issue by reading its current label and dispatching to the corresponding command. Validates that exactly one workflow label is present and that the issue is not blocked, except `shipper:new`, which can always be groomed.
 
 ## The `ship --auto` command
 
@@ -91,7 +91,7 @@ shipper:ready > shipper:pr-reviewed > shipper:pr-open > shipper:implemented
 
 `shipper:new` is excluded from auto-ship because grooming is interactive by default.
 
-Within a stage, issues are processed FIFO by label-application timestamp (queried via the GitHub timeline API).
+Within a stage, issues are processed FIFO by label-application timestamp queried via the GitHub timeline API.
 
 After exhausting available issues, auto-ship attempts to unblock `shipper:blocked` issues. If any are unblocked, it loops back to process the newly available issues.
 
@@ -99,16 +99,21 @@ A review cycle cap (`MAX_REVIEW_CYCLES = 3`) prevents infinite tight `pr-reviewe
 
 ## The `reset` command
 
-Forcibly moves an issue back to any earlier stage. Removes all labels ahead of the target and sets the target label. Handles cleanup of associated branches, worktrees, and PRs when resetting from PR stages.
+`reset` only moves an issue backward to an earlier workflow stage.
+
+- Without `--to`, it presents an interactive picker of valid earlier targets.
+- With `--to <stage>`, it resets directly to the specified earlier stage.
+- Valid reset targets are `new`, `groomed`, `designed`, `planned`, and `implemented`, as long as the target is behind the current stage.
+- Reset removes later shipper labels, closes matching open PRs, deletes shipper-prefixed remote branches, removes matching local branches and local worktrees, deletes later-stage issue comments, and posts a reset notice comment after re-applying the target label.
 
 ## Locking
 
 The `shipper:locked` label prevents concurrent execution on the same issue.
 
-- **Acquire**: Adds the label. If already present and stale (>10 min since last heartbeat), clears and reacquires. If fresh, errors out.
-- **Heartbeat**: Every ~3.3 minutes, removes and re-adds the label to create a fresh timeline event.
-- **Release**: Removes the label in a `finally` block after command completion. Signal handlers (SIGINT/SIGTERM) also release the lock.
-- **Staleness detection**: Queries the issue timeline API for the most recent `labeled` event for `shipper:locked` and checks its age.
+- **Acquire:** Adds the label. If it is already present and stale according to `lockTimeoutMinutes` (default `30` minutes), Shipper clears and reacquires it. If the lock is still fresh, the command errors out.
+- **Heartbeat:** Renews the lock every `lockTimeoutMinutes / 3` minutes. With the default timeout, that is every 10 minutes.
+- **Release:** Removes the label in a `finally` block after command completion. Signal handlers (`SIGINT` and `SIGTERM`) also release the lock.
+- **Staleness detection:** Queries the issue timeline API for the most recent `labeled` event for `shipper:locked` and compares its age to the configured timeout.
 
 All workflow commands wrap their execution in `withIssueLock()`.
 
@@ -116,19 +121,19 @@ All workflow commands wrap their execution in `withIssueLock()`.
 
 `shipper:blocked` indicates an issue has unmet dependencies. It is typically set by the agent during grooming when dependencies are discovered.
 
-- The `next` command refuses to advance blocked issues (except `shipper:new` -> groomed).
-- `selectIssuesForStage()` excludes blocked issues from auto-selection (except for `shipper:new`).
+- The `next` command refuses to advance blocked issues, except `shipper:new`.
+- `selectIssuesForStage()` excludes blocked issues from auto-selection, except for `shipper:new`.
 - The `unblock` command prompts an agent to re-check dependencies and remove the label if resolved.
 
 ## Key files
 
 | File                                      | Role                                            |
 | ----------------------------------------- | ----------------------------------------------- |
-| `packages/cli/src/commands/init.ts`       | Label definitions (names, colors, descriptions) |
+| `packages/core/src/lib/labels.ts`         | Label definitions (names, colors, descriptions) |
 | `packages/cli/src/commands/next.ts`       | State machine dispatch                          |
 | `packages/cli/src/commands/ship.ts`       | Auto-ship priority ordering and stage names     |
-| `packages/cli/src/commands/reset.ts`      | Stage categorization for reset                  |
+| `packages/cli/src/commands/reset.ts`      | Stage categorization and cleanup for reset      |
 | `packages/cli/src/commands/issue-list.ts` | Label display and grouping                      |
-| `packages/core/src/lib/lock.ts`           | Lock acquire/release/heartbeat                  |
-| `packages/core/src/lib/github.ts`         | Issue selection, label timeline queries         |
+| `packages/core/src/lib/lock.ts`           | Lock acquire, release, heartbeat, and staleness |
+| `packages/core/src/lib/github.ts`         | Issue selection and label timeline queries      |
 | `packages/core/src/lib/prerequisites.ts`  | Label existence validation                      |

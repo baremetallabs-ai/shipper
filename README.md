@@ -1,6 +1,6 @@
 # Shipper CLI Workflow
 
-Shipper CLI is an opinionated workflow runner for GitHub-hosted repos. Each Shipper command launches a configured coding agent (e.g. `claude`) with a repo-local prompt file under `./.shipper/prompts/`. Shipper’s responsibility is orchestration; GitHub is the source of truth for workflow state.
+Shipper CLI is an opinionated workflow runner for GitHub-hosted repos. Prompt-driven commands use prompts bundled with the CLI, while GitHub remains the source of truth for workflow state.
 
 ## Prerequisites
 
@@ -11,41 +11,35 @@ Shipper assumes:
 
 `shipper init`:
 
-- Creates/updates `./.shipper/` (idempotent; can be re-run after upgrades).
+- Creates or updates `./.shipper/` (idempotent; can be re-run after upgrades).
 - Ensures required GitHub labels exist for the workflow.
-- Ensures required tooling is installed/configured (e.g. `gh` auth), or guides the user to do so.
+- Ensures required tooling is installed and configured (for example `gh` auth), or guides the user to do so.
 
-If any command discovers missing prerequisites (no `gh`, not authenticated, missing labels, etc.), it instructs the user to run `shipper init` and stops.
+If any command discovers missing prerequisites, it instructs the user to run `shipper init` and stops.
 
 ## Prompt-driven commands
 
-Each command maps to a Markdown prompt file:
+Prompt-running commands use bundled prompts shipped inside `packages/core/src/prompts/<agent>/`.
 
-- `./.shipper/prompts/<command>.md`
+At runtime, `runPrompt()` resolves prompts in this order:
 
-Prompt files include YAML frontmatter specifying:
+- Local override: `./.shipper/prompts/<agent>/<name>.md`
+- Bundled default: `packages/core/src/prompts/<agent>/<name>.md`
 
-- `cmd`: which agent CLI to run (e.g. `claude`)
-- `args`: arguments (e.g. `--model opus`)
-
-Shipper executes the prompt by launching `cmd` with `args` and feeding the prompt content. The user’s command arguments (e.g. `shipper new <request>`) are injected as the initial user message.
-
-Temporary files created during runs must be stored under:
-
-- `./.shipper/tmp/`
+Use `shipper eject` to scaffold editable local overrides under `./.shipper/prompts/<agent>/`. Shipper still stores temporary runtime files under `./.shipper/tmp/`.
 
 ## State model
 
-Workflow state is tracked in GitHub using labels on issues (and optionally PRs). Comments and issue bodies hold the human-readable artifacts produced by each stage.
+Workflow state is tracked in GitHub using labels on issues and PRs. Comments and issue bodies hold the human-readable artifacts produced by each stage.
 
 Workflow states (the happy path):
 
-`shipper:new` → `shipper:groomed` → `shipper:designed` → `shipper:planned` → `shipper:implemented` → `shipper:pr-open` → `shipper:pr-reviewed` → `shipper:ready`
+`shipper:new` -> `shipper:groomed` -> `shipper:designed` -> `shipper:planned` -> `shipper:implemented` -> `shipper:pr-open` -> `shipper:pr-reviewed` -> `shipper:ready`
 
 Control labels:
 
-- `shipper:blocked` — dependency block, resolved by `shipper unblock`
-- `shipper:locked` — active instance lock, resolved by `shipper unlock`
+- `shipper:blocked` - dependency block, resolved by `shipper unblock`
+- `shipper:locked` - active instance lock, resolved by `shipper unlock`
 
 ---
 
@@ -53,94 +47,97 @@ Control labels:
 
 Stage commands that operate on issues (`groom`, `design`, `plan`, `implement`) accept an optional issue argument and, when omitted, auto-select the first eligible issue. Stage commands that operate on pull requests (`pr open`, `pr review`, `pr remediate`) accept an optional PR argument and, when omitted, auto-select the first eligible PR.
 
-## 1) `shipper new <request>`
+## 1) `shipper setup [words...]`
+
+Purpose: configure repository settings with an agent.
+
+Behavior:
+
+- Runs the setup prompt before the rest of the workflow is used.
+- Accepts optional freeform instructions, for example `shipper setup "change agent to codex"`.
+- If no instructions are provided, seeds the prompt with repo-aware setup text.
+- Shared flags: `--mode <headless|interactive|default>` and `--agent <claude|codex>`.
+
+Output:
+
+- Updated `.shipper/` configuration for the repository.
+
+## 2) `shipper new <request>`
 
 Purpose: convert a rough idea into a lightweight, high-level GitHub issue.
 
 Behavior:
 
-- Agent asks a small number of clarifying questions (typically 5–10).
-- Agent drafts a concise issue with title, summary, acceptance criteria, out of scope, notes.
+- Agent asks a small number of clarifying questions.
+- Agent drafts a concise issue with title, summary, acceptance criteria, out of scope, and notes.
 - Agent creates the issue via `gh issue create --body-file ...` and applies label `shipper:new`.
+- Shared flags: `--mode <headless|interactive|default>` and `--agent <claude|codex>`.
 
 Output:
 
 - A new GitHub issue labeled `shipper:new`.
 
-## 2) `shipper groom <issue>`
+## 3) `shipper groom [issue] [--auto]`
 
-Purpose: make the issue **decision-complete at the product level**.
+Purpose: make the issue decision-complete at the product level.
 
 Behavior:
 
 - Agent reads the full issue and comments.
-- Agent explores the codebase only to understand existing user-facing behavior (no design/architecture decisions).
-- Agent interviews the product owner to resolve missing product decisions:
-  - scope and requirements
-  - UX/behavior including edge cases
-  - acceptance criteria
-  - follow-ups and boundaries
-
-- Agent updates the issue body to be implementation-ready.
-- Agent posts a grooming summary comment.
-- Agent updates labels: add `shipper:groomed`, remove `shipper:new`.
-
-If the agent recommends splitting:
-
-- It creates additional issues using `gh issue create --body-file ... --label shipper:new`.
-- Those new issues start in `shipper:new` status (not groomed).
+- Agent explores the codebase only to understand existing user-facing behavior.
+- Agent interviews the product owner to resolve missing product decisions.
+- Agent updates the issue body, posts a grooming summary comment, and transitions the issue to `shipper:groomed`.
+- `--auto` grooms all eligible `shipper:new` issues in sequence. It is mutually exclusive with an explicit issue number.
+- Shared flags: `--mode <headless|interactive|default>` and `--agent <claude|codex>`.
 
 Output:
 
-- Updated original issue body + grooming summary comment.
+- Updated original issue body and grooming summary comment.
 - Issue labeled `shipper:groomed`.
-- Optional: additional `shipper:new` issues created.
+- Optional new `shipper:new` issues if the work is split.
 
-## 3) `shipper design <issue>`
+## 4) `shipper design [issue]`
 
-Purpose: make the issue **decision-complete at the technical design level**.
+Purpose: make the issue decision-complete at the technical design level.
 
 Behavior:
 
-- Agent reads the issue + grooming outputs.
-- Agent explores the codebase to understand the current architecture and constraints.
-- Agent produces a technical design write-up (as an issue comment), including tradeoffs and key decisions.
-- If there are multiple viable approaches, it asks a small number of targeted questions.
-- Agent updates labels: add `shipper:designed`, remove `shipper:groomed`.
+- Agent reads the issue plus grooming outputs.
+- Agent explores the codebase to understand architecture and constraints.
+- Agent posts a technical design comment and transitions the issue to `shipper:designed`.
+- Shared flags: `--mode <headless|interactive|default>` and `--agent <claude|codex>`.
 
 Output:
 
 - Design doc comment on the issue.
 - Issue labeled `shipper:designed`.
 
-## 4) `shipper plan <issue>`
+## 5) `shipper plan [issue]`
 
 Purpose: produce a detailed implementation plan with no open questions.
 
 Behavior:
 
-- Agent reads issue + design.
-- Agent inspects the codebase and identifies specific files/areas to change.
-- Agent writes an implementation plan comment: ordered steps, file touch list, test plan, risk notes.
-- Agent updates labels: add `shipper:planned`, remove `shipper:designed`.
+- Agent reads the issue and design.
+- Agent identifies specific files and areas to change.
+- Agent writes an implementation plan comment and transitions the issue to `shipper:planned`.
+- Shared flags: `--mode <headless|interactive|default>` and `--agent <claude|codex>`.
 
 Output:
 
 - Implementation plan comment.
 - Issue labeled `shipper:planned`.
 
-## 5) `shipper implement <issue>`
+## 6) `shipper implement [issue]`
 
 Purpose: implement the change on a new branch and push it.
 
 Behavior:
 
 - Shipper creates an ephemeral git worktree for the issue.
-- Optional repo hooks run on worktree creation (install/build/etc).
-- Agent implements according to the plan, runs checks, and fixes failures.
-- Agent commits changes, pushes a branch to origin, and posts an implementation summary comment (branch name + notes).
-- Shipper removes the worktree (ephemeral).
-- Agent updates labels: add `shipper:implemented`, remove `shipper:planned`.
+- Advisory install and worktree hooks may run on worktree creation.
+- Agent implements according to the plan, runs checks, commits, pushes, and posts an implementation summary.
+- Shared flags: `--mode <headless|interactive|default>` and `--agent <claude|codex>`.
 
 Output:
 
@@ -148,85 +145,95 @@ Output:
 - Implementation summary comment.
 - Issue labeled `shipper:implemented`.
 
-## 6) `shipper pr open <issue>`
+## 7) `shipper pr open [issue]`
 
 Purpose: open a PR from the implemented branch.
 
 Behavior:
 
 - Shipper creates a fresh ephemeral worktree tracking the pushed branch.
-- Agent runs quality checks, validates requirements, remediates if needed.
-- Agent creates a PR via `gh pr create` with a clear body linking back to the issue.
-- Shipper removes the worktree.
+- Agent runs quality checks, validates requirements, remediates if needed, and creates a PR.
+- Shared flags: `--mode <headless|interactive|default>` and `--agent <claude|codex>`.
 
 Output:
 
-- PR opened (linked to issue).
+- PR opened and linked to the issue.
 - Issue labeled `shipper:pr-open`.
 
-## 7) `shipper pr review <pr|issue>`
+## 8) `shipper pr review [pr|issue]`
 
 Purpose: create a first-pass review in GitHub review format.
 
 Behavior:
 
 - Agent reviews the PR diff against acceptance criteria and plan.
-- Agent posts a GitHub review (approve or request changes) with actionable feedback.
+- Agent posts a GitHub review with actionable feedback.
+- Shared flags: `--mode <headless|interactive|default>` and `--agent <claude|codex>`.
 
 Output:
 
 - A GitHub PR review from Shipper.
 
-## 8) `shipper pr remediate <pr|issue>`
+## 9) `shipper pr remediate [pr|issue]`
 
 Purpose: handle review feedback and prepare the PR for human merge.
 
 Behavior:
 
 - Shipper creates an ephemeral worktree on the PR branch.
-- Agent pulls all PR reviews and comments.
-- Agent converts review feedback into a structured list of claims/suggestions.
-- Agent evaluates each item (accept/reject with rationale).
-- Agent applies accepted changes, runs checks, and pushes updates.
-- Agent replies to reviewers where appropriate.
-- Shipper removes the worktree.
-- Agent updates labels: add `shipper:ready`, remove `shipper:pr-open`.
+- Agent pulls review feedback, applies accepted changes, runs checks, pushes updates, and replies to reviewers.
+- Shared flags: `--mode <headless|interactive|default>` and `--agent <claude|codex>`.
 
 Output:
 
 - PR updated and checks passing.
 - Reviewer replies posted.
-- Issue labeled `shipper:ready` (ready for final human review + merge).
+- Issue labeled `shipper:ready`.
+
+## 10) `shipper unblock <issue>`
+
+Purpose: check if a blocked issue's dependencies are resolved and clear the block.
+
+Behavior:
+
+- Reads the issue to determine what it is blocked on.
+- If the dependency is resolved, removes `shipper:blocked` and instructs the user to continue with `shipper next`.
+- Shared flags: `--mode <headless|interactive|default>` and `--agent <claude|codex>`.
+
+Output:
+
+- Issue unblocked and ready to advance, or still blocked with an explanation.
 
 ---
 
 # Orchestration commands
 
-## `shipper next <ref>`
+## `shipper next <ref> [--agent <name>]`
 
 Purpose: advance an issue to the next workflow step based on its current label.
 
 Behavior:
 
-- Reads the issue's current shipper label.
-- Runs the corresponding next-stage command (e.g. `shipper:new` → `groom`, `shipper:groomed` → `design`, etc.).
+- Reads the current shipper label.
+- Runs the corresponding next-stage command.
 - Works with both issue numbers and PR numbers.
+- `--agent <claude|codex>` overrides the agent used for the dispatched step.
 
 Output:
 
 - The issue advances one step in the workflow.
 
-## `shipper ship <issue> [--merge] [--auto]`
+## `shipper ship <issue> [--merge]` or `shipper ship --auto [--parallel <n>] [--agent <name>]`
 
-Purpose: run the full workflow end-to-end for a single issue.
-
-An `<issue>` or the `--auto` flag is required.
+Purpose: run the full workflow end-to-end.
 
 Behavior:
 
 - Repeatedly calls `next` until the issue reaches `shipper:ready`.
-- `--merge`: auto-merges the PR after reaching `shipper:ready`.
-- `--auto`: runs a continuous loop that auto-selects issues, ships them, and merges their PRs. Mutually exclusive with an explicit issue number. Implies `--merge`.
+- `--merge` auto-merges the PR after reaching `shipper:ready`.
+- `--auto` runs a continuous loop that auto-selects issues, ships them, and merges their PRs. It is mutually exclusive with an explicit issue number and implies `--merge`.
+- `--parallel <n>` sets the number of parallel slots in auto-ship mode and requires `--auto`.
+- `--agent <claude|codex>` overrides the agent used by dispatched steps.
 
 Output:
 
@@ -240,10 +247,10 @@ Behavior:
 
 - Polls for PRs labeled `shipper:ready` and merges them one at a time.
 - If a specific PR or issue number is given, merges only that PR.
-- `--once`: process the queue once and exit (no polling).
-- `--dry-run`: print actions without executing.
-- `--interval <seconds>`: polling interval (default: 60).
-- `--repo <owner/repo>`: target repository (default: inferred from cwd).
+- `--once` processes the queue once and exits.
+- `--dry-run` prints actions without executing them.
+- `--interval <seconds>` sets the polling interval (default: `60`).
+- `--repo <owner/repo>` targets a specific repository instead of inferring from the current working directory.
 
 Output:
 
@@ -253,46 +260,66 @@ Output:
 
 # Utility commands
 
-## `shipper adopt <issue>`
+## `shipper adopt <issue>` or `shipper adopt --all`
 
-Purpose: bring an existing GitHub issue into the shipper workflow.
-
-Behavior:
-
-- Applies the `shipper:new` label to the specified issue.
-
-Output:
-
-- Issue labeled `shipper:new`, ready for `groom` or `next`.
-
-## `shipper reset <issue> [-f | --force]`
-
-Purpose: reset an issue back to `shipper:new` status.
+Purpose: bring existing GitHub issues into the shipper workflow.
 
 Behavior:
 
-- Closes any PRs associated with the issue.
-- Deletes shipper-prefixed branches created for the issue.
-- Deletes prior comments on the issue.
-- Removes all shipper labels and re-applies `shipper:new`.
-- Prompts for confirmation unless `-f` / `--force` is passed.
+- `shipper adopt <issue>` applies `shipper:new` to a single issue.
+- `shipper adopt --all` adopts every open issue that does not already have a shipper workflow label.
 
 Output:
 
-- Issue reset to `shipper:new` with associated PRs closed, branches deleted, and comments cleared.
+- Selected issues are labeled `shipper:new`, ready for `groom` or `next`.
 
-## `shipper unblock <issue>`
+## `shipper eject [name]`
 
-Purpose: check if a blocked issue's dependencies are resolved and clear the block.
+Purpose: scaffold prompt overrides for customization.
 
 Behavior:
 
-- Reads the issue to determine what it's blocked on.
-- If the dependency is resolved, removes `shipper:blocked` and instructs the user to continue with `shipper next`.
+- Writes prompt overrides to `./.shipper/prompts/<agent>/`, using the default agent from `settings.commands.default.agent`.
+- With no `name`, ejects the nine workflow prompts: `new`, `groom`, `design`, `plan`, `implement`, `pr-open`, `pr-review`, `pr-remediate`, and `unblock`.
+- `setup` is intentionally excluded from the default eject set.
+- With `name`, ejects a single prompt override using the same names listed above.
+- Existing files are left in place and reported as skipped.
 
 Output:
 
-- Issue unblocked and ready to advance with `shipper next`, or still blocked with an explanation.
+- Local prompt override files ready for editing.
+
+## `shipper issue list [--status <name>]`
+
+Purpose: list shipper-managed issues by pipeline status.
+
+Behavior:
+
+- Groups open shipper-managed issues by their most advanced workflow label.
+- `--status <name>` filters to a single stage.
+- Valid short status names are `new`, `groomed`, `designed`, `planned`, `implemented`, `pr-open`, `pr-reviewed`, and `ready`.
+- Control labels such as `blocked` and `locked` are shown as suffixes on matching issues.
+
+Output:
+
+- Grouped issue lists, or `No shipper-managed issues found.`
+
+## `shipper reset <issue> [-f | --force] [--to <stage>]`
+
+Purpose: reset an issue back to an earlier workflow stage.
+
+Behavior:
+
+- Without `--to`, prompts you to choose an earlier valid target stage interactively.
+- With `--to <stage>`, resets directly to the named earlier stage.
+- Valid targets are earlier workflow stages: `new`, `groomed`, `designed`, `planned`, and `implemented`.
+- Cleans up later-stage artifacts by closing associated PRs, deleting shipper-prefixed remote branches, removing matching local branches and worktrees, deleting later issue comments, and re-applying the target workflow label.
+- Posts a reset notice comment after cleanup.
+- Prompts for confirmation unless `-f` or `--force` is passed.
+
+Output:
+
+- Issue reset to the selected earlier stage with later artifacts cleaned up.
 
 ## `shipper unlock <issue>`
 
@@ -312,21 +339,27 @@ Output:
 
 Implementation and PR-affecting commands run in ephemeral worktrees that are created for the duration of the command and then deleted.
 
-Repo-specific setup/cleanup can be added under `./.shipper/hooks/` and configured by `shipper init` (e.g. install deps on create, clean caches on destroy).
+- Executable file hooks can live under `./.shipper/hooks/`.
+- `installCommand` runs as an advisory dependency-install step after worktree creation.
+- `hooks.worktreeSetup` and `hooks.worktreeTeardown` are still supported as settings-based hook commands, though file-based worktree hooks take precedence when both exist.
 
 ---
 
 # Settings
 
-Settings are stored in `.shipper/settings.json` (created by `shipper init`). Local overrides can be placed in `.shipper/settings.local.json` (gitignored).
+Settings are stored in `.shipper/settings.json` (created by `shipper init`). Local overrides can be placed in `.shipper/settings.local.json`, which is gitignored.
 
-| Setting                  | Default | Description                                                                |
-| ------------------------ | ------- | -------------------------------------------------------------------------- |
-| `prReviewWaitMinutes`    | `15`    | Minimum wait (minutes) before PR review remediation                        |
-| `lockTimeoutMinutes`     | `30`    | Stale lock timeout (minutes) before auto-clearing `shipper:locked`         |
-| `hooks.postMerge`        | —       | Shell command to run after a PR is merged                                  |
-| `hooks.worktreeSetup`    | —       | Shell command to run after a worktree is created (before the agent starts) |
-| `hooks.worktreeTeardown` | —       | Shell command to run before a worktree is removed                          |
+| Setting                      | Default                                      | Description                                                                                                                                                                                                                      |
+| ---------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `prReviewWait`               | `{ "mode": "checks", "timeoutMinutes": 15 }` | PR review wait strategy. `mode` is `"checks"` or `"timer"`, and `timeoutMinutes` is the maximum wait in minutes.                                                                                                                 |
+| `lockTimeoutMinutes`         | `30`                                         | Stale lock timeout in minutes before `shipper:locked` is considered stale.                                                                                                                                                       |
+| `agentTimeoutMinutes`        | `60`                                         | Agent process timeout for headless runs in minutes. Set to `0` to disable the timeout.                                                                                                                                           |
+| `commands`                   | `{ "default": { "agent": "claude" } }`       | Per-command settings map. `default` is required. Optional per-step overrides may set `agent`, `mode`, or both for `new`, `groom`, `design`, `plan`, `implement`, `pr_open`, `pr_review`, `pr_remediate`, `unblock`, and `setup`. |
+| `defaultBaseBranch`          | auto-detected                                | Target branch for PRs if you do not set one explicitly.                                                                                                                                                                          |
+| `installCommand`             | unset                                        | Shell command used for the advisory dependency-install step in new worktrees.                                                                                                                                                    |
+| `hooks.worktreeSetup`        | unset                                        | Shell command to run after a worktree is created and before the agent starts.                                                                                                                                                    |
+| `hooks.worktreeTeardown`     | unset                                        | Shell command to run before a worktree is removed.                                                                                                                                                                               |
+| `merge.requirePassingChecks` | `true`                                       | Require all CI checks to pass before auto-merging.                                                                                                                                                                               |
 
 ---
 
@@ -334,7 +367,7 @@ Settings are stored in `.shipper/settings.json` (created by `shipper init`). Loc
 
 If the agent discovers:
 
-- missing prerequisites (`gh`, auth, labels) → instruct `shipper init` and stop.
-- missing product decisions during later phases → recommend returning to `shipper groom`.
-- missing technical decisions during implementation → recommend returning to `shipper design` / `shipper plan`.
-- oversized scope → recommend splitting into additional issues (created in `shipper:new`).
+- Missing prerequisites (`gh`, auth, labels) -> instruct `shipper init` and stop.
+- Missing product decisions during later phases -> recommend returning to `shipper groom`.
+- Missing technical decisions during implementation -> recommend returning to `shipper design` or `shipper plan`.
+- Oversized scope -> recommend splitting into additional issues created in `shipper:new`.
