@@ -1,33 +1,20 @@
 import { mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline/promises';
-import { gh, scripts } from '@dnsquared/shipper-core';
-import { DEFAULTS, SETTING_DESCRIPTIONS } from '@dnsquared/shipper-core';
-import { CLI_VERSION, readmeTemplate } from '@dnsquared/shipper-core';
 import {
+  gh,
+  scripts,
+  DEFAULTS,
+  SETTING_DESCRIPTIONS,
+  CLI_VERSION,
+  readmeTemplate,
+  LABELS,
   runPrereqChecks,
   checkGitRepo,
   checkGhInstalled,
   checkGhAuth,
   checkGitHubRemote,
 } from '@dnsquared/shipper-core';
-
-const LABELS = [
-  { name: 'shipper:new', color: 'C2E0C6', description: 'New issue from shipper' },
-  { name: 'shipper:groomed', color: 'BFD4F2', description: 'Product-groomed' },
-  { name: 'shipper:designed', color: 'D4C5F9', description: 'Design-reviewed' },
-  { name: 'shipper:planned', color: 'FEF2C0', description: 'Implementation planned' },
-  { name: 'shipper:implemented', color: 'FBCA04', description: 'Implementation complete' },
-  { name: 'shipper:pr-open', color: 'F9D0C4', description: 'PR opened' },
-  { name: 'shipper:pr-reviewed', color: 'E6B8AF', description: 'PR reviewed, pending remediation' },
-  { name: 'shipper:ready', color: '0E8A16', description: 'Ready for final review and merge' },
-  {
-    name: 'shipper:blocked',
-    color: 'E11D48',
-    description: 'Blocked by a dependency — run shipper unblock',
-  },
-  { name: 'shipper:locked', color: 'D93F0B', description: 'Locked by an active shipper instance' },
-];
 
 const VALID_AGENTS = ['claude', 'codex'] as const;
 const UNSAFE_COMMAND_KEYS = new Set(['__proto__', 'constructor', 'prototype']);

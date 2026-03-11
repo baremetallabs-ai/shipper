@@ -4,6 +4,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 import { gh } from './gh.js';
+import { STAGE_LABEL_NAMES } from './labels.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -79,16 +80,6 @@ export async function checkShipperDir(): Promise<CheckResult> {
   }
 }
 
-const REQUIRED_LABELS = [
-  'shipper:new',
-  'shipper:groomed',
-  'shipper:designed',
-  'shipper:planned',
-  'shipper:implemented',
-  'shipper:pr-open',
-  'shipper:ready',
-];
-
 export async function checkLabels(repo?: string): Promise<CheckResult> {
   try {
     const { stdout } = await gh([
@@ -104,7 +95,7 @@ export async function checkLabels(repo?: string): Promise<CheckResult> {
     ]);
     const output = stdout.trim();
     const existing = output ? output.split(/\r?\n/) : [];
-    const missing = REQUIRED_LABELS.filter((l) => !existing.includes(l));
+    const missing = STAGE_LABEL_NAMES.filter((label) => !existing.includes(label));
     if (missing.length === 0) {
       return { ok: true, message: 'All required labels exist' };
     }
