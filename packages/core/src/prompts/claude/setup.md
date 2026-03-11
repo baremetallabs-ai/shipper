@@ -43,7 +43,7 @@ Create or update the project's agent configuration file so that coding agents kn
 Read `.shipper/settings.json` and verify:
 
 - All required fields are present and have reasonable values.
-- The `agent` field matches the installed coding agent.
+- The `commands.default.agent` field matches the installed coding agent (`"claude"` or `"codex"`).
 - Report any issues or suggestions.
 
 ### 4. Hooks configuration
@@ -103,3 +103,56 @@ Or use **`shipper next`** to auto-advance, or **`shipper ship`** to run end-to-e
 ### 7. Suggest next steps
 
 Based on the repository state, suggest what the user should do next (e.g., create their first issue, adopt existing issues, etc.).
+
+## Settings Schema Reference
+
+Use `packages/core/src/lib/settings.ts` as the source of truth. The current canonical settings schema is:
+
+| Field                        | Type / valid values                                     | Default                                  | Description                                                                         |
+| ---------------------------- | ------------------------------------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------- |
+| `prReviewWait`               | `{ mode: "checks" \| "timer", timeoutMinutes: number }` | `{ mode: "checks", timeoutMinutes: 15 }` | PR review wait strategy.                                                            |
+| `lockTimeoutMinutes`         | `number`                                                | `30`                                     | Minutes before a stale `shipper:locked` label can be auto-cleared.                  |
+| `agentTimeoutMinutes`        | `number`                                                | `60`                                     | Agent process timeout in headless mode, in minutes. Set `0` to disable the timeout. |
+| `commands`                   | Object map. See `### Commands map` below.               | `{ default: { agent: "claude" } }`       | Per-command agent and mode settings.                                                |
+| `defaultBaseBranch`          | Optional `string`                                       | auto-detected from GitHub                | Default base branch for PRs.                                                        |
+| `installCommand`             | Optional `string`                                       | none                                     | Shell command used to install project dependencies.                                 |
+| `hooks.worktreeSetup`        | Optional `string`                                       | none                                     | Shell command to run after a worktree is created.                                   |
+| `hooks.worktreeTeardown`     | Optional `string`                                       | none                                     | Shell command to run before a worktree is removed.                                  |
+| `merge.requirePassingChecks` | `boolean`                                               | `true`                                   | Require all CI checks to pass before auto-merging.                                  |
+| `cliVersion`                 | Optional `string`                                       | none                                     | Pin Shipper CLI to a specific version.                                              |
+
+### Commands map
+
+- `commands.default` is required. It sets the baseline `agent` and optional `mode`.
+- `commands.default.agent` is required and must be `"claude"` or `"codex"`.
+- `commands.default.mode` is optional and may be `"headless"`, `"interactive"`, or `"default"`.
+- Per-step overrides are optional keys in the same map: `new`, `groom`, `design`, `plan`, `implement`, `pr_open`, `pr_review`, `pr_remediate`, `unblock`, `setup`.
+- Each per-step override may set `agent`, `mode`, or both. Valid agents are `"claude"` and `"codex"`. Valid modes are `"headless"`, `"interactive"`, and `"default"`.
+- Resolution order is: per-step override -> `commands.default` -> built-in defaults.
+
+### settings.local.json
+
+- Settings files live in `.shipper/settings.json` and `.shipper/settings.local.json`.
+- `.shipper/settings.local.json` is for local-only overrides. It is gitignored and is usually absent in a clean worktree.
+- Settings merge precedence is: built-in defaults -> `.shipper/settings.json` -> `.shipper/settings.local.json`.
+- `commands`, `hooks`, and `merge` are deep-merged across those layers. Other top-level fields use last-wins replacement.
+
+## Troubleshooting
+
+### Environment diagnostics
+
+1. Run `gh auth status` and confirm the GitHub CLI is authenticated for the repository you are working in.
+2. Run `which gh` and confirm the `gh` CLI is installed and available on `PATH`.
+3. Run `which claude` or `which codex`, depending on the configured agent, and confirm the agent CLI is installed and on `PATH`.
+4. Run `./.shipper/scripts/install-deps.sh`, then inspect both the exit code and the command output for dependency or environment failures.
+5. Read `.shipper/settings.json` and confirm it is valid JSON with the expected canonical fields and values.
+6. Run `gh label list` and confirm the required `shipper:*` labels exist.
+7. Check `~/.shipper/worktrees/` for stale worktree directories that may have been left behind by interrupted runs.
+
+### Issue-specific failure investigation
+
+1. Check the issue's current labels and confirm it is not stuck on an unexpected state or carrying a stale `shipper:locked` label.
+2. Read recent issue comments for error context, failure reports, or notes from prior agent runs.
+3. Check whether a branch exists for the issue, for example with `git branch -a | grep <issue-number>`.
+4. Check whether a matching worktree exists under `~/.shipper/worktrees/`.
+5. If `shipper:locked` is stale and no active agent is running, remove it manually or wait for it to auto-clear after `lockTimeoutMinutes`.
