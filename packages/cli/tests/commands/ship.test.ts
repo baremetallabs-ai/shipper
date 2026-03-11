@@ -47,6 +47,8 @@ vi.mock('@dnsquared/shipper-core', () => ({
   selectIssuesForStage: vi.fn(async () => []),
   clearStaleLockIfNeeded: vi.fn(async () => {}),
   gh: vi.fn(),
+  fetchChecks: vi.fn(async () => []),
+  classifyChecks: vi.fn(() => ({ pending: [], failed: [], passed: [], total: 0 })),
   STAGE_NAME_MAP: labelFixtures.stageNameMap,
   STAGE_LABEL_NAMES: labelFixtures.stageLabelNames,
   NEW_LABEL: 'shipper:new',
@@ -108,15 +110,24 @@ import {
   selectIssuesForStage,
   clearStaleLockIfNeeded,
   gh,
+  fetchChecks,
+  classifyChecks,
+  withStageHooks,
+  withIssueLock,
   releaseIssueLock,
 } from '@dnsquared/shipper-core';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 
 const mockSelectIssuesForStage = vi.mocked(selectIssuesForStage);
 const mockClearStaleLockIfNeeded = vi.mocked(clearStaleLockIfNeeded);
 const mockGh = vi.mocked(gh);
+const mockFetchChecks = vi.mocked(fetchChecks);
+const mockClassifyChecks = vi.mocked(classifyChecks);
+const mockWithStageHooks = vi.mocked(withStageHooks);
+const mockWithIssueLock = vi.mocked(withIssueLock);
 const mockReleaseIssueLock = vi.mocked(releaseIssueLock);
 const mockSpawn = vi.mocked(spawn);
+const mockSpawnSync = vi.mocked(spawnSync);
 const mockCreateWriteStream = fsMockState.mockCreateWriteStream;
 const mockMkdirSync = fsMockState.mockMkdirSync;
 const mockHomedir = osMockState.mockHomedir;
@@ -151,6 +162,103 @@ async function flushMicrotasks(): Promise<void> {
   });
   await Promise.resolve();
 }
+
+function defaultWithStageHooks<T>(_stage: string, _env: unknown, fn: () => Promise<T>): Promise<T> {
+  return fn();
+}
+
+function defaultWithIssueLock<T>(_repo: string, _issue: string, fn: () => Promise<T>): Promise<T> {
+  return fn();
+}
+
+function setupReadyMergeFlow(options?: {
+  mergeStates?: string[];
+  prNumber?: number;
+  issueNumber?: string;
+  updateBranchStdout?: string;
+  updateBranchError?: Error;
+  mergeStdout?: string;
+  mergeError?: Error;
+}): void {
+  const {
+    mergeStates = ['CLEAN'],
+    prNumber = 456,
+    issueNumber = '123',
+    updateBranchStdout = '',
+    updateBranchError,
+    mergeStdout = '',
+    mergeError,
+  } = options ?? {};
+
+  let mergeStateCall = 0;
+
+  mockGh.mockImplementation(async (args: string[]) => {
+    if (args[0] === 'issue' && args[1] === 'list') {
+      return { stdout: '[]', stderr: '' };
+    }
+
+    if (args[0] === 'issue' && args[1] === 'view') {
+      return { stdout: 'shipper:ready', stderr: '' };
+    }
+
+    if (args[0] === 'pr' && args[1] === 'list') {
+      return {
+        stdout: JSON.stringify([
+          {
+            number: prNumber,
+            title: 'Ready PR',
+            headRefName: `shipper/${issueNumber}`,
+            baseRefName: 'main',
+          },
+        ]),
+        stderr: '',
+      };
+    }
+
+    if (args[0] === 'pr' && args[1] === 'view') {
+      const index = Math.min(mergeStateCall, mergeStates.length - 1);
+      const mergeStateStatus = mergeStates[index] ?? mergeStates[mergeStates.length - 1] ?? 'CLEAN';
+      mergeStateCall++;
+      return {
+        stdout: JSON.stringify({ mergeStateStatus }),
+        stderr: '',
+      };
+    }
+
+    if (args[0] === 'pr' && args[1] === 'update-branch') {
+      if (updateBranchError) throw updateBranchError;
+      return { stdout: updateBranchStdout, stderr: '' };
+    }
+
+    if (args[0] === 'pr' && args[1] === 'merge') {
+      if (mergeError) throw mergeError;
+      return { stdout: mergeStdout, stderr: '' };
+    }
+
+    if (
+      (args[0] === 'pr' && (args[1] === 'edit' || args[1] === 'comment')) ||
+      (args[0] === 'issue' && (args[1] === 'edit' || args[1] === 'close'))
+    ) {
+      return { stdout: '', stderr: '' };
+    }
+
+    throw new Error(`Unexpected gh args: ${args.join(' ')}`);
+  });
+}
+
+function findGhCalls(command: string, subcommand: string): string[][] {
+  return mockGh.mock.calls
+    .map(([args]) => args as string[])
+    .filter((args) => args[0] === command && args[1] === subcommand);
+}
+
+const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((_code?: number) => {
+  return undefined as never;
+}) as typeof process.exit);
+
+afterAll(() => {
+  exitSpy.mockRestore();
+});
 
 describe('STAGE_NAME', () => {
   it('contains all expected workflow labels', () => {
@@ -434,17 +542,261 @@ describe('printUnblockSummary', () => {
   });
 });
 
-describe('shipCommand parallel auto runner', () => {
-  const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((_code?: number) => {
-    return undefined as never;
-  }) as typeof process.exit);
-
-  afterEach(() => {
-    vi.useRealTimers();
+describe('shipCommand merge path', () => {
+  beforeEach(() => {
+    mockGh.mockReset();
+    mockFetchChecks.mockReset();
+    mockFetchChecks.mockResolvedValue([]);
+    mockClassifyChecks.mockReset();
+    mockClassifyChecks.mockReturnValue({ pending: [], failed: [], passed: [], total: 0 });
+    mockWithStageHooks.mockReset();
+    mockWithStageHooks.mockImplementation(defaultWithStageHooks);
+    mockWithIssueLock.mockReset();
+    mockWithIssueLock.mockImplementation(defaultWithIssueLock);
+    mockSpawn.mockReset();
+    mockSpawnSync.mockReset();
+    exitSpy.mockClear();
   });
 
-  afterAll(() => {
-    exitSpy.mockRestore();
+  it('rebases a behind PR and merges it in the same invocation', async () => {
+    setupReadyMergeFlow({
+      mergeStates: ['BEHIND', 'CLEAN'],
+      updateBranchStdout: 'rebased\n',
+      mergeStdout: 'merged\n',
+    });
+
+    await shipCommand(repo, '123', { merge: true, auto: false });
+
+    expect(findGhCalls('pr', 'view')).toHaveLength(2);
+    expect(findGhCalls('pr', 'update-branch')).toHaveLength(1);
+    expect(findGhCalls('pr', 'merge')).toHaveLength(1);
+    expect(findGhCalls('issue', 'close')).toHaveLength(1);
+    expect(exitSpy).toHaveBeenCalledWith(0);
+  });
+
+  it('treats a failed behind-state rebase as a remediable merge failure', async () => {
+    setupReadyMergeFlow({
+      mergeStates: ['BEHIND'],
+      updateBranchError: new Error('rebase conflict'),
+    });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await shipCommand(repo, '123', { merge: true, auto: false });
+
+    const stderrOutput = errorSpy.mock.calls.map((call) => call[0]).join('\n');
+    expect(stderrOutput).toContain(
+      'Merge failed for PR #456: Failed to rebase PR #456 onto its base branch: rebase conflict'
+    );
+    expect(findGhCalls('pr', 'merge')).toHaveLength(0);
+    expect(findGhCalls('pr', 'edit')).toHaveLength(2);
+    expect(findGhCalls('issue', 'edit')).toHaveLength(2);
+    expect(findGhCalls('pr', 'comment')).toHaveLength(1);
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    errorSpy.mockRestore();
+  });
+
+  it('fails early for DIRTY merge state without attempting gh pr merge', async () => {
+    setupReadyMergeFlow({ mergeStates: ['DIRTY'] });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await shipCommand(repo, '123', { merge: true, auto: false });
+
+    const stderrOutput = errorSpy.mock.calls.map((call) => call[0]).join('\n');
+    expect(stderrOutput).toContain(
+      'Merge failed for PR #456: PR #456 has merge conflicts that must be resolved.'
+    );
+    expect(findGhCalls('pr', 'merge')).toHaveLength(0);
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    errorSpy.mockRestore();
+  });
+
+  it.each([
+    {
+      name: 'failed checks',
+      classification: {
+        pending: [],
+        failed: [{ name: 'test' }],
+        passed: [],
+        total: 1,
+      },
+      expected: 'Merge failed for PR #456: PR #456 is blocked by failed CI checks: test.',
+    },
+    {
+      name: 'pending checks',
+      classification: {
+        pending: [{ name: 'lint' }],
+        failed: [],
+        passed: [],
+        total: 1,
+      },
+      expected:
+        'Merge failed for PR #456: PR #456 is blocked by pending CI checks: lint. Retry when they complete.',
+    },
+    {
+      name: 'review requirements',
+      classification: {
+        pending: [],
+        failed: [],
+        passed: [],
+        total: 0,
+      },
+      expected:
+        'Merge failed for PR #456: PR #456 is blocked, likely due to required reviews or branch protection requirements.',
+    },
+  ])('reports actionable BLOCKED reasons for $name', async ({ classification, expected }) => {
+    setupReadyMergeFlow({ mergeStates: ['BLOCKED'] });
+    mockFetchChecks.mockResolvedValue([
+      { name: 'test', state: 'FAILURE', bucket: 'fail' },
+      { name: 'lint', state: 'PENDING', bucket: 'pending' },
+    ]);
+    mockClassifyChecks.mockReturnValue(classification);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await shipCommand(repo, '123', { merge: true, auto: false });
+
+    const stderrOutput = errorSpy.mock.calls.map((call) => call[0]).join('\n');
+    expect(stderrOutput).toContain(expected);
+    expect(mockFetchChecks).toHaveBeenCalledWith(repo, '456');
+    expect(findGhCalls('pr', 'merge')).toHaveLength(0);
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    errorSpy.mockRestore();
+  });
+
+  it('fails early when GitHub reports UNKNOWN merge state', async () => {
+    setupReadyMergeFlow({ mergeStates: ['UNKNOWN'] });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await shipCommand(repo, '123', { merge: true, auto: false });
+
+    const stderrOutput = errorSpy.mock.calls.map((call) => call[0]).join('\n');
+    expect(stderrOutput).toContain(
+      'Merge failed for PR #456: GitHub has not computed merge state for PR #456 yet. Retry shortly.'
+    );
+    expect(findGhCalls('pr', 'merge')).toHaveLength(0);
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    errorSpy.mockRestore();
+  });
+
+  it('fails clearly on an unrecognized merge state instead of merging blindly', async () => {
+    setupReadyMergeFlow({ mergeStates: ['MERGEABLE_LATER'] });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await shipCommand(repo, '123', { merge: true, auto: false });
+
+    const stderrOutput = errorSpy.mock.calls.map((call) => call[0]).join('\n');
+    expect(stderrOutput).toContain(
+      "Merge failed for PR #456: Unrecognized merge state 'MERGEABLE_LATER' for PR #456."
+    );
+    expect(findGhCalls('pr', 'merge')).toHaveLength(0);
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    errorSpy.mockRestore();
+  });
+
+  it('runs the merge post hook only on success', async () => {
+    const hookSteps: string[] = [];
+    mockWithStageHooks.mockImplementation(async (_stage: string, _env: unknown, fn) => {
+      hookSteps.push('pre');
+      const result = await fn();
+      hookSteps.push('post');
+      return result;
+    });
+
+    setupReadyMergeFlow({ mergeStates: ['DIRTY'] });
+    await shipCommand(repo, '123', { merge: true, auto: false });
+    expect(hookSteps).toEqual(['pre']);
+    expect(exitSpy).toHaveBeenLastCalledWith(1);
+
+    hookSteps.length = 0;
+    exitSpy.mockClear();
+    setupReadyMergeFlow({ mergeStates: ['CLEAN'], mergeStdout: 'merged\n' });
+    await shipCommand(repo, '123', { merge: true, auto: false });
+    expect(hookSteps).toEqual(['pre', 'post']);
+    expect(exitSpy).toHaveBeenLastCalledWith(0);
+  });
+});
+
+describe('shipCommand auto merge-failure retry handling', () => {
+  beforeEach(() => {
+    mockSelectIssuesForStage.mockReset();
+    mockClearStaleLockIfNeeded.mockReset();
+    mockGh.mockReset();
+    mockFetchChecks.mockReset();
+    mockFetchChecks.mockResolvedValue([]);
+    mockClassifyChecks.mockReset();
+    mockClassifyChecks.mockReturnValue({ pending: [], failed: [], passed: [], total: 0 });
+    mockWithStageHooks.mockReset();
+    mockWithStageHooks.mockImplementation(defaultWithStageHooks);
+    mockWithIssueLock.mockReset();
+    mockWithIssueLock.mockImplementation(defaultWithIssueLock);
+    mockSpawn.mockReset();
+    mockSpawnSync.mockReset();
+    exitSpy.mockClear();
+  });
+
+  it('does not blacklist a retriable merge failure in sequential auto mode', async () => {
+    let readySelections = 0;
+    mockSelectIssuesForStage.mockImplementation(async (_repo: string, label: string) => {
+      if (label === 'shipper:ready' && readySelections < 2) {
+        readySelections++;
+        return [{ number: 123, title: 'Retry merge issue' }];
+      }
+      return [];
+    });
+    setupReadyMergeFlow({ mergeStates: ['DIRTY'] });
+
+    await shipCommand(repo, undefined, { auto: true, merge: false, parallel: 1 });
+
+    expect(findGhCalls('pr', 'list')).toHaveLength(2);
+    expect(exitSpy).toHaveBeenCalledWith(0);
+  });
+
+  it('does not blacklist a child-process merge failure in parallel auto mode', async () => {
+    let candidateAvailable = true;
+    mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
+      if (label === 'shipper:ready' && candidateAvailable) {
+        return [{ number: 1, title: 'Retry merge issue' }];
+      }
+      return [];
+    });
+    mockGh.mockResolvedValue({ stdout: '[]', stderr: '' });
+
+    const child1 = new FakeChildProcess();
+    const child2 = new FakeChildProcess();
+    mockSpawn.mockReturnValueOnce(child1 as never).mockImplementationOnce(() => {
+      candidateAvailable = false;
+      return child2 as never;
+    });
+
+    const runPromise = shipCommand(repo, undefined, { auto: true, merge: false, parallel: 2 });
+
+    await flushMicrotasks();
+    child1.finish(
+      1,
+      null,
+      'Merge failed for PR #456: PR #456 has merge conflicts that must be resolved.'
+    );
+    await flushMicrotasks();
+    await new Promise<void>((resolve) => {
+      process.nextTick(resolve);
+    });
+
+    expect(mockSpawn).toHaveBeenCalledTimes(2);
+    child2.finish(0);
+    await runPromise;
+
+    expect(mockSpawn.mock.calls.map(([, args]) => (args as string[])[2])).toEqual(['1', '1']);
+    expect(exitSpy).toHaveBeenCalledWith(0);
+  });
+});
+
+describe('shipCommand parallel auto runner', () => {
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   beforeEach(() => {
