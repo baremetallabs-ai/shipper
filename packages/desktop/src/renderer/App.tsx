@@ -163,7 +163,7 @@ export default function App(): JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [loadIssues]);
+  }, []);
 
   useEffect(() => {
     if (!canFetch || !savedRepoIsValid) {
@@ -177,7 +177,7 @@ export default function App(): JSX.Element {
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [canFetch, loadIssues, savedRepo, savedRepoIsValid]);
+  }, [canFetch, savedRepo, savedRepoIsValid]);
 
   async function handleRefresh(): Promise<void> {
     if (!canFetch || !savedRepoIsValid || isLoading) {

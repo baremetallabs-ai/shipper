@@ -21,7 +21,7 @@ interface ListIssuesFailure {
 
 const defaultConfig: AppConfig = { repo: '' };
 const repoPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
-const preloadPath = fileURLToPath(new URL('../preload/index.mjs', import.meta.url));
+const preloadPath = fileURLToPath(new URL('../preload/index.cjs', import.meta.url));
 const rendererPath = fileURLToPath(new URL('../renderer/index.html', import.meta.url));
 
 function getConfigPath(): string {
