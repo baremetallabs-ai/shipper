@@ -90,6 +90,8 @@ function setupExecMock(overrides?: {
   prJson?: string;
   commentsWithDates?: string;
   timelineByStage?: Record<string, string>;
+  gitCommonDir?: string;
+  gitCommonDirError?: string;
   localBranchesOutput?: string;
   currentBranch?: string;
   showCurrentError?: string;
@@ -105,6 +107,7 @@ function setupExecMock(overrides?: {
   const prJson = overrides?.prJson ?? '[]';
   const commentsWithDates = overrides?.commentsWithDates ?? '';
   const timelineByStage = overrides?.timelineByStage ?? {};
+  const gitCommonDir = overrides?.gitCommonDir ?? '/tmp/fake-repo/.git';
   const localBranchesOutput = overrides?.localBranchesOutput ?? '';
   const currentBranch = overrides?.currentBranch ?? '';
   const deleteLocalBranchErrors = overrides?.deleteLocalBranchErrors ?? {};
@@ -189,6 +192,14 @@ function setupExecMock(overrides?: {
     if (args[0] === 'branch' && args[1] === '--list') {
       operationLog?.push('git branch --list');
       return localBranchesOutput;
+    }
+
+    if (args[0] === 'rev-parse' && args[1] === '--git-common-dir') {
+      operationLog?.push('git rev-parse --git-common-dir');
+      if (overrides?.gitCommonDirError) {
+        throw new Error(overrides.gitCommonDirError);
+      }
+      return gitCommonDir;
     }
 
     if (args[0] === 'branch' && args[1] === '--show-current') {
@@ -626,6 +637,47 @@ describe('resetCommand', () => {
         cwd: '/tmp/fake-repo',
         stdio: ['ignore', 'ignore', 'ignore'],
       })
+    );
+  });
+
+  it('strips linked-worktree + markers before deleting local branches', async () => {
+    setupExecMock({
+      issueJson: mockIssueView('OPEN', ['shipper:planned']),
+      commentIds: '',
+      localBranchesOutput: '+ shipper/18-add-reset\n',
+      currentBranch: 'main',
+    });
+
+    await resetCommand('18', { force: true, to: 'new' });
+
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      'git',
+      ['branch', '-D', 'shipper/18-add-reset'],
+      expect.objectContaining({
+        cwd: '/tmp/fake-repo',
+        stdio: ['ignore', 'ignore', 'ignore'],
+      })
+    );
+  });
+
+  it('derives the worktree repo prefix from the git common dir when running inside a worktree', async () => {
+    const siblingWorktree = getLocalWorktreePath('fake-repo--wt--shipper-18-other');
+    mockGetRepoRoot.mockResolvedValue(
+      '/tmp/home/.shipper/worktrees/fake-repo--wt--shipper-18-add-reset'
+    );
+    setupExecMock({
+      issueJson: mockIssueView('OPEN', ['shipper:planned']),
+      commentIds: '',
+      gitCommonDir: '/tmp/fake-repo/.git',
+      worktreeEntries: [{ name: 'fake-repo--wt--shipper-18-other' }],
+      existingPaths: [siblingWorktree],
+    });
+
+    await resetCommand('18', { force: true, to: 'new' });
+
+    expect(mockRemoveWorktree).toHaveBeenCalledWith(
+      '/tmp/home/.shipper/worktrees/fake-repo--wt--shipper-18-add-reset',
+      siblingWorktree
     );
   });
 
