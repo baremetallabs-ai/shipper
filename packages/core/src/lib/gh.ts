@@ -7,6 +7,7 @@ const execFileAsync = promisify(execFile);
 
 const MAX_ATTEMPTS = 3;
 const BASE_DELAY_MS = 1000;
+const UNQUOTED_ARG_PATTERN = /^[A-Za-z0-9_./:=,@-]+$/;
 
 const PERMANENT_PATTERNS = [
   /HTTP 401/i,
@@ -33,6 +34,18 @@ function isMissingBinary(err: unknown): boolean {
   return typeof err === 'object' && err !== null && 'code' in err && err.code === 'ENOENT';
 }
 
+function formatArgForLog(arg: string): string {
+  return UNQUOTED_ARG_PATTERN.test(arg) ? arg : JSON.stringify(arg);
+}
+
+function formatCommandForLog(args: string[]): string {
+  return `gh ${args.map(formatArgForLog).join(' ')}`;
+}
+
+function formatStderrForLog(stderr: string): string {
+  return stderr.trim().replace(/\r/g, '\\r').replace(/\n/g, '\\n');
+}
+
 export async function gh(
   args: string[],
   options?: { cwd?: string }
@@ -57,9 +70,10 @@ export async function gh(
         throw firstError;
       }
 
-      const reason = stderr.trim();
+      const command = formatCommandForLog(args);
+      const reason = formatStderrForLog(stderr);
       console.error(
-        `gh ${args.join(' ')} failed${reason ? `: ${reason}` : ''}, retrying (attempt ${attempt + 1}/${MAX_ATTEMPTS})...`
+        `${command} failed${reason ? `: ${reason}` : ''}, retrying (attempt ${attempt + 1}/${MAX_ATTEMPTS})...`
       );
       await sleepMs(BASE_DELAY_MS * 2 ** (attempt - 1));
     }

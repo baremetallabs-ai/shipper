@@ -159,6 +159,35 @@ describe('gh', () => {
     await expect(promise).resolves.toEqual({ stdout: 'ok\n', stderr: '' });
   });
 
+  it('quotes args with spaces and escapes multiline stderr in retry logs', async () => {
+    execFileMock
+      .mockImplementationOnce((_cmd: string, _args: string[], ...rest: unknown[]) => {
+        const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
+        cb(transientError('temporary network failure', 'line 1\nline 2'));
+      })
+      .mockImplementationOnce((_cmd: string, _args: string[], ...rest: unknown[]) => {
+        const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
+        cb(null, 'ok\n', '');
+      });
+
+    const promise = gh([
+      'issue',
+      'list',
+      '--search',
+      '-label:shipper:blocked -label:shipper:locked',
+      '--jq',
+      '.[] | .title',
+    ]);
+
+    await Promise.resolve();
+    expect(errorSpy).toHaveBeenCalledOnce();
+    expect(errorSpy).toHaveBeenCalledWith(
+      'gh issue list --search "-label:shipper:blocked -label:shipper:locked" --jq ".[] | .title" failed: line 1\\nline 2, retrying (attempt 2/3)...'
+    );
+
+    await expect(promise).resolves.toEqual({ stdout: 'ok\n', stderr: '' });
+  });
+
   it.each([
     'HTTP 401 unauthorized',
     'HTTP 404 missing',
