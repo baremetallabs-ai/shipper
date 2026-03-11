@@ -103,13 +103,22 @@ export const DISPLAY_NAME_MAP: Record<string, string> = Object.fromEntries(
   WORKFLOW_LABELS.map((label) => [label.name, label.displayName])
 );
 
-export const NEW_LABEL = LABELS[0]!.name;
-export const GROOMED_LABEL = LABELS[1]!.name;
-export const DESIGNED_LABEL = LABELS[2]!.name;
-export const PLANNED_LABEL = LABELS[3]!.name;
-export const IMPLEMENTED_LABEL = LABELS[4]!.name;
-export const PR_OPEN_LABEL = LABELS[5]!.name;
-export const PR_REVIEWED_LABEL = LABELS[6]!.name;
-export const READY_LABEL = LABELS[7]!.name;
-export const BLOCKED_LABEL = LABELS[8]!.name;
-export const LOCKED_LABEL = LABELS[9]!.name;
+function requireLabelName(name: string): string {
+  const label = LABELS.find((candidate) => candidate.name === name);
+  if (!label) {
+    throw new Error(`Missing label definition for ${name}`);
+  }
+
+  return label.name;
+}
+
+export const NEW_LABEL = requireLabelName('shipper:new');
+export const GROOMED_LABEL = requireLabelName('shipper:groomed');
+export const DESIGNED_LABEL = requireLabelName('shipper:designed');
+export const PLANNED_LABEL = requireLabelName('shipper:planned');
+export const IMPLEMENTED_LABEL = requireLabelName('shipper:implemented');
+export const PR_OPEN_LABEL = requireLabelName('shipper:pr-open');
+export const PR_REVIEWED_LABEL = requireLabelName('shipper:pr-reviewed');
+export const READY_LABEL = requireLabelName('shipper:ready');
+export const BLOCKED_LABEL = requireLabelName('shipper:blocked');
+export const LOCKED_LABEL = requireLabelName('shipper:locked');
