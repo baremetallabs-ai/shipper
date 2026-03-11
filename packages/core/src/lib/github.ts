@@ -103,7 +103,6 @@ export async function resolveBaseBranch(repo: string, configured?: string): Prom
     const result = await gh([
       'repo',
       'view',
-      '-R',
       repo,
       '--json',
       'defaultBranchRef',

@@ -410,7 +410,7 @@ describe('resolveBaseBranch', () => {
     expect(await resolveBaseBranch(repo)).toBe('main');
     expect(execFileMock).toHaveBeenCalledWith(
       'gh',
-      ['repo', 'view', '-R', repo, '--json', 'defaultBranchRef', '-q', '.defaultBranchRef.name'],
+      ['repo', 'view', repo, '--json', 'defaultBranchRef', '-q', '.defaultBranchRef.name'],
       { encoding: 'utf-8' },
       expect.any(Function)
     );
