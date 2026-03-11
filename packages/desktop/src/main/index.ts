@@ -20,6 +20,7 @@ interface ListIssuesFailure {
 }
 
 const defaultConfig: AppConfig = { repo: '' };
+const repoPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const preloadPath = fileURLToPath(new URL('../preload/index.mjs', import.meta.url));
 const rendererPath = fileURLToPath(new URL('../renderer/index.html', import.meta.url));
 
@@ -58,6 +59,28 @@ function writeConfig(config: AppConfig): void {
   writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
 }
 
+function parseRepo(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const repo = value.trim();
+  return repoPattern.test(repo) ? repo : null;
+}
+
+function parseConfig(value: unknown): AppConfig | null {
+  if (typeof value !== 'object' || value === null || !('repo' in value)) {
+    return null;
+  }
+
+  const repo = typeof value.repo === 'string' ? value.repo.trim() : null;
+  if (repo === null) {
+    return null;
+  }
+
+  return { repo };
+}
+
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
     width: 1280,
@@ -69,7 +92,6 @@ function createWindow(): BrowserWindow {
       contextIsolation: true,
       nodeIntegration: false,
       preload: preloadPath,
-      sandbox: false,
     },
   });
 
@@ -90,13 +112,26 @@ function createWindow(): BrowserWindow {
 function registerIpcHandlers(): void {
   ipcMain.handle('check-prerequisites', async () => {
     const ghInstalled = await checkGhInstalled();
-    const ghAuth = await checkGhAuth();
+    const ghAuth = ghInstalled.ok ? await checkGhAuth() : { ok: false, message: '' };
     return { ghInstalled, ghAuth };
   });
 
-  ipcMain.handle('list-issues', async (_event, payload: { repo: string }) => {
+  ipcMain.handle('list-issues', async (_event, payload: unknown) => {
+    const repo =
+      typeof payload === 'object' && payload !== null && 'repo' in payload
+        ? parseRepo(payload.repo)
+        : null;
+
+    if (repo === null) {
+      const response: ListIssuesFailure = {
+        ok: false,
+        error: 'Enter a repository in owner/repo format.',
+      };
+      return response;
+    }
+
     try {
-      const issues = await listIssues(payload.repo);
+      const issues = await listIssues(repo);
       const response: ListIssuesSuccess = { ok: true, issues };
       return response;
     } catch (error) {
@@ -107,8 +142,17 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('get-config', () => readConfig());
-  ipcMain.handle('set-config', (_event, config: AppConfig) => {
-    writeConfig(config);
+  ipcMain.handle('set-config', (_event, config: unknown) => {
+    const nextConfig = parseConfig(config);
+    if (nextConfig === null) {
+      throw new Error('Invalid config payload.');
+    }
+
+    if (nextConfig.repo.length > 0 && parseRepo(nextConfig.repo) === null) {
+      throw new Error('Enter a repository in owner/repo format.');
+    }
+
+    writeConfig(nextConfig);
   });
 }
 

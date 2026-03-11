@@ -100,6 +100,7 @@ export default function App(): JSX.Element {
 
     try {
       await window.shipperAPI.setConfig({ repo: nextRepo });
+      const repoChanged = nextRepo !== savedRepo;
       setSavedRepo(nextRepo);
       setRepoDraft(nextRepo);
       setFetchError(null);
@@ -108,6 +109,11 @@ export default function App(): JSX.Element {
         setIssues([]);
         setLastUpdated(null);
         return;
+      }
+
+      if (repoChanged) {
+        setIssues([]);
+        setLastUpdated(null);
       }
 
       if (canFetch) {
