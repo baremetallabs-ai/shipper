@@ -339,7 +339,7 @@ describe('runPrompt', () => {
 });
 
 describe('worktree --add-dir', () => {
-  it('adds --add-dir before exec for codex in a worktree', async () => {
+  it('adds --add-dir for both gitdir and commondir before exec for codex in a worktree', async () => {
     resolveAgentMock.mockReturnValue('codex');
     resolveModeMock.mockReturnValue('headless');
     readFileMock.mockResolvedValueOnce(makePrompt('codex'));
@@ -347,16 +347,21 @@ describe('worktree --add-dir', () => {
       if (p.endsWith('.git')) return { isFile: () => true };
       return { isFile: () => false };
     });
-    readFileSyncMock.mockReturnValueOnce('gitdir: /repo/.git/worktrees/my-wt\n');
+    readFileSyncMock
+      .mockReturnValueOnce('gitdir: /repo/.git/worktrees/my-wt\n')
+      .mockReturnValueOnce('../..\n');
     mockSpawnResult();
 
     await runPrompt('test', { cwd: '/tmp/wt' });
 
     const args = spawnedArgs();
-    const addDirIdx = args.indexOf('--add-dir');
-    expect(addDirIdx).toBeGreaterThanOrEqual(0);
-    expect(args[addDirIdx + 1]).toBe('/repo/.git/worktrees/my-wt');
-    expect(addDirIdx).toBeLessThan(args.indexOf('exec'));
+    const firstAddDir = args.indexOf('--add-dir');
+    expect(firstAddDir).toBeGreaterThanOrEqual(0);
+    expect(args[firstAddDir + 1]).toBe('/repo/.git/worktrees/my-wt');
+    const secondAddDir = args.indexOf('--add-dir', firstAddDir + 1);
+    expect(secondAddDir).toBeGreaterThanOrEqual(0);
+    expect(args[secondAddDir + 1]).toBe('/repo/.git');
+    expect(secondAddDir).toBeLessThan(args.indexOf('exec'));
   });
 
   it('does not add --add-dir when .git is a directory (non-worktree)', async () => {

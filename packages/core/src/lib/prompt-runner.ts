@@ -27,7 +27,12 @@ export interface RunPromptOpts {
 const CODEX_HEADLESS_CONFIG = 'sandbox_workspace_write.network_access=true';
 const CODEX_HEADLESS_ARGS = ['exec', '--full-auto', '-c', CODEX_HEADLESS_CONFIG] as const;
 
-function resolveWorktreeGitDir(cwd: string): string | undefined {
+interface WorktreeDirs {
+  gitDir: string;
+  commonDir?: string;
+}
+
+function resolveWorktreeGitDir(cwd: string): WorktreeDirs | undefined {
   const dotGit = path.join(cwd, '.git');
   try {
     if (!statSync(dotGit).isFile()) return undefined;
@@ -48,7 +53,26 @@ function resolveWorktreeGitDir(cwd: string): string | undefined {
       console.warn(`Warning: gitdir path ${resolved} does not exist. Skipping --add-dir.`);
       return undefined;
     }
-    return resolved;
+
+    // Resolve the shared git common dir (parent repo's .git/) so that operations
+    // like `git push -u` can write to config, refs/remotes/, and logs/refs/.
+    let commonDir: string | undefined;
+    try {
+      const commonDirContent = readFileSync(path.join(resolved, 'commondir'), 'utf-8');
+      const commonDirResolved = path.resolve(resolved, commonDirContent.trim());
+      try {
+        statSync(commonDirResolved);
+        commonDir = commonDirResolved;
+      } catch {
+        console.warn(
+          `Warning: commondir path ${commonDirResolved} does not exist. Skipping common --add-dir.`
+        );
+      }
+    } catch {
+      // No commondir file — gitDir is the main repo .git, not a worktree sub-dir
+    }
+
+    return { gitDir: resolved, commonDir };
   } catch {
     console.warn(`Warning: Failed to read .git file at ${dotGit}. Skipping --add-dir.`);
     return undefined;
@@ -153,11 +177,15 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
   }
 
   if (agent === 'codex' && opts.cwd) {
-    const gitDir = resolveWorktreeGitDir(opts.cwd);
-    if (gitDir) {
+    const worktreeDirs = resolveWorktreeGitDir(opts.cwd);
+    if (worktreeDirs) {
       const execIdx = args.indexOf('exec');
       const insertIdx = execIdx === -1 ? 0 : execIdx;
-      args.splice(insertIdx, 0, '--add-dir', gitDir);
+      const addDirArgs = ['--add-dir', worktreeDirs.gitDir];
+      if (worktreeDirs.commonDir) {
+        addDirArgs.push('--add-dir', worktreeDirs.commonDir);
+      }
+      args.splice(insertIdx, 0, ...addDirArgs);
     }
   }
 
