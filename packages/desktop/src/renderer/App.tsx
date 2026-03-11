@@ -310,12 +310,19 @@ export default function App(): JSX.Element {
           ) : (
             <div className="divide-y divide-border/60">
               {issues.map((issue) => (
-                <article key={issue.number} className="grid gap-4 px-6 py-5 md:grid-cols-[1fr_auto]">
+                <article
+                  key={issue.number}
+                  className="grid gap-4 px-6 py-5 md:grid-cols-[1fr_auto]"
+                >
                   <div className="space-y-3">
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge variant={getStateVariant(issue.state)}>{issue.state}</Badge>
-                      <span className="text-sm font-medium text-muted-foreground">#{issue.number}</span>
-                      <span className="text-sm text-muted-foreground">opened by {issue.author}</span>
+                      <span className="text-sm font-medium text-muted-foreground">
+                        #{issue.number}
+                      </span>
+                      <span className="text-sm text-muted-foreground">
+                        opened by {issue.author}
+                      </span>
                     </div>
                     <div>
                       <h3 className="text-base font-semibold leading-tight text-foreground">
