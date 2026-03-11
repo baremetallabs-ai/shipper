@@ -568,7 +568,7 @@ export async function resetCommand(
 
   const labels = issueData.labels.map((label) => label.name);
 
-  if (!opts.force && labels.includes('shipper:locked')) {
+  if (!opts.force && labels.includes(LOCKED_LABEL)) {
     if (!(await isLockStale(nwo, String(issueNum)))) {
       console.error(
         `Issue #${issueNum} is locked by another shipper instance. Use --force to override.`
