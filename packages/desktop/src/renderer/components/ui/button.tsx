@@ -25,8 +25,7 @@ const buttonVariants = cva(
 );
 
 export interface ButtonProps
-  extends ComponentProps<'button'>,
-    VariantProps<typeof buttonVariants> {}
+  extends ComponentProps<'button'>, VariantProps<typeof buttonVariants> {}
 
 export function Button({ className, size, variant, ...props }: ButtonProps): JSX.Element {
   return <button className={cn(buttonVariants({ className, size, variant }))} {...props} />;
