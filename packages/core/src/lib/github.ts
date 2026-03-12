@@ -351,9 +351,12 @@ export async function selectIssuesForStage(
 ): Promise<{ number: number; title: string }[]> {
   const issueSearchFilter =
     label === 'shipper:new'
-      ? '-label:shipper:locked'
-      : '-label:shipper:blocked -label:shipper:locked';
-  const lockedSearchFilter = label === 'shipper:new' ? null : '-label:shipper:blocked';
+      ? '-label:shipper:locked -label:shipper:failed'
+      : '-label:shipper:blocked -label:shipper:locked -label:shipper:failed';
+  const lockedSearchFilter =
+    label === 'shipper:new'
+      ? '-label:shipper:failed'
+      : '-label:shipper:blocked -label:shipper:failed';
   let issues: { number: number; title: string }[];
   try {
     const result = await gh([

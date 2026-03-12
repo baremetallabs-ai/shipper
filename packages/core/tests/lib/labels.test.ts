@@ -9,8 +9,8 @@ import {
 } from '../../src/lib/labels.js';
 
 describe('labels', () => {
-  it('defines the canonical set of 10 labels', () => {
-    expect(LABELS).toHaveLength(10);
+  it('defines the canonical set of 11 labels', () => {
+    expect(LABELS).toHaveLength(11);
     expect(LABELS.map((label) => label.name)).toEqual([
       'shipper:new',
       'shipper:groomed',
@@ -22,15 +22,17 @@ describe('labels', () => {
       'shipper:ready',
       'shipper:blocked',
       'shipper:locked',
+      'shipper:failed',
     ]);
   });
 
   it('splits workflow and control labels correctly', () => {
     expect(WORKFLOW_LABELS).toHaveLength(8);
-    expect(CONTROL_LABELS).toHaveLength(2);
+    expect(CONTROL_LABELS).toHaveLength(3);
     expect(CONTROL_LABELS.map((label) => label.name)).toEqual([
       'shipper:blocked',
       'shipper:locked',
+      'shipper:failed',
     ]);
   });
 

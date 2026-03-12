@@ -29,6 +29,11 @@ const { canonicalLabels } = vi.hoisted(() => ({
       color: 'D93F0B',
       description: 'Locked by an active shipper instance',
     },
+    {
+      name: 'shipper:failed',
+      color: '6A0DAD',
+      description: 'Failed after exhausting transition cap — requires manual intervention',
+    },
   ],
 }));
 

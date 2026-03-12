@@ -86,6 +86,13 @@ export const LABELS: readonly LabelDefinition[] = [
     kind: 'control',
     displayName: 'Locked',
   },
+  {
+    name: 'shipper:failed',
+    color: '6A0DAD',
+    description: 'Failed after exhausting transition cap — requires manual intervention',
+    kind: 'control',
+    displayName: 'Failed',
+  },
 ];
 
 export const WORKFLOW_LABELS = LABELS.filter((label) => label.kind === 'stage');
@@ -122,3 +129,4 @@ export const PR_REVIEWED_LABEL = requireLabelName('shipper:pr-reviewed');
 export const READY_LABEL = requireLabelName('shipper:ready');
 export const BLOCKED_LABEL = requireLabelName('shipper:blocked');
 export const LOCKED_LABEL = requireLabelName('shipper:locked');
+export const FAILED_LABEL = requireLabelName('shipper:failed');
