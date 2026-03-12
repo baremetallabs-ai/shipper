@@ -167,6 +167,22 @@ If your decomposition recommendation includes additional issues, you must create
 
 ---
 
+## Agent Feedback
+
+As you work through this stage, observe any friction you encounter. If you have feedback worth reporting, append an `## Agent Feedback` section **at the end** of your stage comment (after all other sections). If you have nothing to report, omit the section entirely — no placeholder.
+
+**What qualifies as reportable feedback:**
+
+- Commands that failed unexpectedly or required workarounds
+- Prompt instructions that were confusing, contradictory, or ambiguous
+- Missing context that caused delays or wrong turns
+- Tooling limitations that impacted your work
+- Constructive suggestions for improving the workflow
+
+Keep feedback concise and actionable. This section is for human consumption — write it as bullet points, not prose.
+
+---
+
 ## Stop conditions
 
 - If any GitHub update/create command fails, report the error **and which prior steps (if any) already completed** (e.g., "the issue body was updated but the label change failed").

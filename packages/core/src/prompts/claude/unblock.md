@@ -128,6 +128,46 @@ Use a general heuristic to distinguish environment failures from code failures. 
 
 ---
 
+## Agent Feedback
+
+As you work through this stage, observe any friction you encounter. If you have feedback worth reporting, append an `## Agent Feedback` section **at the end** of your stage comment (after all other sections). If you have nothing to report, omit the section entirely — no placeholder.
+
+**What qualifies as reportable feedback:**
+
+- Commands that failed unexpectedly or required workarounds
+- Prompt instructions that were confusing, contradictory, or ambiguous
+- Missing context that caused delays or wrong turns
+- Tooling limitations that impacted your work
+- Constructive suggestions for improving the workflow
+
+Keep feedback concise and actionable. This section is for human consumption — write it as bullet points, not prose.
+
+**Note:** The stale-block and condition-met paths may need to switch from inline comment bodies to `--body-file` when feedback exists. The still-blocked path does not post an issue comment, so Agent Feedback does not apply there. If you have nothing to report, keep using the existing inline comment bodies above. If you have agent feedback to append on a comment-posting path, create `./.shipper/tmp/unblock-comment-<number>.md` with the appropriate body:
+
+```markdown
+## Unblocked (stale)
+
+The `shipper:blocked` label was present but no blocking-condition comment (starting with `## Blocked`) was found. Treating the block as stale and removing the label.
+
+## Agent Feedback
+
+- <bullet points only when there is feedback>
+```
+
+```markdown
+## Unblocked
+
+<Evidence of why the condition is satisfied. Be specific — cite issue numbers, PR numbers, merge dates, etc.>
+
+## Agent Feedback
+
+- <bullet points only when there is feedback>
+```
+
+Then post it with `gh issue comment <ISSUE> --body-file ./.shipper/tmp/unblock-comment-<number>.md`.
+
+---
+
 ## Rules
 
 - **Always cite evidence.** Every decision must include the specific data you checked (issue state, PR state, dates, etc.).

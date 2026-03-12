@@ -345,6 +345,42 @@ When complete, report to the user:
 
 ---
 
+## Agent Feedback
+
+As you work through this stage, observe any friction you encounter. If you have feedback worth reporting, append an `## Agent Feedback` section **at the end** of your stage comment (after all other sections). If you have nothing to report, omit the section entirely — no placeholder.
+
+**What qualifies as reportable feedback:**
+
+- Commands that failed unexpectedly or required workarounds
+- Prompt instructions that were confusing, contradictory, or ambiguous
+- Missing context that caused delays or wrong turns
+- Tooling limitations that impacted your work
+- Constructive suggestions for improving the workflow
+
+Keep feedback concise and actionable. This section is for human consumption — write it as bullet points, not prose.
+
+**Note:** Agent Feedback for this stage belongs only in the brief issue comment posted via `gh issue comment`. Do not put it in `## Review Summary`, and do not add it to `./.shipper/tmp/pr_review_payload-<number>.json`. If you have nothing to report, keep using the inline `gh issue comment` commands above. If you have agent feedback to append, create `./.shipper/tmp/pr-review-comment-<number>.md` with the appropriate first line for the path you are on:
+
+```markdown
+Shipper review attempted but no open PR was found for this issue. Run `shipper pr open` to create one.
+
+## Agent Feedback
+
+- <bullet points only when there is feedback>
+```
+
+```markdown
+Shipper review posted on PR #<PR>: [APPROVE|REQUEST_CHANGES|COMMENT] — <one-line summary of findings>
+
+## Agent Feedback
+
+- <bullet points only when there is feedback>
+```
+
+Then post it with `gh issue comment <ISSUE> --body-file ./.shipper/tmp/pr-review-comment-<number>.md` instead of inline `--body`.
+
+---
+
 ## Environment failure escape hatch
 
 If a failure is caused by the **environment, sandbox, or repository configuration** — not by a code problem you can fix — stop immediately and escalate. Do not retry.
