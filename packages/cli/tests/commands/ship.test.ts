@@ -368,7 +368,7 @@ function installSequentialCliMocks(): void {
       };
     }
 
-    if (args[0] === 'pr' && args[1] === 'view' && args.includes('mergeStateStatus')) {
+    if (args[0] === 'pr' && args[1] === 'view') {
       return {
         stdout: JSON.stringify({ mergeStateStatus: 'CLEAN' }),
         stderr: '',
@@ -380,6 +380,13 @@ function installSequentialCliMocks(): void {
         stdout: 'merged',
         stderr: '',
       };
+    }
+
+    if (
+      (args[0] === 'pr' && (args[1] === 'edit' || args[1] === 'comment')) ||
+      (args[0] === 'issue' && (args[1] === 'edit' || args[1] === 'close'))
+    ) {
+      return { stdout: '', stderr: '' };
     }
 
     throw new Error(`Unexpected gh call: ${args.join(' ')}`);
@@ -816,7 +823,10 @@ describe('shipCommand single-issue path', () => {
       1,
       process.execPath,
       [cliEntrypoint, 'next', '42'],
-      expect.objectContaining({ stdio: 'inherit', env: process.env })
+      expect.objectContaining({
+        stdio: 'inherit',
+        env: expect.objectContaining({ SHIPPER_LOCK_HELD: '42' }),
+      })
     );
     expect(mockGh).not.toHaveBeenCalledWith(
       expect.arrayContaining(['issue', 'edit', '42', '--add-label', 'shipper:failed'])
@@ -876,6 +886,8 @@ describe('shipCommand merge path', () => {
     mockWithIssueLock.mockImplementation(defaultWithIssueLock);
     mockSpawn.mockReset();
     mockSpawnSync.mockReset();
+    postMergeMock.mockClear();
+    postMergeMock.mockResolvedValue(undefined);
     exitSpy.mockClear();
   });
 
@@ -891,7 +903,7 @@ describe('shipCommand merge path', () => {
     expect(findGhCalls('pr', 'view')).toHaveLength(2);
     expect(findGhCalls('pr', 'update-branch')).toHaveLength(1);
     expect(findGhCalls('pr', 'merge')).toHaveLength(1);
-    expect(findGhCalls('issue', 'close')).toHaveLength(1);
+    expect(postMergeMock).toHaveBeenCalledTimes(1);
     expect(exitSpy).toHaveBeenCalledWith(0);
   });
 
@@ -1041,100 +1053,6 @@ describe('shipCommand merge path', () => {
   });
 });
 
-describe('shipCommand auto merge-failure retry handling', () => {
-  beforeEach(() => {
-    mockSelectIssuesForStage.mockReset();
-    mockClearStaleLockIfNeeded.mockReset();
-    mockGh.mockReset();
-    mockFetchChecks.mockReset();
-    mockFetchChecks.mockResolvedValue([]);
-    mockClassifyChecks.mockReset();
-    mockClassifyChecks.mockReturnValue({ pending: [], failed: [], passed: [], total: 0 });
-    mockWithStageHooks.mockReset();
-    mockWithStageHooks.mockImplementation(defaultWithStageHooks);
-    mockWithIssueLock.mockReset();
-    mockWithIssueLock.mockImplementation(defaultWithIssueLock);
-    mockSpawn.mockReset();
-    mockSpawnSync.mockReset();
-    exitSpy.mockClear();
-  });
-
-  it('does not blacklist a retriable merge failure in sequential auto mode', async () => {
-    let readySelections = 0;
-    mockSelectIssuesForStage.mockImplementation(async (_repo: string, label: string) => {
-      if (label === 'shipper:ready' && readySelections < 2) {
-        readySelections++;
-        return [{ number: 123, title: 'Retry merge issue' }];
-      }
-      return [];
-    });
-    setupReadyMergeFlow({ mergeStates: ['DIRTY'] });
-
-    await shipCommand(repo, undefined, { auto: true, merge: false, parallel: 1 });
-
-    expect(findGhCalls('pr', 'list')).toHaveLength(2);
-    expect(exitSpy).toHaveBeenCalledWith(0);
-  });
-
-  it('blacklists a non-merge hook failure in sequential auto mode', async () => {
-    let readySelections = 0;
-    mockSelectIssuesForStage.mockImplementation(async (_repo: string, label: string) => {
-      if (label === 'shipper:ready' && readySelections < 2) {
-        readySelections++;
-        return [{ number: 123, title: 'Hook failure issue' }];
-      }
-      return [];
-    });
-    setupReadyMergeFlow({ mergeStates: ['CLEAN'] });
-    mockWithStageHooks.mockImplementation(async () => {
-      throw new Error('pre-merge hook exited with code 1');
-    });
-
-    await shipCommand(repo, undefined, { auto: true, merge: false, parallel: 1 });
-
-    expect(findGhCalls('pr', 'list')).toHaveLength(1);
-    expect(exitSpy).toHaveBeenCalledWith(0);
-  });
-
-  it('does not blacklist a child-process merge failure in parallel auto mode', async () => {
-    let candidateAvailable = true;
-    mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
-      if (label === 'shipper:ready' && candidateAvailable) {
-        return [{ number: 1, title: 'Retry merge issue' }];
-      }
-      return [];
-    });
-    mockGh.mockResolvedValue({ stdout: '[]', stderr: '' });
-
-    const child1 = new FakeChildProcess();
-    const child2 = new FakeChildProcess();
-    mockSpawn.mockReturnValueOnce(child1 as never).mockImplementationOnce(() => {
-      candidateAvailable = false;
-      return child2 as never;
-    });
-
-    const runPromise = shipCommand(repo, undefined, { auto: true, merge: false, parallel: 2 });
-
-    await flushMicrotasks();
-    child1.finish(
-      1,
-      null,
-      'Merge failed for PR #456: PR #456 has merge conflicts that must be resolved.'
-    );
-    await flushMicrotasks();
-    await new Promise<void>((resolve) => {
-      process.nextTick(resolve);
-    });
-
-    expect(mockSpawn).toHaveBeenCalledTimes(2);
-    child2.finish(0);
-    await runPromise;
-
-    expect(mockSpawn.mock.calls.map(([, args]) => (args as string[])[2])).toEqual(['1', '1']);
-    expect(exitSpy).toHaveBeenCalledWith(0);
-  });
-});
-
 describe('shipCommand sequential auto runner parking', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -1148,6 +1066,17 @@ describe('shipCommand sequential auto runner parking', () => {
     mockSpawnSync.mockReset();
     mockGh.mockReset();
     mockSelectIssuesForStage.mockReset();
+    mockWithStageHooks.mockReset();
+    mockWithStageHooks.mockImplementation(defaultWithStageHooks);
+    mockWithIssueLock.mockReset();
+    mockWithIssueLock.mockImplementation(async (_repo: string, issue: string, fn) => {
+      lockState.lockedIssues.add(String(issue));
+      try {
+        return await fn();
+      } finally {
+        lockState.lockedIssues.delete(String(issue));
+      }
+    });
     postMergeMock.mockClear();
     postMergeMock.mockImplementation(async (_pr: unknown, issueNumber: number | string) => {
       mockIssues.delete(Number(issueNumber));
@@ -1405,6 +1334,102 @@ describe('shipCommand sequential auto runner parking', () => {
       '1',
       '1',
     ]);
+  });
+});
+
+describe('shipCommand auto merge-failure retry handling', () => {
+  beforeEach(() => {
+    mockSelectIssuesForStage.mockReset();
+    mockClearStaleLockIfNeeded.mockReset();
+    mockGh.mockReset();
+    mockFetchChecks.mockReset();
+    mockFetchChecks.mockResolvedValue([]);
+    mockClassifyChecks.mockReset();
+    mockClassifyChecks.mockReturnValue({ pending: [], failed: [], passed: [], total: 0 });
+    mockWithStageHooks.mockReset();
+    mockWithStageHooks.mockImplementation(defaultWithStageHooks);
+    mockWithIssueLock.mockReset();
+    mockWithIssueLock.mockImplementation(defaultWithIssueLock);
+    mockSpawn.mockReset();
+    mockSpawnSync.mockReset();
+    postMergeMock.mockClear();
+    postMergeMock.mockResolvedValue(undefined);
+    exitSpy.mockClear();
+  });
+
+  it('does not blacklist a retriable merge failure in sequential auto mode', async () => {
+    let readySelections = 0;
+    mockSelectIssuesForStage.mockImplementation(async (_repo: string, label: string) => {
+      if (label === 'shipper:ready' && readySelections < 2) {
+        readySelections++;
+        return [{ number: 123, title: 'Retry merge issue' }];
+      }
+      return [];
+    });
+    setupReadyMergeFlow({ mergeStates: ['DIRTY'] });
+
+    await shipCommand(repo, undefined, { auto: true, merge: false, parallel: 1 });
+
+    expect(findGhCalls('pr', 'list')).toHaveLength(2);
+    expect(exitSpy).toHaveBeenCalledWith(0);
+  });
+
+  it('blacklists a non-merge hook failure in sequential auto mode', async () => {
+    let readySelections = 0;
+    mockSelectIssuesForStage.mockImplementation(async (_repo: string, label: string) => {
+      if (label === 'shipper:ready' && readySelections < 2) {
+        readySelections++;
+        return [{ number: 123, title: 'Hook failure issue' }];
+      }
+      return [];
+    });
+    setupReadyMergeFlow({ mergeStates: ['CLEAN'] });
+    mockWithStageHooks.mockImplementation(async () => {
+      throw new Error('pre-merge hook exited with code 1');
+    });
+
+    await shipCommand(repo, undefined, { auto: true, merge: false, parallel: 1 });
+
+    expect(findGhCalls('pr', 'list')).toHaveLength(1);
+    expect(exitSpy).toHaveBeenCalledWith(0);
+  });
+
+  it('does not blacklist a child-process merge failure in parallel auto mode', async () => {
+    let candidateAvailable = true;
+    mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
+      if (label === 'shipper:ready' && candidateAvailable) {
+        return [{ number: 1, title: 'Retry merge issue' }];
+      }
+      return [];
+    });
+    mockGh.mockResolvedValue({ stdout: '[]', stderr: '' });
+
+    const child1 = new FakeChildProcess();
+    const child2 = new FakeChildProcess();
+    mockSpawn.mockReturnValueOnce(child1 as never).mockImplementationOnce(() => {
+      candidateAvailable = false;
+      return child2 as never;
+    });
+
+    const runPromise = shipCommand(repo, undefined, { auto: true, merge: false, parallel: 2 });
+
+    await flushMicrotasks();
+    child1.finish(
+      1,
+      null,
+      'Merge failed for PR #456: PR #456 has merge conflicts that must be resolved.'
+    );
+    await flushMicrotasks();
+    await new Promise<void>((resolve) => {
+      process.nextTick(resolve);
+    });
+
+    expect(mockSpawn).toHaveBeenCalledTimes(2);
+    child2.finish(0);
+    await runPromise;
+
+    expect(mockSpawn.mock.calls.map(([, args]) => (args as string[])[2])).toEqual(['1', '1']);
+    expect(exitSpy).toHaveBeenCalledWith(0);
   });
 });
 
