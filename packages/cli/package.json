@@ -16,7 +16,7 @@
   },
   "scripts": {
     "dev": "tsx --loader ./raw-text-loader.mjs src/index.ts",
-    "build": "tsup",
+    "build": "npm --prefix ../core run build && tsup",
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "type-check": "tsc --noEmit",
     "test": "vitest run",

@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
-import { access, mkdir } from 'node:fs/promises';
+import { access, mkdir, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -8,11 +8,47 @@ import { getSettings } from './settings.js';
 
 const WORKTREES_DIR = path.join(homedir(), '.shipper', 'worktrees');
 const execFileAsync = promisify(execFile);
+const MAX_REBASE_ATTEMPTS = 3;
+const CONFLICT_BLOCK_PATTERN = /^<{7}.*$\n[\s\S]*?^={7}$\n[\s\S]*?^>{7}.*(?:\n|$)?/gm;
 
-function spawnAsync(command: string, args: string[], cwd?: string): Promise<void> {
+interface CommandOpts {
+  cwd?: string;
+  env?: typeof process.env;
+}
+
+interface CommandResult {
+  stdout: string;
+  stderr: string;
+  code: number;
+}
+
+interface ExecFileError extends Error {
+  code?: number | string;
+  stdout?: string;
+  stderr?: string;
+}
+
+export interface WorktreeGitOpts {
+  wtPath: string;
+  repoRoot: string;
+  baseBranch: string;
+  pushMode: 'new-branch' | 'force-with-lease';
+}
+
+export interface ConflictContext {
+  files: string[];
+  conflicts: Array<{
+    path: string;
+    markers: string[];
+  }>;
+  continueError?: string;
+}
+
+function spawnAsync(command: string, args: string[], opts: CommandOpts = {}): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
-      cwd,
+      cwd: opts.cwd,
+      env: { ...process.env, ...opts.env },
       stdio: 'inherit',
     });
 
@@ -25,6 +61,233 @@ function spawnAsync(command: string, args: string[], cwd?: string): Promise<void
       reject(new Error(`${command} exited with code ${code ?? 'unknown'}`));
     });
   });
+}
+
+async function execAsync(
+  command: string,
+  args: string[],
+  opts: CommandOpts = {}
+): Promise<CommandResult> {
+  return await new Promise((resolve, reject) => {
+    execFile(
+      command,
+      args,
+      {
+        cwd: opts.cwd,
+        env: { ...process.env, ...opts.env },
+      },
+      (error, stdout, stderr) => {
+        if (!error) {
+          resolve({ stdout, stderr, code: 0 });
+          return;
+        }
+
+        if (error instanceof Error) {
+          const execError = error as ExecFileError;
+          resolve({
+            stdout: stdout || execError.stdout || '',
+            stderr: stderr || execError.stderr || '',
+            code: typeof execError.code === 'number' ? execError.code : 1,
+          });
+          return;
+        }
+
+        reject(error);
+      }
+    );
+  });
+}
+
+function formatCommandFailure(command: string, args: string[], result: CommandResult): string {
+  const output = [result.stderr.trim(), result.stdout.trim()].filter(Boolean).join('\n');
+  if (!output) {
+    return `${command} ${args.join(' ')} exited with code ${result.code}`;
+  }
+  return `${command} ${args.join(' ')} exited with code ${result.code}:\n${output}`;
+}
+
+function formatTransportError(opts: WorktreeGitOpts, detail: string): Error {
+  return new Error(`Git transport failed in ${opts.wtPath} for repo ${opts.repoRoot}: ${detail}`);
+}
+
+async function listConflictedFiles(wtPath: string): Promise<string[]> {
+  const result = await execAsync('git', ['diff', '--name-only', '--diff-filter=U'], {
+    cwd: wtPath,
+  });
+  if (result.code !== 0) {
+    throw new Error(
+      formatCommandFailure('git', ['diff', '--name-only', '--diff-filter=U'], result)
+    );
+  }
+
+  return result.stdout
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
+
+async function extractConflictMarkers(wtPath: string, relativePath: string): Promise<string[]> {
+  const filePath = path.join(wtPath, relativePath);
+  const content = await readFile(filePath, 'utf-8');
+  const matches = [...content.matchAll(CONFLICT_BLOCK_PATTERN)].map((match) => match[0].trimEnd());
+  if (matches.length === 0) {
+    throw new Error(`Could not extract conflict markers from ${relativePath}`);
+  }
+  return matches;
+}
+
+async function buildConflictContext(
+  wtPath: string,
+  continueError?: string
+): Promise<ConflictContext | undefined> {
+  const files = await listConflictedFiles(wtPath);
+  if (files.length === 0) {
+    return undefined;
+  }
+
+  const conflicts: ConflictContext['conflicts'] = [];
+  for (const file of files) {
+    conflicts.push({
+      path: file,
+      markers: await extractConflictMarkers(wtPath, file),
+    });
+  }
+
+  return { files, conflicts, continueError };
+}
+
+function getRetryFailureText(result: CommandResult): string {
+  const output = [result.stderr.trim(), result.stdout.trim()].filter(Boolean).join('\n');
+  return output || `git rebase --continue exited with code ${result.code}`;
+}
+
+async function getConflictContextOrThrow(
+  opts: WorktreeGitOpts,
+  result: CommandResult,
+  continueError?: string
+): Promise<ConflictContext> {
+  const conflictContext = await buildConflictContext(opts.wtPath, continueError);
+  if (conflictContext) {
+    return conflictContext;
+  }
+
+  throw formatTransportError(
+    opts,
+    `git rebase origin/${opts.baseBranch} failed without unresolved files.\n${formatCommandFailure(
+      'git',
+      ['rebase', `origin/${opts.baseBranch}`],
+      result
+    )}`
+  );
+}
+
+async function pushWorktreeBranch(opts: WorktreeGitOpts): Promise<void> {
+  const args =
+    opts.pushMode === 'new-branch'
+      ? ['push', '-u', 'origin', 'HEAD']
+      : ['push', '--force-with-lease'];
+  await spawnAsync('git', args, { cwd: opts.wtPath });
+}
+
+export function formatConflictContext(conflictContext: ConflictContext): string {
+  const lines = [
+    '## Merge Conflict Resolution Required',
+    '',
+    'The following files still have merge conflicts that must be resolved before the rebase can continue:',
+    '',
+    ...conflictContext.files.map((file) => `- ${file}`),
+  ];
+
+  if (conflictContext.continueError) {
+    lines.push(
+      '',
+      'A previous `git rebase --continue` attempt failed with:',
+      '',
+      '```text',
+      conflictContext.continueError,
+      '```'
+    );
+  }
+
+  for (const conflict of conflictContext.conflicts) {
+    lines.push('', `### ${conflict.path}`);
+    for (const marker of conflict.markers) {
+      lines.push('', '```diff', marker, '```');
+    }
+  }
+
+  lines.push(
+    '',
+    'Resolve all conflicts, then use `git add` to stage the resolved files and `git commit` if Git asks for it. Do not run `git rebase --continue`, `git rebase --abort`, or `git push` yourself.'
+  );
+
+  return lines.join('\n');
+}
+
+export async function withGitTransport(
+  opts: WorktreeGitOpts,
+  runAgent: (conflictContext?: ConflictContext) => Promise<number>
+): Promise<number> {
+  await spawnAsync('git', ['fetch', 'origin'], { cwd: opts.wtPath });
+
+  const initialRebase = await execAsync('git', ['rebase', `origin/${opts.baseBranch}`], {
+    cwd: opts.wtPath,
+  });
+
+  if (initialRebase.code === 0) {
+    const agentCode = await runAgent();
+    if (agentCode !== 0) {
+      return agentCode;
+    }
+
+    await pushWorktreeBranch(opts);
+    return 0;
+  }
+
+  let conflictContext = await getConflictContextOrThrow(opts, initialRebase);
+
+  for (let attempt = 1; attempt <= MAX_REBASE_ATTEMPTS; attempt++) {
+    const agentCode = await runAgent(conflictContext);
+    if (agentCode !== 0) {
+      return agentCode;
+    }
+
+    const continueResult = await execAsync('git', ['rebase', '--continue'], {
+      cwd: opts.wtPath,
+      env: { GIT_EDITOR: 'true' },
+    });
+    if (continueResult.code === 0) {
+      await pushWorktreeBranch(opts);
+      return 0;
+    }
+
+    const continueError = getRetryFailureText(continueResult);
+    if (attempt === MAX_REBASE_ATTEMPTS) {
+      await spawnAsync('git', ['rebase', '--abort'], { cwd: opts.wtPath });
+      throw formatTransportError(
+        opts,
+        `Could not complete rebase onto origin/${opts.baseBranch} after ${MAX_REBASE_ATTEMPTS} conflict resolution attempts.\n${continueError}`
+      );
+    }
+
+    const nextConflictContext = await buildConflictContext(opts.wtPath, continueError);
+    if (!nextConflictContext) {
+      throw formatTransportError(
+        opts,
+        `git rebase --continue failed without unresolved files.\n${formatCommandFailure(
+          'git',
+          ['rebase', '--continue'],
+          continueResult
+        )}`
+      );
+    }
+    conflictContext = nextConflictContext;
+  }
+
+  throw formatTransportError(
+    opts,
+    `Could not complete rebase onto origin/${opts.baseBranch} after ${MAX_REBASE_ATTEMPTS} conflict resolution attempts.`
+  );
 }
 
 export function getWorktreePath(repoRoot: string, branch: string): string {
@@ -48,7 +311,7 @@ export async function createWorktree(opts: CreateWorktreeOpts): Promise<string> 
     await access(wtPath);
     // Clean up stale worktree from a previous crashed run
     try {
-      await spawnAsync('git', ['worktree', 'remove', '--force', wtPath], opts.repoRoot);
+      await spawnAsync('git', ['worktree', 'remove', '--force', wtPath], { cwd: opts.repoRoot });
     } catch {
       // If git worktree remove fails, try just deleting the directory
     }
@@ -79,14 +342,14 @@ export async function createWorktree(opts: CreateWorktreeOpts): Promise<string> 
     args.push(wtPath, opts.branch);
   }
 
-  await spawnAsync('git', args, opts.repoRoot);
+  await spawnAsync('git', args, { cwd: opts.repoRoot });
 
   return wtPath;
 }
 
 export async function removeWorktree(repoRoot: string, wtPath: string): Promise<void> {
   try {
-    await spawnAsync('git', ['worktree', 'remove', '--force', wtPath], repoRoot);
+    await spawnAsync('git', ['worktree', 'remove', '--force', wtPath], { cwd: repoRoot });
   } catch {
     // Idempotent — ignore errors if already removed
   }
