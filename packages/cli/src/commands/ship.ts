@@ -20,12 +20,13 @@ import {
   READY_LABEL,
   BLOCKED_LABEL,
   LOCKED_LABEL,
+  FAILED_LABEL,
 } from '@dnsquared/shipper-core';
 import type { AgentName } from '@dnsquared/shipper-core';
 import { postMerge } from './merge.js';
 import type { QueuedPR } from './merge.js';
 
-const MAX_REVIEW_CYCLES = 3;
+const MAX_TRANSITIONS = 15;
 const MERGE_FAILURE_PREFIX = 'Merge failed for PR #';
 
 export const STAGE_NAME: Record<string, string> = { ...STAGE_NAME_MAP };
@@ -122,7 +123,11 @@ async function getCurrentLabel(repo: string, issueStr: string): Promise<string |
   const shipperLabels = output
     .split(/\r?\n/)
     .filter(
-      (name) => name.startsWith('shipper:') && name !== BLOCKED_LABEL && name !== LOCKED_LABEL
+      (name) =>
+        name.startsWith('shipper:') &&
+        name !== BLOCKED_LABEL &&
+        name !== LOCKED_LABEL &&
+        name !== FAILED_LABEL
     );
 
   if (shipperLabels.length !== 1) return undefined;
@@ -447,10 +452,10 @@ async function shipOneIssue(
     }
 
     const results: StageResult[] = [];
+    const transitionHistory: string[] = [label];
 
     if (label !== READY_LABEL) {
-      let reviewCycles = 0;
-      let seenPrReviewed = false;
+      let transitions = 0;
       const cliEntrypoint = process.argv[1];
       if (!cliEntrypoint) {
         throw new Error('Missing CLI entrypoint path.');
@@ -487,11 +492,7 @@ async function shipOneIssue(
 
         label = await getCurrentLabel(repo, issueStr);
 
-        if (label === READY_LABEL) {
-          break;
-        }
-
-        if (!label || !(label in STAGE_NAME)) {
+        if (!label || (label !== READY_LABEL && !(label in STAGE_NAME))) {
           if (!label) {
             console.error(`Issue #${issueStr} has no shipper label after stage "${stageName}".`);
           } else {
@@ -510,18 +511,37 @@ async function shipOneIssue(
           return { success: false, error: msg };
         }
 
-        if (label === PR_REVIEWED_LABEL) {
-          if (seenPrReviewed) {
-            reviewCycles++;
-            if (reviewCycles >= MAX_REVIEW_CYCLES) {
-              const msg = `Review loop cap reached after ${MAX_REVIEW_CYCLES} cycles. Issue is at ${PR_REVIEWED_LABEL}. Continue manually.`;
-              console.error(msg);
-              results.push({ stage: 'pr remediate', status: 'fail' });
-              printSummary(results);
-              return { success: false, error: msg };
-            }
+        transitions++;
+        transitionHistory.push(label);
+
+        if (transitions >= MAX_TRANSITIONS) {
+          const history = transitionHistory.join(' → ');
+          const msg = `Issue #${issueStr} hit transition cap (${MAX_TRANSITIONS}): ${history}`;
+          console.error(msg);
+
+          try {
+            await gh([
+              'issue',
+              'edit',
+              issueStr,
+              '-R',
+              repo,
+              '--add-label',
+              FAILED_LABEL,
+              '--remove-label',
+              label,
+            ]);
+          } catch {
+            console.error(`Warning: Failed to update labels on issue #${issueStr}`);
           }
-          seenPrReviewed = true;
+
+          results.push({ stage: STAGE_NAME[label] ?? label, status: 'fail' });
+          printSummary(results);
+          return { success: false, error: msg };
+        }
+
+        if (label === READY_LABEL) {
+          break;
         }
       }
     }

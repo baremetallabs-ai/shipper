@@ -56,6 +56,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   READY_LABEL: 'shipper:ready',
   BLOCKED_LABEL: 'shipper:blocked',
   LOCKED_LABEL: 'shipper:locked',
+  FAILED_LABEL: 'shipper:failed',
   withStageHooks: vi.fn(
     async (_stage: string, _env: unknown, fn: () => Promise<unknown>) => await fn()
   ),
@@ -132,6 +133,9 @@ const mockCreateWriteStream = fsMockState.mockCreateWriteStream;
 const mockMkdirSync = fsMockState.mockMkdirSync;
 const mockHomedir = osMockState.mockHomedir;
 const repo = 'owner/repo';
+const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((_code?: number) => {
+  return undefined as never;
+}) as typeof process.exit);
 
 type ShipSignal = 'SIGINT' | 'SIGTERM' | 'SIGKILL';
 
@@ -252,14 +256,17 @@ function findGhCalls(command: string, subcommand: string): string[][] {
     .filter((args) => args[0] === command && args[1] === subcommand);
 }
 
-const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((_code?: number) => {
-  return undefined as never;
-}) as typeof process.exit);
+function mockIssueViewSequence(labels: string[]): void {
+  let index = 0;
+  mockGh.mockImplementation(async (args: string[]) => {
+    if (args[0] === 'issue' && args[1] === 'view') {
+      const label = labels[index++];
+      return { stdout: label ? `${label}\n` : '', stderr: '' };
+    }
 
-afterAll(() => {
-  exitSpy.mockRestore();
-});
-
+    return { stdout: '', stderr: '' };
+  });
+}
 describe('STAGE_NAME', () => {
   it('contains all expected workflow labels', () => {
     const expectedLabels = [
@@ -539,6 +546,96 @@ describe('printUnblockSummary', () => {
     expect(output).not.toContain('forty-five character limit');
 
     logSpy.mockRestore();
+  });
+});
+
+describe('shipCommand single-issue path', () => {
+  beforeEach(() => {
+    mockGh.mockReset();
+    mockSpawnSync.mockReset();
+    mockSpawnSync.mockReturnValue({ status: 0 } as ReturnType<typeof spawnSync>);
+    exitSpy.mockClear();
+  });
+
+  it('fails after the 15th transition, relabels the issue as failed, and logs full history', async () => {
+    const labels = [
+      'shipper:planned',
+      'shipper:implemented',
+      'shipper:pr-open',
+      'shipper:pr-reviewed',
+      'shipper:planned',
+      'shipper:implemented',
+      'shipper:pr-open',
+      'shipper:pr-reviewed',
+      'shipper:planned',
+      'shipper:implemented',
+      'shipper:pr-open',
+      'shipper:pr-reviewed',
+      'shipper:planned',
+      'shipper:implemented',
+      'shipper:pr-open',
+      'shipper:pr-reviewed',
+    ];
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    mockIssueViewSequence(labels);
+
+    await shipCommand(repo, '42', { auto: false, merge: false });
+
+    expect(mockSpawnSync).toHaveBeenCalledTimes(15);
+    expect(mockGh).toHaveBeenCalledWith([
+      'issue',
+      'edit',
+      '42',
+      '-R',
+      repo,
+      '--add-label',
+      'shipper:failed',
+      '--remove-label',
+      'shipper:pr-reviewed',
+    ]);
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    const capMessage = errorSpy.mock.calls
+      .map(([message]) => String(message))
+      .find((message) => message.includes('hit transition cap'));
+    expect(capMessage).toBe(`Issue #42 hit transition cap (15): ${labels.join(' → ')}`);
+
+    errorSpy.mockRestore();
+    logSpy.mockRestore();
+  });
+
+  it('keeps the happy path under the cap and does not apply shipper:failed', async () => {
+    const labels = [
+      'shipper:planned',
+      'shipper:implemented',
+      'shipper:pr-open',
+      'shipper:pr-reviewed',
+      'shipper:ready',
+    ];
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockIssueViewSequence(labels);
+
+    await shipCommand(repo, '42', { auto: false, merge: false });
+
+    const cliEntrypoint = process.argv[1];
+    expect(cliEntrypoint).toBeDefined();
+    expect(mockSpawnSync).toHaveBeenCalledTimes(4);
+    expect(mockSpawnSync).toHaveBeenNthCalledWith(
+      1,
+      process.execPath,
+      [cliEntrypoint, 'next', '42'],
+      expect.objectContaining({ stdio: 'inherit', env: process.env })
+    );
+    expect(mockGh).not.toHaveBeenCalledWith(
+      expect.arrayContaining(['issue', 'edit', '42', '--add-label', 'shipper:failed'])
+    );
+    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining('hit transition cap'));
+
+    logSpy.mockRestore();
+    errorSpy.mockRestore();
   });
 });
 
@@ -825,6 +922,7 @@ describe('shipCommand parallel auto runner', () => {
     mockGh.mockReset();
     mockGh.mockResolvedValue({ stdout: '[]', stderr: '' });
     mockSpawn.mockReset();
+    mockSpawnSync.mockReset();
     mockReleaseIssueLock.mockReset();
     mockCreateWriteStream.mockClear();
     mockMkdirSync.mockClear();
@@ -1180,4 +1278,8 @@ describe('shipCommand parallel auto runner', () => {
       await runPromise;
     }
   );
+});
+
+afterAll(() => {
+  exitSpy.mockRestore();
 });
