@@ -992,7 +992,9 @@ function startSequentialIssueRun(
 
 async function waitForCompletionOrPark(
   run: SequentialIssueRun
-): Promise<{ type: 'completed'; result: ShipIssueResult } | { type: 'parked'; parked: ParkedIssue }> {
+): Promise<
+  { type: 'completed'; result: ShipIssueResult } | { type: 'parked'; parked: ParkedIssue }
+> {
   const parkRequest = await run.waitForNextPark();
   if (parkRequest) {
     return {
