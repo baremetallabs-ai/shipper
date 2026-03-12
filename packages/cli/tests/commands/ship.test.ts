@@ -588,8 +588,8 @@ describe('shipCommand merge path', () => {
       'Merge failed for PR #456: Failed to rebase PR #456 onto its base branch: rebase conflict'
     );
     expect(findGhCalls('pr', 'merge')).toHaveLength(0);
-    expect(findGhCalls('pr', 'edit')).toHaveLength(2);
-    expect(findGhCalls('issue', 'edit')).toHaveLength(2);
+    expect(findGhCalls('pr', 'edit')).toHaveLength(1);
+    expect(findGhCalls('issue', 'edit')).toHaveLength(1);
     expect(findGhCalls('pr', 'comment')).toHaveLength(1);
     expect(exitSpy).toHaveBeenCalledWith(1);
 
@@ -752,6 +752,26 @@ describe('shipCommand auto merge-failure retry handling', () => {
     await shipCommand(repo, undefined, { auto: true, merge: false, parallel: 1 });
 
     expect(findGhCalls('pr', 'list')).toHaveLength(2);
+    expect(exitSpy).toHaveBeenCalledWith(0);
+  });
+
+  it('blacklists a non-merge hook failure in sequential auto mode', async () => {
+    let readySelections = 0;
+    mockSelectIssuesForStage.mockImplementation(async (_repo: string, label: string) => {
+      if (label === 'shipper:ready' && readySelections < 2) {
+        readySelections++;
+        return [{ number: 123, title: 'Hook failure issue' }];
+      }
+      return [];
+    });
+    setupReadyMergeFlow({ mergeStates: ['CLEAN'] });
+    mockWithStageHooks.mockImplementation(async () => {
+      throw new Error('pre-merge hook exited with code 1');
+    });
+
+    await shipCommand(repo, undefined, { auto: true, merge: false, parallel: 1 });
+
+    expect(findGhCalls('pr', 'list')).toHaveLength(1);
     expect(exitSpy).toHaveBeenCalledWith(0);
   });
 

@@ -315,27 +315,35 @@ async function remediateMergeFailure(
   console.error(`\n${formatMergeFailureMessage(pr.number, reason)}`);
 
   try {
-    await gh(['pr', 'edit', String(pr.number), '-R', nwo, '--remove-label', READY_LABEL]);
+    await gh([
+      'pr',
+      'edit',
+      String(pr.number),
+      '-R',
+      nwo,
+      '--remove-label',
+      READY_LABEL,
+      '--add-label',
+      PR_REVIEWED_LABEL,
+    ]);
   } catch {
-    console.error(`Warning: Failed to remove ${READY_LABEL} label from PR #${pr.number}`);
+    console.error(`Warning: Failed to update labels on PR #${pr.number}`);
   }
 
   try {
-    await gh(['pr', 'edit', String(pr.number), '-R', nwo, '--add-label', PR_REVIEWED_LABEL]);
+    await gh([
+      'issue',
+      'edit',
+      String(issueNumber),
+      '-R',
+      nwo,
+      '--remove-label',
+      READY_LABEL,
+      '--add-label',
+      PR_REVIEWED_LABEL,
+    ]);
   } catch {
-    console.error(`Warning: Failed to add ${PR_REVIEWED_LABEL} label to PR #${pr.number}`);
-  }
-
-  try {
-    await gh(['issue', 'edit', String(issueNumber), '-R', nwo, '--remove-label', READY_LABEL]);
-  } catch {
-    console.error(`Warning: Failed to remove ${READY_LABEL} label from issue #${issueNumber}`);
-  }
-
-  try {
-    await gh(['issue', 'edit', String(issueNumber), '-R', nwo, '--add-label', PR_REVIEWED_LABEL]);
-  } catch {
-    console.error(`Warning: Failed to add ${PR_REVIEWED_LABEL} label to issue #${issueNumber}`);
+    console.error(`Warning: Failed to update labels on issue #${issueNumber}`);
   }
 
   const comment = [
@@ -545,7 +553,7 @@ async function shipOneIssue(
         const msg = err instanceof Error ? err.message : String(err);
         results.push({ stage: 'merge', status: 'fail' });
         printSummary(results);
-        return { success: false, error: msg, retriable: true };
+        return { success: false, error: msg, retriable: isRetriableMergeFailure(msg) };
       }
     }
 
