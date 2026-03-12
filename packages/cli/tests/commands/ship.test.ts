@@ -11,6 +11,16 @@ const fsMockState = vi.hoisted(() => ({
 const osMockState = vi.hoisted(() => ({
   mockHomedir: vi.fn(() => '/mock-home'),
 }));
+const lockState = vi.hoisted(() => ({
+  lockedIssues: new Set<string>(),
+}));
+const getSettingsMock = vi.hoisted(() =>
+  vi.fn(() => ({
+    prReviewWait: { mode: 'checks', timeoutMinutes: 15 },
+  }))
+);
+const buildReadyCheckMock = vi.hoisted(() => vi.fn());
+const postMergeMock = vi.hoisted(() => vi.fn(async () => {}));
 const labelFixtures = vi.hoisted(() => ({
   stageLabelNames: [
     'shipper:new',
@@ -33,6 +43,16 @@ const labelFixtures = vi.hoisted(() => ({
     'shipper:ready': 'ready',
   },
 }));
+
+vi.mock('../../src/commands/pr-remediate.js', () => ({
+  buildReadyCheck: (...args: unknown[]) => buildReadyCheckMock(...args),
+  SKIP_PR_REMEDIATE_WAIT_ENV_VAR: 'SHIPPER_SKIP_PR_REMEDIATE_WAIT',
+}));
+
+vi.mock('../../src/commands/merge.js', () => ({
+  postMerge: (...args: unknown[]) => postMergeMock(...args),
+}));
+
 import {
   STAGE_NAME,
   AUTO_PRIORITY_LABELS,
@@ -57,12 +77,18 @@ vi.mock('@dnsquared/shipper-core', () => ({
   BLOCKED_LABEL: 'shipper:blocked',
   LOCKED_LABEL: 'shipper:locked',
   FAILED_LABEL: 'shipper:failed',
+  getSettings: () => getSettingsMock(),
   withStageHooks: vi.fn(
     async (_stage: string, _env: unknown, fn: () => Promise<unknown>) => await fn()
   ),
-  withIssueLock: vi.fn(
-    async (_repo: string, _issue: string, fn: () => Promise<unknown>) => await fn()
-  ),
+  withIssueLock: vi.fn(async (_repo: string, issue: string, fn: () => Promise<unknown>) => {
+    lockState.lockedIssues.add(String(issue));
+    try {
+      return await fn();
+    } finally {
+      lockState.lockedIssues.delete(String(issue));
+    }
+  }),
   releaseIssueLock: vi.fn(async () => {}),
   runPrompt: vi.fn(async () => 0),
 }));
@@ -129,6 +155,7 @@ const mockWithStageHooks = vi.mocked(withStageHooks);
 const mockWithIssueLock = vi.mocked(withIssueLock);
 const mockReleaseIssueLock = vi.mocked(releaseIssueLock);
 const mockRunPrompt = vi.mocked(runPrompt);
+const mockBuildReadyCheck = buildReadyCheckMock;
 const mockSpawn = vi.mocked(spawn);
 const mockSpawnSync = vi.mocked(spawnSync);
 const mockCreateWriteStream = fsMockState.mockCreateWriteStream;
@@ -269,6 +296,119 @@ function mockIssueViewSequence(labels: string[]): void {
     return { stdout: '', stderr: '' };
   });
 }
+
+interface MockIssueState {
+  number: number;
+  title: string;
+  labels: string[];
+  nextLabels: string[];
+  prNumber?: number;
+}
+
+let mockIssues = new Map<number, MockIssueState>();
+
+function setMockIssues(issues: MockIssueState[]): void {
+  mockIssues = new Map(
+    issues.map((issue) => [
+      issue.number,
+      { ...issue, labels: [...issue.labels], nextLabels: [...issue.nextLabels] },
+    ])
+  );
+}
+
+function getStageLabel(issue: MockIssueState): string | undefined {
+  return issue.labels.find((label) => label.startsWith('shipper:') && label !== 'shipper:blocked');
+}
+
+function installSequentialCliMocks(): void {
+  mockSelectIssuesForStage.mockImplementation(async (_repo: string, label: string) => {
+    return Array.from(mockIssues.values())
+      .filter((issue) => getStageLabel(issue) === label)
+      .filter((issue) => !issue.labels.includes('shipper:blocked'))
+      .filter((issue) => !lockState.lockedIssues.has(String(issue.number)))
+      .map((issue) => ({ number: issue.number, title: issue.title }));
+  });
+
+  mockGh.mockImplementation(async (args: string[]) => {
+    if (args[0] === 'issue' && args[1] === 'view') {
+      const issue = mockIssues.get(Number(args[2]));
+      return {
+        stdout: issue ? `${issue.labels.join('\n')}\n` : '',
+        stderr: '',
+      };
+    }
+
+    if (args[0] === 'issue' && args[1] === 'list') {
+      const blocked = Array.from(mockIssues.values())
+        .filter((issue) => issue.labels.includes('shipper:blocked'))
+        .filter((issue) => !lockState.lockedIssues.has(String(issue.number)))
+        .map((issue) => ({
+          number: issue.number,
+          title: issue.title,
+          labels: issue.labels.map((name) => ({ name })),
+        }));
+      return {
+        stdout: JSON.stringify(blocked),
+        stderr: '',
+      };
+    }
+
+    if (args[0] === 'pr' && args[1] === 'list') {
+      const prs = Array.from(mockIssues.values())
+        .filter((issue) => issue.prNumber !== undefined)
+        .map((issue) => ({
+          number: issue.prNumber,
+          title: `PR for ${issue.title}`,
+          headRefName: `shipper/${issue.number}`,
+          baseRefName: 'main',
+        }));
+      return {
+        stdout: JSON.stringify(prs),
+        stderr: '',
+      };
+    }
+
+    if (args[0] === 'pr' && args[1] === 'view' && args.includes('mergeStateStatus')) {
+      return {
+        stdout: JSON.stringify({ mergeStateStatus: 'CLEAN' }),
+        stderr: '',
+      };
+    }
+
+    if (args[0] === 'pr' && args[1] === 'merge') {
+      return {
+        stdout: 'merged',
+        stderr: '',
+      };
+    }
+
+    throw new Error(`Unexpected gh call: ${args.join(' ')}`);
+  });
+
+  mockSpawnSync.mockImplementation((_command: string, args: ReadonlyArray<string>, options) => {
+    const issueNumber = Number(args[2]);
+    const issue = mockIssues.get(issueNumber);
+    if (!issue) {
+      return { status: 1, signal: null, output: [], pid: 0, stdout: null, stderr: null };
+    }
+
+    const nextLabel = issue.nextLabels.shift();
+    if (nextLabel) {
+      issue.labels = [nextLabel];
+    }
+
+    return {
+      status: 0,
+      signal: null,
+      output: [],
+      pid: 0,
+      stdout: null,
+      stderr: null,
+      ...(options?.env?.SHIPPER_SKIP_PR_REMEDIATE_WAIT === '1' ? { env: options.env } : {}),
+    } as never;
+  });
+}
+
 describe('STAGE_NAME', () => {
   it('contains all expected workflow labels', () => {
     const expectedLabels = [
@@ -698,7 +838,10 @@ describe('shipCommand single-issue path', () => {
     expect(mockSpawnSync).toHaveBeenCalledWith(
       process.execPath,
       [cliEntrypoint, 'next', '42', '--model', 'sonnet'],
-      expect.objectContaining({ stdio: 'inherit', env: process.env })
+      expect.objectContaining({
+        stdio: 'inherit',
+        env: expect.objectContaining({ SHIPPER_LOCK_HELD: '42' }),
+      })
     );
     expect(exitSpy).toHaveBeenCalledWith(0);
   });
@@ -989,6 +1132,279 @@ describe('shipCommand auto merge-failure retry handling', () => {
 
     expect(mockSpawn.mock.calls.map(([, args]) => (args as string[])[2])).toEqual(['1', '1']);
     expect(exitSpy).toHaveBeenCalledWith(0);
+  });
+});
+
+describe('shipCommand sequential auto runner parking', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    lockState.lockedIssues.clear();
+    mockIssues.clear();
+    getSettingsMock.mockReturnValue({
+      prReviewWait: { mode: 'checks', timeoutMinutes: 15 },
+    });
+    mockBuildReadyCheck.mockReset();
+    mockSpawnSync.mockReset();
+    mockGh.mockReset();
+    mockSelectIssuesForStage.mockReset();
+    postMergeMock.mockClear();
+    postMergeMock.mockImplementation(async (_pr: unknown, issueNumber: number | string) => {
+      mockIssues.delete(Number(issueNumber));
+    });
+    exitSpy.mockClear();
+    installSequentialCliMocks();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('parks timer waits and runs the next candidate while the first issue is parked', async () => {
+    setMockIssues([
+      {
+        number: 1,
+        title: 'Timer wait issue',
+        labels: ['shipper:pr-reviewed'],
+        nextLabels: ['shipper:ready'],
+        prNumber: 101,
+      },
+      {
+        number: 2,
+        title: 'Follow-on issue',
+        labels: ['shipper:planned'],
+        nextLabels: [
+          'shipper:implemented',
+          'shipper:pr-open',
+          'shipper:pr-reviewed',
+          'shipper:ready',
+        ],
+        prNumber: 102,
+      },
+    ]);
+    getSettingsMock.mockReturnValue({
+      prReviewWait: { mode: 'timer', timeoutMinutes: 15 },
+    });
+
+    let timerReady = false;
+    mockBuildReadyCheck.mockImplementation(async (_repo: string, pr: string) => {
+      if (pr === '101') {
+        return async () => timerReady;
+      }
+      return async () => true;
+    });
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const runPromise = shipCommand(repo, undefined, { auto: true, merge: false });
+
+    await flushMicrotasks();
+
+    expect(mockBuildReadyCheck).toHaveBeenCalledWith(
+      repo,
+      '101',
+      expect.objectContaining({ mode: 'timer', timeoutMinutes: 15 })
+    );
+    expect(mockSpawnSync.mock.calls.some(([, args]) => (args as string[])[2] === '1')).toBe(false);
+    expect(mockSpawnSync.mock.calls.some(([, args]) => (args as string[])[2] === '2')).toBe(true);
+
+    timerReady = true;
+    await vi.advanceTimersByTimeAsync(20_000);
+    await runPromise;
+
+    const resumedCall = mockSpawnSync.mock.calls.find(([, args]) => (args as string[])[2] === '1');
+    expect(resumedCall?.[2]).toMatchObject({
+      env: expect.objectContaining({ SHIPPER_SKIP_PR_REMEDIATE_WAIT: '1' }),
+    });
+
+    const output = logSpy.mock.calls.map((call) => call[0]).join('\n');
+    expect(output).toContain('✓ pass');
+    expect(output).not.toContain('park');
+    expect(output).not.toContain('resume');
+    expect(exitSpy).toHaveBeenCalledWith(0);
+
+    logSpy.mockRestore();
+  });
+
+  it('parks checks waits and runs the next candidate while the first issue is parked', async () => {
+    setMockIssues([
+      {
+        number: 1,
+        title: 'Checks wait issue',
+        labels: ['shipper:pr-reviewed'],
+        nextLabels: ['shipper:ready'],
+        prNumber: 201,
+      },
+      {
+        number: 2,
+        title: 'Second issue',
+        labels: ['shipper:planned'],
+        nextLabels: [
+          'shipper:implemented',
+          'shipper:pr-open',
+          'shipper:pr-reviewed',
+          'shipper:ready',
+        ],
+        prNumber: 202,
+      },
+    ]);
+
+    let checksReady = false;
+    mockBuildReadyCheck.mockImplementation(async (_repo: string, pr: string) => {
+      if (pr === '201') {
+        return async () => checksReady;
+      }
+      return async () => true;
+    });
+
+    const runPromise = shipCommand(repo, undefined, { auto: true, merge: false });
+
+    await flushMicrotasks();
+    expect(mockBuildReadyCheck).toHaveBeenCalledWith(
+      repo,
+      '201',
+      expect.objectContaining({ mode: 'checks', timeoutMinutes: 15 })
+    );
+    expect(mockSpawnSync.mock.calls.some(([, args]) => (args as string[])[2] === '1')).toBe(false);
+    expect(mockSpawnSync.mock.calls.some(([, args]) => (args as string[])[2] === '2')).toBe(true);
+
+    checksReady = true;
+    await vi.advanceTimersByTimeAsync(20_000);
+    await runPromise;
+
+    const issueOrder = mockSpawnSync.mock.calls.map(([, args]) => (args as string[])[2]);
+    expect(issueOrder.indexOf('2')).toBeLessThan(issueOrder.lastIndexOf('1'));
+    expect(exitSpy).toHaveBeenCalledWith(0);
+  });
+
+  it('resumes multiple parked issues independently as their readiness changes', async () => {
+    setMockIssues([
+      {
+        number: 1,
+        title: 'First parked issue',
+        labels: ['shipper:pr-reviewed'],
+        nextLabels: ['shipper:ready'],
+        prNumber: 301,
+      },
+      {
+        number: 2,
+        title: 'Second parked issue',
+        labels: ['shipper:pr-reviewed'],
+        nextLabels: ['shipper:ready'],
+        prNumber: 302,
+      },
+    ]);
+
+    let firstReady = false;
+    let secondReady = false;
+    mockBuildReadyCheck.mockImplementation(async (_repo: string, pr: string) => {
+      if (pr === '301') {
+        return async () => firstReady;
+      }
+      if (pr === '302') {
+        return async () => secondReady;
+      }
+      return async () => true;
+    });
+
+    const runPromise = shipCommand(repo, undefined, { auto: true, merge: false });
+
+    await flushMicrotasks();
+    expect(mockSpawnSync).not.toHaveBeenCalled();
+
+    secondReady = true;
+    await vi.advanceTimersByTimeAsync(20_000);
+    await flushMicrotasks();
+    expect(mockSpawnSync.mock.calls.map(([, args]) => (args as string[])[2])).toEqual(['2']);
+
+    firstReady = true;
+    await vi.advanceTimersByTimeAsync(20_000);
+    await runPromise;
+
+    expect(mockSpawnSync.mock.calls.map(([, args]) => (args as string[])[2])).toEqual(['2', '1']);
+    expect(exitSpy).toHaveBeenCalledWith(0);
+  });
+
+  it('runs the unblock pass before waiting for parked work when the normal queue is empty', async () => {
+    setMockIssues([
+      {
+        number: 1,
+        title: 'Parked issue',
+        labels: ['shipper:pr-reviewed'],
+        nextLabels: ['shipper:ready'],
+        prNumber: 401,
+      },
+      {
+        number: 2,
+        title: 'Queue issue',
+        labels: ['shipper:planned'],
+        nextLabels: [
+          'shipper:implemented',
+          'shipper:pr-open',
+          'shipper:pr-reviewed',
+          'shipper:ready',
+        ],
+        prNumber: 402,
+      },
+      {
+        number: 3,
+        title: 'Blocked issue',
+        labels: ['shipper:planned', 'shipper:blocked'],
+        nextLabels: [],
+      },
+    ]);
+
+    let parkedReady = false;
+    mockBuildReadyCheck.mockImplementation(async (_repo: string, pr: string) => {
+      if (pr === '401') {
+        return async () => parkedReady;
+      }
+      return async () => true;
+    });
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const runPromise = shipCommand(repo, undefined, { auto: true, merge: false });
+
+    await flushMicrotasks();
+    expect(mockSpawnSync.mock.calls.some(([, args]) => (args as string[])[2] === '1')).toBe(false);
+    expect(mockSpawnSync.mock.calls.some(([, args]) => (args as string[])[2] === '2')).toBe(true);
+
+    parkedReady = true;
+    await vi.advanceTimersByTimeAsync(20_000);
+    await runPromise;
+
+    const output = logSpy.mock.calls.map((call) => call[0]).join('\n');
+    expect(output).toContain('Auto: attempting unblock of #3');
+    expect(output).toContain('✓ pass');
+    expect(exitSpy).toHaveBeenCalledWith(0);
+
+    logSpy.mockRestore();
+  });
+
+  it('does not enable parking for non-auto ship runs', async () => {
+    setMockIssues([
+      {
+        number: 1,
+        title: 'Single issue',
+        labels: ['shipper:planned'],
+        nextLabels: [
+          'shipper:implemented',
+          'shipper:pr-open',
+          'shipper:pr-reviewed',
+          'shipper:ready',
+        ],
+        prNumber: 501,
+      },
+    ]);
+
+    await shipCommand(repo, '1', { auto: false, merge: true });
+
+    expect(mockBuildReadyCheck).not.toHaveBeenCalled();
+    expect(mockSpawnSync.mock.calls.map(([, args]) => (args as string[])[2])).toEqual([
+      '1',
+      '1',
+      '1',
+      '1',
+    ]);
   });
 });
 

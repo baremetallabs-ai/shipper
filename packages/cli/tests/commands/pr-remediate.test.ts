@@ -85,7 +85,76 @@ describe('prRemediateCommand', () => {
 
   afterEach(() => {
     process.exitCode = undefined;
+    vi.useRealTimers();
     exitSpy.mockRestore();
+  });
+
+  it('reports timer readiness only after the deadline passes', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-12T10:00:00Z'));
+    ghMock.mockResolvedValue({
+      stdout: JSON.stringify({ createdAt: '2026-03-12T09:50:00Z' }),
+      stderr: '',
+    });
+
+    const { buildReadyCheck } = await import('../../src/commands/pr-remediate.js');
+    const readyCheck = await buildReadyCheck(repo, '42', {
+      mode: 'timer',
+      timeoutMinutes: 15,
+    });
+
+    await expect(readyCheck()).resolves.toBe(false);
+
+    vi.setSystemTime(new Date('2026-03-12T10:05:01Z'));
+    await expect(readyCheck()).resolves.toBe(true);
+  });
+
+  it('reports checks readiness as false while checks are pending', async () => {
+    fetchChecksMock
+      .mockResolvedValueOnce([{ name: 'build', state: 'IN_PROGRESS', bucket: 'pending' }])
+      .mockResolvedValueOnce([{ name: 'build', state: 'IN_PROGRESS', bucket: 'pending' }]);
+
+    const { buildReadyCheck } = await import('../../src/commands/pr-remediate.js');
+    const readyCheck = await buildReadyCheck(repo, '42', {
+      mode: 'checks',
+      timeoutMinutes: 15,
+    });
+
+    await expect(readyCheck()).resolves.toBe(false);
+  });
+
+  it('reports checks readiness once pending checks clear', async () => {
+    fetchChecksMock
+      .mockResolvedValueOnce([{ name: 'build', state: 'IN_PROGRESS', bucket: 'pending' }])
+      .mockResolvedValueOnce([{ name: 'build', state: 'COMPLETED', bucket: 'pass' }]);
+
+    const { buildReadyCheck } = await import('../../src/commands/pr-remediate.js');
+    const readyCheck = await buildReadyCheck(repo, '42', {
+      mode: 'checks',
+      timeoutMinutes: 15,
+    });
+
+    await expect(readyCheck()).resolves.toBe(true);
+  });
+
+  it('keeps the zero-check grace window before reporting ready', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-12T10:00:00Z'));
+    fetchChecksMock.mockResolvedValue([]);
+
+    const { buildReadyCheck } = await import('../../src/commands/pr-remediate.js');
+    const readyCheck = await buildReadyCheck(repo, '42', {
+      mode: 'checks',
+      timeoutMinutes: 15,
+    });
+
+    await expect(readyCheck()).resolves.toBe(false);
+
+    vi.setSystemTime(new Date('2026-03-12T10:00:20Z'));
+    await expect(readyCheck()).resolves.toBe(false);
+
+    vi.setSystemTime(new Date('2026-03-12T10:00:31Z'));
+    await expect(readyCheck()).resolves.toBe(true);
   });
 
   it('passes issueNumber (not PR number) as issueRef to runPrompt', async () => {
