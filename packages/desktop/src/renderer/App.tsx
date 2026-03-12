@@ -258,14 +258,14 @@ export default function App(): JSX.Element {
 
       <main className="mx-auto flex max-w-7xl flex-col gap-4 px-6 py-6">
         {prerequisiteMessage ? (
-          <Alert className="border-destructive/40 bg-destructive/5">
+          <Alert variant="destructive">
             <AlertTitle>GitHub CLI required</AlertTitle>
             <AlertDescription>{prerequisiteMessage}</AlertDescription>
           </Alert>
         ) : null}
 
         {fetchError ? (
-          <Alert className="border-destructive/40 bg-destructive/5">
+          <Alert variant="destructive">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <AlertTitle>Issue fetch failed</AlertTitle>
