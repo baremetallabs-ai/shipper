@@ -9,6 +9,7 @@ import {
   fetchChecks,
   selectIssuesForStage,
   gh,
+  getSettings,
   withStageHooks,
   releaseIssueLock,
   withIssueLock,
@@ -25,9 +26,11 @@ import {
 import type { AgentName } from '@dnsquared/shipper-core';
 import { postMerge } from './merge.js';
 import type { QueuedPR } from './merge.js';
+import { buildReadyCheck, SKIP_PR_REMEDIATE_WAIT_ENV_VAR } from './pr-remediate.js';
 
 const MAX_TRANSITIONS = 15;
 const MERGE_FAILURE_PREFIX = 'Merge failed for PR #';
+const PARKED_POLL_INTERVAL_MS = 20_000;
 
 export const STAGE_NAME: Record<string, string> = { ...STAGE_NAME_MAP };
 
@@ -82,9 +85,50 @@ interface ActiveIssueRun {
 }
 
 type ShipSignal = 'SIGINT' | 'SIGTERM' | 'SIGKILL';
+type ReadyCheck = () => Promise<boolean>;
+
+interface ParkRequest {
+  readyCheck: ReadyCheck;
+  resume: () => void;
+}
+
+interface ParkHooks {
+  shouldPark: () => Promise<boolean>;
+  park: (request: ParkRequest) => void;
+}
+
+interface ParkObserver {
+  hooks: ParkHooks;
+  waitForNextPark: () => Promise<ParkRequest | null>;
+  close: () => void;
+}
+
+interface SequentialIssueRun {
+  issue: { number: number; title: string };
+  completion: Promise<ShipIssueResult>;
+  waitForNextPark: () => Promise<ParkRequest | null>;
+}
+
+interface ParkedIssue {
+  issue: { number: number; title: string };
+  readyCheck: ReadyCheck;
+  resume: () => void;
+  run: SequentialIssueRun;
+}
 
 interface PRMergeStateViewData {
   mergeStateStatus: string;
+}
+
+function buildIssueCommandEnv(
+  issueStr: string,
+  skipPrRemediateWaitOnce: boolean
+): typeof process.env {
+  return {
+    ...process.env,
+    SHIPPER_LOCK_HELD: issueStr,
+    ...(skipPrRemediateWaitOnce ? { [SKIP_PR_REMEDIATE_WAIT_ENV_VAR]: '1' } : {}),
+  };
 }
 
 function formatLogTimestamp(date = new Date()): string {
@@ -428,7 +472,8 @@ async function shipOneIssue(
   issue: string,
   merge: boolean,
   agent?: AgentName,
-  model?: string
+  model?: string,
+  parkHooks?: ParkHooks
 ): Promise<ShipIssueResult> {
   const issueStr = issue.replace(/^#/, '');
 
@@ -463,9 +508,16 @@ async function shipOneIssue(
 
     const results: StageResult[] = [];
     const transitionHistory: string[] = [label];
+    const failCurrentStage = (stage: string, message: string): ShipIssueResult => {
+      console.error(message);
+      results.push({ stage, status: 'fail' });
+      printSummary(results);
+      return { success: false, error: message };
+    };
 
     if (label !== READY_LABEL) {
       let transitions = 0;
+      let skipPrRemediateWaitOnce = false;
       const cliEntrypoint = process.argv[1];
       if (!cliEntrypoint) {
         throw new Error('Missing CLI entrypoint path.');
@@ -481,6 +533,31 @@ async function shipOneIssue(
         }
         const previousLabel: string | undefined = label;
 
+        if (label === PR_REVIEWED_LABEL && parkHooks) {
+          let pr: QueuedPR;
+          try {
+            pr = await resolvePrForIssue(Number(issueStr), repo);
+          } catch (err) {
+            return failCurrentStage(stageName, err instanceof Error ? err.message : String(err));
+          }
+
+          let readyCheck: ReadyCheck;
+          try {
+            readyCheck = await buildReadyCheck(repo, String(pr.number), getSettings().prReviewWait);
+          } catch (err) {
+            return failCurrentStage(stageName, err instanceof Error ? err.message : String(err));
+          }
+
+          const readyNow = await readyCheck();
+          if (!readyNow && (await parkHooks.shouldPark())) {
+            const resumePromise = new Promise<void>((resolve) => {
+              parkHooks.park({ readyCheck, resume: resolve });
+            });
+            await resumePromise;
+            skipPrRemediateWaitOnce = true;
+          }
+        }
+
         console.log(`Running stage: ${stageName}`);
 
         const nextArgs = [cliEntrypoint, 'next', issueStr];
@@ -492,8 +569,12 @@ async function shipOneIssue(
         }
         const result = spawnSync(process.execPath, nextArgs, {
           stdio: 'inherit',
-          env: process.env,
+          env: buildIssueCommandEnv(
+            issueStr,
+            label === PR_REVIEWED_LABEL && skipPrRemediateWaitOnce
+          ),
         });
+        skipPrRemediateWaitOnce = false;
 
         if (result.status !== 0) {
           results.push({ stage: stageName, status: 'fail' });
@@ -833,6 +914,166 @@ async function attemptUnblock(
   return !labels.includes(BLOCKED_LABEL);
 }
 
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function createParkObserver(shouldPark: () => Promise<boolean>): ParkObserver {
+  const queued: ParkRequest[] = [];
+  const waiters: Array<(request: ParkRequest | null) => void> = [];
+  let closed = false;
+
+  return {
+    hooks: {
+      shouldPark,
+      park: (request) => {
+        if (closed) {
+          return;
+        }
+        const waiter = waiters.shift();
+        if (waiter) {
+          waiter(request);
+          return;
+        }
+        queued.push(request);
+      },
+    },
+    waitForNextPark: async () => {
+      const queuedRequest = queued.shift();
+      if (queuedRequest) {
+        return queuedRequest;
+      }
+      if (closed) {
+        return null;
+      }
+      return await new Promise<ParkRequest | null>((resolve) => {
+        waiters.push(resolve);
+      });
+    },
+    close: () => {
+      if (closed) {
+        return;
+      }
+      closed = true;
+      while (waiters.length > 0) {
+        waiters.shift()?.(null);
+      }
+    },
+  };
+}
+
+function startSequentialIssueRun(
+  repo: string,
+  issue: { number: number; title: string },
+  shouldPark: () => Promise<boolean>,
+  agent?: AgentName,
+  model?: string
+): SequentialIssueRun {
+  const parkObserver = createParkObserver(shouldPark);
+  const completion = shipOneIssue(
+    repo,
+    String(issue.number),
+    true,
+    agent,
+    model,
+    parkObserver.hooks
+  ).finally(() => {
+    parkObserver.close();
+  });
+
+  return {
+    issue,
+    completion,
+    waitForNextPark: parkObserver.waitForNextPark,
+  };
+}
+
+async function waitForCompletionOrPark(
+  run: SequentialIssueRun
+): Promise<{ type: 'completed'; result: ShipIssueResult } | { type: 'parked'; parked: ParkedIssue }> {
+  const parkRequest = await run.waitForNextPark();
+  if (parkRequest) {
+    return {
+      type: 'parked',
+      parked: {
+        issue: run.issue,
+        readyCheck: parkRequest.readyCheck,
+        resume: parkRequest.resume,
+        run,
+      },
+    };
+  }
+
+  return {
+    type: 'completed',
+    result: await run.completion,
+  };
+}
+
+async function pollReadyParked(parked: readonly ParkedIssue[]): Promise<ParkedIssue | null> {
+  for (const parkedIssue of parked) {
+    if (await parkedIssue.readyCheck()) {
+      return parkedIssue;
+    }
+  }
+  return null;
+}
+
+async function waitForReadyParked(parked: readonly ParkedIssue[]): Promise<ParkedIssue> {
+  for (;;) {
+    const ready = await pollReadyParked(parked);
+    if (ready) {
+      return ready;
+    }
+    await wait(PARKED_POLL_INTERVAL_MS);
+  }
+}
+
+function recordAutoResult(
+  results: AutoResult[],
+  skippedIssues: Set<number>,
+  issue: { number: number; title: string },
+  result: ShipIssueResult
+): void {
+  if (result.success) {
+    results.push({ issue: issue.number, title: issue.title, outcome: 'pass' });
+    return;
+  }
+
+  if (result.retriable !== true) {
+    skippedIssues.add(issue.number);
+  }
+  results.push({
+    issue: issue.number,
+    title: issue.title,
+    outcome: 'fail',
+    error: result.error,
+  });
+}
+
+async function resumeParkedIssue(
+  parked: ParkedIssue[],
+  readyParked: ParkedIssue,
+  results: AutoResult[],
+  skippedIssues: Set<number>
+): Promise<void> {
+  const parkedIndex = parked.indexOf(readyParked);
+  if (parkedIndex !== -1) {
+    parked.splice(parkedIndex, 1);
+  }
+
+  readyParked.resume();
+  const resumedOutcome = await waitForCompletionOrPark(readyParked.run);
+  if (resumedOutcome.type === 'parked') {
+    parked.push(resumedOutcome.parked);
+    return;
+  }
+
+  recordAutoResult(results, skippedIssues, readyParked.issue, resumedOutcome.result);
+}
+
 export function printUnblockSummary(attempts: UnblockAttempt[]): void {
   console.log('\n  Unblock attempts:\n');
   console.log('  #    Issue                                          Outcome');
@@ -850,34 +1091,50 @@ async function shipAutoSequential(repo: string, agent?: AgentName, model?: strin
   const skippedIssues = new Set<number>();
   const results: AutoResult[] = [];
   const allUnblockAttempts: UnblockAttempt[] = [];
+  const parked: ParkedIssue[] = [];
+
+  const shouldParkCurrentIssue = async (): Promise<boolean> => {
+    if (parked.length > 0) {
+      return true;
+    }
+    return (await selectNextCandidate(repo, skippedIssues)) !== null;
+  };
 
   for (;;) {
     // Inner loop: process all available candidates
     for (;;) {
+      const readyParked = await pollReadyParked(parked);
+      if (readyParked) {
+        await resumeParkedIssue(parked, readyParked, results, skippedIssues);
+        continue;
+      }
+
       const candidate = await selectNextCandidate(repo, skippedIssues);
-      if (!candidate) break;
+      if (!candidate) {
+        break;
+      }
 
       console.log(`\nAuto: advancing issue #${candidate.number} — ${candidate.title}`);
-      const result = await shipOneIssue(repo, String(candidate.number), true, agent, model);
-
-      if (result.success) {
-        results.push({ issue: candidate.number, title: candidate.title, outcome: 'pass' });
+      const run = startSequentialIssueRun(repo, candidate, shouldParkCurrentIssue, agent, model);
+      const outcome = await waitForCompletionOrPark(run);
+      if (outcome.type === 'parked') {
+        parked.push(outcome.parked);
       } else {
-        if (result.retriable !== true) {
-          skippedIssues.add(candidate.number);
-        }
-        results.push({
-          issue: candidate.number,
-          title: candidate.title,
-          outcome: 'fail',
-          error: result.error,
-        });
+        recordAutoResult(results, skippedIssues, candidate, outcome.result);
       }
     }
 
     // Unblock pass
     const blocked = await selectBlockedIssues(repo);
-    if (blocked.length === 0) break;
+    if (blocked.length === 0) {
+      if (parked.length === 0) {
+        break;
+      }
+
+      const readyParked = await waitForReadyParked(parked);
+      await resumeParkedIssue(parked, readyParked, results, skippedIssues);
+      continue;
+    }
 
     let progress = false;
     for (const issue of blocked) {
@@ -891,7 +1148,15 @@ async function shipAutoSequential(repo: string, agent?: AgentName, model?: strin
       if (unblocked) progress = true;
     }
 
-    if (!progress) break;
+    if (!progress) {
+      if (parked.length === 0) {
+        break;
+      }
+
+      const readyParked = await waitForReadyParked(parked);
+      await resumeParkedIssue(parked, readyParked, results, skippedIssues);
+      continue;
+    }
     // Loop back — newly unblocked issues are now eligible candidates
   }
 

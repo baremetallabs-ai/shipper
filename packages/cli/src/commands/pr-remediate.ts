@@ -10,8 +10,12 @@ import { withGitTransport } from '@dnsquared/shipper-core';
 import { withWorktree } from '@dnsquared/shipper-core';
 import { runPrompt } from '@dnsquared/shipper-core';
 import { getSettings } from '@dnsquared/shipper-core';
+import type { PrReviewWait } from '@dnsquared/shipper-core';
 
 import { sleepMs } from '@dnsquared/shipper-core';
+
+const ZERO_CHECKS_GRACE_MS = 30_000;
+export const SKIP_PR_REMEDIATE_WAIT_ENV_VAR = 'SHIPPER_SKIP_PR_REMEDIATE_WAIT';
 
 class PollingInterruptedError extends Error {
   constructor() {
@@ -93,6 +97,50 @@ async function fetchChecksGraceful(
   }
 }
 
+export async function buildReadyCheck(
+  repo: string,
+  pr: string,
+  prReviewWait: PrReviewWait
+): Promise<() => Promise<boolean>> {
+  if (prReviewWait.timeoutMinutes <= 0) {
+    return async () => true;
+  }
+
+  if (prReviewWait.mode === 'timer') {
+    const { stdout } = await gh(['pr', 'view', pr, '-R', repo, '--json', 'createdAt']);
+    const { createdAt } = JSON.parse(stdout) as { createdAt: string };
+    const deadline = new Date(createdAt).getTime() + prReviewWait.timeoutMinutes * 60_000;
+
+    return async () => Date.now() >= deadline;
+  }
+
+  const deadline = Date.now() + prReviewWait.timeoutMinutes * 60_000;
+  const initialChecks = await fetchChecksGraceful(repo, pr);
+  const zeroChecksDeadline =
+    initialChecks !== null && initialChecks.length === 0
+      ? Math.min(deadline, Date.now() + ZERO_CHECKS_GRACE_MS)
+      : null;
+
+  return async () => {
+    const now = Date.now();
+    if (now >= deadline) {
+      return true;
+    }
+
+    const checks = await fetchChecksGraceful(repo, pr);
+    if (zeroChecksDeadline !== null && (checks === null || checks.length === 0)) {
+      return now >= zeroChecksDeadline;
+    }
+
+    if (checks === null) {
+      return false;
+    }
+
+    const { pending } = classifyChecks(checks);
+    return pending.length === 0;
+  };
+}
+
 export async function prRemediateCommand(
   repo: string,
   pr?: string,
@@ -141,25 +189,27 @@ export async function prRemediateCommand(
     return await withStageHooks('pr-remediate', { issueNumber, branchName: branch }, async () => {
       const { prReviewWait } = getSettings();
 
-      if (prReviewWait.mode === 'timer') {
-        if (prReviewWait.timeoutMinutes > 0) {
-          const { stdout } = await gh(['pr', 'view', prRef, '-R', repo, '--json', 'createdAt']);
-          const { createdAt } = JSON.parse(stdout) as { createdAt: string };
-          const elapsedMs = Date.now() - new Date(createdAt).getTime();
-          const waitMs = prReviewWait.timeoutMinutes * 60_000;
-          const remainingMs = waitMs - elapsedMs;
+      if (process.env[SKIP_PR_REMEDIATE_WAIT_ENV_VAR] !== '1') {
+        if (prReviewWait.mode === 'timer') {
+          if (prReviewWait.timeoutMinutes > 0) {
+            const { stdout } = await gh(['pr', 'view', prRef, '-R', repo, '--json', 'createdAt']);
+            const { createdAt } = JSON.parse(stdout) as { createdAt: string };
+            const elapsedMs = Date.now() - new Date(createdAt).getTime();
+            const waitMs = prReviewWait.timeoutMinutes * 60_000;
+            const remainingMs = waitMs - elapsedMs;
 
-          if (remainingMs > 0) {
-            const remainingMin = Math.ceil(remainingMs / 60_000);
-            console.log(
-              `PR #${pr} is ${Math.floor(elapsedMs / 60_000)} minutes old. ` +
-                `Waiting ${remainingMin} more minute(s) for reviewers (prReviewWait.timeoutMinutes: ${prReviewWait.timeoutMinutes})...`
-            );
-            await sleepMs(remainingMs);
+            if (remainingMs > 0) {
+              const remainingMin = Math.ceil(remainingMs / 60_000);
+              console.log(
+                `PR #${pr} is ${Math.floor(elapsedMs / 60_000)} minutes old. ` +
+                  `Waiting ${remainingMin} more minute(s) for reviewers (prReviewWait.timeoutMinutes: ${prReviewWait.timeoutMinutes})...`
+              );
+              await sleepMs(remainingMs);
+            }
           }
+        } else {
+          await waitForChecks(repo, prRef, prReviewWait.timeoutMinutes);
         }
-      } else {
-        await waitForChecks(repo, prRef, prReviewWait.timeoutMinutes);
       }
 
       const repoRoot = await getRepoRoot();
