@@ -605,6 +605,52 @@ describe('shipCommand single-issue path', () => {
     logSpy.mockRestore();
   });
 
+  it('logs the relabel error details when applying shipper:failed fails', async () => {
+    const labels = [
+      'shipper:planned',
+      'shipper:implemented',
+      'shipper:pr-open',
+      'shipper:pr-reviewed',
+      'shipper:planned',
+      'shipper:implemented',
+      'shipper:pr-open',
+      'shipper:pr-reviewed',
+      'shipper:planned',
+      'shipper:implemented',
+      'shipper:pr-open',
+      'shipper:pr-reviewed',
+      'shipper:planned',
+      'shipper:implemented',
+      'shipper:pr-open',
+      'shipper:pr-reviewed',
+    ];
+    let index = 0;
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    mockGh.mockImplementation(async (args: string[]) => {
+      if (args[0] === 'issue' && args[1] === 'view') {
+        const label = labels[index++];
+        return { stdout: label ? `${label}\n` : '', stderr: '' };
+      }
+
+      if (args[0] === 'issue' && args[1] === 'edit') {
+        throw new Error('gh edit failed');
+      }
+
+      return { stdout: '', stderr: '' };
+    });
+
+    await shipCommand(repo, '42', { auto: false, merge: false });
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(errorSpy).toHaveBeenCalledWith(
+      'Warning: Failed to update labels on issue #42: gh edit failed'
+    );
+
+    errorSpy.mockRestore();
+    logSpy.mockRestore();
+  });
+
   it('keeps the happy path under the cap and does not apply shipper:failed', async () => {
     const labels = [
       'shipper:planned',
@@ -635,6 +681,22 @@ describe('shipCommand single-issue path', () => {
     expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining('hit transition cap'));
 
     logSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
+
+  it('fails fast with a terminal-state message for shipper:failed issues', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    mockIssueViewSequence(['shipper:failed']);
+
+    await shipCommand(repo, '42', { auto: false, merge: false });
+
+    expect(mockSpawnSync).not.toHaveBeenCalled();
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(errorSpy).toHaveBeenCalledWith(
+      'Issue #42 is marked shipper:failed and requires manual intervention before it can re-enter the pipeline.'
+    );
+
     errorSpy.mockRestore();
   });
 });
