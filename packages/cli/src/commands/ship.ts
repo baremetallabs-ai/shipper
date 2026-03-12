@@ -123,16 +123,18 @@ async function getCurrentLabel(repo: string, issueStr: string): Promise<string |
   const shipperLabels = output
     .split(/\r?\n/)
     .filter(
-      (name) =>
-        name.startsWith('shipper:') &&
-        name !== BLOCKED_LABEL &&
-        name !== LOCKED_LABEL &&
-        name !== FAILED_LABEL
+      (name) => name.startsWith('shipper:') && name !== BLOCKED_LABEL && name !== LOCKED_LABEL
     );
 
-  if (shipperLabels.length !== 1) return undefined;
+  if (shipperLabels.includes(FAILED_LABEL)) {
+    return FAILED_LABEL;
+  }
 
-  return shipperLabels[0];
+  const stageLabels = shipperLabels.filter((name) => name !== FAILED_LABEL);
+
+  if (stageLabels.length !== 1) return undefined;
+
+  return stageLabels[0];
 }
 
 function printSummary(results: StageResult[]): void {
@@ -431,6 +433,12 @@ async function shipOneIssue(
   return await withIssueLock(repo, issueStr, async () => {
     let label = await getCurrentLabel(repo, issueStr);
 
+    if (label === FAILED_LABEL) {
+      const msg = `Issue #${issueStr} is marked ${FAILED_LABEL} and requires manual intervention before it can re-enter the pipeline.`;
+      console.error(msg);
+      return { success: false, error: msg };
+    }
+
     if (!label) {
       const msg = `Issue #${issueStr} has no shipper label. Run \`shipper next\` or add a label first.`;
       console.error(msg);
@@ -495,6 +503,10 @@ async function shipOneIssue(
         if (!label || (label !== READY_LABEL && !(label in STAGE_NAME))) {
           if (!label) {
             console.error(`Issue #${issueStr} has no shipper label after stage "${stageName}".`);
+          } else if (label === FAILED_LABEL) {
+            console.error(
+              `Issue #${issueStr} entered terminal state ${FAILED_LABEL} after stage "${stageName}".`
+            );
           } else {
             console.error(
               `Unrecognized shipper label "${label}" on issue #${issueStr} after stage "${stageName}".`
@@ -531,8 +543,11 @@ async function shipOneIssue(
               '--remove-label',
               label,
             ]);
-          } catch {
-            console.error(`Warning: Failed to update labels on issue #${issueStr}`);
+          } catch (err) {
+            const relabelError = err instanceof Error ? err.message : String(err);
+            console.error(
+              `Warning: Failed to update labels on issue #${issueStr}: ${relabelError}`
+            );
           }
 
           results.push({ stage: STAGE_NAME[label] ?? label, status: 'fail' });
