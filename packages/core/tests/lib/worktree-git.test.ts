@@ -171,6 +171,43 @@ describe('withGitTransport', () => {
     ]);
   });
 
+  it('passes conflicts without inline markers through to the agent', async () => {
+    queueSpawnExit();
+    queueExecResult({ code: 1, stderr: 'merge conflict' });
+    queueExecResult({ stdout: 'assets/logo.png\ndeleted.txt\n' });
+    readFileMock
+      .mockResolvedValueOnce('not a text conflict file')
+      .mockRejectedValueOnce(Object.assign(new Error('missing'), { code: 'ENOENT' }));
+    const runAgent = vi.fn().mockResolvedValue(2);
+
+    await expect(
+      withGitTransport(
+        {
+          wtPath: '/tmp/wt',
+          repoRoot: '/tmp/repo',
+          baseBranch: 'main',
+          pushMode: 'force-with-lease',
+        },
+        runAgent
+      )
+    ).resolves.toBe(2);
+
+    expect(runAgent).toHaveBeenCalledWith({
+      files: ['assets/logo.png', 'deleted.txt'],
+      conflicts: [
+        {
+          path: 'assets/logo.png',
+          markers: [],
+        },
+        {
+          path: 'deleted.txt',
+          markers: [],
+        },
+      ],
+      continueError: undefined,
+    });
+  });
+
   it('feeds a failed rebase --continue error into the next retry context', async () => {
     queueSpawnExit();
     queueExecResult({ code: 1, stderr: 'merge conflict' });
@@ -285,6 +322,66 @@ describe('withGitTransport', () => {
       ['rebase', '--continue'],
     ]);
   });
+
+  it('aborts the rebase before throwing when rebase --continue fails without unresolved files', async () => {
+    queueSpawnExit();
+    queueExecResult({ code: 1, stderr: 'merge conflict' });
+    queueExecResult({ stdout: 'src/conflict.ts\n' });
+    readFileMock.mockResolvedValueOnce(
+      ['<<<<<<< HEAD', 'old', '=======', 'new', '>>>>>>> origin/main'].join('\n')
+    );
+    queueExecResult({ code: 1, stderr: 'No changes - did you forget to use git add?' });
+    queueExecResult({ stdout: '' });
+    queueSpawnExit();
+    const runAgent = vi.fn().mockResolvedValue(0);
+
+    await expect(
+      withGitTransport(
+        {
+          wtPath: '/tmp/wt',
+          repoRoot: '/tmp/repo',
+          baseBranch: 'main',
+          pushMode: 'force-with-lease',
+        },
+        runAgent
+      )
+    ).rejects.toThrow('git rebase --continue failed without unresolved files.');
+
+    expect(gitArgsFromSpawnCalls()).toEqual([
+      ['fetch', 'origin'],
+      ['rebase', '--abort'],
+    ]);
+  });
+
+  it('preserves the transport failure when rebase abort also fails', async () => {
+    queueSpawnExit();
+    queueExecResult({ code: 1, stderr: 'merge conflict' });
+    queueExecResult({ stdout: 'src/conflict.ts\n' });
+    readFileMock.mockResolvedValue(
+      ['<<<<<<< HEAD', 'old', '=======', 'new', '>>>>>>> origin/main'].join('\n')
+    );
+    queueExecResult({ code: 1, stderr: 'continue failed once' });
+    queueExecResult({ stdout: 'src/conflict.ts\n' });
+    queueExecResult({ code: 1, stderr: 'continue failed twice' });
+    queueExecResult({ stdout: 'src/conflict.ts\n' });
+    queueExecResult({ code: 1, stderr: 'continue failed thrice' });
+    queueSpawnExit(1);
+    const runAgent = vi.fn().mockResolvedValue(0);
+
+    await expect(
+      withGitTransport(
+        {
+          wtPath: '/tmp/wt',
+          repoRoot: '/tmp/repo',
+          baseBranch: 'main',
+          pushMode: 'force-with-lease',
+        },
+        runAgent
+      )
+    ).rejects.toThrow(
+      'Could not complete rebase onto origin/main after 3 conflict resolution attempts.\ncontinue failed thrice\nA best-effort git rebase --abort also failed: git exited with code 1'
+    );
+  });
 });
 
 describe('formatConflictContext', () => {
@@ -341,6 +438,22 @@ describe('formatConflictContext', () => {
         '',
         'Resolve all conflicts, then use `git add` to stage the resolved files and `git commit` if Git asks for it. Do not run `git rebase --continue`, `git rebase --abort`, or `git push` yourself.',
       ].join('\n')
+    );
+  });
+
+  it('explains conflicts that do not have inline markers', () => {
+    const formatted = formatConflictContext({
+      files: ['assets/logo.png'],
+      conflicts: [
+        {
+          path: 'assets/logo.png',
+          markers: [],
+        },
+      ],
+    });
+
+    expect(formatted).toContain(
+      'No inline conflict markers were found for this path. It may be a binary or delete/modify conflict. Resolve the file state directly, then stage it with `git add`.'
     );
   });
 });
