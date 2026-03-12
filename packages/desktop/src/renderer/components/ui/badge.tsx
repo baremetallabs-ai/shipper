@@ -3,14 +3,20 @@ import type { ComponentProps, JSX } from 'react';
 
 import { cn } from '../../lib/utils.js';
 
-const badgeVariants = cva(
-  'inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors',
+export const badgeVariants = cva(
+  'inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-full border border-transparent px-2 py-0.5 text-xs font-medium whitespace-nowrap transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&>svg]:pointer-events-none [&>svg]:size-3',
   {
     variants: {
       variant: {
-        default: 'border-transparent bg-secondary text-secondary-foreground',
-        outline: 'border-border bg-transparent text-foreground',
-        success: 'border-transparent bg-success text-success-foreground',
+        default: 'bg-primary text-primary-foreground [a&]:hover:bg-primary/90',
+        secondary: 'bg-secondary text-secondary-foreground [a&]:hover:bg-secondary/90',
+        destructive:
+          'bg-destructive text-white focus-visible:ring-destructive/20 dark:bg-destructive/60 dark:focus-visible:ring-destructive/40 [a&]:hover:bg-destructive/90',
+        outline:
+          'border-border text-foreground [a&]:hover:bg-accent [a&]:hover:text-accent-foreground',
+        ghost: '[a&]:hover:bg-accent [a&]:hover:text-accent-foreground',
+        link: 'text-primary underline-offset-4 [a&]:hover:underline',
+        success: 'bg-success text-success-foreground',
       },
     },
     defaultVariants: {
@@ -19,8 +25,15 @@ const badgeVariants = cva(
   }
 );
 
-export interface BadgeProps extends ComponentProps<'div'>, VariantProps<typeof badgeVariants> {}
+export interface BadgeProps extends ComponentProps<'span'>, VariantProps<typeof badgeVariants> {}
 
-export function Badge({ className, variant, ...props }: BadgeProps): JSX.Element {
-  return <div className={cn(badgeVariants({ className, variant }))} {...props} />;
+export function Badge({ className, variant = 'default', ...props }: BadgeProps): JSX.Element {
+  return (
+    <span
+      data-slot="badge"
+      data-variant={variant ?? undefined}
+      className={cn(badgeVariants({ variant }), className)}
+      {...props}
+    />
+  );
 }
