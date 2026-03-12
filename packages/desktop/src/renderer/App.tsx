@@ -265,22 +265,19 @@ export default function App(): JSX.Element {
         ) : null}
 
         {fetchError ? (
-          <Alert variant="destructive">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <AlertTitle>Issue fetch failed</AlertTitle>
-                <AlertDescription>{fetchError}</AlertDescription>
-              </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setFetchError(null);
-                }}
-              >
-                Dismiss
-              </Button>
-            </div>
+          <Alert variant="destructive" className="pr-24">
+            <AlertTitle>Issue fetch failed</AlertTitle>
+            <AlertDescription>{fetchError}</AlertDescription>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="absolute top-2 right-2"
+              onClick={() => {
+                setFetchError(null);
+              }}
+            >
+              Dismiss
+            </Button>
           </Alert>
         ) : null}
 

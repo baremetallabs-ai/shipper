@@ -10,7 +10,7 @@ const alertVariants = cva(
       variant: {
         default: 'bg-card text-card-foreground',
         destructive:
-          'bg-card text-destructive *:data-[slot=alert-description]:text-destructive/90 [&>svg]:text-current',
+          'border-destructive bg-card text-destructive *:data-[slot=alert-description]:text-destructive/90 [&>svg]:text-current',
       },
     },
     defaultVariants: {
@@ -32,9 +32,9 @@ export function Alert({ className, variant, ...props }: AlertProps): JSX.Element
   );
 }
 
-export function AlertTitle({ className, ...props }: ComponentProps<'div'>): JSX.Element {
+export function AlertTitle({ className, ...props }: ComponentProps<'h5'>): JSX.Element {
   return (
-    <div
+    <h5
       data-slot="alert-title"
       className={cn('col-start-2 line-clamp-1 min-h-4 font-medium tracking-tight', className)}
       {...props}
