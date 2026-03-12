@@ -28,6 +28,10 @@ interface ExecFileError extends Error {
   stderr?: string;
 }
 
+interface ErrnoError extends Error {
+  code?: string;
+}
+
 export interface WorktreeGitOpts {
   wtPath: string;
   repoRoot: string;
@@ -128,11 +132,17 @@ async function listConflictedFiles(wtPath: string): Promise<string[]> {
 
 async function extractConflictMarkers(wtPath: string, relativePath: string): Promise<string[]> {
   const filePath = path.join(wtPath, relativePath);
-  const content = await readFile(filePath, 'utf-8');
-  const matches = [...content.matchAll(CONFLICT_BLOCK_PATTERN)].map((match) => match[0].trimEnd());
-  if (matches.length === 0) {
-    throw new Error(`Could not extract conflict markers from ${relativePath}`);
+  let content: string;
+  try {
+    content = await readFile(filePath, 'utf-8');
+  } catch (error) {
+    if ((error as ErrnoError).code === 'ENOENT') {
+      return [];
+    }
+    throw error;
   }
+
+  const matches = [...content.matchAll(CONFLICT_BLOCK_PATTERN)].map((match) => match[0].trimEnd());
   return matches;
 }
 
@@ -161,6 +171,26 @@ function getRetryFailureText(result: CommandResult): string {
   return output || `git rebase --continue exited with code ${result.code}`;
 }
 
+async function abortRebase(wtPath: string): Promise<string | undefined> {
+  try {
+    await spawnAsync('git', ['rebase', '--abort'], { cwd: wtPath });
+    return undefined;
+  } catch (error) {
+    if (error instanceof Error) {
+      return error.message;
+    }
+    return String(error);
+  }
+}
+
+function appendAbortFailure(detail: string, abortFailure?: string): string {
+  if (!abortFailure) {
+    return detail;
+  }
+
+  return `${detail}\nA best-effort git rebase --abort also failed: ${abortFailure}`;
+}
+
 async function getConflictContextOrThrow(
   opts: WorktreeGitOpts,
   result: CommandResult,
@@ -171,13 +201,17 @@ async function getConflictContextOrThrow(
     return conflictContext;
   }
 
+  const abortFailure = await abortRebase(opts.wtPath);
   throw formatTransportError(
     opts,
-    `git rebase origin/${opts.baseBranch} failed without unresolved files.\n${formatCommandFailure(
-      'git',
-      ['rebase', `origin/${opts.baseBranch}`],
-      result
-    )}`
+    appendAbortFailure(
+      `git rebase origin/${opts.baseBranch} failed without unresolved files.\n${formatCommandFailure(
+        'git',
+        ['rebase', `origin/${opts.baseBranch}`],
+        result
+      )}`,
+      abortFailure
+    )
   );
 }
 
@@ -211,6 +245,14 @@ export function formatConflictContext(conflictContext: ConflictContext): string 
 
   for (const conflict of conflictContext.conflicts) {
     lines.push('', `### ${conflict.path}`);
+    if (conflict.markers.length === 0) {
+      lines.push(
+        '',
+        'No inline conflict markers were found for this path. It may be a binary or delete/modify conflict. Resolve the file state directly, then stage it with `git add`.'
+      );
+      continue;
+    }
+
     for (const marker of conflict.markers) {
       lines.push('', '```diff', marker, '```');
     }
@@ -263,22 +305,29 @@ export async function withGitTransport(
 
     const continueError = getRetryFailureText(continueResult);
     if (attempt === MAX_REBASE_ATTEMPTS) {
-      await spawnAsync('git', ['rebase', '--abort'], { cwd: opts.wtPath });
+      const abortFailure = await abortRebase(opts.wtPath);
       throw formatTransportError(
         opts,
-        `Could not complete rebase onto origin/${opts.baseBranch} after ${MAX_REBASE_ATTEMPTS} conflict resolution attempts.\n${continueError}`
+        appendAbortFailure(
+          `Could not complete rebase onto origin/${opts.baseBranch} after ${MAX_REBASE_ATTEMPTS} conflict resolution attempts.\n${continueError}`,
+          abortFailure
+        )
       );
     }
 
     const nextConflictContext = await buildConflictContext(opts.wtPath, continueError);
     if (!nextConflictContext) {
+      const abortFailure = await abortRebase(opts.wtPath);
       throw formatTransportError(
         opts,
-        `git rebase --continue failed without unresolved files.\n${formatCommandFailure(
-          'git',
-          ['rebase', '--continue'],
-          continueResult
-        )}`
+        appendAbortFailure(
+          `git rebase --continue failed without unresolved files.\n${formatCommandFailure(
+            'git',
+            ['rebase', '--continue'],
+            continueResult
+          )}`,
+          abortFailure
+        )
       );
     }
     conflictContext = nextConflictContext;
