@@ -169,6 +169,31 @@ describe('runPrompt', () => {
     expect(fetchPRMock).toHaveBeenCalledWith('owner/repo', '5');
   });
 
+  it('appends user input as a trailing argument for claude prompts', async () => {
+    readFileMock.mockResolvedValueOnce(
+      ['---', 'cmd: claude', 'append-user-input: true', '---', '', 'prompt body'].join('\n')
+    );
+    mockSpawnResult();
+
+    await expect(runPrompt('test', { userInput: 'resolve the merge conflict' })).resolves.toBe(0);
+
+    const args = spawnMock.mock.calls[0][1] as string[];
+    expect(args.at(-1)).toBe('resolve the merge conflict');
+  });
+
+  it('appends user input into the combined prompt body for codex prompts', async () => {
+    resolveAgentMock.mockReturnValue('codex');
+    readFileMock.mockResolvedValueOnce(
+      ['---', 'cmd: codex', 'append-user-input: true', '---', '', 'prompt body'].join('\n')
+    );
+    mockSpawnResult();
+
+    await expect(runPrompt('test', { userInput: 'resolve the merge conflict' })).resolves.toBe(0);
+
+    const args = spawnMock.mock.calls[0][1] as string[];
+    expect(args).toContain('prompt body\n\n---\n\nresolve the merge conflict');
+  });
+
   it('throws when appended issue or PR context is requested without a repo', async () => {
     readFileMock.mockResolvedValueOnce(
       [

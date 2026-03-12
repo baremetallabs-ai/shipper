@@ -1,9 +1,11 @@
 import { findBranchForIssue, getRepoRoot } from '@dnsquared/shipper-core';
 import { autoSelectIssue, resolveBaseBranch, resolveRef } from '@dnsquared/shipper-core';
 import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
+import { formatConflictContext } from '@dnsquared/shipper-core';
 import { withStageHooks } from '@dnsquared/shipper-core';
 import { getSettings } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
+import { withGitTransport } from '@dnsquared/shipper-core';
 import { withWorktree } from '@dnsquared/shipper-core';
 import { runPrompt } from '@dnsquared/shipper-core';
 
@@ -40,14 +42,19 @@ export async function prOpenCommand(
         await withWorktree(
           { repoRoot, branch, createBranch: false, issueNumber: issue, stage: 'pr-open' },
           async (wtPath) => {
-            return await runPrompt('pr_open', {
-              repo,
-              issueRef: issue,
-              cwd: wtPath,
-              baseBranch,
-              mode,
-              agent,
-            });
+            return await withGitTransport(
+              { wtPath, repoRoot, baseBranch, pushMode: 'force-with-lease' },
+              async (conflictContext) =>
+                await runPrompt('pr_open', {
+                  repo,
+                  issueRef: issue,
+                  cwd: wtPath,
+                  baseBranch,
+                  mode,
+                  agent,
+                  userInput: conflictContext ? formatConflictContext(conflictContext) : undefined,
+                })
+            );
           }
         )
     );

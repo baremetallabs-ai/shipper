@@ -1,7 +1,10 @@
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import { parseFrontmatter } from '../../src/lib/frontmatter.js';
+
+const testDir = dirname(fileURLToPath(import.meta.url));
 
 describe('parseFrontmatter', () => {
   it('parses cmd and args from frontmatter', () => {
@@ -181,14 +184,14 @@ You are helping a developer turn a rough idea into a lightweight GitHub issue.`;
 
   it('parses every prompt that passes --settings as valid JSON', () => {
     const promptPaths = [
-      'src/prompts/claude/implement.md',
-      'src/prompts/claude/pr_open.md',
-      'src/prompts/claude/pr_remediate.md',
-      'src/prompts/claude/setup.md',
+      '../../src/prompts/claude/implement.md',
+      '../../src/prompts/claude/pr_open.md',
+      '../../src/prompts/claude/pr_remediate.md',
+      '../../src/prompts/claude/setup.md',
     ];
 
     for (const promptPath of promptPaths) {
-      const input = readFileSync(resolve(promptPath), 'utf8');
+      const input = readFileSync(resolve(testDir, promptPath), 'utf8');
       const result = parseFrontmatter(input);
       const settingsIndex = result.frontmatter.args.indexOf('--settings');
       expect(settingsIndex, `${promptPath} is missing --settings`).toBeGreaterThanOrEqual(0);
@@ -199,6 +202,25 @@ You are helping a developer turn a rough idea into a lightweight GitHub issue.`;
         throw new Error(`${promptPath} is missing the settings payload`);
       }
       expect(() => JSON.parse(settingsArg)).not.toThrow();
+    }
+  });
+
+  it('requires append-user-input on the transport-aware prompts', () => {
+    const promptPaths = [
+      '../../src/prompts/codex/implement.md',
+      '../../src/prompts/codex/pr_open.md',
+      '../../src/prompts/codex/pr_remediate.md',
+      '../../src/prompts/claude/implement.md',
+      '../../src/prompts/claude/pr_open.md',
+      '../../src/prompts/claude/pr_remediate.md',
+    ];
+
+    for (const promptPath of promptPaths) {
+      const input = readFileSync(resolve(testDir, promptPath), 'utf8');
+      const result = parseFrontmatter(input);
+      expect(result.frontmatter['append-user-input'], `${promptPath} must append user input`).toBe(
+        true
+      );
     }
   });
 });

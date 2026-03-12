@@ -2,40 +2,56 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const getSettingsMock = vi.fn();
 const fetchChecksMock = vi.fn();
+const resolveRefMock = vi.fn();
+const autoSelectPrForStageMock = vi.fn();
+const formatConflictContextMock = vi.fn(() => 'formatted conflict context');
+const runPromptMock = vi.fn();
+const withGitTransportMock = vi.fn(
+  async (_opts: unknown, fn: (conflictContext?: unknown) => Promise<unknown>) =>
+    await fn({
+      files: ['src/conflict.ts'],
+      conflicts: [
+        {
+          path: 'src/conflict.ts',
+          markers: ['<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> origin/main'],
+        },
+      ],
+    })
+);
+const withStageHooksMock = vi.fn(
+  async (_stage: unknown, _env: unknown, fn: () => Promise<unknown>) => await fn()
+);
+const withIssueLockMock = vi.fn(
+  async (_repo: unknown, _issue: unknown, fn: () => Promise<unknown>) => await fn()
+);
+const withWorktreeMock = vi.fn(
+  async (_opts: unknown, fn: (wtPath: string) => Promise<unknown>) => await fn('/tmp/fake-wt')
+);
+const getBranchForPRMock = vi.fn(async () => 'shipper/10-feature');
+const getRepoRootMock = vi.fn(async () => '/tmp/fake-repo');
+const ghMock = vi.fn();
+const sleepMsMock = vi.fn(async () => {});
 const repo = 'owner/repo';
-vi.mock('@dnsquared/shipper-core', async () => {
-  const actual =
-    await vi.importActual<typeof import('@dnsquared/shipper-core')>('@dnsquared/shipper-core');
-  return {
-    ...actual,
-    resolveRef: vi.fn(),
-    autoSelectPrForStage: vi.fn(),
-    runPrompt: vi.fn(),
-    withStageHooks: vi.fn(
-      async (_stage: unknown, _env: unknown, fn: () => Promise<unknown>) => await fn()
-    ),
-    withIssueLock: vi.fn(
-      async (_repo: unknown, _issue: unknown, fn: () => Promise<unknown>) => await fn()
-    ),
-    withWorktree: vi.fn(
-      async (_opts: unknown, fn: (wtPath: string) => Promise<unknown>) => await fn('/tmp/fake-wt')
-    ),
-    getBranchForPR: vi.fn(async () => 'shipper/10-feature'),
-    getRepoRoot: vi.fn(async () => '/tmp/fake-repo'),
-    gh: vi.fn(),
-    sleepMs: vi.fn(async () => {}),
-    getSettings: () => getSettingsMock(),
-    fetchChecks: (...args: unknown[]) => fetchChecksMock(...args),
-  };
-});
-
-import { gh, resolveRef, runPrompt, getBranchForPR, withIssueLock } from '@dnsquared/shipper-core';
-
-const mockGh = vi.mocked(gh);
-const mockResolveRef = vi.mocked(resolveRef);
-const mockRunPrompt = vi.mocked(runPrompt);
-const mockGetBranchForPR = vi.mocked(getBranchForPR);
-const mockWithIssueLock = vi.mocked(withIssueLock);
+vi.mock('@dnsquared/shipper-core', () => ({
+  resolveRef: resolveRefMock,
+  autoSelectPrForStage: autoSelectPrForStageMock,
+  formatConflictContext: formatConflictContextMock,
+  runPrompt: runPromptMock,
+  withGitTransport: withGitTransportMock,
+  withStageHooks: withStageHooksMock,
+  withIssueLock: withIssueLockMock,
+  withWorktree: withWorktreeMock,
+  getBranchForPR: getBranchForPRMock,
+  getRepoRoot: getRepoRootMock,
+  gh: ghMock,
+  sleepMs: sleepMsMock,
+  getSettings: () => getSettingsMock(),
+  fetchChecks: (...args: unknown[]) => fetchChecksMock(...args),
+  classifyChecks: (checks: Array<{ state: string }>) => ({
+    pending: checks.filter((check) => check.state !== 'COMPLETED'),
+    total: checks.length,
+  }),
+}));
 
 describe('prRemediateCommand', () => {
   let exitSpy: ReturnType<typeof vi.spyOn>;
@@ -43,11 +59,20 @@ describe('prRemediateCommand', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.exitCode = undefined;
-    mockResolveRef.mockResolvedValue({ prNumber: '42', issueNumber: '10' });
-    mockRunPrompt.mockResolvedValue(0);
-    mockGh.mockResolvedValue({
-      stdout: JSON.stringify({ createdAt: new Date().toISOString() }),
-      stderr: '',
+    resolveRefMock.mockResolvedValue({ prNumber: '42', issueNumber: '10' });
+    runPromptMock.mockResolvedValue(0);
+    ghMock.mockImplementation(async (args: string[]) => {
+      if (args.includes('baseRefName')) {
+        return {
+          stdout: JSON.stringify({ baseRefName: 'release/2026' }),
+          stderr: '',
+        };
+      }
+
+      return {
+        stdout: JSON.stringify({ createdAt: new Date().toISOString() }),
+        stderr: '',
+      };
     });
     getSettingsMock.mockReturnValue({
       prReviewWait: { mode: 'timer', timeoutMinutes: 0 },
@@ -70,16 +95,27 @@ describe('prRemediateCommand', () => {
     expect(exitSpy).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(0);
 
-    expect(mockResolveRef).toHaveBeenCalledWith(repo, '42', 'both');
+    expect(resolveRefMock).toHaveBeenCalledWith(repo, '42', 'both');
     expect(fetchChecksMock).not.toHaveBeenCalled();
-    expect(mockGetBranchForPR).toHaveBeenCalledWith(repo, '42');
-    expect(mockWithIssueLock).toHaveBeenCalledWith(repo, '10', expect.any(Function));
-    expect(mockRunPrompt).toHaveBeenCalledWith(
+    expect(getBranchForPRMock).toHaveBeenCalledWith(repo, '42');
+    expect(withIssueLockMock).toHaveBeenCalledWith(repo, '10', expect.any(Function));
+    expect(withGitTransportMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        wtPath: '/tmp/fake-wt',
+        repoRoot: '/tmp/fake-repo',
+        baseBranch: 'release/2026',
+        pushMode: 'force-with-lease',
+      }),
+      expect.any(Function)
+    );
+    expect(formatConflictContextMock).toHaveBeenCalled();
+    expect(runPromptMock).toHaveBeenCalledWith(
       'pr_remediate',
       expect.objectContaining({
         repo,
         issueRef: '10',
         prRef: '42',
+        userInput: 'formatted conflict context',
       })
     );
   });
@@ -94,7 +130,7 @@ describe('prRemediateCommand', () => {
     await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
     expect(exitSpy).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(0);
-    expect(mockRunPrompt).toHaveBeenCalled();
+    expect(runPromptMock).toHaveBeenCalled();
     expect(fetchChecksMock).not.toHaveBeenCalled();
   });
 
@@ -113,7 +149,7 @@ describe('prRemediateCommand', () => {
     await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
     expect(exitSpy).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(0);
-    expect(mockRunPrompt).toHaveBeenCalled();
+    expect(runPromptMock).toHaveBeenCalled();
     expect(fetchChecksMock).toHaveBeenCalledWith(repo, '42');
   });
 
@@ -131,7 +167,7 @@ describe('prRemediateCommand', () => {
     await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
     expect(exitSpy).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(0);
-    expect(mockRunPrompt).toHaveBeenCalled();
+    expect(runPromptMock).toHaveBeenCalled();
     // Initial call + 3 grace retries = 4 calls
     expect(fetchChecksMock).toHaveBeenCalledTimes(4);
     expect(logMock).toHaveBeenCalledWith('No CI checks found. Proceeding.');

@@ -6,6 +6,7 @@ args:
   - -c
   - sandbox_workspace_write.network_access=true
 append-issue: true
+append-user-input: true
 ---
 
 You are a senior engineer responsible for preparing an implemented branch for pull request submission. Your job is to ensure the branch is clean, passing all checks, rebased onto the latest base branch, and then open a high-quality PR linking back to the originating issue.
@@ -17,6 +18,7 @@ The **next user message** contains the full GitHub issue including title, labels
 - **You are operating inside an ephemeral worktree** that Shipper created on the implementation branch. You do not need to create or switch branches — you are already on the correct branch.
 - The user may or may not have run the full shipper workflow (groom → design → plan → implement). Work with whatever context is available on the issue.
 - Your job is to validate the implementation, remediate any issues, and open the PR. You are not here to re-implement — if the implementation is fundamentally broken, stop and explain the problem.
+- **Git transport is orchestrator-owned.** Do not run `git fetch`, `git rebase`, `git rebase --continue`, `git rebase --abort`, or `git push`. Use git only for safe read-only inspection plus `git add` and `git commit`. If conflict context is appended later in the prompt, resolve and stage those files; the orchestrator will continue or abort the rebase.
 - **You are running inside a sandbox.** Some shell commands are restricted. If a `gh` command returns a 403/Forbidden error or a keyring/credential error, it means the sandbox blocked that specific command — it does **not** mean your GitHub authentication is broken. Do not attempt to re-authenticate or diagnose auth issues. Other `gh` commands on the allowed list will still work normally.
 
 ---
@@ -51,40 +53,9 @@ Review the commit history to understand what was implemented.
 
 ---
 
-## Phase 2: Rebase onto latest base branch
+## Phase 2: Validate the pre-rebased worktree
 
-Before running any checks, ensure the branch is up to date with the base branch.
-
-### Step 1: Fetch latest
-
-```bash
-git fetch origin
-```
-
-### Step 2: Rebase onto base branch
-
-```bash
-git rebase origin/{{BASE_BRANCH}}
-```
-
-- If conflicts arise, resolve them carefully. The implementation should take priority unless the conflict reveals a fundamental incompatibility — in that case, recommend returning to `shipper implement`.
-- After resolving conflicts, continue the rebase with `git rebase --continue`.
-
-If conflicts cannot be resolved:
-
-1. Post a comment on the issue explaining that the branch could not be rebased onto the base branch and the conflict details.
-2. Roll back labels: `gh issue edit <ISSUE> --add-label "shipper:planned" --remove-label "shipper:implemented"`
-3. Recommend the user run `shipper implement` again, then stop.
-
-### Step 3: Force-push the rebased branch
-
-After a successful rebase, update the remote:
-
-```bash
-./.shipper/scripts/safe-push.sh --force-with-lease
-```
-
-(Force-push is expected here — the rebase rewrites commit history, so a force-with-lease push is required to update the remote branch.)
+Shipper already fetched, rebased, and prepared the branch before spawning you. If appended conflict context is present, resolve those conflicts, stage the files, and continue with the workflow without running `git rebase --continue` yourself.
 
 ---
 

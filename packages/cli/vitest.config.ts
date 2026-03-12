@@ -1,6 +1,15 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
+const packageRoot = fileURLToPath(new URL('.', import.meta.url));
+
 export default defineConfig({
+  resolve: {
+    alias: {
+      '@dnsquared/shipper-core': path.resolve(packageRoot, '../core/src/index.ts'),
+    },
+  },
   test: {
     globals: true,
     environment: 'node',

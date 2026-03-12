@@ -2,9 +2,11 @@ import { getBranchForPR, getRepoRoot } from '@dnsquared/shipper-core';
 import { fetchChecks, classifyChecks } from '@dnsquared/shipper-core';
 import { autoSelectPrForStage, resolveRef } from '@dnsquared/shipper-core';
 import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
+import { formatConflictContext } from '@dnsquared/shipper-core';
 import { gh } from '@dnsquared/shipper-core';
 import { withStageHooks } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
+import { withGitTransport } from '@dnsquared/shipper-core';
 import { withWorktree } from '@dnsquared/shipper-core';
 import { runPrompt } from '@dnsquared/shipper-core';
 import { getSettings } from '@dnsquared/shipper-core';
@@ -124,6 +126,16 @@ export async function prRemediateCommand(
 
   const run = async () => {
     const branch = await getBranchForPR(repo, prRef);
+    const { stdout: baseBranchStdout } = await gh([
+      'pr',
+      'view',
+      prRef,
+      '-R',
+      repo,
+      '--json',
+      'baseRefName',
+    ]);
+    const { baseRefName: baseBranch } = JSON.parse(baseBranchStdout) as { baseRefName: string };
 
     return await withStageHooks('pr-remediate', { issueNumber, branchName: branch }, async () => {
       const { prReviewWait } = getSettings();
@@ -154,14 +166,19 @@ export async function prRemediateCommand(
       return await withWorktree(
         { repoRoot, branch, createBranch: false, issueNumber, stage: 'pr-remediate' },
         async (wtPath) => {
-          return await runPrompt('pr_remediate', {
-            repo,
-            issueRef: issueNumber,
-            prRef,
-            cwd: wtPath,
-            mode,
-            agent,
-          });
+          return await withGitTransport(
+            { wtPath, repoRoot, baseBranch, pushMode: 'force-with-lease' },
+            async (conflictContext) =>
+              await runPrompt('pr_remediate', {
+                repo,
+                issueRef: issueNumber,
+                prRef,
+                cwd: wtPath,
+                mode,
+                agent,
+                userInput: conflictContext ? formatConflictContext(conflictContext) : undefined,
+              })
+          );
         }
       );
     });
