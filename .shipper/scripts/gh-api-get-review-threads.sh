@@ -26,6 +26,7 @@ exec gh api graphql \
               isOutdated
               comments(first: 100) {
                 nodes {
+                  databaseId
                   author {
                     login
                   }
@@ -49,6 +50,7 @@ exec gh api graphql \
         comments: (
           .comments.nodes
           | map({
+              id: .databaseId,
               author: .author.login,
               body,
               createdAt
