@@ -2,15 +2,26 @@ import {
   gh,
   STAGE_LABEL_NAMES,
   DISPLAY_NAME_MAP,
-  CONTROL_LABEL_NAMES,
+  BLOCKED_LABEL,
+  FAILED_LABEL,
+  LOCKED_LABEL,
 } from '@dnsquared/shipper-core';
 
-const VALID_SHORT_NAMES = STAGE_LABEL_NAMES.map((label) => label.replace('shipper:', ''));
+const VALID_SHORT_NAMES = [
+  ...STAGE_LABEL_NAMES.map((label) => label.replace('shipper:', '')),
+  'blocked',
+  'failed',
+];
 
 interface Issue {
   number: number;
   title: string;
   labels: { name: string }[];
+}
+
+interface ControlIssue {
+  issue: Issue;
+  stageLabel: string;
 }
 
 export async function issueListCommand(options: { status?: string }): Promise<void> {
@@ -72,27 +83,89 @@ export async function issueListCommand(options: { status?: string }): Promise<vo
     group.sort((a, b) => a.number - b.number);
   }
 
-  // Determine which labels to display
-  const labelsToShow = options.status ? [`shipper:${options.status}`] : [...STAGE_LABEL_NAMES];
+  const blockedIssues: ControlIssue[] = [];
+  const failedIssues: ControlIssue[] = [];
+
+  for (const [label, group] of groups) {
+    for (let index = group.length - 1; index >= 0; index -= 1) {
+      const issue = group[index];
+      if (!issue) {
+        throw new Error(`Invariant failed: missing issue at index ${index}`);
+      }
+
+      const issueLabels = issue.labels.map((l) => l.name);
+      const isFailed = issueLabels.includes(FAILED_LABEL);
+      const isBlocked = issueLabels.includes(BLOCKED_LABEL);
+
+      if (isFailed) {
+        failedIssues.push({ issue, stageLabel: label });
+        group.splice(index, 1);
+      } else if (isBlocked) {
+        blockedIssues.push({ issue, stageLabel: label });
+        group.splice(index, 1);
+      }
+    }
+  }
+
+  blockedIssues.sort((a, b) => a.issue.number - b.issue.number);
+  failedIssues.sort((a, b) => a.issue.number - b.issue.number);
+
+  function renderControlSection(
+    heading: string,
+    items: ControlIssue[],
+    stageFilter?: string
+  ): boolean {
+    const filteredItems = stageFilter
+      ? items.filter((controlIssue) => controlIssue.stageLabel === stageFilter)
+      : items;
+
+    if (filteredItems.length === 0) {
+      return false;
+    }
+
+    console.log(`\n${heading} (${filteredItems.length})`);
+    for (const { issue, stageLabel } of filteredItems) {
+      const stageSuffix = `[${stageLabel.replace('shipper:', '')}]`;
+      const lockedSuffix = issue.labels.some((label) => label.name === LOCKED_LABEL)
+        ? ' [locked]'
+        : '';
+      console.log(`  #${issue.number} ${issue.title} ${stageSuffix}${lockedSuffix}`);
+    }
+
+    return true;
+  }
+
+  const isControlFilter = options.status === 'blocked' || options.status === 'failed';
+  const stageFilter = options.status && !isControlFilter ? `shipper:${options.status}` : undefined;
 
   let hasOutput = false;
-  for (const label of labelsToShow) {
-    const group = groups.get(label);
-    if (!group || group.length === 0) continue;
+  if (!isControlFilter) {
+    const labelsToShow = stageFilter ? [stageFilter] : [...STAGE_LABEL_NAMES];
 
-    hasOutput = true;
-    console.log(`\n${DISPLAY_NAME_MAP[label]} (${group.length})`);
-
-    for (const issue of group) {
-      const issueLabels = issue.labels.map((l) => l.name);
-      let suffixes = '';
-      for (const controlLabel of CONTROL_LABEL_NAMES) {
-        if (issueLabels.includes(controlLabel)) {
-          suffixes += ` [${controlLabel.replace('shipper:', '')}]`;
-        }
+    for (const label of labelsToShow) {
+      const group = groups.get(label);
+      if (!group || group.length === 0) {
+        continue;
       }
-      console.log(`  #${issue.number} ${issue.title}${suffixes}`);
+
+      hasOutput = true;
+      console.log(`\n${DISPLAY_NAME_MAP[label]} (${group.length})`);
+
+      for (const issue of group) {
+        const lockedSuffix = issue.labels.some((stageLabel) => stageLabel.name === LOCKED_LABEL)
+          ? ' [locked]'
+          : '';
+        console.log(`  #${issue.number} ${issue.title}${lockedSuffix}`);
+      }
     }
+  }
+
+  if (options.status !== 'failed') {
+    hasOutput = renderControlSection('Blocked', blockedIssues, stageFilter) || hasOutput;
+  }
+
+  if (options.status !== 'blocked') {
+    hasOutput = renderControlSection('Failed', failedIssues, stageFilter) || hasOutput;
   }
 
   if (!hasOutput) {
