@@ -28,6 +28,7 @@ export interface Settings {
   };
   defaultBaseBranch?: string;
   installCommand?: string;
+  worktreeEnv?: Record<string, string>;
   hooks: {
     worktreeSetup?: string;
     worktreeTeardown?: string;
@@ -58,6 +59,8 @@ export const SETTING_DESCRIPTIONS: Record<string, string> = {
   defaultBaseBranch: 'target branch for PRs (auto-detected from GitHub if not set)',
   installCommand:
     'shell command to install project dependencies (e.g. npm ci, pnpm install --frozen-lockfile)',
+  worktreeEnv:
+    'flat env-var map applied inside worktree execution; values are passed through exactly as configured',
   'hooks.worktreeSetup':
     'shell command to run after a worktree is created (before the agent starts)',
   'hooks.worktreeTeardown': 'shell command to run before a worktree is removed',

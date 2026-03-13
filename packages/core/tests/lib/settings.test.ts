@@ -119,6 +119,53 @@ describe('loadSettings', () => {
     });
   });
 
+  it('loads worktreeEnv values exactly as configured', async () => {
+    readFileMock.mockImplementation(async (p: string) => {
+      if (p === settingsPath) {
+        return JSON.stringify({
+          worktreeEnv: {
+            UV_CACHE_DIR: '.uv-cache',
+          },
+        });
+      }
+      throw enoent(p);
+    });
+
+    const { loadSettings, getSettings } = await loadModule();
+    await loadSettings();
+
+    expect(getSettings().worktreeEnv).toEqual({
+      UV_CACHE_DIR: '.uv-cache',
+    });
+  });
+
+  it('replaces worktreeEnv from local settings instead of deep-merging it', async () => {
+    readFileMock.mockImplementation(async (p: string) => {
+      if (p === settingsPath) {
+        return JSON.stringify({
+          worktreeEnv: {
+            UV_CACHE_DIR: '.uv-cache',
+          },
+        });
+      }
+      if (p === localPath) {
+        return JSON.stringify({
+          worktreeEnv: {
+            NPM_CONFIG_CACHE: '/custom-cache',
+          },
+        });
+      }
+      throw enoent(p);
+    });
+
+    const { loadSettings, getSettings } = await loadModule();
+    await loadSettings();
+
+    expect(getSettings().worktreeEnv).toEqual({
+      NPM_CONFIG_CACHE: '/custom-cache',
+    });
+  });
+
   it('warns on unknown settings.commands keys', async () => {
     readFileMock.mockImplementation(async (p: string) => {
       if (p === settingsPath) {
