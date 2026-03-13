@@ -2,25 +2,32 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { afterAll, describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+type ChildProcessModule = typeof import('node:child_process');
+type FsModule = typeof import('node:fs');
+type OsModule = typeof import('node:os');
+type ShipperCore = typeof import('@dnsquared/shipper-core');
+type MergeModule = typeof import('../../src/commands/merge.js');
+type PrRemediateModule = typeof import('../../src/commands/pr-remediate.js');
+
 const fsMockState = vi.hoisted(() => ({
   capturedLogs: new Map<string, string>(),
-  mockCreateWriteStream: vi.fn(),
-  mockMkdirSync: vi.fn(),
+  mockCreateWriteStream: vi.fn<FsModule['createWriteStream']>(),
+  mockMkdirSync: vi.fn<FsModule['mkdirSync']>(),
 }));
 
 const osMockState = vi.hoisted(() => ({
-  mockHomedir: vi.fn(() => '/mock-home'),
+  mockHomedir: vi.fn<OsModule['homedir']>(() => '/mock-home'),
 }));
 const lockState = vi.hoisted(() => ({
   lockedIssues: new Set<string>(),
 }));
 const getSettingsMock = vi.hoisted(() =>
-  vi.fn(() => ({
+  vi.fn<ShipperCore['getSettings']>(() => ({
     prReviewWait: { mode: 'checks', timeoutMinutes: 15 },
   }))
 );
-const buildReadyCheckMock = vi.hoisted(() => vi.fn());
-const postMergeMock = vi.hoisted(() => vi.fn(async () => {}));
+const buildReadyCheckMock = vi.hoisted(() => vi.fn<PrRemediateModule['buildReadyCheck']>());
+const postMergeMock = vi.hoisted(() => vi.fn<MergeModule['postMerge']>(() => Promise.resolve()));
 const labelFixtures = vi.hoisted(() => ({
   stageLabelNames: [
     'shipper:new',
@@ -45,12 +52,12 @@ const labelFixtures = vi.hoisted(() => ({
 }));
 
 vi.mock('../../src/commands/pr-remediate.js', () => ({
-  buildReadyCheck: (...args: unknown[]) => buildReadyCheckMock(...args),
+  buildReadyCheck: buildReadyCheckMock,
   SKIP_PR_REMEDIATE_WAIT_ENV_VAR: 'SHIPPER_SKIP_PR_REMEDIATE_WAIT',
 }));
 
 vi.mock('../../src/commands/merge.js', () => ({
-  postMerge: (...args: unknown[]) => postMergeMock(...args),
+  postMerge: postMergeMock,
 }));
 
 import {
@@ -64,10 +71,10 @@ import {
 import type { UnblockAttempt } from '../../src/commands/ship.js';
 
 vi.mock('@dnsquared/shipper-core', () => ({
-  selectIssuesForStage: vi.fn(async () => []),
-  clearStaleLockIfNeeded: vi.fn(async () => {}),
+  selectIssuesForStage: vi.fn(() => Promise.resolve([])),
+  clearStaleLockIfNeeded: vi.fn(() => Promise.resolve()),
   gh: vi.fn(),
-  fetchChecks: vi.fn(async () => []),
+  fetchChecks: vi.fn(() => Promise.resolve([])),
   classifyChecks: vi.fn(() => ({ pending: [], failed: [], passed: [], total: 0 })),
   STAGE_NAME_MAP: labelFixtures.stageNameMap,
   STAGE_LABEL_NAMES: labelFixtures.stageLabelNames,
@@ -77,24 +84,20 @@ vi.mock('@dnsquared/shipper-core', () => ({
   BLOCKED_LABEL: 'shipper:blocked',
   LOCKED_LABEL: 'shipper:locked',
   FAILED_LABEL: 'shipper:failed',
-  getSettings: () => getSettingsMock(),
-  withStageHooks: vi.fn(
-    async (_stage: string, _env: unknown, fn: () => Promise<unknown>) => await fn()
-  ),
-  withIssueLock: vi.fn(async (_repo: string, issue: string, fn: () => Promise<unknown>) => {
-    lockState.lockedIssues.add(String(issue));
-    try {
-      return await fn();
-    } finally {
-      lockState.lockedIssues.delete(String(issue));
-    }
+  getSettings: getSettingsMock,
+  withStageHooks: vi.fn((_stage: string, _env: unknown, fn: () => Promise<unknown>) => fn()),
+  withIssueLock: vi.fn((_repo: string, issue: string, fn: () => Promise<unknown>) => {
+    lockState.lockedIssues.add(issue);
+    return fn().finally(() => {
+      lockState.lockedIssues.delete(issue);
+    });
   }),
-  releaseIssueLock: vi.fn(async () => {}),
-  runPrompt: vi.fn(async () => 0),
+  releaseIssueLock: vi.fn(() => Promise.resolve()),
+  runPrompt: vi.fn(() => Promise.resolve(0)),
 }));
 
 vi.mock('node:fs', async (importOriginal) => {
-  const actual = (await importOriginal()) as Record<string, unknown>;
+  const actual = await importOriginal<FsModule>();
   const { PassThrough } = await import('node:stream');
 
   fsMockState.mockCreateWriteStream.mockImplementation((filePath: string) => {
@@ -117,7 +120,7 @@ vi.mock('node:fs', async (importOriginal) => {
 });
 
 vi.mock('node:os', async (importOriginal) => {
-  const actual = (await importOriginal()) as Record<string, unknown>;
+  const actual = await importOriginal<OsModule>();
   return {
     ...actual,
     homedir: osMockState.mockHomedir,
@@ -125,11 +128,11 @@ vi.mock('node:os', async (importOriginal) => {
 });
 
 vi.mock('node:child_process', async (importOriginal) => {
-  const actual = (await importOriginal()) as Record<string, unknown>;
+  const actual = await importOriginal<ChildProcessModule>();
   return {
     ...actual,
-    spawn: vi.fn(),
-    spawnSync: vi.fn(),
+    spawn: vi.fn<ChildProcessModule['spawn']>(),
+    spawnSync: vi.fn<ChildProcessModule['spawnSync']>(),
   };
 });
 
@@ -204,6 +207,18 @@ function defaultWithIssueLock<T>(_repo: string, _issue: string, fn: () => Promis
   return fn();
 }
 
+function getLoggedOutput(spy: ReturnType<typeof vi.spyOn>): string {
+  return spy.mock.calls.map(([message]) => message as string).join('\n');
+}
+
+function getSpawnSyncIssueOrder(): string[] {
+  return mockSpawnSync.mock.calls.map(([, args]) => args[2]);
+}
+
+function findSpawnSyncCall(issueNumber: string) {
+  return mockSpawnSync.mock.calls.find(([, args]) => args[2] === issueNumber);
+}
+
 function setupReadyMergeFlow(options?: {
   mergeStates?: string[];
   mergeable?: string;
@@ -227,17 +242,17 @@ function setupReadyMergeFlow(options?: {
 
   let mergeStateCall = 0;
 
-  mockGh.mockImplementation(async (args: string[]) => {
+  mockGh.mockImplementation((args: string[]) => {
     if (args[0] === 'issue' && args[1] === 'list') {
-      return { stdout: '[]', stderr: '' };
+      return Promise.resolve({ stdout: '[]', stderr: '' });
     }
 
     if (args[0] === 'issue' && args[1] === 'view') {
-      return { stdout: 'shipper:ready', stderr: '' };
+      return Promise.resolve({ stdout: 'shipper:ready', stderr: '' });
     }
 
     if (args[0] === 'pr' && args[1] === 'list') {
-      return {
+      return Promise.resolve({
         stdout: JSON.stringify([
           {
             number: prNumber,
@@ -247,34 +262,34 @@ function setupReadyMergeFlow(options?: {
           },
         ]),
         stderr: '',
-      };
+      });
     }
 
     if (args[0] === 'pr' && args[1] === 'view') {
       const index = Math.min(mergeStateCall, mergeStates.length - 1);
       const mergeStateStatus = mergeStates[index] ?? mergeStates[mergeStates.length - 1] ?? 'CLEAN';
       mergeStateCall++;
-      return {
+      return Promise.resolve({
         stdout: JSON.stringify({ mergeStateStatus, mergeable }),
         stderr: '',
-      };
+      });
     }
 
     if (args[0] === 'pr' && args[1] === 'update-branch') {
       if (updateBranchError) throw updateBranchError;
-      return { stdout: updateBranchStdout, stderr: '' };
+      return Promise.resolve({ stdout: updateBranchStdout, stderr: '' });
     }
 
     if (args[0] === 'pr' && args[1] === 'merge') {
       if (mergeError) throw mergeError;
-      return { stdout: mergeStdout, stderr: '' };
+      return Promise.resolve({ stdout: mergeStdout, stderr: '' });
     }
 
     if (
       (args[0] === 'pr' && (args[1] === 'edit' || args[1] === 'comment')) ||
       (args[0] === 'issue' && (args[1] === 'edit' || args[1] === 'close'))
     ) {
-      return { stdout: '', stderr: '' };
+      return Promise.resolve({ stdout: '', stderr: '' });
     }
 
     throw new Error(`Unexpected gh args: ${args.join(' ')}`);
@@ -283,19 +298,19 @@ function setupReadyMergeFlow(options?: {
 
 function findGhCalls(command: string, subcommand: string): string[][] {
   return mockGh.mock.calls
-    .map(([args]) => args as string[])
+    .map(([args]) => args)
     .filter((args) => args[0] === command && args[1] === subcommand);
 }
 
 function mockIssueViewSequence(labels: string[]): void {
   let index = 0;
-  mockGh.mockImplementation(async (args: string[]) => {
+  mockGh.mockImplementation((args: string[]) => {
     if (args[0] === 'issue' && args[1] === 'view') {
       const label = labels[index++];
-      return { stdout: label ? `${label}\n` : '', stderr: '' };
+      return Promise.resolve({ stdout: label ? `${label}\n` : '', stderr: '' });
     }
 
-    return { stdout: '', stderr: '' };
+    return Promise.resolve({ stdout: '', stderr: '' });
   });
 }
 
@@ -323,21 +338,23 @@ function getStageLabel(issue: MockIssueState): string | undefined {
 }
 
 function installSequentialCliMocks(): void {
-  mockSelectIssuesForStage.mockImplementation(async (_repo: string, label: string) => {
-    return Array.from(mockIssues.values())
-      .filter((issue) => getStageLabel(issue) === label)
-      .filter((issue) => !issue.labels.includes('shipper:blocked'))
-      .filter((issue) => !lockState.lockedIssues.has(String(issue.number)))
-      .map((issue) => ({ number: issue.number, title: issue.title }));
+  mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
+    return Promise.resolve(
+      Array.from(mockIssues.values())
+        .filter((issue) => getStageLabel(issue) === label)
+        .filter((issue) => !issue.labels.includes('shipper:blocked'))
+        .filter((issue) => !lockState.lockedIssues.has(String(issue.number)))
+        .map((issue) => ({ number: issue.number, title: issue.title }))
+    );
   });
 
-  mockGh.mockImplementation(async (args: string[]) => {
+  mockGh.mockImplementation((args: string[]) => {
     if (args[0] === 'issue' && args[1] === 'view') {
       const issue = mockIssues.get(Number(args[2]));
-      return {
+      return Promise.resolve({
         stdout: issue ? `${issue.labels.join('\n')}\n` : '',
         stderr: '',
-      };
+      });
     }
 
     if (args[0] === 'issue' && args[1] === 'list') {
@@ -349,10 +366,10 @@ function installSequentialCliMocks(): void {
           title: issue.title,
           labels: issue.labels.map((name) => ({ name })),
         }));
-      return {
+      return Promise.resolve({
         stdout: JSON.stringify(blocked),
         stderr: '',
-      };
+      });
     }
 
     if (args[0] === 'pr' && args[1] === 'list') {
@@ -364,31 +381,31 @@ function installSequentialCliMocks(): void {
           headRefName: `shipper/${issue.number}`,
           baseRefName: 'main',
         }));
-      return {
+      return Promise.resolve({
         stdout: JSON.stringify(prs),
         stderr: '',
-      };
+      });
     }
 
     if (args[0] === 'pr' && args[1] === 'view') {
-      return {
+      return Promise.resolve({
         stdout: JSON.stringify({ mergeStateStatus: 'CLEAN' }),
         stderr: '',
-      };
+      });
     }
 
     if (args[0] === 'pr' && args[1] === 'merge') {
-      return {
+      return Promise.resolve({
         stdout: 'merged',
         stderr: '',
-      };
+      });
     }
 
     if (
       (args[0] === 'pr' && (args[1] === 'edit' || args[1] === 'comment')) ||
       (args[0] === 'issue' && (args[1] === 'edit' || args[1] === 'close'))
     ) {
-      return { stdout: '', stderr: '' };
+      return Promise.resolve({ stdout: '', stderr: '' });
     }
 
     throw new Error(`Unexpected gh call: ${args.join(' ')}`);
@@ -480,12 +497,14 @@ describe('selectNextCandidate', () => {
   });
 
   it('returns the issue from the highest-priority label', async () => {
-    mockSelectIssuesForStage.mockImplementation(async (_repo: string, label: string) => {
+    mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
       if (label === 'shipper:ready') return [];
       if (label === 'shipper:pr-reviewed') return [];
-      if (label === 'shipper:pr-open') return [{ number: 10, title: 'PR open issue' }];
-      if (label === 'shipper:groomed') return [{ number: 20, title: 'Groomed issue' }];
-      return [];
+      if (label === 'shipper:pr-open')
+        return Promise.resolve([{ number: 10, title: 'PR open issue' }]);
+      if (label === 'shipper:groomed')
+        return Promise.resolve([{ number: 20, title: 'Groomed issue' }]);
+      return Promise.resolve([]);
     });
 
     const result = await selectNextCandidate(repo, new Set());
@@ -493,13 +512,13 @@ describe('selectNextCandidate', () => {
   });
 
   it('skips issues in the skippedIssues set', async () => {
-    mockSelectIssuesForStage.mockImplementation(async (_repo: string, label: string) => {
+    mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
       if (label === 'shipper:pr-open')
-        return [
+        return Promise.resolve([
           { number: 10, title: 'Skipped issue' },
           { number: 11, title: 'Next issue' },
-        ];
-      return [];
+        ]);
+      return Promise.resolve([]);
     });
 
     const result = await selectNextCandidate(repo, new Set([10]));
@@ -514,9 +533,9 @@ describe('selectNextCandidate', () => {
   });
 
   it('returns null when all candidates are skipped', async () => {
-    mockSelectIssuesForStage.mockImplementation(async (_repo: string, label: string) => {
-      if (label === 'shipper:planned') return [{ number: 5, title: 'Only issue' }];
-      return [];
+    mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
+      if (label === 'shipper:planned') return Promise.resolve([{ number: 5, title: 'Only issue' }]);
+      return Promise.resolve([]);
     });
 
     const result = await selectNextCandidate(repo, new Set([5]));
@@ -524,13 +543,13 @@ describe('selectNextCandidate', () => {
   });
 
   it('returns the first issue within a label (already sorted by time-in-state)', async () => {
-    mockSelectIssuesForStage.mockImplementation(async (_repo: string, label: string) => {
+    mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
       if (label === 'shipper:groomed')
-        return [
+        return Promise.resolve([
           { number: 1, title: 'Oldest' },
           { number: 2, title: 'Newer' },
-        ];
-      return [];
+        ]);
+      return Promise.resolve([]);
     });
 
     const result = await selectNextCandidate(repo, new Set());
@@ -539,13 +558,13 @@ describe('selectNextCandidate', () => {
 
   it('clears stale lock on selected candidate', async () => {
     mockSelectIssuesForStage.mockImplementation(
-      async (_repo: string, label: string, staleLocked?: Set<number>) => {
+      (_repo: string, label: string, staleLocked?: Set<number>) => {
         if (label === 'shipper:planned') {
           const issues = [{ number: 7, title: 'Stale locked issue' }];
           staleLocked?.add(7);
-          return issues;
+          return Promise.resolve(issues);
         }
-        return [];
+        return Promise.resolve([]);
       }
     );
 
@@ -555,9 +574,10 @@ describe('selectNextCandidate', () => {
   });
 
   it('calls clearStaleLockIfNeeded with empty staleLocked set for non-stale candidate', async () => {
-    mockSelectIssuesForStage.mockImplementation(async (_repo: string, label: string) => {
-      if (label === 'shipper:planned') return [{ number: 7, title: 'Normal issue' }];
-      return [];
+    mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
+      if (label === 'shipper:planned')
+        return Promise.resolve([{ number: 7, title: 'Normal issue' }]);
+      return Promise.resolve([]);
     });
 
     const result = await selectNextCandidate(repo, new Set());
@@ -566,13 +586,13 @@ describe('selectNextCandidate', () => {
   });
 
   it('skips issues already active in parallel slots', async () => {
-    mockSelectIssuesForStage.mockImplementation(async (_repo: string, label: string) => {
+    mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
       if (label === 'shipper:planned')
-        return [
+        return Promise.resolve([
           { number: 7, title: 'Active issue' },
           { number: 8, title: 'Available issue' },
-        ];
-      return [];
+        ]);
+      return Promise.resolve([]);
     });
 
     const result = await selectNextCandidate(repo, new Set(), new Set([7]));
@@ -667,7 +687,7 @@ describe('printUnblockSummary', () => {
 
     printUnblockSummary(attempts);
 
-    const output = logSpy.mock.calls.map((c) => c[0]).join('\n');
+    const output = getLoggedOutput(logSpy);
     expect(output).toContain('Unblock attempts:');
     expect(output).toContain('12');
     expect(output).toContain('Fix database migration');
@@ -692,7 +712,7 @@ describe('printUnblockSummary', () => {
 
     printUnblockSummary(attempts);
 
-    const output = logSpy.mock.calls.map((c) => c[0]).join('\n');
+    const output = getLoggedOutput(logSpy);
     expect(output).toContain('This is a very long title that exceeds the...');
     expect(output).not.toContain('forty-five character limit');
 
@@ -780,17 +800,17 @@ describe('shipCommand single-issue path', () => {
     let index = 0;
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    mockGh.mockImplementation(async (args: string[]) => {
+    mockGh.mockImplementation((args: string[]) => {
       if (args[0] === 'issue' && args[1] === 'view') {
         const label = labels[index++];
-        return { stdout: label ? `${label}\n` : '', stderr: '' };
+        return Promise.resolve({ stdout: label ? `${label}\n` : '', stderr: '' });
       }
 
       if (args[0] === 'issue' && args[1] === 'edit') {
         throw new Error('gh edit failed');
       }
 
-      return { stdout: '', stderr: '' };
+      return Promise.resolve({ stdout: '', stderr: '' });
     });
 
     await shipCommand(repo, '42', { auto: false, merge: false });
@@ -821,15 +841,11 @@ describe('shipCommand single-issue path', () => {
     const cliEntrypoint = process.argv[1];
     expect(cliEntrypoint).toBeDefined();
     expect(mockSpawnSync).toHaveBeenCalledTimes(4);
-    expect(mockSpawnSync).toHaveBeenNthCalledWith(
-      1,
-      process.execPath,
-      [cliEntrypoint, 'next', '42'],
-      expect.objectContaining({
-        stdio: 'inherit',
-        env: expect.objectContaining({ SHIPPER_LOCK_HELD: '42' }),
-      })
-    );
+    const firstSpawnSyncCall = mockSpawnSync.mock.calls[0];
+    expect(firstSpawnSyncCall?.[0]).toBe(process.execPath);
+    expect(firstSpawnSyncCall?.[1]).toEqual([cliEntrypoint, 'next', '42']);
+    expect(firstSpawnSyncCall?.[2]?.stdio).toBe('inherit');
+    expect(firstSpawnSyncCall?.[2]?.env?.SHIPPER_LOCK_HELD).toBe('42');
     expect(mockGh).not.toHaveBeenCalledWith(
       expect.arrayContaining(['issue', 'edit', '42', '--add-label', 'shipper:failed'])
     );
@@ -893,14 +909,11 @@ describe('shipCommand single-issue path', () => {
 
     const cliEntrypoint = process.argv[1];
     expect(cliEntrypoint).toBeDefined();
-    expect(mockSpawnSync).toHaveBeenCalledWith(
-      process.execPath,
-      [cliEntrypoint, 'next', '42', '--model', 'sonnet'],
-      expect.objectContaining({
-        stdio: 'inherit',
-        env: expect.objectContaining({ SHIPPER_LOCK_HELD: '42' }),
-      })
-    );
+    const spawnSyncCall = mockSpawnSync.mock.calls[0];
+    expect(spawnSyncCall?.[0]).toBe(process.execPath);
+    expect(spawnSyncCall?.[1]).toEqual([cliEntrypoint, 'next', '42', '--model', 'sonnet']);
+    expect(spawnSyncCall?.[2]?.stdio).toBe('inherit');
+    expect(spawnSyncCall?.[2]?.env?.SHIPPER_LOCK_HELD).toBe('42');
     expect(exitSpy).toHaveBeenCalledWith(0);
   });
 
@@ -964,7 +977,7 @@ describe('shipCommand merge path', () => {
 
     await shipCommand(repo, '123', { merge: true, auto: false });
 
-    const stderrOutput = errorSpy.mock.calls.map((call) => call[0]).join('\n');
+    const stderrOutput = getLoggedOutput(errorSpy);
     expect(stderrOutput).toContain(
       'Merge failed for PR #456: Failed to rebase PR #456 onto its base branch: rebase conflict'
     );
@@ -983,7 +996,7 @@ describe('shipCommand merge path', () => {
 
     await shipCommand(repo, '123', { merge: true, auto: false });
 
-    const stderrOutput = errorSpy.mock.calls.map((call) => call[0]).join('\n');
+    const stderrOutput = getLoggedOutput(errorSpy);
     expect(stderrOutput).toContain(
       'Merge failed for PR #456: PR #456 has merge conflicts that must be resolved.'
     );
@@ -1037,7 +1050,7 @@ describe('shipCommand merge path', () => {
 
     await shipCommand(repo, '123', { merge: true, auto: false });
 
-    const stderrOutput = errorSpy.mock.calls.map((call) => call[0]).join('\n');
+    const stderrOutput = getLoggedOutput(errorSpy);
     expect(stderrOutput).toContain(expected);
     expect(mockFetchChecks).toHaveBeenCalledWith(repo, '456');
     expect(findGhCalls('pr', 'merge')).toHaveLength(0);
@@ -1052,7 +1065,7 @@ describe('shipCommand merge path', () => {
 
     await shipCommand(repo, '123', { merge: true, auto: false });
 
-    const stderrOutput = errorSpy.mock.calls.map((call) => call[0]).join('\n');
+    const stderrOutput = getLoggedOutput(errorSpy);
     expect(stderrOutput).toContain(
       'Merge failed for PR #456: GitHub has not computed merge state for PR #456 yet. Retry shortly.'
     );
@@ -1082,7 +1095,7 @@ describe('shipCommand merge path', () => {
 
     await shipCommand(repo, '123', { merge: true, auto: false });
 
-    const stderrOutput = errorSpy.mock.calls.map((call) => call[0]).join('\n');
+    const stderrOutput = getLoggedOutput(errorSpy);
     expect(stderrOutput).toContain(
       "Merge failed for PR #456: Unrecognized merge state 'MERGEABLE_LATER' for PR #456."
     );
@@ -1131,17 +1144,16 @@ describe('shipCommand sequential auto runner parking', () => {
     mockWithStageHooks.mockReset();
     mockWithStageHooks.mockImplementation(defaultWithStageHooks);
     mockWithIssueLock.mockReset();
-    mockWithIssueLock.mockImplementation(async (_repo: string, issue: string, fn) => {
-      lockState.lockedIssues.add(String(issue));
-      try {
-        return await fn();
-      } finally {
-        lockState.lockedIssues.delete(String(issue));
-      }
+    mockWithIssueLock.mockImplementation((_repo: string, issue: string, fn) => {
+      lockState.lockedIssues.add(issue);
+      return fn().finally(() => {
+        lockState.lockedIssues.delete(issue);
+      });
     });
     postMergeMock.mockClear();
-    postMergeMock.mockImplementation(async (_pr: unknown, issueNumber: number | string) => {
+    postMergeMock.mockImplementation((_pr: unknown, issueNumber: number | string) => {
       mockIssues.delete(Number(issueNumber));
+      return Promise.resolve();
     });
     exitSpy.mockClear();
     installSequentialCliMocks();
@@ -1178,11 +1190,11 @@ describe('shipCommand sequential auto runner parking', () => {
     });
 
     let timerReady = false;
-    mockBuildReadyCheck.mockImplementation(async (_repo: string, pr: string) => {
+    mockBuildReadyCheck.mockImplementation((_repo: string, pr: string) => {
       if (pr === '101') {
-        return async () => timerReady;
+        return Promise.resolve(() => Promise.resolve(timerReady));
       }
-      return async () => true;
+      return Promise.resolve(() => Promise.resolve(true));
     });
 
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -1195,28 +1207,20 @@ describe('shipCommand sequential auto runner parking', () => {
       '101',
       expect.objectContaining({ mode: 'timer', timeoutMinutes: 15 })
     );
-    expect(mockSpawnSync.mock.calls.some(([, args]) => (args as string[])[2] === '1')).toBe(false);
-    expect(mockSpawnSync.mock.calls.some(([, args]) => (args as string[])[2] === '2')).toBe(true);
+    expect(getSpawnSyncIssueOrder().includes('1')).toBe(false);
+    expect(getSpawnSyncIssueOrder().includes('2')).toBe(true);
 
     timerReady = true;
     await vi.advanceTimersByTimeAsync(20_000);
     await runPromise;
 
-    const resumedCall = mockSpawnSync.mock.calls.find(([, args]) => (args as string[])[2] === '1');
-    expect(resumedCall?.[2]).toMatchObject({
-      env: expect.objectContaining({
-        SHIPPER_LOCK_HELD: '1',
-        SHIPPER_SKIP_PR_REMEDIATE_WAIT: '1',
-      }),
-    });
-    const secondIssueCall = mockSpawnSync.mock.calls.find(
-      ([, args]) => (args as string[])[2] === '2'
-    );
-    expect(secondIssueCall?.[2]).toMatchObject({
-      env: expect.objectContaining({ SHIPPER_LOCK_HELD: '2' }),
-    });
+    const resumedCall = findSpawnSyncCall('1');
+    expect(resumedCall?.[2]?.env?.SHIPPER_LOCK_HELD).toBe('1');
+    expect(resumedCall?.[2]?.env?.SHIPPER_SKIP_PR_REMEDIATE_WAIT).toBe('1');
+    const secondIssueCall = findSpawnSyncCall('2');
+    expect(secondIssueCall?.[2]?.env?.SHIPPER_LOCK_HELD).toBe('2');
 
-    const output = logSpy.mock.calls.map((call) => call[0]).join('\n');
+    const output = getLoggedOutput(logSpy);
     expect(output).toContain('✓ pass');
     expect(output).not.toContain('park');
     expect(output).not.toContain('resume');
@@ -1249,11 +1253,11 @@ describe('shipCommand sequential auto runner parking', () => {
     ]);
 
     let checksReady = false;
-    mockBuildReadyCheck.mockImplementation(async (_repo: string, pr: string) => {
+    mockBuildReadyCheck.mockImplementation((_repo: string, pr: string) => {
       if (pr === '201') {
-        return async () => checksReady;
+        return Promise.resolve(() => Promise.resolve(checksReady));
       }
-      return async () => true;
+      return Promise.resolve(() => Promise.resolve(true));
     });
 
     const runPromise = shipCommand(repo, undefined, { auto: true, merge: false });
@@ -1264,14 +1268,14 @@ describe('shipCommand sequential auto runner parking', () => {
       '201',
       expect.objectContaining({ mode: 'checks', timeoutMinutes: 15 })
     );
-    expect(mockSpawnSync.mock.calls.some(([, args]) => (args as string[])[2] === '1')).toBe(false);
-    expect(mockSpawnSync.mock.calls.some(([, args]) => (args as string[])[2] === '2')).toBe(true);
+    expect(getSpawnSyncIssueOrder().includes('1')).toBe(false);
+    expect(getSpawnSyncIssueOrder().includes('2')).toBe(true);
 
     checksReady = true;
     await vi.advanceTimersByTimeAsync(20_000);
     await runPromise;
 
-    const issueOrder = mockSpawnSync.mock.calls.map(([, args]) => (args as string[])[2]);
+    const issueOrder = getSpawnSyncIssueOrder();
     expect(issueOrder.indexOf('2')).toBeLessThan(issueOrder.lastIndexOf('1'));
     expect(exitSpy).toHaveBeenCalledWith(0);
   });
@@ -1296,14 +1300,14 @@ describe('shipCommand sequential auto runner parking', () => {
 
     let firstReady = false;
     let secondReady = false;
-    mockBuildReadyCheck.mockImplementation(async (_repo: string, pr: string) => {
+    mockBuildReadyCheck.mockImplementation((_repo: string, pr: string) => {
       if (pr === '301') {
-        return async () => firstReady;
+        return Promise.resolve(() => Promise.resolve(firstReady));
       }
       if (pr === '302') {
-        return async () => secondReady;
+        return Promise.resolve(() => Promise.resolve(secondReady));
       }
-      return async () => true;
+      return Promise.resolve(() => Promise.resolve(true));
     });
 
     const runPromise = shipCommand(repo, undefined, { auto: true, merge: false });
@@ -1314,13 +1318,13 @@ describe('shipCommand sequential auto runner parking', () => {
     secondReady = true;
     await vi.advanceTimersByTimeAsync(20_000);
     await flushMicrotasks();
-    expect(mockSpawnSync.mock.calls.map(([, args]) => (args as string[])[2])).toEqual(['2']);
+    expect(getSpawnSyncIssueOrder()).toEqual(['2']);
 
     firstReady = true;
     await vi.advanceTimersByTimeAsync(20_000);
     await runPromise;
 
-    expect(mockSpawnSync.mock.calls.map(([, args]) => (args as string[])[2])).toEqual(['2', '1']);
+    expect(getSpawnSyncIssueOrder()).toEqual(['2', '1']);
     expect(exitSpy).toHaveBeenCalledWith(0);
   });
 
@@ -1354,25 +1358,25 @@ describe('shipCommand sequential auto runner parking', () => {
     ]);
 
     let parkedReady = false;
-    mockBuildReadyCheck.mockImplementation(async (_repo: string, pr: string) => {
+    mockBuildReadyCheck.mockImplementation((_repo: string, pr: string) => {
       if (pr === '401') {
-        return async () => parkedReady;
+        return Promise.resolve(() => Promise.resolve(parkedReady));
       }
-      return async () => true;
+      return Promise.resolve(() => Promise.resolve(true));
     });
 
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const runPromise = shipCommand(repo, undefined, { auto: true, merge: false });
 
     await flushMicrotasks();
-    expect(mockSpawnSync.mock.calls.some(([, args]) => (args as string[])[2] === '1')).toBe(false);
-    expect(mockSpawnSync.mock.calls.some(([, args]) => (args as string[])[2] === '2')).toBe(true);
+    expect(getSpawnSyncIssueOrder().includes('1')).toBe(false);
+    expect(getSpawnSyncIssueOrder().includes('2')).toBe(true);
 
     parkedReady = true;
     await vi.advanceTimersByTimeAsync(20_000);
     await runPromise;
 
-    const output = logSpy.mock.calls.map((call) => call[0]).join('\n');
+    const output = getLoggedOutput(logSpy);
     expect(output).toContain('Auto: attempting unblock of #3');
     expect(output).toContain('✓ pass');
     expect(exitSpy).toHaveBeenCalledWith(0);
@@ -1491,12 +1495,12 @@ describe('shipCommand auto merge-failure retry handling', () => {
 
   it('does not blacklist a retriable merge failure in sequential auto mode', async () => {
     let readySelections = 0;
-    mockSelectIssuesForStage.mockImplementation(async (_repo: string, label: string) => {
+    mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
       if (label === 'shipper:ready' && readySelections < 2) {
         readySelections++;
-        return [{ number: 123, title: 'Retry merge issue' }];
+        return Promise.resolve([{ number: 123, title: 'Retry merge issue' }]);
       }
-      return [];
+      return Promise.resolve([]);
     });
     setupReadyMergeFlow({ mergeStates: ['DIRTY'] });
 
@@ -1508,17 +1512,17 @@ describe('shipCommand auto merge-failure retry handling', () => {
 
   it('blacklists a non-merge hook failure in sequential auto mode', async () => {
     let readySelections = 0;
-    mockSelectIssuesForStage.mockImplementation(async (_repo: string, label: string) => {
+    mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
       if (label === 'shipper:ready' && readySelections < 2) {
         readySelections++;
-        return [{ number: 123, title: 'Hook failure issue' }];
+        return Promise.resolve([{ number: 123, title: 'Hook failure issue' }]);
       }
-      return [];
+      return Promise.resolve([]);
     });
     setupReadyMergeFlow({ mergeStates: ['CLEAN'] });
-    mockWithStageHooks.mockImplementation(async () => {
-      throw new Error('pre-merge hook exited with code 1');
-    });
+    mockWithStageHooks.mockImplementation(() =>
+      Promise.reject(new Error('pre-merge hook exited with code 1'))
+    );
 
     await shipCommand(repo, undefined, { auto: true, merge: false, parallel: 1 });
 
@@ -1680,18 +1684,18 @@ describe('shipCommand parallel auto runner', () => {
     let readyReturned = false;
     let blockedReturned = false;
 
-    mockSelectIssuesForStage.mockImplementation(async (_repo: string, label: string) => {
+    mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
       if (label === 'shipper:ready' && !readyReturned) {
         readyReturned = true;
-        return [];
+        return Promise.resolve([]);
       }
-      return [];
+      return Promise.resolve([]);
     });
 
-    mockGh.mockImplementation(async (args: string[]) => {
+    mockGh.mockImplementation((args: string[]) => {
       if (args[0] === 'issue' && args[1] === 'list' && !blockedReturned) {
         blockedReturned = true;
-        return {
+        return Promise.resolve({
           stdout: JSON.stringify([
             {
               number: 7,
@@ -1700,18 +1704,18 @@ describe('shipCommand parallel auto runner', () => {
             },
           ]),
           stderr: '',
-        };
+        });
       }
 
       if (args[0] === 'issue' && args[1] === 'list') {
-        return { stdout: '[]', stderr: '' };
+        return Promise.resolve({ stdout: '[]', stderr: '' });
       }
 
       if (args[0] === 'issue' && args[1] === 'view') {
-        return { stdout: 'shipper:planned\n', stderr: '' };
+        return Promise.resolve({ stdout: 'shipper:planned\n', stderr: '' });
       }
 
-      return { stdout: '[]', stderr: '' };
+      return Promise.resolve({ stdout: '[]', stderr: '' });
     });
 
     await shipCommand(repo, undefined, {
@@ -1743,9 +1747,9 @@ describe('shipCommand parallel auto runner', () => {
       if (label === 'shipper:planned') return plannedIssues;
       return [];
     });
-    mockGh.mockImplementation(async (args: string[]) => {
+    mockGh.mockImplementation((args: string[]) => {
       if (args.includes('list')) {
-        return {
+        return Promise.resolve({
           stdout: JSON.stringify([
             {
               number: 7,
@@ -1754,14 +1758,14 @@ describe('shipCommand parallel auto runner', () => {
             },
           ]),
           stderr: '',
-        };
+        });
       }
 
       if (args.includes('view')) {
-        return { stdout: 'shipper:planned\nshipper:blocked', stderr: '' };
+        return Promise.resolve({ stdout: 'shipper:planned\nshipper:blocked', stderr: '' });
       }
 
-      return { stdout: '[]', stderr: '' };
+      return Promise.resolve({ stdout: '[]', stderr: '' });
     });
 
     const child1 = new FakeChildProcess();
@@ -1796,7 +1800,7 @@ describe('shipCommand parallel auto runner', () => {
     child2.finish(1);
     await runPromise;
 
-    const output = logSpy.mock.calls.map((call) => call[0]).join('\n');
+    const output = getLoggedOutput(logSpy);
 
     expect(output).toContain('[#1] Auto: advancing issue #1 — Issue one');
     expect(output).toContain('[#2] Auto: advancing issue #2 — Issue two');
@@ -1909,7 +1913,7 @@ describe('shipCommand parallel auto runner', () => {
     expect(mockCreateWriteStream).not.toHaveBeenCalled();
     expect(mockMkdirSync).not.toHaveBeenCalled();
     expect(mockSelectIssuesForStage).toHaveBeenCalled();
-    expect(logSpy.mock.calls.map((call) => call[0]).join('\n')).not.toContain('[#');
+    expect(getLoggedOutput(logSpy)).not.toContain('[#');
     expect(exitSpy).toHaveBeenCalledWith(0);
 
     logSpy.mockRestore();
@@ -1926,7 +1930,7 @@ describe('shipCommand parallel auto runner', () => {
     expect(mockCreateWriteStream).not.toHaveBeenCalled();
     expect(mockMkdirSync).not.toHaveBeenCalled();
     expect(mockSelectIssuesForStage).toHaveBeenCalled();
-    expect(logSpy.mock.calls.map((call) => call[0]).join('\n')).not.toContain('[#');
+    expect(getLoggedOutput(logSpy)).not.toContain('[#');
     expect(exitSpy).toHaveBeenCalledWith(0);
 
     logSpy.mockRestore();
@@ -1966,7 +1970,7 @@ describe('shipCommand parallel auto runner', () => {
     child.finish(null, 'SIGTERM');
     await runPromise;
 
-    const output = logSpy.mock.calls.map((call) => call[0]).join('\n');
+    const output = getLoggedOutput(logSpy);
     expect(output).toContain('✗ fail — failed to write log file');
     expect(output).toContain('disk full');
     expect(exitSpy).toHaveBeenCalledWith(0);

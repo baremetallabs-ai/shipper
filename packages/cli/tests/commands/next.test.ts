@@ -23,9 +23,9 @@ vi.mock('@dnsquared/shipper-core', () => ({
   PR_OPEN_LABEL: 'shipper:pr-open',
   PR_REVIEWED_LABEL: 'shipper:pr-reviewed',
   READY_LABEL: 'shipper:ready',
-  withIssueLock: vi.fn(
-    async (_repo: string, _issue: string, fn: () => Promise<void>) => await fn()
-  ),
+  withIssueLock: vi.fn(async (_repo: string, _issue: string, fn: () => Promise<void>) => {
+    await fn();
+  }),
 }));
 
 vi.mock('../../src/commands/groom.js', () => ({
@@ -82,7 +82,9 @@ describe('nextCommand', () => {
     mockTryResolvePrForIssue.mockResolvedValue('200');
     mockGh.mockResolvedValue({ stdout: '', stderr: '' });
     mockWithIssueLock.mockImplementation(
-      async (_repo: string, _issue: string, fn: () => Promise<void>) => await fn()
+      async (_repo: string, _issue: string, fn: () => Promise<void>) => {
+        await fn();
+      }
     );
     exitSpy = vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
       throw new Error(`exit:${code}`);

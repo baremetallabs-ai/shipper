@@ -201,7 +201,9 @@ You are helping a developer turn a rough idea into a lightweight GitHub issue.`;
       if (settingsArg === undefined) {
         throw new Error(`${promptPath} is missing the settings payload`);
       }
-      expect(() => JSON.parse(settingsArg)).not.toThrow();
+      expect(() => {
+        JSON.parse(settingsArg);
+      }).not.toThrow();
     }
   });
 

@@ -2,21 +2,24 @@ import { EventEmitter } from 'node:events';
 import path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const spawnMock = vi.fn();
-const statMock = vi.fn();
-const accessMock = vi.fn();
+type ChildProcessModule = typeof import('node:child_process');
+type FsPromisesModule = typeof import('node:fs/promises');
+
+const spawnMock = vi.fn<ChildProcessModule['spawn']>();
+const statMock = vi.fn<FsPromisesModule['stat']>();
+const accessMock = vi.fn<FsPromisesModule['access']>();
 
 vi.mock('node:child_process', async () => {
-  const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
-  return { ...actual, spawn: (...args: unknown[]) => spawnMock(...args) };
+  const actual = await vi.importActual<ChildProcessModule>('node:child_process');
+  return { ...actual, spawn: spawnMock };
 });
 
 vi.mock('node:fs/promises', async () => {
-  const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+  const actual = await vi.importActual<FsPromisesModule>('node:fs/promises');
   return {
     ...actual,
-    stat: (...args: unknown[]) => statMock(...args),
-    access: (...args: unknown[]) => accessMock(...args),
+    stat: statMock,
+    access: accessMock,
   };
 });
 
@@ -64,12 +67,22 @@ describe('runAdvisoryHook', () => {
 
     await runAdvisoryHook('Test', 'echo hello', { FOO: 'bar' }, '/tmp/worktree');
 
-    expect(spawnMock).toHaveBeenCalledWith('echo hello', [], {
-      stdio: ['inherit', 'inherit', 'pipe'],
-      env: expect.objectContaining({ FOO: 'bar' }),
-      cwd: '/tmp/worktree',
-      shell: true,
-    });
+    const spawnCall = spawnMock.mock.calls[0];
+    expect(spawnCall).toBeDefined();
+    if (spawnCall === undefined) {
+      throw new Error('expected spawn to be called');
+    }
+
+    expect(spawnCall[0]).toBe('echo hello');
+    expect(spawnCall[1]).toEqual([]);
+    expect(spawnCall[2]).toEqual(
+      expect.objectContaining({
+        stdio: ['inherit', 'inherit', 'pipe'],
+        cwd: '/tmp/worktree',
+        shell: true,
+      })
+    );
+    expect(spawnCall[2].env).toEqual(expect.objectContaining({ FOO: 'bar' }));
     expect(logMock).toHaveBeenCalledWith('  Test hook completed.');
   });
 
@@ -171,9 +184,9 @@ describe('withStageHooks', () => {
       const child = new EventEmitter() as EventEmitter & { stderr: EventEmitter };
       child.stderr = new EventEmitter();
       globalThis.queueMicrotask(() => {
-        if (String(command).includes('pre-groom')) {
+        if (command.includes('pre-groom')) {
           callOrder.push('pre');
-        } else if (String(command).includes('post-groom')) {
+        } else if (command.includes('post-groom')) {
           callOrder.push('post');
         }
         child.emit('close', 0);
@@ -181,7 +194,7 @@ describe('withStageHooks', () => {
       return child;
     });
 
-    const result = await withStageHooks('groom', { issueNumber: '10' }, async () => {
+    const result = await withStageHooks('groom', { issueNumber: '10' }, () => {
       callOrder.push('fn');
       return 42;
     });
@@ -197,19 +210,22 @@ describe('withStageHooks', () => {
     await withStageHooks(
       'implement',
       { issueNumber: '42', branchName: 'shipper/42-feature' },
-      async () => 0
+      () => 0
     );
 
-    expect(spawnMock).toHaveBeenNthCalledWith(
-      1,
-      expect.stringContaining('pre-implement'),
-      [],
+    const spawnCall = spawnMock.mock.calls[0];
+    expect(spawnCall).toBeDefined();
+    if (spawnCall === undefined) {
+      throw new Error('expected spawn to be called');
+    }
+
+    expect(spawnCall[0]).toContain('pre-implement');
+    expect(spawnCall[1]).toEqual([]);
+    expect(spawnCall[2].env).toEqual(
       expect.objectContaining({
-        env: expect.objectContaining({
-          SHIPPER_STAGE: 'implement',
-          SHIPPER_ISSUE_NUMBER: '42',
-          SHIPPER_BRANCH_NAME: 'shipper/42-feature',
-        }),
+        SHIPPER_STAGE: 'implement',
+        SHIPPER_ISSUE_NUMBER: '42',
+        SHIPPER_BRANCH_NAME: 'shipper/42-feature',
       })
     );
   });

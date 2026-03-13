@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+type GhModule = typeof import('../../src/lib/gh.js');
+
 const { mockGh } = vi.hoisted(() => ({
-  mockGh: vi.fn(),
+  mockGh: vi.fn<GhModule['gh']>(),
 }));
 
 vi.mock('../../src/lib/gh.js', () => ({
-  gh: (...args: unknown[]) => mockGh(...args),
+  gh: mockGh,
 }));
 
 const { checkLabels } = await import('../../src/lib/prerequisites.js');

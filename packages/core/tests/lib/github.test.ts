@@ -1,15 +1,23 @@
 import { promisify } from 'node:util';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 
-const execFileMock = vi.fn();
-const execFile = Object.assign((...args: unknown[]) => execFileMock(...args), {
+type ChildProcessModule = typeof import('node:child_process');
+type LockModule = typeof import('../../src/lib/lock.js');
+
+const execFileMock = vi.fn<ChildProcessModule['execFile']>();
+
+function normalizeError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+const execFile = Object.assign(execFileMock, {
   [promisify.custom]: (...args: unknown[]) =>
     new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
       execFileMock(
         ...args,
         (err: unknown, stdout: string | Buffer = '', stderr: string | Buffer = '') => {
           if (err) {
-            reject(err);
+            reject(normalizeError(err));
             return;
           }
           resolve({ stdout: String(stdout), stderr: String(stderr) });
@@ -18,8 +26,8 @@ const execFile = Object.assign((...args: unknown[]) => execFileMock(...args), {
     }),
 });
 
-vi.mock('node:child_process', async (importOriginal) => {
-  const actual = (await importOriginal()) as Record<string, unknown>;
+vi.mock('node:child_process', async () => {
+  const actual = await vi.importActual<ChildProcessModule>('node:child_process');
   return {
     ...actual,
     execFile,
@@ -27,8 +35,8 @@ vi.mock('node:child_process', async (importOriginal) => {
 });
 
 vi.mock('../../src/lib/lock.js', () => ({
-  isLockStale: vi.fn(async () => false),
-  releaseIssueLock: vi.fn(async () => {}),
+  isLockStale: vi.fn<LockModule['isLockStale']>(() => Promise.resolve(false)),
+  releaseIssueLock: vi.fn<LockModule['releaseIssueLock']>(() => Promise.resolve()),
 }));
 
 function queueExecFileResult(stdout: string): void {

@@ -2,46 +2,54 @@ import { EventEmitter } from 'node:events';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const spawnMock = vi.fn();
-const readFileMock = vi.fn();
-const statSyncMock = vi.fn();
-const readFileSyncMock = vi.fn();
-const fetchIssueMock = vi.fn();
-const fetchPRMock = vi.fn();
-const resolveAgentMock = vi.fn().mockReturnValue('claude');
-const resolveModelMock = vi.fn().mockReturnValue(undefined);
-const resolveModeMock = vi.fn().mockReturnValue('default');
-const getSettingsMock = vi.fn().mockReturnValue({ agentTimeoutMinutes: 60 });
+type ChildProcessModule = typeof import('node:child_process');
+type FsPromisesModule = typeof import('node:fs/promises');
+type FsModule = typeof import('node:fs');
+type GithubModule = typeof import('../../src/lib/github.js');
+type SettingsModule = typeof import('../../src/lib/settings.js');
+
+const spawnMock = vi.fn<ChildProcessModule['spawn']>();
+const readFileMock = vi.fn<FsPromisesModule['readFile']>();
+const statSyncMock = vi.fn<FsModule['statSync']>();
+const readFileSyncMock = vi.fn<FsModule['readFileSync']>();
+const fetchIssueMock = vi.fn<GithubModule['fetchIssue']>();
+const fetchPRMock = vi.fn<GithubModule['fetchPR']>();
+const resolveAgentMock = vi.fn<SettingsModule['resolveAgent']>().mockReturnValue('claude');
+const resolveModelMock = vi.fn<SettingsModule['resolveModel']>().mockReturnValue(undefined);
+const resolveModeMock = vi.fn<SettingsModule['resolveMode']>().mockReturnValue('default');
+const getSettingsMock = vi
+  .fn<SettingsModule['getSettings']>()
+  .mockReturnValue({ agentTimeoutMinutes: 60 });
 
 vi.mock('node:child_process', async () => {
-  const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
-  return { ...actual, spawn: (...args: unknown[]) => spawnMock(...args) };
+  const actual = await vi.importActual<ChildProcessModule>('node:child_process');
+  return { ...actual, spawn: spawnMock };
 });
 
 vi.mock('node:fs/promises', async () => {
-  const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
-  return { ...actual, readFile: (...args: unknown[]) => readFileMock(...args) };
+  const actual = await vi.importActual<FsPromisesModule>('node:fs/promises');
+  return { ...actual, readFile: readFileMock };
 });
 
 vi.mock('node:fs', async () => {
-  const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+  const actual = await vi.importActual<FsModule>('node:fs');
   return {
     ...actual,
-    statSync: (...args: unknown[]) => statSyncMock(...args),
-    readFileSync: (...args: unknown[]) => readFileSyncMock(...args),
+    statSync: statSyncMock,
+    readFileSync: readFileSyncMock,
   };
 });
 
 vi.mock('../../src/lib/github.js', () => ({
-  fetchIssue: (...args: unknown[]) => fetchIssueMock(...args),
-  fetchPR: (...args: unknown[]) => fetchPRMock(...args),
+  fetchIssue: fetchIssueMock,
+  fetchPR: fetchPRMock,
 }));
 
 vi.mock('../../src/lib/settings.js', () => ({
-  resolveAgent: (...args: unknown[]) => resolveAgentMock(...args),
-  resolveModel: (...args: unknown[]) => resolveModelMock(...args),
-  resolveMode: (...args: unknown[]) => resolveModeMock(...args),
-  getSettings: () => getSettingsMock(),
+  resolveAgent: resolveAgentMock,
+  resolveModel: resolveModelMock,
+  resolveMode: resolveModeMock,
+  getSettings: getSettingsMock,
 }));
 vi.mock('../../src/lib/prompts.js', () => ({
   agentPrompts: {

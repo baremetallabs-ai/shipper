@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import path from 'node:path';
 
-const readFileMock = vi.fn();
+type FsPromisesModule = typeof import('node:fs/promises');
+
+const readFileMock = vi.fn<FsPromisesModule['readFile']>();
 vi.mock('node:fs/promises', async () => {
-  const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
-  return { ...actual, readFile: (...args: unknown[]) => readFileMock(...args) };
+  const actual = await vi.importActual<FsPromisesModule>('node:fs/promises');
+  return { ...actual, readFile: readFileMock };
 });
 
 const warnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -20,6 +22,20 @@ function enoent(filepath: string): Error {
   return err;
 }
 
+function mockReadFile(handler: (filepath: string) => string): void {
+  readFileMock.mockImplementation((filepath) => {
+    if (typeof filepath !== 'string') {
+      return Promise.reject(new Error(`Unexpected filepath type: ${typeof filepath}`));
+    }
+
+    try {
+      return Promise.resolve(handler(filepath));
+    } catch (error) {
+      return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+    }
+  });
+}
+
 async function loadModule() {
   return await import('../../src/lib/settings.js');
 }
@@ -32,7 +48,7 @@ beforeEach(() => {
 
 describe('loadSettings', () => {
   it('returns commands-based defaults when no files exist', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
+    mockReadFile((p) => {
       throw enoent(p);
     });
 
@@ -50,7 +66,7 @@ describe('loadSettings', () => {
   });
 
   it('migrates legacy agents and headless into commands', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
+    mockReadFile((p) => {
       if (p === settingsPath) {
         return JSON.stringify({
           agents: { default: 'claude', groom: 'codex' },
@@ -71,7 +87,7 @@ describe('loadSettings', () => {
   });
 
   it('preserves the default agent when migrating headless-only default settings', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
+    mockReadFile((p) => {
       if (p === settingsPath) {
         return JSON.stringify({
           headless: { default: true, new: true },
@@ -90,7 +106,7 @@ describe('loadSettings', () => {
   });
 
   it('deep-merges commands from base and local settings', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
+    mockReadFile((p) => {
       if (p === settingsPath) {
         return JSON.stringify({
           commands: {
@@ -120,7 +136,7 @@ describe('loadSettings', () => {
   });
 
   it('loads worktreeEnv values exactly as configured', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
+    mockReadFile((p) => {
       if (p === settingsPath) {
         return JSON.stringify({
           worktreeEnv: {
@@ -140,7 +156,7 @@ describe('loadSettings', () => {
   });
 
   it('replaces worktreeEnv from local settings instead of deep-merging it', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
+    mockReadFile((p) => {
       if (p === settingsPath) {
         return JSON.stringify({
           worktreeEnv: {
@@ -167,7 +183,7 @@ describe('loadSettings', () => {
   });
 
   it('warns on unknown settings.commands keys', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
+    mockReadFile((p) => {
       if (p === settingsPath) {
         return JSON.stringify({
           commands: {
@@ -188,7 +204,7 @@ describe('loadSettings', () => {
   });
 
   it('throws on a non-string model value', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
+    mockReadFile((p) => {
       if (p === settingsPath) {
         return JSON.stringify({
           commands: {
@@ -207,7 +223,7 @@ describe('loadSettings', () => {
   });
 
   it('ignores unsafe command keys while loading settings', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
+    mockReadFile((p) => {
       if (p === settingsPath) {
         return JSON.stringify({
           commands: {
@@ -231,7 +247,7 @@ describe('loadSettings', () => {
   });
 
   it('throws on malformed JSON', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
+    mockReadFile((p) => {
       if (p === settingsPath) return '{bad json';
       throw enoent(p);
     });
@@ -241,7 +257,7 @@ describe('loadSettings', () => {
   });
 
   it('throws on malformed local JSON', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
+    mockReadFile((p) => {
       if (p === settingsPath) return '{"prReviewWait": {"mode": "checks", "timeoutMinutes": 20}}';
       if (p === localPath) return 'not json';
       throw enoent(p);
@@ -267,7 +283,7 @@ describe('getSettings', () => {
 
 describe('prReviewWait migration', () => {
   it('auto-migrates legacy prReviewWaitMinutes to prReviewWait timer mode', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
+    mockReadFile((p) => {
       if (p === settingsPath) return '{"prReviewWaitMinutes": 10}';
       throw enoent(p);
     });
@@ -278,7 +294,7 @@ describe('prReviewWait migration', () => {
   });
 
   it('uses prReviewWait directly when present', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
+    mockReadFile((p) => {
       if (p === settingsPath) return '{"prReviewWait": {"mode": "checks", "timeoutMinutes": 20}}';
       throw enoent(p);
     });
@@ -288,7 +304,7 @@ describe('prReviewWait migration', () => {
   });
 
   it('does not overwrite explicit prReviewWait with legacy migration', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
+    mockReadFile((p) => {
       if (p === settingsPath)
         return '{"prReviewWaitMinutes": 10, "prReviewWait": {"mode": "checks", "timeoutMinutes": 25}}';
       throw enoent(p);
@@ -301,7 +317,7 @@ describe('prReviewWait migration', () => {
 
 describe('lockTimeoutMinutes', () => {
   it('defaults to 30', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
+    mockReadFile((p) => {
       throw enoent(p);
     });
     const { loadSettings, getSettings } = await loadModule();
@@ -310,7 +326,7 @@ describe('lockTimeoutMinutes', () => {
   });
 
   it('can be overridden via settings file', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
+    mockReadFile((p) => {
       if (p === settingsPath) return '{"lockTimeoutMinutes": 60}';
       throw enoent(p);
     });
@@ -320,7 +336,7 @@ describe('lockTimeoutMinutes', () => {
   });
 
   it('can be overridden via local settings file', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
+    mockReadFile((p) => {
       if (p === settingsPath) return '{"lockTimeoutMinutes": 60}';
       if (p === localPath) return '{"lockTimeoutMinutes": 5}';
       throw enoent(p);
@@ -333,7 +349,7 @@ describe('lockTimeoutMinutes', () => {
 
 describe('agentTimeoutMinutes', () => {
   it('defaults to 60', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
+    mockReadFile((p) => {
       throw enoent(p);
     });
     const { loadSettings, getSettings } = await loadModule();
@@ -342,7 +358,7 @@ describe('agentTimeoutMinutes', () => {
   });
 
   it('can be overridden via settings file', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
+    mockReadFile((p) => {
       if (p === settingsPath) return '{"agentTimeoutMinutes": 120}';
       throw enoent(p);
     });
@@ -352,7 +368,7 @@ describe('agentTimeoutMinutes', () => {
   });
 
   it('can be set to 0 to disable', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
+    mockReadFile((p) => {
       if (p === settingsPath) return '{"agentTimeoutMinutes": 0}';
       throw enoent(p);
     });
@@ -364,7 +380,7 @@ describe('agentTimeoutMinutes', () => {
 
 describe('hooks settings', () => {
   it('loads hooks from settings', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
+    mockReadFile((p) => {
       if (p === settingsPath) return '{"hooks": {"worktreeSetup": "echo done"}}';
       throw enoent(p);
     });
@@ -374,7 +390,7 @@ describe('hooks settings', () => {
   });
 
   it('local hooks override base hooks', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
+    mockReadFile((p) => {
       if (p === settingsPath) return '{"hooks": {"worktreeSetup": "echo base"}}';
       if (p === localPath) return '{"hooks": {"worktreeSetup": "echo local"}}';
       throw enoent(p);
@@ -387,7 +403,7 @@ describe('hooks settings', () => {
 
 describe('resolveAgent', () => {
   it('returns the per-step agent override when configured', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
+    mockReadFile((p) => {
       if (p === settingsPath) {
         return JSON.stringify({
           commands: {
@@ -407,7 +423,7 @@ describe('resolveAgent', () => {
   });
 
   it('throws on an invalid command agent', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
+    mockReadFile((p) => {
       if (p === settingsPath) {
         return JSON.stringify({
           commands: {
@@ -425,7 +441,7 @@ describe('resolveAgent', () => {
   });
 
   it('returns the override when provided', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
+    mockReadFile((p) => {
       if (p === settingsPath) {
         return JSON.stringify({
           commands: { default: { agent: 'claude' } },
@@ -442,7 +458,7 @@ describe('resolveAgent', () => {
   });
 
   it('preserves invalid legacy default agents for later validation', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
+    mockReadFile((p) => {
       if (p === settingsPath) {
         return JSON.stringify({
           agents: { default: 'vim' },
@@ -460,7 +476,7 @@ describe('resolveAgent', () => {
 
 describe('resolveMode', () => {
   it('uses the CLI override unless it is default', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
+    mockReadFile((p) => {
       if (p === settingsPath) {
         return JSON.stringify({
           commands: {
@@ -482,7 +498,7 @@ describe('resolveMode', () => {
   });
 
   it('throws on an invalid command mode', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
+    mockReadFile((p) => {
       if (p === settingsPath) {
         return JSON.stringify({
           commands: {
@@ -503,7 +519,7 @@ describe('resolveMode', () => {
 
 describe('resolveModel', () => {
   it('returns undefined when no model is set anywhere', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
+    mockReadFile((p) => {
       if (p === settingsPath) {
         return JSON.stringify({
           commands: {
@@ -521,7 +537,7 @@ describe('resolveModel', () => {
   });
 
   it('returns the per-step model when configured', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
+    mockReadFile((p) => {
       if (p === settingsPath) {
         return JSON.stringify({
           commands: {
@@ -540,7 +556,7 @@ describe('resolveModel', () => {
   });
 
   it('inherits the default model when the step does not set one', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
+    mockReadFile((p) => {
       if (p === settingsPath) {
         return JSON.stringify({
           commands: {
@@ -559,7 +575,7 @@ describe('resolveModel', () => {
   });
 
   it('returns the CLI override when provided', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
+    mockReadFile((p) => {
       if (p === settingsPath) {
         return JSON.stringify({
           commands: {
@@ -581,7 +597,7 @@ describe('resolveModel', () => {
 
 describe('merge settings', () => {
   it('defaults requirePassingChecks to true', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
+    mockReadFile((p) => {
       throw enoent(p);
     });
     const { loadSettings, getSettings } = await loadModule();
@@ -590,7 +606,7 @@ describe('merge settings', () => {
   });
 
   it('can be overridden to false', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
+    mockReadFile((p) => {
       if (p === settingsPath) return '{"merge": {"requirePassingChecks": false}}';
       throw enoent(p);
     });
@@ -600,7 +616,7 @@ describe('merge settings', () => {
   });
 
   it('local overrides base merge settings', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
+    mockReadFile((p) => {
       if (p === settingsPath) return '{"merge": {"requirePassingChecks": true}}';
       if (p === localPath) return '{"merge": {"requirePassingChecks": false}}';
       throw enoent(p);

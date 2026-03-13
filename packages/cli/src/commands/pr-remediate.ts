@@ -27,6 +27,7 @@ async function waitForChecks(repo: string, pr: string, timeoutMinutes: number): 
   const deadline = Date.now() + timeoutMinutes * 60_000;
   let previousCompleted = -1;
   let interrupted = false;
+  let proceedWithoutChecks = false;
   const isInterrupted = () => interrupted;
 
   const sigHandler = () => {
@@ -47,13 +48,12 @@ async function waitForChecks(repo: string, pr: string, timeoutMinutes: number): 
         break;
       }
       if (checks === null || checks.length === 0) {
-        console.log('No CI checks found. Proceeding.');
-        return;
+        proceedWithoutChecks = true;
       }
     }
 
     // Main poll loop
-    for (;;) {
+    for (; !proceedWithoutChecks; ) {
       if (isInterrupted()) {
         break;
       }
@@ -86,6 +86,10 @@ async function waitForChecks(repo: string, pr: string, timeoutMinutes: number): 
 
   if (isInterrupted()) {
     throw new PollingInterruptedError();
+  }
+
+  if (proceedWithoutChecks) {
+    console.log('No CI checks found. Proceeding.');
   }
 }
 

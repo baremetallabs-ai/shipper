@@ -2,29 +2,34 @@ import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const execFileMock = vi.fn();
-const spawnMock = vi.fn();
-const accessMock = vi.fn();
-const mkdirMock = vi.fn();
-const runAdvisoryHookMock = vi.fn();
-const runWorktreeHookMock = vi.fn();
-const getSettingsMock = vi.fn();
+type ChildProcessModule = typeof import('node:child_process');
+type FsPromisesModule = typeof import('node:fs/promises');
+type HooksModule = typeof import('../../src/lib/hooks.js');
+type SettingsModule = typeof import('../../src/lib/settings.js');
+
+const execFileMock = vi.fn<ChildProcessModule['execFile']>();
+const spawnMock = vi.fn<ChildProcessModule['spawn']>();
+const accessMock = vi.fn<FsPromisesModule['access']>();
+const mkdirMock = vi.fn<FsPromisesModule['mkdir']>();
+const runAdvisoryHookMock = vi.fn<HooksModule['runAdvisoryHook']>();
+const runWorktreeHookMock = vi.fn<HooksModule['runWorktreeHook']>();
+const getSettingsMock = vi.fn<SettingsModule['getSettings']>();
 
 vi.mock('node:child_process', async () => {
-  const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+  const actual = await vi.importActual<ChildProcessModule>('node:child_process');
   return {
     ...actual,
-    execFile: (...args: unknown[]) => execFileMock(...args),
-    spawn: (...args: unknown[]) => spawnMock(...args),
+    execFile: execFileMock,
+    spawn: spawnMock,
   };
 });
 
 vi.mock('node:fs/promises', async () => {
-  const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+  const actual = await vi.importActual<FsPromisesModule>('node:fs/promises');
   return {
     ...actual,
-    access: (...args: unknown[]) => accessMock(...args),
-    mkdir: (...args: unknown[]) => mkdirMock(...args),
+    access: accessMock,
+    mkdir: mkdirMock,
   };
 });
 
@@ -34,12 +39,12 @@ vi.mock('node:os', async () => {
 });
 
 vi.mock('../../src/lib/hooks.js', () => ({
-  runAdvisoryHook: (...args: unknown[]) => runAdvisoryHookMock(...args),
-  runWorktreeHook: (...args: unknown[]) => runWorktreeHookMock(...args),
+  runAdvisoryHook: runAdvisoryHookMock,
+  runWorktreeHook: runWorktreeHookMock,
 }));
 
 vi.mock('../../src/lib/settings.js', () => ({
-  getSettings: (...args: unknown[]) => getSettingsMock(...args),
+  getSettings: getSettingsMock,
 }));
 
 function mockSpawnSuccess(): void {
@@ -108,11 +113,12 @@ afterEach(() => {
 describe('withWorktree', () => {
   it('runs setup before the callback and teardown after it', async () => {
     const callOrder: string[] = [];
-    runWorktreeHookMock.mockImplementation(async (event: string) => {
+    runWorktreeHookMock.mockImplementation((event: string) => {
       callOrder.push(event);
+      return Promise.resolve();
     });
 
-    const result = await withWorktree(defaultOpts, async () => {
+    const result = await withWorktree(defaultOpts, () => {
       callOrder.push('callback');
       return 'ok';
     });
@@ -122,7 +128,7 @@ describe('withWorktree', () => {
   });
 
   it('passes the expected hook environment and cwd', async () => {
-    await withWorktree(defaultOpts, async () => undefined);
+    await withWorktree(defaultOpts, () => undefined);
 
     expect(runWorktreeHookMock).toHaveBeenNthCalledWith(
       1,
@@ -145,14 +151,16 @@ describe('withWorktree', () => {
     });
 
     const callOrder: string[] = [];
-    runAdvisoryHookMock.mockImplementation(async (label: string) => {
+    runAdvisoryHookMock.mockImplementation((label: string) => {
       callOrder.push(label);
+      return Promise.resolve();
     });
-    runWorktreeHookMock.mockImplementation(async (event: string) => {
+    runWorktreeHookMock.mockImplementation((event: string) => {
       callOrder.push(event);
+      return Promise.resolve();
     });
 
-    await withWorktree(defaultOpts, async () => {
+    await withWorktree(defaultOpts, () => {
       callOrder.push('callback');
     });
 
@@ -167,7 +175,7 @@ describe('withWorktree', () => {
   it('sets NPM_CONFIG_CACHE to a worktree-local path inside the callback', async () => {
     process.env.NPM_CONFIG_CACHE = '/original-cache';
 
-    await withWorktree(defaultOpts, async (wtPath) => {
+    await withWorktree(defaultOpts, (wtPath) => {
       expect(process.env.NPM_CONFIG_CACHE).toBe(path.join(wtPath, '.npm-cache'));
     });
 
@@ -182,7 +190,7 @@ describe('withWorktree', () => {
       worktreeEnv: { UV_CACHE_DIR: '.uv-cache' },
     });
 
-    await withWorktree(defaultOpts, async () => {
+    await withWorktree(defaultOpts, () => {
       expect(process.env.NPM_CONFIG_CACHE).toBe(expectedNpmCachePath);
       expect(process.env.UV_CACHE_DIR).toBe('.uv-cache');
     });
@@ -197,7 +205,7 @@ describe('withWorktree', () => {
       worktreeEnv: { NPM_CONFIG_CACHE: '/custom-cache' },
     });
 
-    await withWorktree(defaultOpts, async () => {
+    await withWorktree(defaultOpts, () => {
       expect(process.env.NPM_CONFIG_CACHE).toBe('/custom-cache');
     });
   });
@@ -218,7 +226,7 @@ describe('withWorktree', () => {
       worktreeEnv: { UV_CACHE_DIR: '.uv-cache' },
     });
 
-    await withWorktree(defaultOpts, async () => {
+    await withWorktree(defaultOpts, () => {
       expect(process.env.NPM_CONFIG_CACHE).toBe(expectedNpmCachePath);
       expect(process.env.UV_CACHE_DIR).toBe('.uv-cache');
       sigintListener?.();
@@ -258,7 +266,7 @@ describe('withWorktree', () => {
     });
 
     let resolved = false;
-    const worktreePromise = withWorktree(defaultOpts, async () => {
+    const worktreePromise = withWorktree(defaultOpts, () => {
       sigintListener?.();
     }).then(() => {
       resolved = true;

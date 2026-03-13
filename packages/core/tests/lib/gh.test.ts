@@ -1,16 +1,23 @@
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const execFileMock = vi.fn();
+type ChildProcessModule = typeof import('node:child_process');
+
+const execFileMock = vi.fn<ChildProcessModule['execFile']>();
 const sleepMsMock = vi.fn(async (_ms: number) => {});
-const execFile = Object.assign((...args: unknown[]) => execFileMock(...args), {
+
+function normalizeError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+const execFile = Object.assign(execFileMock, {
   [promisify.custom]: (...args: unknown[]) =>
     new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
       execFileMock(
         ...args,
         (err: unknown, stdout: string | Buffer = '', stderr: string | Buffer = '') => {
           if (err) {
-            reject(err);
+            reject(normalizeError(err));
             return;
           }
           resolve({ stdout: String(stdout), stderr: String(stderr) });

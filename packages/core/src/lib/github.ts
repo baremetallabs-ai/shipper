@@ -127,7 +127,11 @@ function isPRData(value: unknown): value is PRData {
     return false;
   }
 
-  const record = value as Record<string, unknown>;
+  const record = value as IssueData & {
+    headRefName?: unknown;
+    baseRefName?: unknown;
+    reviews?: unknown;
+  };
   return (
     typeof record.headRefName === 'string' &&
     typeof record.baseRefName === 'string' &&

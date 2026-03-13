@@ -1,14 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-const getSettingsMock = vi.fn();
-const fetchChecksMock = vi.fn();
-const resolveRefMock = vi.fn();
-const autoSelectPrForStageMock = vi.fn();
+type ShipperCore = typeof import('@dnsquared/shipper-core');
+
+const getSettingsMock = vi.fn<ShipperCore['getSettings']>();
+const fetchChecksMock = vi.fn<ShipperCore['fetchChecks']>();
+const resolveRefMock = vi.fn<ShipperCore['resolveRef']>();
+const autoSelectPrForStageMock = vi.fn<ShipperCore['autoSelectPrForStage']>();
 const formatConflictContextMock = vi.fn(() => 'formatted conflict context');
-const runPromptMock = vi.fn();
+const runPromptMock = vi.fn<ShipperCore['runPrompt']>();
 const withGitTransportMock = vi.fn(
-  async (_opts: unknown, fn: (conflictContext?: unknown) => Promise<unknown>) =>
-    await fn({
+  (_opts: unknown, fn: (conflictContext?: unknown) => Promise<unknown>) =>
+    fn({
       files: ['src/conflict.ts'],
       conflicts: [
         {
@@ -18,19 +20,19 @@ const withGitTransportMock = vi.fn(
       ],
     })
 );
-const withStageHooksMock = vi.fn(
-  async (_stage: unknown, _env: unknown, fn: () => Promise<unknown>) => await fn()
+const withStageHooksMock = vi.fn((_stage: unknown, _env: unknown, fn: () => Promise<unknown>) =>
+  fn()
 );
-const withIssueLockMock = vi.fn(
-  async (_repo: unknown, _issue: unknown, fn: () => Promise<unknown>) => await fn()
+const withIssueLockMock = vi.fn((_repo: unknown, _issue: unknown, fn: () => Promise<unknown>) =>
+  fn()
 );
-const withWorktreeMock = vi.fn(
-  async (_opts: unknown, fn: (wtPath: string) => Promise<unknown>) => await fn('/tmp/fake-wt')
+const withWorktreeMock = vi.fn((_opts: unknown, fn: (wtPath: string) => Promise<unknown>) =>
+  fn('/tmp/fake-wt')
 );
-const getBranchForPRMock = vi.fn(async () => 'shipper/10-feature');
-const getRepoRootMock = vi.fn(async () => '/tmp/fake-repo');
-const ghMock = vi.fn();
-const sleepMsMock = vi.fn(async () => {});
+const getBranchForPRMock = vi.fn(() => Promise.resolve('shipper/10-feature'));
+const getRepoRootMock = vi.fn(() => Promise.resolve('/tmp/fake-repo'));
+const ghMock = vi.fn<ShipperCore['gh']>();
+const sleepMsMock = vi.fn(() => Promise.resolve());
 const repo = 'owner/repo';
 vi.mock('@dnsquared/shipper-core', () => ({
   resolveRef: resolveRefMock,
@@ -45,8 +47,8 @@ vi.mock('@dnsquared/shipper-core', () => ({
   getRepoRoot: getRepoRootMock,
   gh: ghMock,
   sleepMs: sleepMsMock,
-  getSettings: () => getSettingsMock(),
-  fetchChecks: (...args: unknown[]) => fetchChecksMock(...args),
+  getSettings: getSettingsMock,
+  fetchChecks: fetchChecksMock,
   classifyChecks: (checks: Array<{ state: string }>) => ({
     pending: checks.filter((check) => check.state !== 'COMPLETED'),
     total: checks.length,
@@ -61,18 +63,18 @@ describe('prRemediateCommand', () => {
     process.exitCode = undefined;
     resolveRefMock.mockResolvedValue({ prNumber: '42', issueNumber: '10' });
     runPromptMock.mockResolvedValue(0);
-    ghMock.mockImplementation(async (args: string[]) => {
+    ghMock.mockImplementation((args: string[]) => {
       if (args.includes('baseRefName')) {
-        return {
+        return Promise.resolve({
           stdout: JSON.stringify({ baseRefName: 'release/2026' }),
           stderr: '',
-        };
+        });
       }
 
-      return {
+      return Promise.resolve({
         stdout: JSON.stringify({ createdAt: new Date().toISOString() }),
         stderr: '',
-      };
+      });
     });
     getSettingsMock.mockReturnValue({
       prReviewWait: { mode: 'timer', timeoutMinutes: 0 },

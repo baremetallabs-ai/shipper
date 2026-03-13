@@ -1,11 +1,13 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+type ShipperCore = typeof import('@dnsquared/shipper-core');
+
 const { mockRunPrompt } = vi.hoisted(() => ({
-  mockRunPrompt: vi.fn(),
+  mockRunPrompt: vi.fn<ShipperCore['runPrompt']>(),
 }));
 
 vi.mock('@dnsquared/shipper-core', () => ({
-  runPrompt: (...args: unknown[]) => mockRunPrompt(...args),
+  runPrompt: mockRunPrompt,
 }));
 
 import { newCommand } from '../../src/commands/new.js';

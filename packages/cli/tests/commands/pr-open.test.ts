@@ -1,16 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+type ShipperCore = typeof import('@dnsquared/shipper-core');
+
 const autoSelectIssueMock = vi.fn();
-const findBranchForIssueMock = vi.fn(async () => 'shipper/239-branch');
+const findBranchForIssueMock = vi.fn(() => Promise.resolve('shipper/239-branch'));
 const formatConflictContextMock = vi.fn(() => 'formatted conflict context');
-const getRepoRootMock = vi.fn(async () => '/tmp/fake-repo');
+const getRepoRootMock = vi.fn(() => Promise.resolve('/tmp/fake-repo'));
 const getSettingsMock = vi.fn(() => ({ defaultBaseBranch: 'main' }));
-const resolveBaseBranchMock = vi.fn(async () => 'release/2026');
-const resolveRefMock = vi.fn(async () => ({ issueNumber: '239' }));
-const runPromptMock = vi.fn(async () => 0);
+const resolveBaseBranchMock = vi.fn(() => Promise.resolve('release/2026'));
+const resolveRefMock = vi.fn<ShipperCore['resolveRef']>(() =>
+  Promise.resolve({ issueNumber: '239' })
+);
+const runPromptMock = vi.fn(() => Promise.resolve(0));
 const withGitTransportMock = vi.fn(
-  async (_opts: unknown, fn: (conflictContext?: unknown) => Promise<unknown>) =>
-    await fn({
+  (_opts: unknown, fn: (conflictContext?: unknown) => Promise<unknown>) =>
+    fn({
       files: ['src/conflict.ts'],
       conflicts: [
         {
@@ -20,14 +24,14 @@ const withGitTransportMock = vi.fn(
       ],
     })
 );
-const withIssueLockMock = vi.fn(
-  async (_repo: unknown, _issue: unknown, fn: () => Promise<unknown>) => await fn()
+const withIssueLockMock = vi.fn((_repo: unknown, _issue: unknown, fn: () => Promise<unknown>) =>
+  fn()
 );
-const withStageHooksMock = vi.fn(
-  async (_stage: unknown, _env: unknown, fn: () => Promise<unknown>) => await fn()
+const withStageHooksMock = vi.fn((_stage: unknown, _env: unknown, fn: () => Promise<unknown>) =>
+  fn()
 );
-const withWorktreeMock = vi.fn(
-  async (_opts: unknown, fn: (wtPath: string) => Promise<unknown>) => await fn('/tmp/fake-wt')
+const withWorktreeMock = vi.fn((_opts: unknown, fn: (wtPath: string) => Promise<unknown>) =>
+  fn('/tmp/fake-wt')
 );
 
 vi.mock('@dnsquared/shipper-core', () => ({

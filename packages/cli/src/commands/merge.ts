@@ -95,7 +95,17 @@ function parseGraphQLResponse(output: string): GraphQLResponse {
     throw new Error('Invalid merge queue response from GitHub CLI.');
   }
 
-  return parsed as GraphQLResponse;
+  return {
+    data: {
+      search: {
+        nodes: parsed.data.search.nodes,
+        pageInfo: {
+          hasNextPage: parsed.data.search.pageInfo.hasNextPage,
+          endCursor: parsed.data.search.pageInfo.endCursor,
+        },
+      },
+    },
+  };
 }
 
 function parseMergeStateStatus(output: string): string {

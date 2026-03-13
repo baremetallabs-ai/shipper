@@ -1,24 +1,27 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const spawnMock = vi.fn();
-const execFileMock = vi.fn();
-const readFileMock = vi.fn();
+type ChildProcessModule = typeof import('node:child_process');
+type FsPromisesModule = typeof import('node:fs/promises');
+
+const spawnMock = vi.fn<ChildProcessModule['spawn']>();
+const execFileMock = vi.fn<ChildProcessModule['execFile']>();
+const readFileMock = vi.fn<FsPromisesModule['readFile']>();
 
 vi.mock('node:child_process', async () => {
-  const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+  const actual = await vi.importActual<ChildProcessModule>('node:child_process');
   return {
     ...actual,
-    execFile: (...args: unknown[]) => execFileMock(...args),
-    spawn: (...args: unknown[]) => spawnMock(...args),
+    execFile: execFileMock,
+    spawn: spawnMock,
   };
 });
 
 vi.mock('node:fs/promises', async () => {
-  const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+  const actual = await vi.importActual<FsPromisesModule>('node:fs/promises');
   return {
     ...actual,
-    readFile: (...args: unknown[]) => readFileMock(...args),
+    readFile: readFileMock,
   };
 });
 

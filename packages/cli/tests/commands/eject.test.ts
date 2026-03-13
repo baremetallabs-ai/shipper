@@ -1,6 +1,9 @@
 import path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+type FsModule = typeof import('node:fs');
+type ShipperCore = typeof import('@dnsquared/shipper-core');
+
 const {
   existsSyncMock,
   mkdirSyncMock,
@@ -36,27 +39,27 @@ const {
   };
 
   return {
-    existsSyncMock: vi.fn(),
-    mkdirSyncMock: vi.fn(),
-    writeFileSyncMock: vi.fn(),
-    getSettingsMock: vi.fn(),
+    existsSyncMock: vi.fn<FsModule['existsSync']>(),
+    mkdirSyncMock: vi.fn<FsModule['mkdirSync']>(),
+    writeFileSyncMock: vi.fn<FsModule['writeFileSync']>(),
+    getSettingsMock: vi.fn<ShipperCore['getSettings']>(),
     claudePrompts: claudeRegistry,
     codexPrompts: codexRegistry,
   };
 });
 
 vi.mock('node:fs', async () => {
-  const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+  const actual = await vi.importActual<FsModule>('node:fs');
   return {
     ...actual,
-    existsSync: (...args: unknown[]) => existsSyncMock(...args),
-    mkdirSync: (...args: unknown[]) => mkdirSyncMock(...args),
-    writeFileSync: (...args: unknown[]) => writeFileSyncMock(...args),
+    existsSync: existsSyncMock,
+    mkdirSync: mkdirSyncMock,
+    writeFileSync: writeFileSyncMock,
   };
 });
 
 vi.mock('@dnsquared/shipper-core', () => ({
-  getSettings: (...args: unknown[]) => getSettingsMock(...args),
+  getSettings: getSettingsMock,
   agentPrompts: {
     claude: claudePrompts,
     codex: codexPrompts,
@@ -150,7 +153,9 @@ describe('ejectCommand', () => {
   });
 
   it('prints a helpful error and exits 1 for invalid prompt names', () => {
-    expect(() => ejectCommand('not-a-prompt')).toThrow('process.exit:1');
+    expect(() => {
+      ejectCommand('not-a-prompt');
+    }).toThrow('process.exit:1');
 
     expect(errorSpy).toHaveBeenCalledWith(
       'Error: Invalid prompt name "not-a-prompt". Valid prompt names: new, groom, design, plan, implement, pr-open, pr-review, pr-remediate, unblock'
