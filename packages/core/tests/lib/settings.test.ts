@@ -187,6 +187,25 @@ describe('loadSettings', () => {
     );
   });
 
+  it('throws on a non-string model value', async () => {
+    readFileMock.mockImplementation(async (p: string) => {
+      if (p === settingsPath) {
+        return JSON.stringify({
+          commands: {
+            default: { agent: 'claude' },
+            implement: { model: 123 },
+          },
+        });
+      }
+      throw enoent(p);
+    });
+
+    const { loadSettings } = await loadModule();
+    await expect(loadSettings()).rejects.toThrow(
+      'Invalid model for step "implement". Must be a string.'
+    );
+  });
+
   it('ignores unsafe command keys while loading settings', async () => {
     readFileMock.mockImplementation(async (p: string) => {
       if (p === settingsPath) {
