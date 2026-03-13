@@ -3,10 +3,11 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { app, BrowserWindow, ipcMain } from 'electron';
-import { checkGhAuth, checkGhInstalled, listIssues } from '@dnsquared/shipper-core';
+import { checkGhAuth, checkGhInstalled, gh, listIssues } from '@dnsquared/shipper-core';
 
 interface AppConfig {
-  repo: string;
+  repos: string[];
+  activeRepo: string;
 }
 
 interface ListIssuesSuccess {
@@ -19,7 +20,7 @@ interface ListIssuesFailure {
   error: string;
 }
 
-const defaultConfig: AppConfig = { repo: '' };
+const defaultConfig: AppConfig = { repos: [], activeRepo: '' };
 const repoPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const preloadPath = fileURLToPath(new URL('../preload/index.cjs', import.meta.url));
 const rendererPath = fileURLToPath(new URL('../renderer/index.html', import.meta.url));
@@ -32,11 +33,23 @@ function readConfig(): AppConfig {
   const configPath = getConfigPath();
 
   try {
-    const raw = readFileSync(configPath, 'utf8');
-    const parsed = JSON.parse(raw) as Partial<AppConfig>;
+    const parsed = JSON.parse(readFileSync(configPath, 'utf8')) as unknown;
+    const nextConfig = parseConfig(parsed);
+    if (nextConfig !== null) {
+      return nextConfig;
+    }
 
-    if (typeof parsed.repo === 'string') {
-      return { repo: parsed.repo };
+    const legacyRepo =
+      typeof parsed === 'object' && parsed !== null && 'repo' in parsed
+        ? parseRepo(parsed.repo)
+        : null;
+    if (legacyRepo !== null) {
+      const migratedConfig: AppConfig = {
+        repos: [legacyRepo],
+        activeRepo: legacyRepo,
+      };
+      writeConfig(migratedConfig);
+      return migratedConfig;
     }
 
     return defaultConfig;
@@ -69,16 +82,36 @@ function parseRepo(value: unknown): string | null {
 }
 
 function parseConfig(value: unknown): AppConfig | null {
-  if (typeof value !== 'object' || value === null || !('repo' in value)) {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('repos' in value) ||
+    !Array.isArray(value.repos) ||
+    !('activeRepo' in value)
+  ) {
     return null;
   }
 
-  const repo = typeof value.repo === 'string' ? value.repo.trim() : null;
-  if (repo === null) {
+  const repos: string[] = [];
+  for (const repo of value.repos) {
+    const parsedRepo = parseRepo(repo);
+    if (parsedRepo === null) {
+      return null;
+    }
+
+    repos.push(parsedRepo);
+  }
+
+  const activeRepo = typeof value.activeRepo === 'string' ? value.activeRepo.trim() : null;
+  if (activeRepo === null) {
     return null;
   }
 
-  return { repo };
+  if (activeRepo.length === 0) {
+    return repos.length === 0 ? { repos, activeRepo } : null;
+  }
+
+  return repos.includes(activeRepo) ? { repos, activeRepo } : null;
 }
 
 function createWindow(): BrowserWindow {
@@ -142,14 +175,15 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('get-config', () => readConfig());
+  ipcMain.handle('list-repos', async () => {
+    const result = await gh(['repo', 'list', '--json', 'nameWithOwner', '--limit', '100']);
+    const parsed = JSON.parse(result.stdout) as Array<{ nameWithOwner: string }>;
+    return parsed.map((repo) => repo.nameWithOwner);
+  });
   ipcMain.handle('set-config', (_event, config: unknown) => {
     const nextConfig = parseConfig(config);
     if (nextConfig === null) {
       throw new Error('Invalid config payload.');
-    }
-
-    if (nextConfig.repo.length > 0 && parseRepo(nextConfig.repo) === null) {
-      throw new Error('Enter a repository in owner/repo format.');
     }
 
     writeConfig(nextConfig);

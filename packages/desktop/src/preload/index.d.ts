@@ -6,7 +6,8 @@ interface CheckResult {
 }
 
 interface ConfigPayload {
-  repo: string;
+  repos: string[];
+  activeRepo: string;
 }
 
 interface ListIssuesSuccess {
@@ -25,6 +26,7 @@ interface ShipperAPI {
     ghAuth: CheckResult;
   }>;
   getConfig: () => Promise<ConfigPayload>;
+  listRepos: () => Promise<string[]>;
   listIssues: (repo: string) => Promise<ListIssuesSuccess | ListIssuesFailure>;
   setConfig: (config: ConfigPayload) => Promise<void>;
 }

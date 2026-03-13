@@ -1,12 +1,13 @@
-import { useEffect, useEffectEvent, useState } from 'react';
-import type { JSX, KeyboardEvent } from 'react';
+import { useEffect, useEffectEvent, useRef, useState } from 'react';
+import type { JSX } from 'react';
 
 import type { ListIssueItem } from '@dnsquared/shipper-core';
 
+import { RepoPickerDialog } from './components/repo-picker-dialog.js';
+import { RepoTabBar } from './components/repo-tab-bar.js';
 import { Alert, AlertDescription, AlertTitle } from './components/ui/alert.js';
 import { Badge } from './components/ui/badge.js';
 import { Button } from './components/ui/button.js';
-import { Input } from './components/ui/input.js';
 
 interface CheckResult {
   ok: boolean;
@@ -18,6 +19,11 @@ interface Prerequisites {
   ghAuth: CheckResult;
 }
 
+interface AppConfig {
+  repos: string[];
+  activeRepo: string;
+}
+
 const repoPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: 'medium',
@@ -26,6 +32,10 @@ const dateFormatter = new Intl.DateTimeFormat(undefined, {
 
 function isValidRepo(repo: string): boolean {
   return repoPattern.test(repo);
+}
+
+function toRepoKey(repo: string): string {
+  return repo.trim().toLowerCase();
 }
 
 function formatIssueDate(createdAt: string): string {
@@ -54,25 +64,40 @@ function getStateVariant(state: string): 'default' | 'outline' | 'success' {
 }
 
 export default function App(): JSX.Element {
-  const [repoDraft, setRepoDraft] = useState('');
-  const [savedRepo, setSavedRepo] = useState('');
+  const [repos, setRepos] = useState<string[]>([]);
+  const [activeRepo, setActiveRepo] = useState('');
   const [prerequisites, setPrerequisites] = useState<Prerequisites | null>(null);
   const [issues, setIssues] = useState<ListIssueItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
-  const [validationError, setValidationError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [isPickerOpen, setIsPickerOpen] = useState(false);
+  const requestVersionRef = useRef(0);
 
   const prerequisiteMessage = getPrerequisiteMessage(prerequisites);
   const canFetch = prerequisites !== null && prerequisiteMessage === null;
-  const savedRepoIsValid = isValidRepo(savedRepo);
+  const hasActiveRepo = activeRepo.length > 0 && isValidRepo(activeRepo);
+
+  function clearIssueState(): void {
+    requestVersionRef.current += 1;
+    setIssues([]);
+    setLastUpdated(null);
+    setFetchError(null);
+    setIsLoading(false);
+  }
 
   const loadIssues = useEffectEvent(async (repo: string) => {
+    const requestVersion = requestVersionRef.current + 1;
+    requestVersionRef.current = requestVersion;
     setIsLoading(true);
     setFetchError(null);
 
     try {
       const result = await window.shipperAPI.listIssues(repo);
+      if (requestVersion !== requestVersionRef.current) {
+        return;
+      }
+
       if (!result.ok) {
         setFetchError(result.error);
         return;
@@ -81,48 +106,21 @@ export default function App(): JSX.Element {
       setIssues(result.issues);
       setLastUpdated(new Date());
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setFetchError(message);
-    } finally {
-      setIsLoading(false);
-    }
-  });
-
-  const persistRepo = useEffectEvent(async (rawRepo: string) => {
-    const nextRepo = rawRepo.trim();
-
-    if (nextRepo.length > 0 && !isValidRepo(nextRepo)) {
-      setValidationError('Enter a repository in owner/repo format.');
-      return;
-    }
-
-    setValidationError(null);
-
-    try {
-      await window.shipperAPI.setConfig({ repo: nextRepo });
-      const repoChanged = nextRepo !== savedRepo;
-      setSavedRepo(nextRepo);
-      setRepoDraft(nextRepo);
-      setFetchError(null);
-
-      if (!nextRepo) {
-        setIssues([]);
-        setLastUpdated(null);
+      if (requestVersion !== requestVersionRef.current) {
         return;
       }
 
-      if (repoChanged) {
-        setIssues([]);
-        setLastUpdated(null);
-      }
-
-      if (canFetch) {
-        await loadIssues(nextRepo);
-      }
-    } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setFetchError(`Failed to save repository: ${message}`);
+      setFetchError(message);
+    } finally {
+      if (requestVersion === requestVersionRef.current) {
+        setIsLoading(false);
+      }
     }
+  });
+
+  const persistConfig = useEffectEvent(async (config: AppConfig) => {
+    await window.shipperAPI.setConfig(config);
   });
 
   useEffect(() => {
@@ -140,15 +138,15 @@ export default function App(): JSX.Element {
         }
 
         setPrerequisites(prerequisiteResult);
-        setRepoDraft(config.repo);
-        setSavedRepo(config.repo);
+        setRepos(config.repos);
+        setActiveRepo(config.activeRepo);
 
         if (
           prerequisiteResult.ghInstalled.ok &&
           prerequisiteResult.ghAuth.ok &&
-          isValidRepo(config.repo)
+          config.activeRepo.length > 0
         ) {
-          await loadIssues(config.repo);
+          await loadIssues(config.activeRepo);
         }
       } catch (error) {
         if (!cancelled) {
@@ -162,44 +160,114 @@ export default function App(): JSX.Element {
 
     return () => {
       cancelled = true;
+      requestVersionRef.current += 1;
     };
   }, []);
 
   useEffect(() => {
-    if (!canFetch || !savedRepoIsValid) {
+    if (!canFetch || !hasActiveRepo) {
       return;
     }
 
     const intervalId = window.setInterval(() => {
-      void loadIssues(savedRepo);
+      void loadIssues(activeRepo);
     }, 60_000);
 
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [canFetch, savedRepo, savedRepoIsValid]);
+  }, [activeRepo, canFetch, hasActiveRepo]);
 
   async function handleRefresh(): Promise<void> {
-    if (!canFetch || !savedRepoIsValid || isLoading) {
+    if (!canFetch || !hasActiveRepo || isLoading) {
       return;
     }
 
-    await loadIssues(savedRepo);
+    await loadIssues(activeRepo);
   }
 
-  async function handleSubmit(): Promise<void> {
-    await persistRepo(repoDraft);
+  async function handleAddRepo(repo: string): Promise<void> {
+    const nextRepo = repo.trim();
+    if (
+      !isValidRepo(nextRepo) ||
+      repos.some((currentRepo) => toRepoKey(currentRepo) === toRepoKey(nextRepo))
+    ) {
+      return;
+    }
+
+    const nextRepos = [...repos, nextRepo];
+
+    try {
+      await persistConfig({ repos: nextRepos, activeRepo: nextRepo });
+      setRepos(nextRepos);
+      setActiveRepo(nextRepo);
+      clearIssueState();
+
+      if (canFetch) {
+        await loadIssues(nextRepo);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setFetchError(`Failed to save repositories: ${message}`);
+    }
   }
 
-  function handleKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      void handleSubmit();
+  async function handleSwitchRepo(repo: string): Promise<void> {
+    if (repo === activeRepo) {
+      return;
+    }
+
+    try {
+      await persistConfig({ repos, activeRepo: repo });
+      setActiveRepo(repo);
+      clearIssueState();
+
+      if (canFetch) {
+        await loadIssues(repo);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setFetchError(`Failed to save repositories: ${message}`);
+    }
+  }
+
+  async function handleCloseRepo(repo: string): Promise<void> {
+    const index = repos.findIndex((currentRepo) => currentRepo === repo);
+    if (index < 0) {
+      return;
+    }
+
+    const nextRepos = repos.filter((currentRepo) => currentRepo !== repo);
+    const nextActiveRepo =
+      repo === activeRepo ? (nextRepos[index] ?? nextRepos.at(-1) ?? '') : activeRepo;
+
+    try {
+      await persistConfig({ repos: nextRepos, activeRepo: nextActiveRepo });
+      setRepos(nextRepos);
+      setActiveRepo(nextActiveRepo);
+
+      if (repo === activeRepo) {
+        clearIssueState();
+
+        if (canFetch && nextActiveRepo) {
+          await loadIssues(nextActiveRepo);
+        }
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setFetchError(`Failed to save repositories: ${message}`);
     }
   }
 
   return (
     <div className="min-h-screen bg-transparent">
+      <RepoPickerDialog
+        open={isPickerOpen}
+        onOpenChange={setIsPickerOpen}
+        repos={repos}
+        onSelectRepo={handleAddRepo}
+      />
+
       <header className="sticky top-0 z-10 border-b border-border bg-background">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-6 py-5">
           <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
@@ -220,39 +288,28 @@ export default function App(): JSX.Element {
                 onClick={() => {
                   void handleRefresh();
                 }}
-                disabled={!canFetch || !savedRepoIsValid || isLoading}
+                disabled={!canFetch || !hasActiveRepo || isLoading}
               >
                 {isLoading ? 'Refreshing...' : 'Refresh'}
               </Button>
             </div>
           </div>
-          <div className="flex flex-col gap-3 md:flex-row md:items-center">
-            <div className="flex-1">
-              <Input
-                value={repoDraft}
-                onChange={(event) => {
-                  setRepoDraft(event.target.value);
-                  if (validationError) {
-                    setValidationError(null);
-                  }
-                }}
-                onBlur={() => {
-                  void handleSubmit();
-                }}
-                onKeyDown={handleKeyDown}
-                placeholder="owner/repo"
-                aria-label="GitHub repository"
-              />
-            </div>
-            <Button
-              onClick={() => {
-                void handleSubmit();
+
+          {repos.length > 0 ? (
+            <RepoTabBar
+              repos={repos}
+              activeRepo={activeRepo}
+              onSelectRepo={(repo) => {
+                void handleSwitchRepo(repo);
               }}
-            >
-              Save Repo
-            </Button>
-          </div>
-          {validationError ? <p className="text-sm text-destructive">{validationError}</p> : null}
+              onCloseRepo={(repo) => {
+                void handleCloseRepo(repo);
+              }}
+              onAddRepo={() => {
+                setIsPickerOpen(true);
+              }}
+            />
+          ) : null}
         </div>
       </header>
 
@@ -281,73 +338,90 @@ export default function App(): JSX.Element {
           </Alert>
         ) : null}
 
-        <section className="overflow-hidden rounded-sm border border-border bg-card">
-          <div className="border-b border-border px-6 py-4">
-            <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
-              <div>
-                <h2 className="text-lg font-semibold">Shipper-labeled issues</h2>
-                <p className="text-sm text-muted-foreground">
-                  Showing read-only issue metadata from the saved repository.
-                </p>
+        {repos.length === 0 ? (
+          <section className="flex min-h-[24rem] flex-col items-center justify-center rounded-sm border border-dashed border-border bg-card px-6 py-10 text-center">
+            <div className="max-w-md space-y-3">
+              <h2 className="text-xl font-semibold tracking-tight">
+                Add a repository to get started
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                Choose a GitHub repository to load its shipper-labeled issues into the desktop
+                inbox.
+              </p>
+              <Button
+                onClick={() => {
+                  setIsPickerOpen(true);
+                }}
+              >
+                Add repository
+              </Button>
+            </div>
+          </section>
+        ) : (
+          <section className="overflow-hidden rounded-sm border border-border bg-card">
+            <div className="border-b border-border px-6 py-4">
+              <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold">Shipper-labeled issues</h2>
+                  <p className="text-sm text-muted-foreground">
+                    Showing read-only issue metadata from the active repository.
+                  </p>
+                </div>
+                {activeRepo ? (
+                  <Badge variant="outline" className="w-fit">
+                    {activeRepo}
+                  </Badge>
+                ) : null}
               </div>
-              {savedRepo ? (
-                <Badge variant="outline" className="w-fit">
-                  {savedRepo}
-                </Badge>
-              ) : null}
             </div>
-          </div>
 
-          {!savedRepo ? (
-            <div className="px-6 py-10 text-sm text-muted-foreground">
-              Save a repository above to load its shipper-labeled issues.
-            </div>
-          ) : !savedRepoIsValid ? (
-            <div className="px-6 py-10 text-sm text-muted-foreground">
-              Enter a valid repository in owner/repo format to begin.
-            </div>
-          ) : issues.length === 0 && !isLoading ? (
-            <div className="px-6 py-10 text-sm text-muted-foreground">
-              No shipper-labeled issues found for this repository.
-            </div>
-          ) : (
-            <div className="divide-y divide-border">
-              {issues.map((issue) => (
-                <article
-                  key={issue.number}
-                  className="grid gap-4 px-6 py-5 md:grid-cols-[1fr_auto]"
-                >
-                  <div className="space-y-3">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant={getStateVariant(issue.state)}>{issue.state}</Badge>
-                      <span className="text-sm font-medium text-muted-foreground">
-                        #{issue.number}
-                      </span>
-                      <span className="text-sm text-muted-foreground">
-                        opened by {issue.author}
-                      </span>
+            {!hasActiveRepo ? (
+              <div className="px-6 py-10 text-sm text-muted-foreground">
+                Select a repository tab to begin.
+              </div>
+            ) : issues.length === 0 && !isLoading ? (
+              <div className="px-6 py-10 text-sm text-muted-foreground">
+                No shipper-labeled issues found for this repository.
+              </div>
+            ) : (
+              <div className="divide-y divide-border">
+                {issues.map((issue) => (
+                  <article
+                    key={issue.number}
+                    className="grid gap-4 px-6 py-5 md:grid-cols-[1fr_auto]"
+                  >
+                    <div className="space-y-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant={getStateVariant(issue.state)}>{issue.state}</Badge>
+                        <span className="text-sm font-medium text-muted-foreground">
+                          #{issue.number}
+                        </span>
+                        <span className="text-sm text-muted-foreground">
+                          opened by {issue.author}
+                        </span>
+                      </div>
+                      <div>
+                        <h3 className="text-base font-semibold leading-tight text-foreground">
+                          {issue.title}
+                        </h3>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {issue.labels.map((label) => (
+                          <Badge key={label} variant="outline">
+                            {label}
+                          </Badge>
+                        ))}
+                      </div>
                     </div>
-                    <div>
-                      <h3 className="text-base font-semibold leading-tight text-foreground">
-                        {issue.title}
-                      </h3>
+                    <div className="text-sm text-muted-foreground md:text-right">
+                      Created {formatIssueDate(issue.createdAt)}
                     </div>
-                    <div className="flex flex-wrap gap-2">
-                      {issue.labels.map((label) => (
-                        <Badge key={label} variant="outline">
-                          {label}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="text-sm text-muted-foreground md:text-right">
-                    Created {formatIssueDate(issue.createdAt)}
-                  </div>
-                </article>
-              ))}
-            </div>
-          )}
-        </section>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
       </main>
     </div>
   );
