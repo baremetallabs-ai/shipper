@@ -183,4 +183,52 @@ describe('nextCommand', () => {
     expect(mockPrReviewCommand).not.toHaveBeenCalled();
     expect(mockPrRemediateCommand).not.toHaveBeenCalled();
   });
+
+  it('exits with the failed message when shipper:failed is the only shipper label', async () => {
+    mockGh.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        number: 159,
+        labels: [{ name: 'shipper:failed' }],
+      }),
+      stderr: '',
+    });
+
+    await expect(nextCommand(repo, '159')).rejects.toThrow('exit:1');
+
+    expect(errorSpy).toHaveBeenCalledWith('Issue #159 has the shipper:failed label.');
+    expect(mockWithIssueLock).not.toHaveBeenCalled();
+    expect(mockGroomCommand).not.toHaveBeenCalled();
+    expect(mockDesignCommand).not.toHaveBeenCalled();
+    expect(mockPlanCommand).not.toHaveBeenCalled();
+    expect(mockImplementCommand).not.toHaveBeenCalled();
+    expect(mockPrOpenCommand).not.toHaveBeenCalled();
+    expect(mockPrReviewCommand).not.toHaveBeenCalled();
+    expect(mockPrRemediateCommand).not.toHaveBeenCalled();
+  });
+
+  it('exits with the failed message before reporting multiple workflow labels', async () => {
+    mockGh.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        number: 159,
+        labels: [
+          { name: 'shipper:groomed' },
+          { name: 'shipper:planned' },
+          { name: 'shipper:failed' },
+        ],
+      }),
+      stderr: '',
+    });
+
+    await expect(nextCommand(repo, '159')).rejects.toThrow('exit:1');
+
+    expect(errorSpy).toHaveBeenCalledWith('Issue #159 has the shipper:failed label.');
+    expect(mockWithIssueLock).not.toHaveBeenCalled();
+    expect(mockGroomCommand).not.toHaveBeenCalled();
+    expect(mockDesignCommand).not.toHaveBeenCalled();
+    expect(mockPlanCommand).not.toHaveBeenCalled();
+    expect(mockImplementCommand).not.toHaveBeenCalled();
+    expect(mockPrOpenCommand).not.toHaveBeenCalled();
+    expect(mockPrReviewCommand).not.toHaveBeenCalled();
+    expect(mockPrRemediateCommand).not.toHaveBeenCalled();
+  });
 });
