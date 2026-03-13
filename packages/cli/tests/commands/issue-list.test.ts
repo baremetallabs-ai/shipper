@@ -1,6 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { mockGh, stageLabels, displayNameMap, controlLabelNames } = vi.hoisted(() => ({
+const {
+  mockGh,
+  stageLabels,
+  displayNameMap,
+  controlLabelNames,
+  blockedLabel,
+  failedLabel,
+  lockedLabel,
+} = vi.hoisted(() => ({
   mockGh: vi.fn(),
   stageLabels: [
     'shipper:new',
@@ -22,7 +30,10 @@ const { mockGh, stageLabels, displayNameMap, controlLabelNames } = vi.hoisted(()
     'shipper:pr-reviewed': 'PR Reviewed',
     'shipper:ready': 'Ready',
   },
-  controlLabelNames: ['shipper:blocked', 'shipper:locked'],
+  controlLabelNames: ['shipper:blocked', 'shipper:locked', 'shipper:failed'],
+  blockedLabel: 'shipper:blocked',
+  failedLabel: 'shipper:failed',
+  lockedLabel: 'shipper:locked',
 }));
 
 vi.mock('@dnsquared/shipper-core', () => ({
@@ -30,6 +41,9 @@ vi.mock('@dnsquared/shipper-core', () => ({
   STAGE_LABEL_NAMES: stageLabels,
   DISPLAY_NAME_MAP: displayNameMap,
   CONTROL_LABEL_NAMES: controlLabelNames,
+  BLOCKED_LABEL: blockedLabel,
+  FAILED_LABEL: failedLabel,
+  LOCKED_LABEL: lockedLabel,
 }));
 
 import { issueListCommand } from '../../src/commands/issue-list.js';
@@ -88,19 +102,77 @@ describe('issueListCommand', () => {
     expect(calls).toEqual(['\nPlanned (1)', '  #42 Multi-label issue']);
   });
 
-  it('shows [blocked] suffix for blocked issues', async () => {
+  it('shows blocked issues in a dedicated Blocked section with stage context', async () => {
     mockGhIssueList([
       {
         number: 15,
         title: 'Blocked issue',
-        labels: [{ name: 'shipper:designed' }, { name: 'shipper:blocked' }],
+        labels: [{ name: 'shipper:designed' }, { name: blockedLabel }],
       },
     ]);
 
     await issueListCommand({});
 
     const calls = mockConsoleLog.mock.calls.map((c) => c[0]);
-    expect(calls).toContain('  #15 Blocked issue [blocked]');
+    expect(calls).toEqual(['\nBlocked (1)', '  #15 Blocked issue [designed]']);
+  });
+
+  it('shows failed issues in a dedicated Failed section with stage context', async () => {
+    mockGhIssueList([
+      {
+        number: 16,
+        title: 'Failed issue',
+        labels: [{ name: 'shipper:planned' }, { name: failedLabel }],
+      },
+    ]);
+
+    await issueListCommand({});
+
+    const calls = mockConsoleLog.mock.calls.map((c) => c[0]);
+    expect(calls).toEqual(['\nFailed (1)', '  #16 Failed issue [planned]']);
+  });
+
+  it('shows blocked and failed sections after stage groups in that order', async () => {
+    mockGhIssueList([
+      { number: 1, title: 'New issue', labels: [{ name: 'shipper:new' }] },
+      {
+        number: 2,
+        title: 'Blocked issue',
+        labels: [{ name: 'shipper:designed' }, { name: blockedLabel }],
+      },
+      {
+        number: 3,
+        title: 'Failed issue',
+        labels: [{ name: 'shipper:planned' }, { name: failedLabel }],
+      },
+    ]);
+
+    await issueListCommand({});
+
+    const calls = mockConsoleLog.mock.calls.map((c) => c[0]);
+    expect(calls).toEqual([
+      '\nNew (1)',
+      '  #1 New issue',
+      '\nBlocked (1)',
+      '  #2 Blocked issue [designed]',
+      '\nFailed (1)',
+      '  #3 Failed issue [planned]',
+    ]);
+  });
+
+  it('shows an issue with both blocked and failed only in Failed', async () => {
+    mockGhIssueList([
+      {
+        number: 17,
+        title: 'Dual-control issue',
+        labels: [{ name: 'shipper:planned' }, { name: blockedLabel }, { name: failedLabel }],
+      },
+    ]);
+
+    await issueListCommand({});
+
+    const calls = mockConsoleLog.mock.calls.map((c) => c[0]);
+    expect(calls).toEqual(['\nFailed (1)', '  #17 Dual-control issue [planned]']);
   });
 
   it('shows [locked] suffix for locked issues', async () => {
@@ -108,7 +180,7 @@ describe('issueListCommand', () => {
       {
         number: 20,
         title: 'Locked issue',
-        labels: [{ name: 'shipper:planned' }, { name: 'shipper:locked' }],
+        labels: [{ name: 'shipper:planned' }, { name: lockedLabel }],
       },
     ]);
 
@@ -118,19 +190,19 @@ describe('issueListCommand', () => {
     expect(calls).toContain('  #20 Locked issue [locked]');
   });
 
-  it('shows both [blocked] and [locked] suffixes together', async () => {
+  it('shows both stage and locked suffixes for blocked locked issues', async () => {
     mockGhIssueList([
       {
         number: 25,
         title: 'Both labels',
-        labels: [{ name: 'shipper:new' }, { name: 'shipper:blocked' }, { name: 'shipper:locked' }],
+        labels: [{ name: 'shipper:new' }, { name: blockedLabel }, { name: lockedLabel }],
       },
     ]);
 
     await issueListCommand({});
 
     const calls = mockConsoleLog.mock.calls.map((c) => c[0]);
-    expect(calls).toContain('  #25 Both labels [blocked] [locked]');
+    expect(calls).toEqual(['\nBlocked (1)', '  #25 Both labels [new] [locked]']);
   });
 
   it('prints friendly message when no issues exist', async () => {
@@ -141,17 +213,79 @@ describe('issueListCommand', () => {
     expect(mockConsoleLog).toHaveBeenCalledWith('No shipper-managed issues found.');
   });
 
-  it('filters to a single status with --status flag', async () => {
+  it('filters to only blocked issues with --status blocked', async () => {
     mockGhIssueList([
-      { number: 1, title: 'Issue A', labels: [{ name: 'shipper:new' }] },
-      { number: 2, title: 'Issue B', labels: [{ name: 'shipper:planned' }] },
-      { number: 3, title: 'Issue C', labels: [{ name: 'shipper:planned' }] },
+      {
+        number: 2,
+        title: 'Blocked issue',
+        labels: [{ name: 'shipper:designed' }, { name: blockedLabel }],
+      },
+      {
+        number: 3,
+        title: 'Failed issue',
+        labels: [{ name: 'shipper:planned' }, { name: failedLabel }],
+      },
+      { number: 4, title: 'Normal issue', labels: [{ name: 'shipper:new' }] },
     ]);
 
-    await issueListCommand({ status: 'planned' });
+    await issueListCommand({ status: 'blocked' });
 
     const calls = mockConsoleLog.mock.calls.map((c) => c[0]);
-    expect(calls).toEqual(['\nPlanned (2)', '  #2 Issue B', '  #3 Issue C']);
+    expect(calls).toEqual(['\nBlocked (1)', '  #2 Blocked issue [designed]']);
+  });
+
+  it('filters to only failed issues with --status failed', async () => {
+    mockGhIssueList([
+      {
+        number: 2,
+        title: 'Blocked issue',
+        labels: [{ name: 'shipper:designed' }, { name: blockedLabel }],
+      },
+      {
+        number: 3,
+        title: 'Failed issue',
+        labels: [{ name: 'shipper:planned' }, { name: failedLabel }],
+      },
+      { number: 4, title: 'Normal issue', labels: [{ name: 'shipper:new' }] },
+    ]);
+
+    await issueListCommand({ status: 'failed' });
+
+    const calls = mockConsoleLog.mock.calls.map((c) => c[0]);
+    expect(calls).toEqual(['\nFailed (1)', '  #3 Failed issue [planned]']);
+  });
+
+  it('filters to a single stage while still showing matching blocked and failed sections', async () => {
+    mockGhIssueList([
+      { number: 1, title: 'Issue A', labels: [{ name: 'shipper:designed' }] },
+      {
+        number: 2,
+        title: 'Blocked designed issue',
+        labels: [{ name: 'shipper:designed' }, { name: blockedLabel }],
+      },
+      {
+        number: 3,
+        title: 'Failed designed issue',
+        labels: [{ name: 'shipper:designed' }, { name: failedLabel }],
+      },
+      {
+        number: 4,
+        title: 'Blocked planned issue',
+        labels: [{ name: 'shipper:planned' }, { name: blockedLabel }],
+      },
+    ]);
+
+    await issueListCommand({ status: 'designed' });
+
+    const calls = mockConsoleLog.mock.calls.map((c) => c[0]);
+    expect(calls).toEqual([
+      '\nDesigned (1)',
+      '  #1 Issue A',
+      '\nBlocked (1)',
+      '  #2 Blocked designed issue [designed]',
+      '\nFailed (1)',
+      '  #3 Failed designed issue [designed]',
+    ]);
   });
 
   it('prints friendly message when --status filter matches no issues', async () => {
@@ -165,7 +299,7 @@ describe('issueListCommand', () => {
   it('exits non-zero with error for invalid --status value', async () => {
     await expect(issueListCommand({ status: 'foo' })).rejects.toThrow('process.exit');
     expect(mockConsoleError).toHaveBeenCalledWith(
-      "Error: Invalid status 'foo'. Valid values: new, groomed, designed, planned, implemented, pr-open, pr-reviewed, ready"
+      "Error: Invalid status 'foo'. Valid values: new, groomed, designed, planned, implemented, pr-open, pr-reviewed, ready, blocked, failed"
     );
   });
 
@@ -182,6 +316,43 @@ describe('issueListCommand', () => {
     expect(calls).toEqual(['\nNew (1)', '  #1 Issue A', '\nReady (1)', '  #2 Issue B']);
   });
 
+  it('omits empty Blocked and Failed sections from output', async () => {
+    mockGhIssueList([{ number: 1, title: 'Issue A', labels: [{ name: 'shipper:new' }] }]);
+
+    await issueListCommand({});
+
+    const calls = mockConsoleLog.mock.calls.map((c) => c[0]);
+    expect(calls).toEqual(['\nNew (1)', '  #1 Issue A']);
+  });
+
+  it('excludes blocked and failed issues from stage group counts', async () => {
+    mockGhIssueList([
+      { number: 1, title: 'Normal designed issue', labels: [{ name: 'shipper:designed' }] },
+      {
+        number: 2,
+        title: 'Blocked designed issue',
+        labels: [{ name: 'shipper:designed' }, { name: blockedLabel }],
+      },
+      {
+        number: 3,
+        title: 'Failed designed issue',
+        labels: [{ name: 'shipper:designed' }, { name: failedLabel }],
+      },
+    ]);
+
+    await issueListCommand({});
+
+    const calls = mockConsoleLog.mock.calls.map((c) => c[0]);
+    expect(calls).toEqual([
+      '\nDesigned (1)',
+      '  #1 Normal designed issue',
+      '\nBlocked (1)',
+      '  #2 Blocked designed issue [designed]',
+      '\nFailed (1)',
+      '  #3 Failed designed issue [designed]',
+    ]);
+  });
+
   it('sorts issues within each group by number ascending', async () => {
     mockGhIssueList([
       { number: 50, title: 'Z', labels: [{ name: 'shipper:new' }] },
@@ -193,6 +364,43 @@ describe('issueListCommand', () => {
 
     const calls = mockConsoleLog.mock.calls.map((c) => c[0]);
     expect(calls).toEqual(['\nNew (3)', '  #10 A', '  #30 M', '  #50 Z']);
+  });
+
+  it('sorts blocked and failed sections by issue number ascending', async () => {
+    mockGhIssueList([
+      {
+        number: 30,
+        title: 'Blocked Z',
+        labels: [{ name: 'shipper:designed' }, { name: blockedLabel }],
+      },
+      {
+        number: 10,
+        title: 'Blocked A',
+        labels: [{ name: 'shipper:new' }, { name: blockedLabel }],
+      },
+      {
+        number: 20,
+        title: 'Failed M',
+        labels: [{ name: 'shipper:planned' }, { name: failedLabel }],
+      },
+      {
+        number: 5,
+        title: 'Failed A',
+        labels: [{ name: 'shipper:groomed' }, { name: failedLabel }],
+      },
+    ]);
+
+    await issueListCommand({});
+
+    const calls = mockConsoleLog.mock.calls.map((c) => c[0]);
+    expect(calls).toEqual([
+      '\nBlocked (2)',
+      '  #10 Blocked A [new]',
+      '  #30 Blocked Z [designed]',
+      '\nFailed (2)',
+      '  #5 Failed A [groomed]',
+      '  #20 Failed M [planned]',
+    ]);
   });
 
   it('exits non-zero when gh call fails', async () => {
