@@ -200,7 +200,7 @@ export default function App(): JSX.Element {
 
   return (
     <div className="min-h-screen bg-transparent">
-      <header className="sticky top-0 z-10 border-b border-border/60 bg-background/90 backdrop-blur-xl">
+      <header className="sticky top-0 z-10 border-b border-border bg-background">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-6 py-5">
           <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
             <div>
@@ -281,8 +281,8 @@ export default function App(): JSX.Element {
           </Alert>
         ) : null}
 
-        <section className="overflow-hidden rounded-3xl border border-border/70 bg-card/80 shadow-[0_20px_60px_-30px_rgba(15,23,42,0.35)] backdrop-blur-sm">
-          <div className="border-b border-border/70 px-6 py-4">
+        <section className="overflow-hidden rounded-sm border border-border bg-card">
+          <div className="border-b border-border px-6 py-4">
             <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
               <div>
                 <h2 className="text-lg font-semibold">Shipper-labeled issues</h2>
@@ -311,7 +311,7 @@ export default function App(): JSX.Element {
               No shipper-labeled issues found for this repository.
             </div>
           ) : (
-            <div className="divide-y divide-border/60">
+            <div className="divide-y divide-border">
               {issues.map((issue) => (
                 <article
                   key={issue.number}
