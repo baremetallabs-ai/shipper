@@ -54,9 +54,16 @@ export async function issueListCommand(options: { status?: string }): Promise<vo
     const bestIndex = STAGE_LABEL_NAMES.findLastIndex((label) => issueLabels.includes(label));
     if (bestIndex >= 0) {
       const label = STAGE_LABEL_NAMES[bestIndex];
-      if (label) {
-        groups.get(label)?.push(issue);
+      if (!label) {
+        throw new Error(`Invariant failed: missing stage label for index ${bestIndex}`);
       }
+
+      const group = groups.get(label);
+      if (!group) {
+        throw new Error(`Invariant failed: missing issue group for label ${label}`);
+      }
+
+      group.push(issue);
     }
   }
 
