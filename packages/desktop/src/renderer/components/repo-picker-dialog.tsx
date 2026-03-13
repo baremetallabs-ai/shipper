@@ -49,20 +49,18 @@ export function RepoPickerDialog({
   const [query, setQuery] = useState('');
 
   useEffect(() => {
+    setAvailableRepos([]);
+    setFetchError(null);
+    setQuery('');
+
     let cancelled = false;
 
     if (!open) {
-      setAvailableRepos([]);
-      setFetchError(null);
       setIsLoading(false);
-      setQuery('');
       return;
     }
 
-    setAvailableRepos([]);
-    setFetchError(null);
     setIsLoading(true);
-    setQuery('');
 
     void window.shipperAPI
       .listRepos()
@@ -103,7 +101,10 @@ export function RepoPickerDialog({
     return toRepoKey(repo).includes(queryKey);
   });
   const showManualAdd =
-    normalizedQuery.length > 0 && isValidRepo(normalizedQuery) && !configuredRepoKeys.has(queryKey);
+    normalizedQuery.length > 0 &&
+    isValidRepo(normalizedQuery) &&
+    !configuredRepoKeys.has(queryKey) &&
+    !filteredRepos.some((repo) => toRepoKey(repo) === queryKey);
   const showDuplicateManual = normalizedQuery.length > 0 && configuredRepoKeys.has(queryKey);
   const showEmpty =
     !isLoading && filteredRepos.length === 0 && !showManualAdd && !showDuplicateManual;
