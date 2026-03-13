@@ -136,6 +136,10 @@ export async function loadSettings(): Promise<void> {
     commands: mergedCommands,
   };
 
+  for (const [command, config] of Object.entries(settings.commands)) {
+    validateModel(config?.model, command);
+  }
+
   for (const command of Object.keys(settings.commands)) {
     if (command !== 'default' && !KNOWN_PROMPT_COMMANDS.has(command)) {
       console.warn(`Warning: Unknown command "${command}" in settings.commands.`);
@@ -185,7 +189,7 @@ export function resolveModel(step: string, override?: string): string | undefine
   }
 
   const s = getSettings();
-  return s.commands[step]?.model ?? s.commands.default.model;
+  return validateModel(s.commands[step]?.model ?? s.commands.default.model, step);
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -204,6 +208,14 @@ function validateMode(mode: unknown, step: string): CommandMode {
   throw new Error(
     `Invalid mode "${String(mode)}" for step "${step}". Must be "headless", "interactive", or "default".`
   );
+}
+
+function validateModel(model: unknown, step: string): string | undefined {
+  if (model === undefined || typeof model === 'string') {
+    return model;
+  }
+
+  throw new Error(`Invalid model for step "${step}". Must be a string.`);
 }
 
 async function readSettingsFile(filepath: string): Promise<Partial<Settings>> {
