@@ -38,7 +38,7 @@ export default [
       '@typescript-eslint': tseslint,
     },
     rules: {
-      ...tseslint.configs.recommended.rules,
+      ...tseslint.configs.strict.rules,
 
       '@typescript-eslint/no-unused-vars': [
         'error',
@@ -49,8 +49,6 @@ export default [
       ],
       '@typescript-eslint/explicit-function-return-type': 'off',
       '@typescript-eslint/explicit-module-boundary-types': 'off',
-      '@typescript-eslint/no-explicit-any': 'warn',
-      '@typescript-eslint/no-non-null-assertion': 'warn',
 
       'no-console': 'off',
       'prefer-const': 'error',

@@ -433,7 +433,7 @@ export async function withWorktree<T>(
     cleanupPromise ??= (async () => {
       for (const [key, value] of originalEnv) {
         if (value === undefined) {
-          delete process.env[key];
+          Reflect.deleteProperty(process.env, key);
           continue;
         }
         process.env[key] = value;

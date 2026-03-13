@@ -115,7 +115,7 @@ describe('initCommand README', () => {
       (call: unknown[]) => call[0] === path.resolve('.shipper', 'README.md')
     );
     expect(readmeCall).toBeDefined();
-    expect(readmeCall![1]).toBe('# Test README content');
+    expect(readmeCall?.[1]).toBe('# Test README content');
   });
 });
 
@@ -232,7 +232,7 @@ describe('initCommand settings', () => {
       (call: unknown[]) => call[0] === settingsPath
     );
     expect(settingsCall).toBeDefined();
-    const written = JSON.parse(settingsCall![1] as string);
+    const written = JSON.parse(settingsCall?.[1] as string);
     expect(written.commands).toEqual({
       default: { agent: 'claude' },
       groom: { agent: 'codex', mode: 'interactive' },
@@ -256,7 +256,7 @@ describe('initCommand settings', () => {
       (call: unknown[]) => call[0] === settingsPath
     );
     expect(settingsCall).toBeDefined();
-    const written = JSON.parse(settingsCall![1] as string);
+    const written = JSON.parse(settingsCall?.[1] as string);
     expect(written.commands).toEqual({ default: { agent: 'claude' } });
     expect((Object.prototype as Record<string, unknown>).mode).toBeUndefined();
   });
@@ -267,10 +267,10 @@ describe('initCommand settings', () => {
       (call: unknown[]) => call[0] === gitignorePath
     );
     expect(gitignoreCall).toBeDefined();
-    expect(gitignoreCall![1]).toContain('settings.local.json');
-    expect(gitignoreCall![1]).toContain('tmp/');
-    expect(gitignoreCall![1]).toContain('README.md');
-    expect(gitignoreCall![1]).not.toContain('scripts/');
+    expect(gitignoreCall?.[1]).toContain('settings.local.json');
+    expect(gitignoreCall?.[1]).toContain('tmp/');
+    expect(gitignoreCall?.[1]).toContain('README.md');
+    expect(gitignoreCall?.[1]).not.toContain('scripts/');
   });
 
   it('writes cliVersion to settings.json', async () => {
@@ -279,7 +279,7 @@ describe('initCommand settings', () => {
       (call: unknown[]) => call[0] === settingsPath
     );
     expect(settingsCall).toBeDefined();
-    const written = JSON.parse(settingsCall![1] as string);
+    const written = JSON.parse(settingsCall?.[1] as string);
     expect(written.cliVersion).toBe('1.2.3');
   });
 
@@ -332,7 +332,7 @@ describe('initCommand stored agent', () => {
       (call: unknown[]) => call[0] === settingsPath
     );
     expect(settingsCall).toBeDefined();
-    const written = JSON.parse(settingsCall![1] as string);
+    const written = JSON.parse(settingsCall?.[1] as string);
     expect(written.commands).toEqual({ default: { agent: 'codex' } });
   });
 
@@ -356,7 +356,8 @@ describe('initCommand stored agent', () => {
     const settingsCall = writeFileSyncMock.mock.calls.find(
       (call: unknown[]) => call[0] === settingsPath
     );
-    const written = JSON.parse(settingsCall![1] as string);
+    expect(settingsCall).toBeDefined();
+    const written = JSON.parse(settingsCall?.[1] as string);
     expect(written.commands.default.agent).toBe('claude');
     expect(console.log).not.toHaveBeenCalledWith(expect.stringContaining('from settings'));
   });
@@ -368,7 +369,8 @@ describe('initCommand agent selection', () => {
     const settingsCall = writeFileSyncMock.mock.calls.find(
       (call: unknown[]) => call[0] === settingsPath
     );
-    const written = JSON.parse(settingsCall![1] as string);
+    expect(settingsCall).toBeDefined();
+    const written = JSON.parse(settingsCall?.[1] as string);
     expect(written.commands).toEqual({ default: { agent: 'claude' } });
     expect(written.agent).toBeUndefined();
 
@@ -383,7 +385,8 @@ describe('initCommand agent selection', () => {
     const settingsCall = writeFileSyncMock.mock.calls.find(
       (call: unknown[]) => call[0] === settingsPath
     );
-    const written = JSON.parse(settingsCall![1] as string);
+    expect(settingsCall).toBeDefined();
+    const written = JSON.parse(settingsCall?.[1] as string);
     expect(written.commands).toEqual({ default: { agent: 'codex' } });
     expect(exitMock).not.toHaveBeenCalledWith(1);
   });
@@ -414,7 +417,8 @@ describe('initCommand agent selection', () => {
     const settingsCall = writeFileSyncMock.mock.calls.find(
       (call: unknown[]) => call[0] === settingsPath
     );
-    const written = JSON.parse(settingsCall![1] as string);
+    expect(settingsCall).toBeDefined();
+    const written = JSON.parse(settingsCall?.[1] as string);
     expect(written.commands).toEqual({ default: { agent: 'claude' } });
     expect(written.agent).toBeUndefined();
   });
@@ -425,7 +429,8 @@ describe('initCommand agent selection', () => {
     const settingsCall = writeFileSyncMock.mock.calls.find(
       (call: unknown[]) => call[0] === settingsPath
     );
-    const written = JSON.parse(settingsCall![1] as string);
+    expect(settingsCall).toBeDefined();
+    const written = JSON.parse(settingsCall?.[1] as string);
     expect(written.commands).toEqual({ default: { agent: 'claude' } });
     expect(closeMock).toHaveBeenCalled();
   });
@@ -436,7 +441,8 @@ describe('initCommand agent selection', () => {
     const settingsCall = writeFileSyncMock.mock.calls.find(
       (call: unknown[]) => call[0] === settingsPath
     );
-    const written = JSON.parse(settingsCall![1] as string);
+    expect(settingsCall).toBeDefined();
+    const written = JSON.parse(settingsCall?.[1] as string);
     expect(written.commands).toEqual({ default: { agent: 'claude' } });
   });
 
@@ -446,7 +452,8 @@ describe('initCommand agent selection', () => {
     const settingsCall = writeFileSyncMock.mock.calls.find(
       (call: unknown[]) => call[0] === settingsPath
     );
-    const written = JSON.parse(settingsCall![1] as string);
+    expect(settingsCall).toBeDefined();
+    const written = JSON.parse(settingsCall?.[1] as string);
     expect(written.commands).toEqual({ default: { agent: 'codex' } });
     expect(exitMock).not.toHaveBeenCalledWith(1);
   });

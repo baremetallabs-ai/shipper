@@ -138,9 +138,9 @@ describe('adoptAllCommand', () => {
       ([args]) => (args as string[])[0] === 'issue' && (args as string[])[1] === 'edit'
     );
     expect(editCalls).toHaveLength(3);
-    expect(editCalls[0]![0]).toEqual(['issue', 'edit', '10', '--add-label', 'shipper:new']);
-    expect(editCalls[1]![0]).toEqual(['issue', 'edit', '12', '--add-label', 'shipper:new']);
-    expect(editCalls[2]![0]).toEqual(['issue', 'edit', '13', '--add-label', 'shipper:new']);
+    expect(editCalls[0]?.[0]).toEqual(['issue', 'edit', '10', '--add-label', 'shipper:new']);
+    expect(editCalls[1]?.[0]).toEqual(['issue', 'edit', '12', '--add-label', 'shipper:new']);
+    expect(editCalls[2]?.[0]).toEqual(['issue', 'edit', '13', '--add-label', 'shipper:new']);
     expect(mockConsoleLog).toHaveBeenCalledWith('Adopted #10, #12, #13 into shipper workflow.');
   });
 
