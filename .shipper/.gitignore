@@ -1,3 +1,7 @@
 tmp/
+input/*
+!input/.gitkeep
+output/*
+!output/.gitkeep
 settings.local.json
 README.md

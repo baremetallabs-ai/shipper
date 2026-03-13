@@ -7,13 +7,23 @@ export * from './lib/github.js';
 export * from './lib/hooks.js';
 export * from './lib/labels.js';
 export * from './lib/lock.js';
+export * from './lib/output-dirs.js';
+export * from './lib/postflight.js';
+export {
+  PREFLIGHT,
+  runPreflight as runStagePreflight,
+  type PreflightContext,
+} from './lib/preflight.js';
 export * from './lib/prerequisites.js';
 export * from './lib/prompt-runner.js';
 export * from './lib/prompts.js';
+export * from './lib/result-schema.js';
 export * from './lib/repo.js';
 export * from './lib/scripts.js';
 export * from './lib/settings.js';
 export * from './lib/sleep.js';
+export * from './lib/stage-runner.js';
+export * from './lib/stage-transitions.js';
 export * from './lib/version.js';
 export * from './lib/worktree.js';
 export { default as readmeTemplate } from './templates/readme.js';

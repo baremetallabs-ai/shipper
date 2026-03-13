@@ -28,6 +28,13 @@ export interface RunPromptOpts {
 
 const CODEX_HEADLESS_CONFIG = 'sandbox_workspace_write.network_access=true';
 const CODEX_HEADLESS_ARGS = ['exec', '--full-auto', '-c', CODEX_HEADLESS_CONFIG] as const;
+const STALE_PROMPT_PATTERNS = [
+  /gh issue edit\b/,
+  /gh issue comment\b/,
+  /gh pr create\b/,
+  /gh api\s+repos\/[^/\s]+\/[^/\s]+\/pulls\/[^/\s]+\/reviews\b/,
+  /gh api\s+repos\/[^/\s]+\/[^/\s]+\/pulls\/[^/\s]+\/comments\/[^/\s]+\/replies\b/,
+] as const;
 
 interface WorktreeDirs {
   gitDir: string;
@@ -98,15 +105,16 @@ function spawnAsync(
     let timedOut = false;
 
     if (opts.timeoutMs && opts.timeoutMs > 0) {
+      const timeoutMs = opts.timeoutMs;
       killTimer = setTimeout(() => {
         timedOut = true;
-        const minutes = Math.round(opts.timeoutMs! / 60_000);
+        const minutes = Math.round(timeoutMs / 60_000);
         console.error(`Agent timed out after ${minutes} minutes`);
         child.kill('SIGTERM');
         graceTimer = setTimeout(() => {
           child.kill('SIGKILL');
         }, 10_000);
-      }, opts.timeoutMs);
+      }, timeoutMs);
     }
 
     child.on('error', (err) => {
@@ -129,8 +137,10 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
   const promptPath = path.resolve('.shipper', 'prompts', agent, `${name}.md`);
 
   let raw: string;
+  let loadedLocalPrompt = false;
   try {
     raw = await readFile(promptPath, 'utf-8');
+    loadedLocalPrompt = true;
   } catch {
     const bundled = agentPrompts[agent]?.[`${name}.md`];
     if (!bundled) {
@@ -142,6 +152,9 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
   }
 
   const { frontmatter, body } = parseFrontmatter(raw);
+  if (loadedLocalPrompt) {
+    warnStaleEjectedPrompt(promptPath, body);
+  }
 
   if (frontmatter.cmd !== agent) {
     console.error(
@@ -299,4 +312,19 @@ function findCodexSandboxConfigIndex(args: string[]): number {
     }
   }
   return -1;
+}
+
+export function warnStaleEjectedPrompt(promptPath: string, body: string): void {
+  if (!promptPath.includes(`${path.sep}.shipper${path.sep}prompts${path.sep}`)) {
+    return;
+  }
+
+  if (!STALE_PROMPT_PATTERNS.some((pattern) => pattern.test(body))) {
+    return;
+  }
+
+  const fileName = path.basename(promptPath, '.md');
+  console.warn(
+    `Warning: Ejected prompt at ${promptPath} contains gh CLI commands for state mutations. Re-eject with 'shipper eject ${fileName}' to get the updated prompt.`
+  );
 }

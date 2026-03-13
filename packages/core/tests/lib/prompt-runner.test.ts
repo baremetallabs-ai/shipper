@@ -233,6 +233,38 @@ describe('runPrompt', () => {
     expect(args).toContain('bundled body');
   });
 
+  it('warns when a local ejected prompt still contains gh state-mutation commands', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    readFileMock.mockResolvedValueOnce(
+      [
+        '---',
+        'cmd: claude',
+        '---',
+        '',
+        'Use `gh issue edit 248 --add-label shipper:planned`.',
+      ].join('\n')
+    );
+    mockSpawnResult();
+
+    await expect(runPrompt('test', {})).resolves.toBe(0);
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Re-eject with 'shipper eject test'")
+    );
+    warnSpy.mockRestore();
+  });
+
+  it('does not warn for bundled prompts', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    readFileMock.mockRejectedValueOnce(new Error('ENOENT'));
+    mockSpawnResult();
+
+    await expect(runPrompt('test', {})).resolves.toBe(0);
+
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
   it('returns 1 when neither a local nor bundled prompt exists', async () => {
     readFileMock.mockRejectedValueOnce(new Error('ENOENT'));
 
