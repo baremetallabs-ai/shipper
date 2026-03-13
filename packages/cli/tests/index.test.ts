@@ -38,6 +38,7 @@ import { newCommand } from '../src/commands/new.js';
 import { groomCommand } from '../src/commands/groom.js';
 import { prReviewCommand } from '../src/commands/pr-review.js';
 import { setupCommand } from '../src/commands/setup.js';
+import { unlockCommand } from '../src/commands/unlock.js';
 import { runPreflight, loadSettings, getRepoNwo } from '@dnsquared/shipper-core';
 
 const mockShipCommand = vi.mocked(shipCommand);
@@ -46,6 +47,7 @@ const mockNewCommand = vi.mocked(newCommand);
 const mockGroomCommand = vi.mocked(groomCommand);
 const mockPrReviewCommand = vi.mocked(prReviewCommand);
 const mockSetupCommand = vi.mocked(setupCommand);
+const mockUnlockCommand = vi.mocked(unlockCommand);
 const mockRunPreflight = vi.mocked(runPreflight);
 const mockLoadSettings = vi.mocked(loadSettings);
 const mockGetRepoNwo = vi.mocked(getRepoNwo);
@@ -198,6 +200,53 @@ describe('shipper-cli', () => {
 
       expect(errorSpy).toHaveBeenCalledWith('boom');
       expect(exitSpy).toHaveBeenCalledWith(1);
+    });
+  });
+
+  describe('unlock command wiring', () => {
+    const originalArgv = [...process.argv];
+
+    beforeEach(() => {
+      vi.resetModules();
+      mockUnlockCommand.mockReset();
+      mockRunPreflight.mockClear();
+      mockLoadSettings.mockClear();
+      mockGetRepoNwo.mockClear();
+    });
+
+    afterEach(() => {
+      process.argv = [...originalArgv];
+    });
+
+    async function importEntrypoint() {
+      await import('../src/index.ts');
+    }
+
+    it('passes an explicit issue to unlockCommand', async () => {
+      process.argv = ['node', 'src/index.ts', 'unlock', '42'];
+
+      await importEntrypoint();
+
+      expect(mockUnlockCommand).toHaveBeenCalledTimes(1);
+      expect(mockUnlockCommand).toHaveBeenCalledWith(
+        'owner/repo',
+        '42',
+        expect.objectContaining({})
+      );
+      expect(mockUnlockCommand.mock.calls[0]?.[2]?.stale).toBeUndefined();
+    });
+
+    it('passes --stale without an issue to unlockCommand', async () => {
+      process.argv = ['node', 'src/index.ts', 'unlock', '--stale'];
+
+      await importEntrypoint();
+
+      expect(mockUnlockCommand).toHaveBeenCalledTimes(1);
+      expect(mockUnlockCommand).toHaveBeenCalledWith(
+        'owner/repo',
+        undefined,
+        expect.objectContaining({ stale: true })
+      );
     });
   });
 

@@ -348,10 +348,11 @@ addAgentOption(
 program
   .command('unlock')
   .description('Force-release the lock on an issue')
-  .argument('<issue>', 'issue number')
+  .argument('[issue]', 'issue number')
+  .option('--stale', 'release all stale locks')
   .action(
-    wrapAction(async (issue: string) => {
-      await unlockCommand(requireResolvedRepo(), issue);
+    wrapAction(async (issue: string | undefined, opts: { stale?: boolean }) => {
+      await unlockCommand(requireResolvedRepo(), issue, opts);
     })
   );
 
