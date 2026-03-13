@@ -838,6 +838,31 @@ describe('shipCommand single-issue path', () => {
     errorSpy.mockRestore();
   });
 
+  it('allows explicit single-issue runs to start from shipper:new', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    mockIssueViewSequence(['shipper:new', 'shipper:groomed', 'shipper:ready']);
+
+    await shipCommand(repo, '42', { auto: false, merge: false });
+
+    const cliEntrypoint = process.argv[1];
+    expect(cliEntrypoint).toBeDefined();
+    expect(mockSpawnSync).toHaveBeenCalledTimes(2);
+    expect(mockSpawnSync).toHaveBeenNthCalledWith(
+      1,
+      process.execPath,
+      [cliEntrypoint, 'next', '42'],
+      expect.objectContaining({
+        stdio: 'inherit',
+        env: expect.objectContaining({ SHIPPER_LOCK_HELD: '42' }),
+      })
+    );
+    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining('was reset to shipper:new'));
+
+    errorSpy.mockRestore();
+  });
+
   it('forwards an explicit model override to shipper next', async () => {
     mockIssueViewSequence(['shipper:planned', 'shipper:ready']);
 
@@ -1343,6 +1368,67 @@ describe('shipCommand sequential auto runner parking', () => {
       '1',
       '1',
     ]);
+  });
+});
+
+describe('shipCommand auto skip handling', () => {
+  beforeEach(() => {
+    mockSelectIssuesForStage.mockReset();
+    mockClearStaleLockIfNeeded.mockReset();
+    mockGh.mockReset();
+    mockSpawnSync.mockReset();
+    mockSpawnSync.mockReturnValue({ status: 0 } as ReturnType<typeof spawnSync>);
+    exitSpy.mockClear();
+  });
+
+  it('stops and skips an issue when a stage resets it to shipper:new', async () => {
+    let plannedSelections = 0;
+    mockSelectIssuesForStage.mockImplementation(async (_repo: string, label: string) => {
+      if (label === 'shipper:planned') {
+        plannedSelections++;
+        return [{ number: 42, title: 'Reset issue' }];
+      }
+      return [];
+    });
+
+    let viewCount = 0;
+    mockGh.mockImplementation(async (args: string[]) => {
+      if (args[0] === 'issue' && args[1] === 'view') {
+        viewCount++;
+        return {
+          stdout: `${viewCount === 1 ? 'shipper:planned' : 'shipper:new'}\n`,
+          stderr: '',
+        };
+      }
+
+      if (args[0] === 'issue' && args[1] === 'list') {
+        return { stdout: '[]', stderr: '' };
+      }
+
+      throw new Error(`Unexpected gh args: ${args.join(' ')}`);
+    });
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await shipCommand(repo, undefined, { auto: true, merge: false, parallel: 1 });
+
+    const message =
+      'Issue #42 was reset to shipper:new by stage "implement" - stopping to avoid interactive groom stage.';
+    const logOutput = logSpy.mock.calls.map(([entry]) => String(entry)).join('\n');
+    const errorOutput = errorSpy.mock.calls.map(([entry]) => String(entry)).join('\n');
+
+    expect(mockSpawnSync).toHaveBeenCalledTimes(1);
+    expect(plannedSelections).toBeGreaterThanOrEqual(2);
+    expect(
+      logSpy.mock.calls.filter(([entry]) => String(entry).includes('Auto: advancing issue #42'))
+    ).toHaveLength(1);
+    expect(errorOutput).toContain(message);
+    expect(logOutput).toContain(`✗ fail — ${message}`);
+    expect(exitSpy).toHaveBeenCalledWith(0);
+
+    logSpy.mockRestore();
+    errorSpy.mockRestore();
   });
 });
 
