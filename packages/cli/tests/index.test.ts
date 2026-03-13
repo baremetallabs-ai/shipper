@@ -70,7 +70,7 @@ describe('shipper-cli', () => {
     expect(output).toContain('pr');
   });
 
-  it('shows --mode on prompt-running command help and removes --headless from new', () => {
+  it('shows --mode and --model on prompt-running command help and removes --headless from new', () => {
     const newHelp = execFileSync('node', ['dist/index.js', 'new', '--help'], {
       encoding: 'utf-8',
     });
@@ -79,8 +79,10 @@ describe('shipper-cli', () => {
     });
 
     expect(newHelp).toContain('--mode <mode>');
+    expect(newHelp).toContain('--model <model>');
     expect(newHelp).not.toContain('--headless');
     expect(setupHelp).toContain('--mode <mode>');
+    expect(setupHelp).toContain('--model <model>');
   });
 
   describe('eject command wiring', () => {
@@ -146,12 +148,24 @@ describe('shipper-cli', () => {
       await import('../src/index.ts');
     }
 
-    it('passes mode to newCommand', async () => {
-      process.argv = ['node', 'src/index.ts', 'new', 'request', '--mode', 'headless'];
+    it('passes mode and model to newCommand', async () => {
+      process.argv = [
+        'node',
+        'src/index.ts',
+        'new',
+        'request',
+        '--mode',
+        'headless',
+        '--model',
+        'sonnet',
+      ];
 
       await importEntrypoint();
 
-      expect(mockNewCommand).toHaveBeenCalledWith(['request'], { mode: 'headless' });
+      expect(mockNewCommand).toHaveBeenCalledWith(['request'], {
+        mode: 'headless',
+        model: 'sonnet',
+      });
     });
 
     it('passes mode through groomCommand options', async () => {
@@ -164,15 +178,32 @@ describe('shipper-cli', () => {
         auto: false,
         mode: 'interactive',
         agent: undefined,
+        model: undefined,
       });
     });
 
-    it('passes mode to pr review', async () => {
-      process.argv = ['node', 'src/index.ts', 'pr', 'review', '7', '--mode', 'interactive'];
+    it('passes mode and model to pr review', async () => {
+      process.argv = [
+        'node',
+        'src/index.ts',
+        'pr',
+        'review',
+        '7',
+        '--mode',
+        'interactive',
+        '--model',
+        'gpt-5',
+      ];
 
       await importEntrypoint();
 
-      expect(mockPrReviewCommand).toHaveBeenCalledWith('owner/repo', '7', 'interactive', undefined);
+      expect(mockPrReviewCommand).toHaveBeenCalledWith(
+        'owner/repo',
+        '7',
+        'interactive',
+        undefined,
+        'gpt-5'
+      );
     });
 
     it('loads settings explicitly for setup and does not run preflight', async () => {
@@ -182,7 +213,11 @@ describe('shipper-cli', () => {
 
       expect(mockLoadSettings).toHaveBeenCalled();
       expect(mockRunPreflight).not.toHaveBeenCalled();
-      expect(mockSetupCommand).toHaveBeenCalledWith(['repo'], { mode: 'headless' });
+      expect(mockSetupCommand).toHaveBeenCalledWith(['repo'], {
+        mode: 'headless',
+        model: undefined,
+        agent: undefined,
+      });
     });
 
     it('rejects the removed --headless option on new', async () => {
@@ -312,6 +347,7 @@ describe('shipper-cli', () => {
         auto: true,
         parallel: undefined,
         agent: undefined,
+        model: undefined,
       });
     });
 
@@ -325,6 +361,7 @@ describe('shipper-cli', () => {
         auto: true,
         parallel: 3,
         agent: undefined,
+        model: undefined,
       });
     });
 

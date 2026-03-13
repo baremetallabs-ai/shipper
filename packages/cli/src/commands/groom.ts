@@ -9,19 +9,21 @@ export interface GroomOptions {
   auto: boolean;
   mode?: CommandMode;
   agent?: AgentName;
+  model?: string;
 }
 
 async function groomOneIssue(
   repo: string,
   issueStr: string,
   mode?: CommandMode,
-  agent?: AgentName
+  agent?: AgentName,
+  model?: string
 ): Promise<{ success: boolean; error?: string }> {
   const code = await withIssueLock(repo, issueStr, () =>
     withStageHooks(
       'groom',
       { issueNumber: issueStr },
-      async () => await runPrompt('groom', { repo, issueRef: issueStr, mode, agent })
+      async () => await runPrompt('groom', { repo, issueRef: issueStr, mode, agent, model })
     )
   );
   return code === 0
@@ -46,7 +48,8 @@ export async function groomCommand(
         repo,
         String(candidate.number),
         options.mode,
-        options.agent
+        options.agent,
+        options.model
       );
 
       results.push({
@@ -74,7 +77,8 @@ export async function groomCommand(
     issue = String(selected.number);
   }
 
-  process.exitCode = (await groomOneIssue(repo, issue, options.mode, options.agent)).success
+  process.exitCode = (await groomOneIssue(repo, issue, options.mode, options.agent, options.model))
+    .success
     ? 0
     : 1;
 }

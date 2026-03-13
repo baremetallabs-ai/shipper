@@ -8,7 +8,8 @@ export async function prReviewCommand(
   repo: string,
   pr?: string,
   mode?: CommandMode,
-  agent?: AgentName
+  agent?: AgentName,
+  model?: string
 ): Promise<void> {
   let issueNumber: string;
 
@@ -37,7 +38,14 @@ export async function prReviewCommand(
         'pr-review',
         { issueNumber },
         async () =>
-          await runPrompt('pr_review', { repo, issueRef: issueNumber, prRef: pr, mode, agent })
+          await runPrompt('pr_review', {
+            repo,
+            issueRef: issueNumber,
+            prRef: pr,
+            mode,
+            agent,
+            model,
+          })
       )
   );
 

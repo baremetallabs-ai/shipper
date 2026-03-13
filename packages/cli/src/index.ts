@@ -41,6 +41,10 @@ function addAgentOption(command: Command): Command {
   );
 }
 
+function addModelOption(command: Command): Command {
+  return command.addOption(new Option('--model <model>', 'model to use for the agent CLI'));
+}
+
 program.configureOutput({
   outputError: (str, write) => {
     if (str.includes("option '--parallel <n>' argument missing")) {
@@ -101,37 +105,50 @@ program
     })
   );
 
-addAgentOption(
-  addModeOption(
-    program
-      .command('setup [words...]')
-      .description('Configure repository settings with an agent')
-      .action(
-        wrapAction(async (words: string[], options: { mode: string; agent?: string }) => {
-          await loadSettings();
-          await setupCommand(words, {
-            mode: options.mode as CommandMode,
-            agent: options.agent as AgentName | undefined,
-          });
-        })
-      )
+addModelOption(
+  addAgentOption(
+    addModeOption(
+      program
+        .command('setup [words...]')
+        .description('Configure repository settings with an agent')
+        .action(
+          wrapAction(
+            async (words: string[], options: { mode: string; agent?: string; model?: string }) => {
+              await loadSettings();
+              await setupCommand(words, {
+                mode: options.mode as CommandMode,
+                agent: options.agent as AgentName | undefined,
+                model: options.model,
+              });
+            }
+          )
+        )
+    )
   )
 );
 
-addAgentOption(
-  addModeOption(
-    program
-      .command('new')
-      .description('Create a new issue from a request')
-      .argument('<request...>', 'your idea for the new issue')
-      .action(
-        wrapAction(async (request: string[], options: { mode: string; agent?: string }) => {
-          await newCommand(request, {
-            mode: options.mode as CommandMode,
-            agent: options.agent as AgentName | undefined,
-          });
-        })
-      )
+addModelOption(
+  addAgentOption(
+    addModeOption(
+      program
+        .command('new')
+        .description('Create a new issue from a request')
+        .argument('<request...>', 'your idea for the new issue')
+        .action(
+          wrapAction(
+            async (
+              request: string[],
+              options: { mode: string; agent?: string; model?: string }
+            ) => {
+              await newCommand(request, {
+                mode: options.mode as CommandMode,
+                agent: options.agent as AgentName | undefined,
+                model: options.model,
+              });
+            }
+          )
+        )
+    )
   )
 );
 
@@ -158,90 +175,78 @@ program
     })
   );
 
-addAgentOption(
-  program
-    .command('next')
-    .description('Advance an issue to the next workflow step')
-    .argument('<ref>', 'issue or PR number/URL')
-    .action(
-      wrapAction(async (ref: string, options: { agent?: string }) => {
-        await nextCommand(requireResolvedRepo(), ref, options.agent as AgentName | undefined);
-      })
-    )
-);
-
-addAgentOption(
-  program
-    .command('ship')
-    .description('Run the full workflow end-to-end')
-    .argument('[issue]', 'issue number')
-    .option('--merge', 'auto-merge the PR after reaching shipper:ready', false)
-    .option('--auto', 'run autonomous continuous shipping loop', false)
-    .option('--parallel <n>', 'number of parallel slots (requires --auto)')
-    .action(
-      wrapAction(
-        async (
-          issue: string | undefined,
-          options: { merge: boolean; auto: boolean; parallel?: string; agent?: string }
-        ) => {
-          if (options.auto && issue) {
-            console.error('Error: --auto and an explicit issue number are mutually exclusive.');
-            process.exit(1);
-          }
-          if (!options.auto && !issue) {
-            console.error('Error: an issue number is required unless --auto is used.');
-            process.exit(1);
-          }
-
-          if (options.parallel !== undefined && !options.auto) {
-            console.error('Error: --parallel requires --auto');
-            process.exit(1);
-          }
-
-          let parallel: number | undefined;
-          if (options.parallel !== undefined) {
-            parallel = Number(options.parallel);
-            if (!Number.isInteger(parallel) || parallel < 1) {
-              console.error('Error: --parallel requires a number');
-              process.exit(1);
-            }
-            if (parallel === 1) {
-              parallel = undefined;
-            }
-          }
-
-          await shipCommand(requireResolvedRepo(), issue, {
-            merge: options.merge,
-            auto: options.auto,
-            parallel,
-            agent: options.agent as AgentName | undefined,
-          });
-        }
-      )
-    )
-);
-
-addAgentOption(
-  addModeOption(
+addModelOption(
+  addAgentOption(
     program
-      .command('groom')
-      .description('Groom an existing issue')
-      .argument('[issue]', 'issue number or URL')
-      .option('--auto', 'groom all eligible shipper:new issues in sequence', false)
+      .command('next')
+      .description('Advance an issue to the next workflow step')
+      .argument('<ref>', 'issue or PR number/URL')
+      .action(
+        wrapAction(async (ref: string, options: { agent?: string; model?: string }) => {
+          await nextCommand(
+            requireResolvedRepo(),
+            ref,
+            options.agent as AgentName | undefined,
+            options.model
+          );
+        })
+      )
+  )
+);
+
+addModelOption(
+  addAgentOption(
+    program
+      .command('ship')
+      .description('Run the full workflow end-to-end')
+      .argument('[issue]', 'issue number')
+      .option('--merge', 'auto-merge the PR after reaching shipper:ready', false)
+      .option('--auto', 'run autonomous continuous shipping loop', false)
+      .option('--parallel <n>', 'number of parallel slots (requires --auto)')
       .action(
         wrapAction(
           async (
             issue: string | undefined,
-            options: { auto: boolean; mode: string; agent?: string }
+            options: {
+              merge: boolean;
+              auto: boolean;
+              parallel?: string;
+              agent?: string;
+              model?: string;
+            }
           ) => {
             if (options.auto && issue) {
               console.error('Error: --auto and an explicit issue number are mutually exclusive.');
               process.exit(1);
             }
-            await groomCommand(requireResolvedRepo(), issue, {
+            if (!options.auto && !issue) {
+              console.error('Error: an issue number is required unless --auto is used.');
+              process.exit(1);
+            }
+
+            if (options.parallel !== undefined && !options.auto) {
+              console.error('Error: --parallel requires --auto');
+              process.exit(1);
+            }
+
+            let parallel: number | undefined;
+            if (options.parallel !== undefined) {
+              parallel = Number(options.parallel);
+              if (!Number.isInteger(parallel) || parallel < 1) {
+                console.error('Error: --parallel requires a number');
+                process.exit(1);
+              }
+              if (parallel === 1) {
+                parallel = undefined;
+              }
+            }
+
+            await shipCommand(requireResolvedRepo(), issue, {
+              merge: options.merge,
               auto: options.auto,
-              mode: options.mode as CommandMode,
+              parallel,
               agent: options.agent as AgentName | undefined,
+              model: options.model,
             });
           }
         )
@@ -249,60 +254,115 @@ addAgentOption(
   )
 );
 
-addAgentOption(
-  addModeOption(
-    program
-      .command('design')
-      .description('Run technical design review on an issue')
-      .argument('[issue]', 'issue number or URL')
-      .action(
-        wrapAction(async (issue: string | undefined, options: { mode: string; agent?: string }) => {
-          await designCommand(
-            requireResolvedRepo(),
-            issue,
-            options.mode as CommandMode,
-            options.agent as AgentName | undefined
-          );
-        })
-      )
+addModelOption(
+  addAgentOption(
+    addModeOption(
+      program
+        .command('groom')
+        .description('Groom an existing issue')
+        .argument('[issue]', 'issue number or URL')
+        .option('--auto', 'groom all eligible shipper:new issues in sequence', false)
+        .action(
+          wrapAction(
+            async (
+              issue: string | undefined,
+              options: { auto: boolean; mode: string; agent?: string; model?: string }
+            ) => {
+              if (options.auto && issue) {
+                console.error('Error: --auto and an explicit issue number are mutually exclusive.');
+                process.exit(1);
+              }
+              await groomCommand(requireResolvedRepo(), issue, {
+                auto: options.auto,
+                mode: options.mode as CommandMode,
+                agent: options.agent as AgentName | undefined,
+                model: options.model,
+              });
+            }
+          )
+        )
+    )
   )
 );
 
-addAgentOption(
-  addModeOption(
-    program
-      .command('plan')
-      .description('Create an implementation plan for an issue')
-      .argument('[issue]', 'issue number or URL')
-      .action(
-        wrapAction(async (issue: string | undefined, options: { mode: string; agent?: string }) => {
-          await planCommand(
-            requireResolvedRepo(),
-            issue,
-            options.mode as CommandMode,
-            options.agent as AgentName | undefined
-          );
-        })
-      )
+addModelOption(
+  addAgentOption(
+    addModeOption(
+      program
+        .command('design')
+        .description('Run technical design review on an issue')
+        .argument('[issue]', 'issue number or URL')
+        .action(
+          wrapAction(
+            async (
+              issue: string | undefined,
+              options: { mode: string; agent?: string; model?: string }
+            ) => {
+              await designCommand(
+                requireResolvedRepo(),
+                issue,
+                options.mode as CommandMode,
+                options.agent as AgentName | undefined,
+                options.model
+              );
+            }
+          )
+        )
+    )
   )
 );
 
-addAgentOption(
-  addModeOption(
-    program
-      .command('implement')
-      .description('Implement an issue in a worktree')
-      .argument('[issue]', 'issue number or URL')
-      .action(
-        wrapAction(async (issue: string | undefined, options: { mode: string; agent?: string }) => {
-          await implementCommand(
-            requireResolvedRepo(),
-            issue,
-            options.mode as CommandMode,
-            options.agent as AgentName | undefined
-          );
-        })
-      )
+addModelOption(
+  addAgentOption(
+    addModeOption(
+      program
+        .command('plan')
+        .description('Create an implementation plan for an issue')
+        .argument('[issue]', 'issue number or URL')
+        .action(
+          wrapAction(
+            async (
+              issue: string | undefined,
+              options: { mode: string; agent?: string; model?: string }
+            ) => {
+              await planCommand(
+                requireResolvedRepo(),
+                issue,
+                options.mode as CommandMode,
+                options.agent as AgentName | undefined,
+                options.model
+              );
+            }
+          )
+        )
+    )
+  )
+);
+
+addModelOption(
+  addAgentOption(
+    addModeOption(
+      program
+        .command('implement')
+        .description('Implement an issue in a worktree')
+        .argument('[issue]', 'issue number or URL')
+        .action(
+          wrapAction(
+            async (
+              issue: string | undefined,
+              options: { mode: string; agent?: string; model?: string }
+            ) => {
+              await implementCommand(
+                requireResolvedRepo(),
+                issue,
+                options.mode as CommandMode,
+                options.agent as AgentName | undefined,
+                options.model
+              );
+            }
+          )
+        )
+    )
   )
 );
 
@@ -326,22 +386,27 @@ program
     })
   );
 
-addAgentOption(
-  addModeOption(
-    program
-      .command('unblock')
-      .description('Check if a blocked issue can proceed')
-      .argument('<issue>', 'issue number')
-      .action(
-        wrapAction(async (issue: string, options: { mode: string; agent?: string }) => {
-          await unblockCommand(
-            requireResolvedRepo(),
-            issue,
-            options.mode as CommandMode,
-            options.agent as AgentName | undefined
-          );
-        })
-      )
+addModelOption(
+  addAgentOption(
+    addModeOption(
+      program
+        .command('unblock')
+        .description('Check if a blocked issue can proceed')
+        .argument('<issue>', 'issue number')
+        .action(
+          wrapAction(
+            async (issue: string, options: { mode: string; agent?: string; model?: string }) => {
+              await unblockCommand(
+                requireResolvedRepo(),
+                issue,
+                options.mode as CommandMode,
+                options.agent as AgentName | undefined,
+                options.model
+              );
+            }
+          )
+        )
+    )
   )
 );
 
@@ -370,60 +435,84 @@ issue
 
 const pr = program.command('pr').description('Pull request commands');
 
-addAgentOption(
-  addModeOption(
-    pr
-      .command('review')
-      .description('Review a pull request')
-      .argument('[pr]', 'PR number or URL')
-      .action(
-        wrapAction(async (prArg: string | undefined, options: { mode: string; agent?: string }) => {
-          await prReviewCommand(
-            requireResolvedRepo(),
-            prArg,
-            options.mode as CommandMode,
-            options.agent as AgentName | undefined
-          );
-        })
-      )
+addModelOption(
+  addAgentOption(
+    addModeOption(
+      pr
+        .command('review')
+        .description('Review a pull request')
+        .argument('[pr]', 'PR number or URL')
+        .action(
+          wrapAction(
+            async (
+              prArg: string | undefined,
+              options: { mode: string; agent?: string; model?: string }
+            ) => {
+              await prReviewCommand(
+                requireResolvedRepo(),
+                prArg,
+                options.mode as CommandMode,
+                options.agent as AgentName | undefined,
+                options.model
+              );
+            }
+          )
+        )
+    )
   )
 );
 
-addAgentOption(
-  addModeOption(
-    pr
-      .command('open')
-      .description('Open a pull request for an implemented issue')
-      .argument('[issue]', 'issue number or URL')
-      .action(
-        wrapAction(async (issue: string | undefined, options: { mode: string; agent?: string }) => {
-          await prOpenCommand(
-            requireResolvedRepo(),
-            issue,
-            options.mode as CommandMode,
-            options.agent as AgentName | undefined
-          );
-        })
-      )
+addModelOption(
+  addAgentOption(
+    addModeOption(
+      pr
+        .command('open')
+        .description('Open a pull request for an implemented issue')
+        .argument('[issue]', 'issue number or URL')
+        .action(
+          wrapAction(
+            async (
+              issue: string | undefined,
+              options: { mode: string; agent?: string; model?: string }
+            ) => {
+              await prOpenCommand(
+                requireResolvedRepo(),
+                issue,
+                options.mode as CommandMode,
+                options.agent as AgentName | undefined,
+                options.model
+              );
+            }
+          )
+        )
+    )
   )
 );
 
-addAgentOption(
-  addModeOption(
-    pr
-      .command('remediate')
-      .description('Remediate a pull request after review feedback')
-      .argument('[pr]', 'PR number or URL')
-      .action(
-        wrapAction(async (prArg: string | undefined, options: { mode: string; agent?: string }) => {
-          await prRemediateCommand(
-            requireResolvedRepo(),
-            prArg,
-            options.mode as CommandMode,
-            options.agent as AgentName | undefined
-          );
-        })
-      )
+addModelOption(
+  addAgentOption(
+    addModeOption(
+      pr
+        .command('remediate')
+        .description('Remediate a pull request after review feedback')
+        .argument('[pr]', 'PR number or URL')
+        .action(
+          wrapAction(
+            async (
+              prArg: string | undefined,
+              options: { mode: string; agent?: string; model?: string }
+            ) => {
+              await prRemediateCommand(
+                requireResolvedRepo(),
+                prArg,
+                options.mode as CommandMode,
+                options.agent as AgentName | undefined,
+                options.model
+              );
+            }
+          )
+        )
+    )
   )
 );
 

@@ -4,7 +4,7 @@ import { runPrompt, type AgentName, type CommandMode } from '@dnsquared/shipper-
 
 export async function setupCommand(
   words: string[],
-  options: { mode?: CommandMode; agent?: AgentName } = {}
+  options: { mode?: CommandMode; agent?: AgentName; model?: string } = {}
 ): Promise<void> {
   const userText = words.join(' ').trim();
 
@@ -19,5 +19,12 @@ export async function setupCommand(
       : `Run setup for ${repoName}. This is a fresh setup — no .shipper/ directory found.`;
   }
 
-  process.exit(await runPrompt('setup', { userInput, mode: options.mode, agent: options.agent }));
+  process.exit(
+    await runPrompt('setup', {
+      userInput,
+      mode: options.mode,
+      agent: options.agent,
+      model: options.model,
+    })
+  );
 }

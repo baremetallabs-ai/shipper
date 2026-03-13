@@ -9,6 +9,7 @@ const readFileSyncMock = vi.fn();
 const fetchIssueMock = vi.fn();
 const fetchPRMock = vi.fn();
 const resolveAgentMock = vi.fn().mockReturnValue('claude');
+const resolveModelMock = vi.fn().mockReturnValue(undefined);
 const resolveModeMock = vi.fn().mockReturnValue('default');
 const getSettingsMock = vi.fn().mockReturnValue({ agentTimeoutMinutes: 60 });
 
@@ -38,6 +39,7 @@ vi.mock('../../src/lib/github.js', () => ({
 
 vi.mock('../../src/lib/settings.js', () => ({
   resolveAgent: (...args: unknown[]) => resolveAgentMock(...args),
+  resolveModel: (...args: unknown[]) => resolveModelMock(...args),
   resolveMode: (...args: unknown[]) => resolveModeMock(...args),
   getSettings: () => getSettingsMock(),
 }));
@@ -86,6 +88,7 @@ function spawnedArgs(): string[] {
 afterEach(() => {
   vi.clearAllMocks();
   resolveAgentMock.mockReturnValue('claude');
+  resolveModelMock.mockReturnValue(undefined);
   resolveModeMock.mockReturnValue('default');
   getSettingsMock.mockReturnValue({ agentTimeoutMinutes: 60 });
   fetchIssueMock.mockResolvedValue('issue body');
@@ -130,6 +133,7 @@ describe('runPrompt', () => {
       'utf-8'
     );
     expect(resolveAgentMock).toHaveBeenCalledWith('test', undefined);
+    expect(resolveModelMock).toHaveBeenCalledWith('test', undefined);
     expect(resolveModeMock).toHaveBeenCalledWith('test', undefined);
   });
 
@@ -241,6 +245,46 @@ describe('runPrompt', () => {
     mockSpawnResult({ error: new Error('spawn failed') });
 
     await expect(runPrompt('test', {})).resolves.toBe(1);
+  });
+
+  it('passes --model for claude when a model is resolved', async () => {
+    resolveModelMock.mockReturnValue('opus');
+    readFileMock.mockResolvedValueOnce(makePrompt('claude'));
+    mockSpawnResult();
+
+    await expect(runPrompt('test', { model: 'sonnet' })).resolves.toBe(0);
+
+    expect(spawnedArgs()).toEqual(['--model', 'opus', '--append-system-prompt', 'prompt body']);
+  });
+
+  it('passes -m before exec for codex when a model is resolved', async () => {
+    resolveAgentMock.mockReturnValue('codex');
+    resolveModeMock.mockReturnValue('headless');
+    resolveModelMock.mockReturnValue('gpt-5');
+    readFileMock.mockResolvedValueOnce(makePrompt('codex'));
+    mockSpawnResult();
+
+    await expect(runPrompt('test', { model: 'gpt-5' })).resolves.toBe(0);
+
+    expect(spawnedArgs().slice(0, 6)).toEqual([
+      '-m',
+      'gpt-5',
+      'exec',
+      '--full-auto',
+      '-c',
+      'sandbox_workspace_write.network_access=true',
+    ]);
+  });
+
+  it('does not add a model flag when no model is resolved', async () => {
+    resolveAgentMock.mockReturnValue('codex');
+    readFileMock.mockResolvedValueOnce(makePrompt('codex'));
+    mockSpawnResult();
+
+    await expect(runPrompt('test', {})).resolves.toBe(0);
+
+    expect(spawnedArgs()).not.toContain('-m');
+    expect(spawnedArgs()).not.toContain('--model');
   });
 
   it('injects -p for claude headless mode when absent', async () => {

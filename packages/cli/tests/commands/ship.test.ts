@@ -116,6 +116,7 @@ import {
   withStageHooks,
   withIssueLock,
   releaseIssueLock,
+  runPrompt,
 } from '@dnsquared/shipper-core';
 import { spawn, spawnSync } from 'node:child_process';
 
@@ -127,6 +128,7 @@ const mockClassifyChecks = vi.mocked(classifyChecks);
 const mockWithStageHooks = vi.mocked(withStageHooks);
 const mockWithIssueLock = vi.mocked(withIssueLock);
 const mockReleaseIssueLock = vi.mocked(releaseIssueLock);
+const mockRunPrompt = vi.mocked(runPrompt);
 const mockSpawn = vi.mocked(spawn);
 const mockSpawnSync = vi.mocked(spawnSync);
 const mockCreateWriteStream = fsMockState.mockCreateWriteStream;
@@ -554,6 +556,8 @@ describe('shipCommand single-issue path', () => {
     mockGh.mockReset();
     mockSpawnSync.mockReset();
     mockSpawnSync.mockReturnValue({ status: 0 } as ReturnType<typeof spawnSync>);
+    mockRunPrompt.mockReset();
+    mockRunPrompt.mockResolvedValue(0);
     exitSpy.mockClear();
   });
 
@@ -682,6 +686,21 @@ describe('shipCommand single-issue path', () => {
 
     logSpy.mockRestore();
     errorSpy.mockRestore();
+  });
+
+  it('forwards an explicit model override to shipper next', async () => {
+    mockIssueViewSequence(['shipper:planned', 'shipper:ready']);
+
+    await shipCommand(repo, '42', { auto: false, merge: false, model: 'sonnet' });
+
+    const cliEntrypoint = process.argv[1];
+    expect(cliEntrypoint).toBeDefined();
+    expect(mockSpawnSync).toHaveBeenCalledWith(
+      process.execPath,
+      [cliEntrypoint, 'next', '42', '--model', 'sonnet'],
+      expect.objectContaining({ stdio: 'inherit', env: process.env })
+    );
+    expect(exitSpy).toHaveBeenCalledWith(0);
   });
 
   it('fails fast with a terminal-state message for shipper:failed issues', async () => {
@@ -983,6 +1002,8 @@ describe('shipCommand parallel auto runner', () => {
     mockClearStaleLockIfNeeded.mockReset();
     mockGh.mockReset();
     mockGh.mockResolvedValue({ stdout: '[]', stderr: '' });
+    mockRunPrompt.mockReset();
+    mockRunPrompt.mockResolvedValue(0);
     mockSpawn.mockReset();
     mockSpawnSync.mockReset();
     mockReleaseIssueLock.mockReset();
@@ -1048,6 +1069,91 @@ describe('shipCommand parallel auto runner', () => {
     await runPromise;
 
     expect(exitSpy).toHaveBeenCalledWith(0);
+  });
+
+  it('forwards an explicit model override to child ship processes', async () => {
+    let plannedIssues = [{ number: 1, title: 'Issue one' }];
+    mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
+      if (label === 'shipper:planned') return plannedIssues;
+      return [];
+    });
+
+    const child = new FakeChildProcess();
+    mockSpawn.mockReturnValueOnce(child as never);
+
+    const runPromise = shipCommand(repo, undefined, {
+      auto: true,
+      merge: false,
+      parallel: 2,
+      model: 'gpt-5',
+    });
+
+    await flushMicrotasks();
+
+    const cliEntrypoint = process.argv[1];
+    expect(cliEntrypoint).toBeDefined();
+    expect(mockSpawn).toHaveBeenCalledWith(
+      process.execPath,
+      [cliEntrypoint, 'ship', '1', '--merge', '--model', 'gpt-5'],
+      expect.objectContaining({ env: process.env })
+    );
+
+    plannedIssues = [];
+    child.finish(0);
+    await runPromise;
+  });
+
+  it('forwards model overrides through unblock attempts in auto mode', async () => {
+    let readyReturned = false;
+    let blockedReturned = false;
+
+    mockSelectIssuesForStage.mockImplementation(async (_repo: string, label: string) => {
+      if (label === 'shipper:ready' && !readyReturned) {
+        readyReturned = true;
+        return [];
+      }
+      return [];
+    });
+
+    mockGh.mockImplementation(async (args: string[]) => {
+      if (args[0] === 'issue' && args[1] === 'list' && !blockedReturned) {
+        blockedReturned = true;
+        return {
+          stdout: JSON.stringify([
+            {
+              number: 7,
+              title: 'Blocked issue',
+              labels: [{ name: 'shipper:planned' }, { name: 'shipper:blocked' }],
+            },
+          ]),
+          stderr: '',
+        };
+      }
+
+      if (args[0] === 'issue' && args[1] === 'list') {
+        return { stdout: '[]', stderr: '' };
+      }
+
+      if (args[0] === 'issue' && args[1] === 'view') {
+        return { stdout: 'shipper:planned\n', stderr: '' };
+      }
+
+      return { stdout: '[]', stderr: '' };
+    });
+
+    await shipCommand(repo, undefined, {
+      auto: true,
+      merge: false,
+      parallel: 1,
+      model: 'haiku',
+    });
+
+    expect(mockRunPrompt).toHaveBeenCalledWith('unblock', {
+      repo,
+      issueRef: '7',
+      agent: undefined,
+      model: 'haiku',
+    });
   });
 
   it('captures combined child output in per-issue log files and prints prefixed parallel status lines', async () => {

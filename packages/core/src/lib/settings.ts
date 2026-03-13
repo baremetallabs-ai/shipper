@@ -12,6 +12,7 @@ export interface PrReviewWait {
 export interface CommandConfig {
   mode?: CommandMode;
   agent?: AgentName;
+  model?: string;
 }
 
 export interface MergeSettings {
@@ -54,6 +55,8 @@ export const SETTING_DESCRIPTIONS: Record<string, string> = {
     'per-command settings map (e.g. { "default": { "agent": "claude" }, "groom": { "mode": "headless" } })',
   'commands.default.agent':
     'default coding agent for all steps (supports per-step overrides via commands.<step>.agent)',
+  'commands.default.model':
+    'default model override for all steps (supports per-step overrides via commands.<step>.model)',
   'commands.default.mode':
     'default execution mode for prompt-running commands: "headless", "interactive", or "default"',
   defaultBaseBranch: 'target branch for PRs (auto-detected from GitHub if not set)',
@@ -174,6 +177,15 @@ export function resolveMode(step: string, override?: CommandMode): CommandMode {
     return 'default';
   }
   return validateMode(mode, step);
+}
+
+export function resolveModel(step: string, override?: string): string | undefined {
+  if (override) {
+    return override;
+  }
+
+  const s = getSettings();
+  return s.commands[step]?.model ?? s.commands.default.model;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
