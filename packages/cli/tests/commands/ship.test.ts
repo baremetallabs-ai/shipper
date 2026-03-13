@@ -841,6 +841,7 @@ describe('shipCommand single-issue path', () => {
   });
 
   it('allows explicit single-issue runs to start from shipper:new', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     mockIssueViewSequence(['shipper:new', 'shipper:groomed', 'shipper:ready']);
@@ -862,6 +863,26 @@ describe('shipCommand single-issue path', () => {
     expect(exitSpy).toHaveBeenCalledWith(0);
     expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining('was reset to shipper:new'));
 
+    logSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
+
+  it('keeps the same-label safeguard when grooming stays on shipper:new', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    mockIssueViewSequence(['shipper:new', 'shipper:new']);
+
+    await shipCommand(repo, '42', { auto: false, merge: false });
+
+    expect(mockSpawnSync).toHaveBeenCalledTimes(1);
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(errorSpy).toHaveBeenCalledWith(
+      'Label did not advance after stage "groom" (still "shipper:new"). Aborting to avoid infinite loop.'
+    );
+    expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining('was reset to shipper:new'));
+
+    logSpy.mockRestore();
     errorSpy.mockRestore();
   });
 
