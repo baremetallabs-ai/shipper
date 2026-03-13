@@ -152,7 +152,7 @@ export async function issueListCommand(options: { status?: string }): Promise<vo
       console.log(`\n${DISPLAY_NAME_MAP[label]} (${group.length})`);
 
       for (const issue of group) {
-        const lockedSuffix = issue.labels.some((stageLabel) => stageLabel.name === LOCKED_LABEL)
+        const lockedSuffix = issue.labels.some((label) => label.name === LOCKED_LABEL)
           ? ' [locked]'
           : '';
         console.log(`  #${issue.number} ${issue.title}${lockedSuffix}`);
