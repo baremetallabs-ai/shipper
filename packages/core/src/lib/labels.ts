@@ -88,8 +88,8 @@ export const LABELS: readonly LabelDefinition[] = [
   },
   {
     name: 'shipper:failed',
-    color: '6A0DAD',
-    description: 'Failed after exhausting transition cap — requires manual intervention',
+    color: 'B60205',
+    description: 'Automated processing failed — requires investigation',
     kind: 'control',
     displayName: 'Failed',
   },

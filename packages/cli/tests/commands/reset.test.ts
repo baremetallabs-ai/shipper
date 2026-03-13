@@ -51,6 +51,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   ],
   IMPLEMENTED_LABEL: 'shipper:implemented',
   BLOCKED_LABEL: 'shipper:blocked',
+  FAILED_LABEL: 'shipper:failed',
   LOCKED_LABEL: 'shipper:locked',
 }));
 
@@ -378,6 +379,35 @@ describe('resetCommand', () => {
     expect(mockConsoleLog).toHaveBeenCalledWith('  Target: shipper:designed');
     const editArgs = getIssueEditArgs();
     expect(editArgs[editArgs.indexOf('--remove-label') + 1]).toBe('shipper:planned');
+  });
+
+  it('removes shipper:failed on non-new resets', async () => {
+    setupExecMock({
+      issueJson: mockIssueView('OPEN', ['shipper:groomed', 'shipper:designed', 'shipper:failed']),
+      timelineByStage: { groomed: '2024-01-15T12:00:00Z\n' },
+      commentsWithDates: '{"id":203,"created_at":"2024-01-15T12:00:01Z"}\n',
+    });
+
+    await resetCommand('18', { force: true, to: 'groomed' });
+
+    const editArgs = getIssueEditArgs();
+    expect(editArgs).toContain('--remove-label');
+    expect(editArgs[editArgs.indexOf('--remove-label') + 1]).toBe(
+      'shipper:designed,shipper:failed'
+    );
+  });
+
+  it('still removes shipper:failed when resetting to new', async () => {
+    setupExecMock({
+      issueJson: mockIssueView('OPEN', ['shipper:new', 'shipper:planned', 'shipper:failed']),
+      commentIds: '101\n',
+    });
+
+    await resetCommand('18', { force: true, to: 'new' });
+
+    const editArgs = getIssueEditArgs();
+    expect(editArgs).toContain('--remove-label');
+    expect(editArgs[editArgs.indexOf('--remove-label') + 1]).toBe('shipper:planned,shipper:failed');
   });
 
   it('shows all earlier workflow stages for a planned issue', async () => {
