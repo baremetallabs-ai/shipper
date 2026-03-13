@@ -13,11 +13,13 @@ const expectedOutput = JSON.stringify([
     isOutdated: true,
     comments: [
       {
+        id: 101,
         author: 'reviewer-one',
         body: 'Please rename this.',
         createdAt: '2026-03-06T12:00:00Z',
       },
       {
+        id: 102,
         author: 'author-two',
         body: 'Done.',
         createdAt: '2026-03-06T13:00:00Z',
@@ -89,11 +91,13 @@ const response = JSON.stringify({
               comments: {
                 nodes: [
                   {
+                    databaseId: 101,
                     author: { login: 'reviewer-one' },
                     body: 'Please rename this.',
                     createdAt: '2026-03-06T12:00:00Z',
                   },
                   {
+                    databaseId: 102,
                     author: { login: 'author-two' },
                     body: 'Done.',
                     createdAt: '2026-03-06T13:00:00Z',
@@ -116,7 +120,7 @@ const expectedFilter = [
   'line,',
   'isResolved,',
   'isOutdated,',
-  'comments:(.comments.nodes|map({author:.author.login,body,createdAt}))',
+  'comments:(.comments.nodes|map({id:.databaseId,author:.author.login,body,createdAt}))',
   '})',
 ].join('');
 
@@ -156,7 +160,7 @@ describe('gh-api-get-review-threads.sh', () => {
       line: number;
       isResolved: boolean;
       isOutdated: boolean;
-      comments: Array<{ author: string; body: string; createdAt: string }>;
+      comments: Array<{ id: number; author: string; body: string; createdAt: string }>;
     }>;
 
     expect(ghArgs.slice(0, 2)).toEqual(['api', 'graphql']);
@@ -169,6 +173,7 @@ describe('gh-api-get-review-threads.sh', () => {
     const queryArg = ghArgs.find((arg) => arg.startsWith('query='));
     expect(queryArg).toContain('reviewThreads(first: 100)');
     expect(queryArg).toContain('comments(first: 100)');
+    expect(queryArg).toContain('databaseId');
     expect(queryArg).toContain('isResolved');
     expect(queryArg).toContain('isOutdated');
 
@@ -180,11 +185,13 @@ describe('gh-api-get-review-threads.sh', () => {
         isOutdated: true,
         comments: [
           {
+            id: 101,
             author: 'reviewer-one',
             body: 'Please rename this.',
             createdAt: '2026-03-06T12:00:00Z',
           },
           {
+            id: 102,
             author: 'author-two',
             body: 'Done.',
             createdAt: '2026-03-06T13:00:00Z',
