@@ -13,6 +13,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   resolveRef: vi.fn(),
   tryResolvePrForIssue: vi.fn(),
   BLOCKED_LABEL: 'shipper:blocked',
+  FAILED_LABEL: 'shipper:failed',
   LOCKED_LABEL: 'shipper:locked',
   NEW_LABEL: 'shipper:new',
   GROOMED_LABEL: 'shipper:groomed',
@@ -142,6 +143,37 @@ describe('nextCommand', () => {
     expect(errorSpy).toHaveBeenCalledWith(
       "Issue #159 is blocked. Run 'shipper unblock 159' to check if it can proceed."
     );
+    expect(mockWithIssueLock).not.toHaveBeenCalled();
+    expect(mockGroomCommand).not.toHaveBeenCalled();
+    expect(mockDesignCommand).not.toHaveBeenCalled();
+    expect(mockPlanCommand).not.toHaveBeenCalled();
+    expect(mockImplementCommand).not.toHaveBeenCalled();
+    expect(mockPrOpenCommand).not.toHaveBeenCalled();
+    expect(mockPrReviewCommand).not.toHaveBeenCalled();
+    expect(mockPrRemediateCommand).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'shipper:new',
+    'shipper:groomed',
+    'shipper:designed',
+    'shipper:planned',
+    'shipper:implemented',
+    'shipper:pr-open',
+    'shipper:pr-reviewed',
+    'shipper:ready',
+  ])('exits for failed %s issues before dispatch', async (stageLabel) => {
+    mockGh.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        number: 159,
+        labels: [{ name: stageLabel }, { name: 'shipper:failed' }],
+      }),
+      stderr: '',
+    });
+
+    await expect(nextCommand(repo, '159')).rejects.toThrow('exit:1');
+
+    expect(errorSpy).toHaveBeenCalledWith('Issue #159 has the shipper:failed label.');
     expect(mockWithIssueLock).not.toHaveBeenCalled();
     expect(mockGroomCommand).not.toHaveBeenCalled();
     expect(mockDesignCommand).not.toHaveBeenCalled();

@@ -12,6 +12,7 @@ import {
   STAGE_LABEL_NAMES,
   IMPLEMENTED_LABEL,
   BLOCKED_LABEL,
+  FAILED_LABEL,
   LOCKED_LABEL,
 } from '@dnsquared/shipper-core';
 
@@ -187,6 +188,11 @@ async function scanArtifacts(
     const labelStage = parseStage(label);
     return labelStage !== null && getStageIndex(labelStage) > targetIndex;
   });
+
+  if (labels.includes(FAILED_LABEL) && !labelsToRemove.includes(FAILED_LABEL)) {
+    labelsToRemove.push(FAILED_LABEL);
+  }
+
   const addTarget = !labels.includes(targetLabel);
 
   let commentIds: number[] = [];

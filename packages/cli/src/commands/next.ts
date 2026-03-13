@@ -3,6 +3,7 @@ import {
   resolveRef,
   tryResolvePrForIssue,
   BLOCKED_LABEL,
+  FAILED_LABEL,
   LOCKED_LABEL,
   NEW_LABEL,
   GROOMED_LABEL,
@@ -69,7 +70,10 @@ export async function nextCommand(repo: string, ref: string, agent?: AgentName):
     .map((l) => l.name)
     .filter((name) => name.startsWith('shipper:'));
   const isBlocked = allLabels.includes(BLOCKED_LABEL);
-  const shipperLabels = allLabels.filter((name) => name !== BLOCKED_LABEL && name !== LOCKED_LABEL);
+  const isFailed = allLabels.includes(FAILED_LABEL);
+  const shipperLabels = allLabels.filter(
+    (name) => name !== BLOCKED_LABEL && name !== LOCKED_LABEL && name !== FAILED_LABEL
+  );
 
   // Validate labels
   if (shipperLabels.length === 0) {
@@ -100,6 +104,12 @@ export async function nextCommand(repo: string, ref: string, agent?: AgentName):
     );
     process.exit(1);
   }
+
+  if (isFailed) {
+    console.error(`Issue #${issueNumber} has the shipper:failed label.`);
+    process.exit(1);
+  }
+
   const issueStr = String(issueNumber);
 
   // Dispatch (wrapped in lock so inner commands become passthroughs)

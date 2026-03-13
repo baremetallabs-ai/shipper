@@ -36,6 +36,16 @@ describe('labels', () => {
     ]);
   });
 
+  it('defines shipper:failed as a generalized control label', () => {
+    const failedLabel = LABELS.find((label) => label.name === 'shipper:failed');
+
+    expect(failedLabel).toMatchObject({
+      kind: 'control',
+      color: 'B60205',
+      description: 'Automated processing failed — requires investigation',
+    });
+  });
+
   it('keeps workflow labels in stable stage order', () => {
     expect(STAGE_LABEL_NAMES).toEqual([
       'shipper:new',
