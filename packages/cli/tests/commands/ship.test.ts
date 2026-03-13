@@ -206,6 +206,7 @@ function defaultWithIssueLock<T>(_repo: string, _issue: string, fn: () => Promis
 
 function setupReadyMergeFlow(options?: {
   mergeStates?: string[];
+  mergeable?: string;
   prNumber?: number;
   issueNumber?: string;
   updateBranchStdout?: string;
@@ -215,6 +216,7 @@ function setupReadyMergeFlow(options?: {
 }): void {
   const {
     mergeStates = ['CLEAN'],
+    mergeable = 'UNKNOWN',
     prNumber = 456,
     issueNumber = '123',
     updateBranchStdout = '',
@@ -253,7 +255,7 @@ function setupReadyMergeFlow(options?: {
       const mergeStateStatus = mergeStates[index] ?? mergeStates[mergeStates.length - 1] ?? 'CLEAN';
       mergeStateCall++;
       return {
-        stdout: JSON.stringify({ mergeStateStatus }),
+        stdout: JSON.stringify({ mergeStateStatus, mergeable }),
         stderr: '',
       };
     }
@@ -998,8 +1000,8 @@ describe('shipCommand merge path', () => {
     errorSpy.mockRestore();
   });
 
-  it('fails early when GitHub reports UNKNOWN merge state', async () => {
-    setupReadyMergeFlow({ mergeStates: ['UNKNOWN'] });
+  it('fails early when GitHub reports UNKNOWN merge state and PR is not mergeable', async () => {
+    setupReadyMergeFlow({ mergeStates: ['UNKNOWN'], mergeable: 'UNKNOWN' });
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     await shipCommand(repo, '123', { merge: true, auto: false });
@@ -1012,6 +1014,20 @@ describe('shipCommand merge path', () => {
     expect(exitSpy).toHaveBeenCalledWith(1);
 
     errorSpy.mockRestore();
+  });
+
+  it('merges when mergeStateStatus is UNKNOWN but mergeable is MERGEABLE', async () => {
+    setupReadyMergeFlow({
+      mergeStates: ['UNKNOWN'],
+      mergeable: 'MERGEABLE',
+      mergeStdout: 'merged\n',
+    });
+
+    await shipCommand(repo, '123', { merge: true, auto: false });
+
+    expect(findGhCalls('pr', 'merge')).toHaveLength(1);
+    expect(postMergeMock).toHaveBeenCalledTimes(1);
+    expect(exitSpy).toHaveBeenCalledWith(0);
   });
 
   it('fails clearly on an unrecognized merge state instead of merging blindly', async () => {

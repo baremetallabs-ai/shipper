@@ -118,6 +118,7 @@ interface ParkedIssue {
 
 interface PRMergeStateViewData {
   mergeStateStatus: string;
+  mergeable: string;
 }
 
 function buildIssueCommandEnv(
@@ -286,7 +287,7 @@ async function getMergeStateStatus(prNumber: number, nwo: string): Promise<strin
       '-R',
       nwo,
       '--json',
-      'mergeStateStatus',
+      'mergeStateStatus,mergeable',
     ]);
     output = result.stdout;
   } catch (err) {
@@ -297,6 +298,14 @@ async function getMergeStateStatus(prNumber: number, nwo: string): Promise<strin
 
   try {
     const data = JSON.parse(output) as PRMergeStateViewData;
+
+    // GitHub may not compute mergeStateStatus when branch protection is absent,
+    // leaving it permanently UNKNOWN. Fall back to the mergeable field which is
+    // computed independently.
+    if (data.mergeStateStatus === 'UNKNOWN' && data.mergeable === 'MERGEABLE') {
+      return 'CLEAN';
+    }
+
     return data.mergeStateStatus;
   } catch (err) {
     throw new Error(
