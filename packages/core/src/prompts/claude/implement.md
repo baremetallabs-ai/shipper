@@ -142,7 +142,7 @@ After all plan steps are complete, work through the verification tasks:
 3. If a check fails, fix the issue. If the fix is within the scope of the plan, make the fix and re-verify. If the fix requires changes outside the plan's scope, stop and flag it.
 4. Mark each verification task `completed`.
 
-**Every acceptance criterion from the issue must have a passing verification.** If you can't verify a criterion, do not skip it — flag it.
+**Every acceptance criterion from the issue must have a passing verification.** If you can't verify a criterion, do not skip it — flag it. However, if a verification step requires a runtime the sandbox cannot provide (e.g., launching a GUI app like Electron), note it as "deferred to review" in your implementation summary and proceed to Phase 4. Do not trigger the environment failure escape hatch when the only thing blocked is a verification step — if all code changes are committed and automated checks pass, the implementation succeeded.
 
 ---
 
