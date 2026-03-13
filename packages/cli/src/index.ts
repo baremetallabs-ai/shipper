@@ -347,7 +347,7 @@ addAgentOption(
 
 program
   .command('unlock')
-  .description('Force-release the lock on an issue')
+  .description('Force-release an issue lock or sweep stale locks')
   .argument('[issue]', 'issue number')
   .option('--stale', 'release all stale locks')
   .action(
