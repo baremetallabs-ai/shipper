@@ -166,16 +166,18 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
     effectiveMode === 'headless' && timeoutMinutes > 0 ? timeoutMinutes * 60_000 : undefined;
 
   if (effectiveMode === 'headless') {
-    if (agent === 'claude' && !args.includes('-p')) {
-      args.unshift('-p');
-    } else if (agent === 'codex') {
+    if (agent === 'claude') {
+      if (!args.includes('-p')) {
+        args.unshift('-p');
+      }
+    } else {
       normalizeCodexHeadlessArgs(args);
     }
   } else if (effectiveMode === 'interactive') {
     if (agent === 'claude') {
       const pIdx = args.indexOf('-p');
       if (pIdx !== -1) args.splice(pIdx, 1);
-    } else if (agent === 'codex') {
+    } else {
       stripCodexHeadlessArgs(args);
     }
   }
@@ -205,10 +207,8 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
 
   if (agent === 'claude') {
     args.push('--append-system-prompt', promptBody);
-  } else if (agent === 'codex') {
-    args.push(promptBody);
   } else {
-    args.push('--append-system-prompt', promptBody);
+    args.push(promptBody);
   }
 
   const messageParts: string[] = [];

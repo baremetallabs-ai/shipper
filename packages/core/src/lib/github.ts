@@ -75,6 +75,85 @@ interface RawListIssueData {
   createdAt: string;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function hasName(value: unknown): value is { name: string } {
+  return isRecord(value) && typeof value.name === 'string';
+}
+
+function hasLogin(value: unknown): value is { login: string } {
+  return isRecord(value) && typeof value.login === 'string';
+}
+
+function isIssueComment(value: unknown): value is IssueComment {
+  return (
+    isRecord(value) &&
+    hasLogin(value.author) &&
+    typeof value.body === 'string' &&
+    typeof value.createdAt === 'string'
+  );
+}
+
+function isReviewComment(value: unknown): value is ReviewComment {
+  return (
+    isRecord(value) &&
+    hasLogin(value.author) &&
+    typeof value.body === 'string' &&
+    typeof value.state === 'string' &&
+    typeof value.submittedAt === 'string'
+  );
+}
+
+function isIssueData(value: unknown): value is IssueData {
+  return (
+    isRecord(value) &&
+    typeof value.number === 'number' &&
+    typeof value.title === 'string' &&
+    typeof value.state === 'string' &&
+    Array.isArray(value.labels) &&
+    value.labels.every(hasName) &&
+    typeof value.body === 'string' &&
+    Array.isArray(value.comments) &&
+    value.comments.every(isIssueComment) &&
+    hasLogin(value.author) &&
+    typeof value.createdAt === 'string'
+  );
+}
+
+function isPRData(value: unknown): value is PRData {
+  if (!isIssueData(value)) {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.headRefName === 'string' &&
+    typeof record.baseRefName === 'string' &&
+    Array.isArray(record.reviews) &&
+    record.reviews.every(isReviewComment)
+  );
+}
+
+function parseIssueData(json: string): IssueData {
+  const parsed = JSON.parse(json) as unknown;
+  if (!isIssueData(parsed)) {
+    throw new Error('Invalid issue response from GitHub CLI.');
+  }
+
+  return parsed;
+}
+
+function parsePRData(json: string): PRData {
+  const parsed = JSON.parse(json) as unknown;
+  if (!isPRData(parsed)) {
+    throw new Error('Invalid PR response from GitHub CLI.');
+  }
+
+  return parsed;
+}
+
 export async function resolveBaseBranch(repo: string, configured?: string): Promise<string> {
   if (configured) {
     let result: string;
@@ -139,8 +218,7 @@ export async function fetchIssue(repo: string, ref: string): Promise<string> {
     throw new Error(`Failed to fetch issue ${ref}: ${msg}`);
   }
 
-  const data: IssueData = JSON.parse(json);
-  return formatIssue(data);
+  return formatIssue(parseIssueData(json));
 }
 
 export async function fetchPR(repo: string, ref: string): Promise<string> {
@@ -161,8 +239,7 @@ export async function fetchPR(repo: string, ref: string): Promise<string> {
     throw new Error(`Failed to fetch PR ${ref}: ${msg}`);
   }
 
-  const data: PRData = JSON.parse(json);
-  return formatPR(data);
+  return formatPR(parsePRData(json));
 }
 
 function escapeAttr(value: string): string {
@@ -396,7 +473,8 @@ export async function selectIssuesForStage(
       'open',
       '--limit',
       '1000',
-      ...(lockedSearchFilter ? ['--search', lockedSearchFilter] : []),
+      '--search',
+      lockedSearchFilter,
       '--json',
       'number,title',
     ]);

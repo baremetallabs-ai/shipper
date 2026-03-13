@@ -49,8 +49,62 @@ interface GraphQLResponse {
   };
 }
 
-interface PRViewData {
-  mergeStateStatus: string;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function isSearchNode(value: unknown): value is SearchNode {
+  if (!isRecord(value)) return false;
+  if (
+    typeof value.number !== 'number' ||
+    typeof value.title !== 'string' ||
+    typeof value.headRefName !== 'string' ||
+    typeof value.baseRefName !== 'string' ||
+    !isRecord(value.timelineItems) ||
+    !Array.isArray(value.timelineItems.nodes)
+  ) {
+    return false;
+  }
+
+  return value.timelineItems.nodes.every((node) => {
+    if (!isRecord(node) || typeof node.createdAt !== 'string') {
+      return false;
+    }
+
+    return (
+      node.label === undefined || (isRecord(node.label) && typeof node.label.name === 'string')
+    );
+  });
+}
+
+function parseGraphQLResponse(output: string): GraphQLResponse {
+  const parsed = JSON.parse(output) as unknown;
+  if (
+    !isRecord(parsed) ||
+    !isRecord(parsed.data) ||
+    !isRecord(parsed.data.search) ||
+    !Array.isArray(parsed.data.search.nodes) ||
+    !parsed.data.search.nodes.every(isSearchNode) ||
+    !isRecord(parsed.data.search.pageInfo) ||
+    typeof parsed.data.search.pageInfo.hasNextPage !== 'boolean' ||
+    !(
+      typeof parsed.data.search.pageInfo.endCursor === 'string' ||
+      parsed.data.search.pageInfo.endCursor === null
+    )
+  ) {
+    throw new Error('Invalid merge queue response from GitHub CLI.');
+  }
+
+  return parsed as GraphQLResponse;
+}
+
+function parseMergeStateStatus(output: string): string {
+  const parsed = JSON.parse(output) as unknown;
+  if (!isRecord(parsed) || typeof parsed.mergeStateStatus !== 'string') {
+    throw new Error('Invalid merge state response from GitHub CLI.');
+  }
+
+  return parsed.mergeStateStatus;
 }
 
 async function resolveRepo(override?: string): Promise<string> {
@@ -145,7 +199,8 @@ function acquireLock(lockPath: string): void {
     } catch {
       // Another process may have removed it
     }
-    return acquireLock(lockPath);
+    acquireLock(lockPath);
+    return;
   }
 
   if (isNaN(pid)) {
@@ -155,7 +210,8 @@ function acquireLock(lockPath: string): void {
     } catch {
       // Another process may have removed it
     }
-    return acquireLock(lockPath);
+    acquireLock(lockPath);
+    return;
   }
 
   // Check if the process is still running
@@ -171,7 +227,8 @@ function acquireLock(lockPath: string): void {
     } catch {
       // Another process may have removed it
     }
-    return acquireLock(lockPath);
+    acquireLock(lockPath);
+    return;
   }
 }
 
@@ -230,7 +287,7 @@ async function getQueue(nwo: string): Promise<QueuedPR[]> {
       return [];
     }
 
-    const response: GraphQLResponse = JSON.parse(output);
+    const response = parseGraphQLResponse(output);
     allNodes.push(...response.data.search.nodes);
 
     if (response.data.search.pageInfo.hasNextPage) {
@@ -376,8 +433,7 @@ async function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): Promise<bo
       '--json',
       'mergeStateStatus',
     ]);
-    const data: PRViewData = JSON.parse(json);
-    mergeState = data.mergeStateStatus;
+    mergeState = parseMergeStateStatus(json);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     await failPR(pr, `Could not determine merge state: ${msg}`, nwo, dryRun);
@@ -601,7 +657,7 @@ export async function mergeCommand(options: MergeOptions): Promise<void> {
       await processQueue(nwo, options.dryRun);
     } else {
       console.log(`Polling every ${intervalSeconds}s. Press Ctrl+C to stop.`);
-      while (true) {
+      for (;;) {
         await processQueue(nwo, options.dryRun);
         await sleep(intervalSeconds * 1000);
       }

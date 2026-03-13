@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.node.json",
+  "compilerOptions": {
+    "paths": {
+      "@dnsquared/shipper-core": ["../core/src/index.ts"]
+    }
+  },
+  "include": ["src/main/**/*", "src/preload/**/*", "tests/**/*"]
+}

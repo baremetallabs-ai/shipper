@@ -47,7 +47,7 @@ function spawnAsync(
       shell: options.shell,
     });
 
-    child.stderr?.on('data', (chunk: Buffer | string) => {
+    child.stderr.on('data', (chunk: Buffer | string) => {
       stderrChunks.push(chunk.toString());
     });
 

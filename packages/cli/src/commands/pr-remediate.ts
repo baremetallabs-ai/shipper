@@ -27,6 +27,7 @@ async function waitForChecks(repo: string, pr: string, timeoutMinutes: number): 
   const deadline = Date.now() + timeoutMinutes * 60_000;
   let previousCompleted = -1;
   let interrupted = false;
+  const isInterrupted = () => interrupted;
 
   const sigHandler = () => {
     interrupted = true;
@@ -37,29 +38,33 @@ async function waitForChecks(repo: string, pr: string, timeoutMinutes: number): 
   try {
     // Zero-checks grace period: retry up to 3 times at 10s intervals
     let checks = await fetchChecksGraceful(repo, pr);
-    if (checks !== null && checks.length === 0) {
-      for (let retry = 0; retry < 3 && !interrupted; retry++) {
-        if (Date.now() >= deadline) break;
+    if (checks?.length === 0) {
+      for (let retry = 0; retry < 3; retry++) {
+        if (isInterrupted() || Date.now() >= deadline) break;
         await sleepMs(10_000);
-        if (interrupted) break;
         checks = await fetchChecksGraceful(repo, pr);
-        if (checks !== null && checks.length > 0) break;
+        if (checks === null || checks.length === 0) continue;
+        break;
       }
-      if (!interrupted && (checks === null || checks.length === 0)) {
+      if (checks === null || checks.length === 0) {
         console.log('No CI checks found. Proceeding.');
         return;
       }
     }
 
     // Main poll loop
-    while (!interrupted) {
+    for (;;) {
+      if (isInterrupted()) {
+        break;
+      }
+
       if (Date.now() >= deadline) {
         console.log('Check polling timed out. Proceeding.');
         break;
       }
 
       checks = await fetchChecksGraceful(repo, pr);
-      if (checks !== null) {
+      if (checks) {
         const { pending, total } = classifyChecks(checks);
         const completed = total - pending.length;
 
@@ -79,7 +84,7 @@ async function waitForChecks(repo: string, pr: string, timeoutMinutes: number): 
     process.removeListener('SIGINT', sigHandler);
   }
 
-  if (interrupted) {
+  if (isInterrupted()) {
     throw new PollingInterruptedError();
   }
 }
@@ -103,7 +108,7 @@ export async function buildReadyCheck(
   prReviewWait: PrReviewWait
 ): Promise<() => Promise<boolean>> {
   if (prReviewWait.timeoutMinutes <= 0) {
-    return async () => true;
+    return () => Promise.resolve(true);
   }
 
   if (prReviewWait.mode === 'timer') {
@@ -111,7 +116,7 @@ export async function buildReadyCheck(
     const { createdAt } = JSON.parse(stdout) as { createdAt: string };
     const deadline = new Date(createdAt).getTime() + prReviewWait.timeoutMinutes * 60_000;
 
-    return async () => Date.now() >= deadline;
+    return () => Promise.resolve(Date.now() >= deadline);
   }
 
   const deadline = Date.now() + prReviewWait.timeoutMinutes * 60_000;

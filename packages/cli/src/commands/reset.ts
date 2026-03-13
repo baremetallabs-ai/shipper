@@ -59,6 +59,48 @@ interface CurrentStage {
   hasPrLabels: boolean;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function isLabel(value: unknown): value is { name: string } {
+  return isRecord(value) && typeof value.name === 'string';
+}
+
+function isIssueViewData(value: unknown): value is IssueViewData {
+  return (
+    isRecord(value) &&
+    typeof value.number === 'number' &&
+    typeof value.state === 'string' &&
+    Array.isArray(value.labels) &&
+    value.labels.every(isLabel)
+  );
+}
+
+function isPREntry(value: unknown): value is PREntry {
+  return (
+    isRecord(value) && typeof value.number === 'number' && typeof value.headRefName === 'string'
+  );
+}
+
+function parseIssueViewData(json: string): IssueViewData {
+  const parsed = JSON.parse(json) as unknown;
+  if (!isIssueViewData(parsed)) {
+    throw new Error('Invalid issue view response from GitHub CLI.');
+  }
+
+  return parsed;
+}
+
+function parsePREntries(json: string): PREntry[] {
+  const parsed = JSON.parse(json) as unknown;
+  if (!Array.isArray(parsed) || !parsed.every(isPREntry)) {
+    throw new Error('Invalid pull request list response from GitHub CLI.');
+  }
+
+  return parsed;
+}
+
 function getStageLabel(stage: WorkflowStage): string {
   return `shipper:${stage}`;
 }
@@ -266,7 +308,7 @@ async function scanArtifacts(
       '--json',
       'number,headRefName',
     ]);
-    const allPrs: PREntry[] = JSON.parse(prJson);
+    const allPrs = parsePREntries(prJson);
     prs = allPrs.filter(
       (pr) =>
         pr.headRefName === `shipper/${issueNum}` ||
@@ -565,7 +607,7 @@ export async function resetCommand(
     process.exit(1);
   }
 
-  const issueData: IssueViewData = JSON.parse(issueJson);
+  const issueData = parseIssueViewData(issueJson);
 
   if (issueData.state !== 'OPEN') {
     console.error(`Issue #${issueNum} is closed. Reset only works on open issues.`);

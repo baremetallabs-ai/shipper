@@ -116,9 +116,43 @@ interface ParkedIssue {
   run: SequentialIssueRun;
 }
 
-interface PRMergeStateViewData {
-  mergeStateStatus: string;
-  mergeable: string;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function isQueuedPR(value: unknown): value is QueuedPR {
+  return (
+    isRecord(value) &&
+    typeof value.number === 'number' &&
+    typeof value.title === 'string' &&
+    typeof value.headRefName === 'string' &&
+    typeof value.baseRefName === 'string'
+  );
+}
+
+function parseQueuedPRs(output: string): QueuedPR[] {
+  const parsed = JSON.parse(output) as unknown;
+  if (!Array.isArray(parsed) || !parsed.every(isQueuedPR)) {
+    throw new Error('Invalid pull request list response from GitHub CLI.');
+  }
+
+  return parsed;
+}
+
+function parseMergeStateStatus(output: string): string {
+  const parsed = JSON.parse(output) as unknown;
+  if (!isRecord(parsed) || typeof parsed.mergeStateStatus !== 'string') {
+    throw new Error('Invalid merge state response from GitHub CLI.');
+  }
+
+  // GitHub may not compute mergeStateStatus when branch protection is absent,
+  // leaving it permanently UNKNOWN. Fall back to the independently computed
+  // mergeable field when it proves the PR can merge cleanly.
+  if (parsed.mergeStateStatus === 'UNKNOWN' && parsed.mergeable === 'MERGEABLE') {
+    return 'CLEAN';
+  }
+
+  return parsed.mergeStateStatus;
 }
 
 function buildIssueCommandEnv(
@@ -229,14 +263,14 @@ async function resolvePrForIssue(issueNumber: number, nwo: string): Promise<Queu
 
   let allPrs: QueuedPR[];
   try {
-    allPrs = JSON.parse(output) as QueuedPR[];
+    allPrs = parseQueuedPRs(output);
   } catch {
     throw new Error(
       `Failed to parse GitHub CLI output while looking up PR for issue #${issueNumber}.`
     );
   }
 
-  const prs = (allPrs ?? []).filter(
+  const prs = allPrs.filter(
     (pr) =>
       pr.headRefName === `shipper/${issueNumber}` ||
       pr.headRefName.startsWith(`shipper/${issueNumber}-`)
@@ -297,16 +331,7 @@ async function getMergeStateStatus(prNumber: number, nwo: string): Promise<strin
   }
 
   try {
-    const data = JSON.parse(output) as PRMergeStateViewData;
-
-    // GitHub may not compute mergeStateStatus when branch protection is absent,
-    // leaving it permanently UNKNOWN. Fall back to the mergeable field which is
-    // computed independently.
-    if (data.mergeStateStatus === 'UNKNOWN' && data.mergeable === 'MERGEABLE') {
-      return 'CLEAN';
-    }
-
-    return data.mergeStateStatus;
+    return parseMergeStateStatus(output);
   } catch (err) {
     throw new Error(
       `Could not determine merge state for PR #${prNumber}: ${normalizeError(err).message}`
@@ -680,10 +705,8 @@ async function shipOneIssue(
       }
 
       try {
-        await withStageHooks(
-          'merge',
-          { issueNumber: issueStr, branchName: pr.headRefName },
-          async () => await mergePr(pr, issueNumber, nwo)
+        await withStageHooks('merge', { issueNumber: issueStr, branchName: pr.headRefName }, () =>
+          mergePr(pr, issueNumber, nwo)
         );
         results.push({ stage: 'merge', status: 'pass' });
       } catch (err) {
@@ -1200,6 +1223,7 @@ async function shipAutoParallel(
   const logFiles = new Map<number, string>();
 
   let shuttingDown = false;
+  const isShuttingDown = () => shuttingDown;
 
   mkdirSync(logsDir, { recursive: true, mode: 0o700 });
 
@@ -1243,9 +1267,10 @@ async function shipAutoParallel(
 
   try {
     for (;;) {
-      if (shuttingDown) break;
-
-      while (!shuttingDown && activeRuns.size < parallel) {
+      while (activeRuns.size < parallel) {
+        if (isShuttingDown()) {
+          break;
+        }
         const candidate = await selectNextCandidate(
           repo,
           skippedIssues,
@@ -1266,7 +1291,7 @@ async function shipAutoParallel(
         });
       }
 
-      if (shuttingDown) break;
+      if (isShuttingDown()) break;
 
       if (activeRuns.size === 0) {
         const blocked = await selectBlockedIssues(repo);

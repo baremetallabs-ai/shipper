@@ -27,6 +27,22 @@ function isSafeCommandKey(key: string): boolean {
   return !UNSAFE_COMMAND_KEYS.has(key);
 }
 
+function formatSettingValue(value: unknown): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (typeof value === 'bigint') {
+    return value.toString();
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
 function getStoredAgent(): string | undefined {
   const basePath = path.resolve('.shipper', 'settings.json');
   const localPath = path.resolve('.shipper', 'settings.local.json');
@@ -208,16 +224,20 @@ export async function initCommand(options: { agent?: string }) {
     let value: unknown;
     if (key.includes('.')) {
       const parts = key.split('.');
-      let obj: unknown = merged;
+      let current: unknown = merged;
       for (const part of parts) {
-        obj = (obj as Record<string, unknown>)?.[part];
+        if (!isPlainObject(current)) {
+          current = undefined;
+          break;
+        }
+        current = current[part];
       }
-      value = obj;
+      value = current;
     } else {
-      value = (merged as Record<string, unknown>)[key];
+      value = merged[key];
     }
     if (value !== undefined) {
-      console.log(`  ${key}: ${value}  — ${desc}`);
+      console.log(`  ${key}: ${formatSettingValue(value)}  — ${desc}`);
     } else {
       console.log(`  ${key}: (not set)  — ${desc}`);
     }

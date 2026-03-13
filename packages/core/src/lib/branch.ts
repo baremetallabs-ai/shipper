@@ -5,6 +5,19 @@ import { gh } from './gh.js';
 
 const execFileAsync = promisify(execFile);
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function parseHeadRefName(stdout: string): string {
+  const parsed = JSON.parse(stdout) as unknown;
+  if (!isRecord(parsed) || typeof parsed.headRefName !== 'string') {
+    throw new Error('Invalid PR view response from GitHub CLI.');
+  }
+
+  return parsed.headRefName;
+}
+
 export async function getRepoRoot(): Promise<string> {
   const { stdout } = await execFileAsync('git', ['rev-parse', '--show-toplevel'], {
     encoding: 'utf-8',
@@ -96,6 +109,5 @@ export async function findBranchForIssue(issueRef: string): Promise<string> {
 
 export async function getBranchForPR(repo: string, prRef: string): Promise<string> {
   const { stdout } = await gh(['pr', 'view', prRef, '-R', repo, '--json', 'headRefName']);
-  const data: { headRefName: string } = JSON.parse(stdout);
-  return data.headRefName;
+  return parseHeadRefName(stdout);
 }

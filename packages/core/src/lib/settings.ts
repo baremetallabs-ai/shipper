@@ -86,6 +86,10 @@ const KNOWN_PROMPT_COMMANDS = new Set([
   'setup',
 ]);
 
+function getObjectValue(value: unknown): Record<string, unknown> {
+  return isPlainObject(value) ? value : {};
+}
+
 export async function loadSettings(): Promise<void> {
   const basePath = path.resolve('.shipper', 'settings.json');
   const localPath = path.resolve('.shipper', 'settings.local.json');
@@ -96,10 +100,12 @@ export async function loadSettings(): Promise<void> {
   base = await readSettingsFile(basePath);
   local = await readSettingsFile(localPath);
 
-  const baseCommands: Record<string, unknown> = isPlainObject(base?.commands) ? base.commands : {};
-  const localCommands: Record<string, unknown> = isPlainObject(local?.commands)
-    ? local.commands
-    : {};
+  const baseCommands: Record<string, unknown> = getObjectValue(base.commands);
+  const localCommands: Record<string, unknown> = getObjectValue(local.commands);
+  const baseHooks = getObjectValue(base.hooks);
+  const localHooks = getObjectValue(local.hooks);
+  const baseMerge = getObjectValue(base.merge);
+  const localMerge = getObjectValue(local.merge);
   const allCommandSteps = new Set([
     ...Object.keys(baseCommands).filter(isSafeCommandKey),
     ...Object.keys(localCommands).filter(isSafeCommandKey),
@@ -131,8 +137,8 @@ export async function loadSettings(): Promise<void> {
     ...DEFAULTS,
     ...base,
     ...local,
-    hooks: { ...DEFAULTS.hooks, ...base?.hooks, ...local?.hooks },
-    merge: { ...DEFAULTS.merge, ...base?.merge, ...local?.merge },
+    hooks: { ...DEFAULTS.hooks, ...baseHooks, ...localHooks },
+    merge: { ...DEFAULTS.merge, ...baseMerge, ...localMerge },
     commands: mergedCommands,
   };
 
@@ -163,11 +169,13 @@ export function resolveAgent(step: string, override?: AgentName): AgentName {
     return override;
   }
   const s = getSettings();
-  const agent = s.commands[step]?.agent ?? s.commands.default.agent;
-  if (agent !== 'claude' && agent !== 'codex') {
-    throw new Error(`Invalid agent "${agent}" for step "${step}". Must be "claude" or "codex".`);
+  const rawAgent: unknown = s.commands[step]?.agent ?? s.commands.default.agent;
+  if (rawAgent !== 'claude' && rawAgent !== 'codex') {
+    throw new Error(
+      `Invalid agent "${String(rawAgent)}" for step "${step}". Must be "claude" or "codex".`
+    );
   }
-  return agent;
+  return rawAgent;
 }
 
 export function resolveMode(step: string, override?: CommandMode): CommandMode {
@@ -230,19 +238,27 @@ async function readSettingsFile(filepath: string): Promise<Partial<Settings>> {
   }
 
   try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isPlainObject(parsed)) {
+      throw new Error('Settings file must contain a JSON object.');
+    }
+
+    const normalized: Record<string, unknown> = { ...parsed };
     // Auto-migrate legacy "agent" string to "agents.default"
-    if (typeof parsed.agent === 'string' && !parsed.agents && !parsed.commands) {
-      parsed.agents = { default: parsed.agent };
-      delete parsed.agent;
+    if (typeof normalized.agent === 'string' && !normalized.agents && !normalized.commands) {
+      normalized.agents = { default: normalized.agent };
+      delete normalized.agent;
     }
     // Auto-migrate legacy "prReviewWaitMinutes" to "prReviewWait"
-    if (typeof parsed.prReviewWaitMinutes === 'number' && !parsed.prReviewWait) {
-      parsed.prReviewWait = { mode: 'timer', timeoutMinutes: parsed.prReviewWaitMinutes };
-      delete parsed.prReviewWaitMinutes;
+    if (typeof normalized.prReviewWaitMinutes === 'number' && !normalized.prReviewWait) {
+      normalized.prReviewWait = {
+        mode: 'timer',
+        timeoutMinutes: normalized.prReviewWaitMinutes,
+      };
+      delete normalized.prReviewWaitMinutes;
     }
-    if (parsed.agents && !parsed.commands) {
-      const agents = isPlainObject(parsed.agents) ? parsed.agents : {};
+    if (normalized.agents && !normalized.commands) {
+      const agents = getObjectValue(normalized.agents);
       const commands: Record<string, CommandConfig> = {
         default: {
           agent: typeof agents.default === 'string' ? (agents.default as AgentName) : 'claude',
@@ -254,35 +270,40 @@ async function readSettingsFile(filepath: string): Promise<Partial<Settings>> {
         commands[step] = { ...commands[step], agent: agent as AgentName };
       }
 
-      if (parsed.headless && isPlainObject(parsed.headless)) {
-        for (const [step, enabled] of Object.entries(parsed.headless)) {
+      if (normalized.headless && isPlainObject(normalized.headless)) {
+        for (const [step, enabled] of Object.entries(normalized.headless)) {
           if (enabled === true && isSafeCommandKey(step)) {
             commands[step] = { ...commands[step], mode: 'headless' };
           }
         }
-        delete parsed.headless;
+        delete normalized.headless;
       }
 
-      parsed.commands = commands;
-      delete parsed.agents;
+      normalized.commands = commands;
+      delete normalized.agents;
     }
 
-    if (parsed.headless && !parsed.agents && !parsed.commands && isPlainObject(parsed.headless)) {
+    if (
+      normalized.headless &&
+      !normalized.agents &&
+      !normalized.commands &&
+      isPlainObject(normalized.headless)
+    ) {
       const commands: Record<string, CommandConfig> = {
         default: { agent: 'claude' },
       };
 
-      for (const [step, enabled] of Object.entries(parsed.headless)) {
+      for (const [step, enabled] of Object.entries(normalized.headless)) {
         if (enabled === true && isSafeCommandKey(step)) {
           commands[step] = { ...commands[step], mode: 'headless' };
         }
       }
 
-      parsed.commands = commands;
-      delete parsed.headless;
+      normalized.commands = commands;
+      delete normalized.headless;
     }
 
-    return parsed as Partial<Settings>;
+    return normalized as Partial<Settings>;
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     throw new Error(`Malformed JSON in ${filepath}: ${message}`);
