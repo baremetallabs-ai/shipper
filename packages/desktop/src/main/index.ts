@@ -10,6 +10,11 @@ interface AppConfig {
   activeRepo: string;
 }
 
+interface ParseConfigResult {
+  config: AppConfig;
+  changed: boolean;
+}
+
 interface ListIssuesSuccess {
   ok: true;
   issues: Awaited<ReturnType<typeof listIssues>>;
@@ -34,9 +39,13 @@ function readConfig(): AppConfig {
 
   try {
     const parsed = JSON.parse(readFileSync(configPath, 'utf8')) as unknown;
-    const nextConfig = parseConfig(parsed);
-    if (nextConfig !== null) {
-      return nextConfig;
+    const parsedConfig = parseConfig(parsed);
+    if (parsedConfig !== null) {
+      if (parsedConfig.changed) {
+        writeConfig(parsedConfig.config);
+      }
+
+      return parsedConfig.config;
     }
 
     const legacyRepo =
@@ -81,7 +90,11 @@ function parseRepo(value: unknown): string | null {
   return repoPattern.test(repo) ? repo : null;
 }
 
-function parseConfig(value: unknown): AppConfig | null {
+function toRepoKey(repo: string): string {
+  return repo.trim().toLowerCase();
+}
+
+function parseConfig(value: unknown): ParseConfigResult | null {
   if (
     typeof value !== 'object' ||
     value === null ||
@@ -93,25 +106,68 @@ function parseConfig(value: unknown): AppConfig | null {
   }
 
   const repos: string[] = [];
+  const seenRepos = new Set<string>();
+  let changed = false;
+
   for (const repo of value.repos) {
     const parsedRepo = parseRepo(repo);
     if (parsedRepo === null) {
       return null;
     }
 
+    if (repo !== parsedRepo) {
+      changed = true;
+    }
+
+    const repoKey = toRepoKey(parsedRepo);
+    if (seenRepos.has(repoKey)) {
+      changed = true;
+      continue;
+    }
+
+    seenRepos.add(repoKey);
     repos.push(parsedRepo);
   }
 
-  const activeRepo = typeof value.activeRepo === 'string' ? value.activeRepo.trim() : null;
-  if (activeRepo === null) {
+  if (typeof value.activeRepo !== 'string') {
     return null;
   }
 
-  if (activeRepo.length === 0) {
-    return repos.length === 0 ? { repos, activeRepo } : null;
+  if (repos.length === 0) {
+    return {
+      config: { repos, activeRepo: '' },
+      changed: changed || value.activeRepo.trim().length > 0,
+    };
   }
 
-  return repos.includes(activeRepo) ? { repos, activeRepo } : null;
+  const fallbackActiveRepo = repos[0];
+  if (fallbackActiveRepo === undefined) {
+    return {
+      config: { repos: [], activeRepo: '' },
+      changed: true,
+    };
+  }
+
+  const parsedActiveRepo = parseRepo(value.activeRepo);
+  if (parsedActiveRepo === null) {
+    return {
+      config: { repos, activeRepo: fallbackActiveRepo },
+      changed: true,
+    };
+  }
+
+  const matchingActiveRepo = repos.find((repo) => toRepoKey(repo) === toRepoKey(parsedActiveRepo));
+  if (matchingActiveRepo === undefined) {
+    return {
+      config: { repos, activeRepo: fallbackActiveRepo },
+      changed: true,
+    };
+  }
+
+  return {
+    config: { repos, activeRepo: matchingActiveRepo },
+    changed: changed || value.activeRepo !== matchingActiveRepo,
+  };
 }
 
 function createWindow(): BrowserWindow {
@@ -181,12 +237,12 @@ function registerIpcHandlers(): void {
     return parsed.map((repo) => repo.nameWithOwner);
   });
   ipcMain.handle('set-config', (_event, config: unknown) => {
-    const nextConfig = parseConfig(config);
-    if (nextConfig === null) {
+    const parsedConfig = parseConfig(config);
+    if (parsedConfig === null) {
       throw new Error('Invalid config payload.');
     }
 
-    writeConfig(nextConfig);
+    writeConfig(parsedConfig.config);
   });
 }
 

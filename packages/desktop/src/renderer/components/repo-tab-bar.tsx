@@ -41,24 +41,22 @@ export function RepoTabBar({
             >
               <span className="block max-w-52 truncate">{repo}</span>
             </button>
-            {repos.length > 1 ? (
-              <button
-                type="button"
-                className={cn(
-                  'border-l px-2 py-2 transition-colors',
-                  isActive
-                    ? 'border-primary-foreground/20 hover:bg-primary-foreground/10'
-                    : 'border-border hover:bg-accent hover:text-accent-foreground'
-                )}
-                aria-label={`Remove ${repo}`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onCloseRepo(repo);
-                }}
-              >
-                <X className="size-4" />
-              </button>
-            ) : null}
+            <button
+              type="button"
+              className={cn(
+                'border-l px-2 py-2 transition-colors',
+                isActive
+                  ? 'border-primary-foreground/20 hover:bg-primary-foreground/10'
+                  : 'border-border hover:bg-accent hover:text-accent-foreground'
+              )}
+              aria-label={`Remove ${repo}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onCloseRepo(repo);
+              }}
+            >
+              <X className="size-4" />
+            </button>
           </div>
         );
       })}
