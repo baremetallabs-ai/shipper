@@ -107,6 +107,7 @@ Use `packages/core/src/lib/settings.ts` as the source of truth. The current cano
 | `commands`                   | Object map. See `### Commands map` below.               | `{ default: { agent: "claude" } }`       | Per-command agent and mode settings.                                                |
 | `defaultBaseBranch`          | Optional `string`                                       | auto-detected from GitHub                | Default base branch for PRs.                                                        |
 | `installCommand`             | Optional `string`                                       | none                                     | Shell command used to install project dependencies.                                 |
+| `worktreeEnv`                | Optional `Record<string, string>`                       | none                                     | Env vars injected into the worktree exactly as configured.                          |
 | `hooks`                      | `{ worktreeSetup?: string, worktreeTeardown?: string }` | `{}`                                     | Worktree lifecycle hook commands.                                                   |
 | `hooks.worktreeSetup`        | Optional `string`                                       | none                                     | Deprecated settings-based setup hook. Prefer `.shipper/hooks/worktree-setup`.       |
 | `hooks.worktreeTeardown`     | Optional `string`                                       | none                                     | Deprecated settings-based teardown hook. Prefer `.shipper/hooks/worktree-teardown`. |
@@ -141,6 +142,18 @@ Use `packages/core/src/lib/settings.ts` as the source of truth. The current cano
 5. Read `.shipper/settings.json` and confirm it is valid JSON with the expected canonical fields and values.
 6. Run `gh label list` and confirm the required `shipper:*` labels exist.
 7. Check `~/.shipper/worktrees/` for stale worktree directories that may have been left behind by interrupted runs.
+
+### Sandbox cache errors (EPERM)
+
+If you see `EPERM` errors for `~/.npm/_cacache/` or another user-level cache directory, the agent is trying to write outside the sandboxed worktree.
+Shipper automatically sets `NPM_CONFIG_CACHE` to a worktree-local `.npm-cache` for every worktree.
+For other package managers, set a worktree-local cache path in `.shipper/settings.json`, for example:
+
+```json
+{ "worktreeEnv": { "UV_CACHE_DIR": ".uv-cache" } }
+```
+
+`worktreeEnv` values are passed through exactly as configured, so relative paths stay relative to the worktree.
 
 ### Issue-specific failure investigation
 

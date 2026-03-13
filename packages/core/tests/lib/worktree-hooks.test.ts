@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const execFileMock = vi.fn();
 const spawnMock = vi.fn();
@@ -63,8 +63,23 @@ const defaultOpts = {
   stage: 'implement',
 };
 const expectedWtPath = path.join(WORKTREES_DIR, 'my-repo--wt--shipper-42-add-feature');
+const expectedNpmCachePath = path.join(expectedWtPath, '.npm-cache');
+
+let originalNpmConfigCache: string | undefined;
+let originalUvCacheDir: string | undefined;
+
+function restoreEnvVar(key: 'NPM_CONFIG_CACHE' | 'UV_CACHE_DIR', value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key];
+    return;
+  }
+  process.env[key] = value;
+}
 
 beforeEach(() => {
+  originalNpmConfigCache = process.env.NPM_CONFIG_CACHE;
+  originalUvCacheDir = process.env.UV_CACHE_DIR;
+
   execFileMock.mockReset();
   spawnMock.mockReset();
   accessMock.mockReset();
@@ -83,6 +98,11 @@ beforeEach(() => {
   runWorktreeHookMock.mockResolvedValue(undefined);
   getSettingsMock.mockReturnValue({ hooks: {} });
   mockSpawnSuccess();
+});
+
+afterEach(() => {
+  restoreEnvVar('NPM_CONFIG_CACHE', originalNpmConfigCache);
+  restoreEnvVar('UV_CACHE_DIR', originalUvCacheDir);
 });
 
 describe('withWorktree', () => {
@@ -144,22 +164,73 @@ describe('withWorktree', () => {
     ]);
   });
 
+  it('sets NPM_CONFIG_CACHE to a worktree-local path inside the callback', async () => {
+    process.env.NPM_CONFIG_CACHE = '/original-cache';
+
+    await withWorktree(defaultOpts, async (wtPath) => {
+      expect(process.env.NPM_CONFIG_CACHE).toBe(path.join(wtPath, '.npm-cache'));
+    });
+
+    expect(process.env.NPM_CONFIG_CACHE).toBe('/original-cache');
+  });
+
+  it('applies worktreeEnv values as-is and restores them after cleanup', async () => {
+    process.env.NPM_CONFIG_CACHE = '/original-cache';
+    process.env.UV_CACHE_DIR = '/original-uv-cache';
+    getSettingsMock.mockReturnValue({
+      hooks: {},
+      worktreeEnv: { UV_CACHE_DIR: '.uv-cache' },
+    });
+
+    await withWorktree(defaultOpts, async () => {
+      expect(process.env.NPM_CONFIG_CACHE).toBe(expectedNpmCachePath);
+      expect(process.env.UV_CACHE_DIR).toBe('.uv-cache');
+    });
+
+    expect(process.env.NPM_CONFIG_CACHE).toBe('/original-cache');
+    expect(process.env.UV_CACHE_DIR).toBe('/original-uv-cache');
+  });
+
+  it('lets worktreeEnv override the built-in NPM_CONFIG_CACHE default', async () => {
+    getSettingsMock.mockReturnValue({
+      hooks: {},
+      worktreeEnv: { NPM_CONFIG_CACHE: '/custom-cache' },
+    });
+
+    await withWorktree(defaultOpts, async () => {
+      expect(process.env.NPM_CONFIG_CACHE).toBe('/custom-cache');
+    });
+  });
+
   it('runs teardown only once when a signal fires during the callback', async () => {
     let sigintListener: (() => void) | undefined;
-    vi.spyOn(process, 'on').mockImplementation((event, listener) => {
+    const onSpy = vi.spyOn(process, 'on').mockImplementation((event, listener) => {
       if (event === 'SIGINT') {
         sigintListener = listener as () => void;
       }
       return process;
     });
-    vi.spyOn(process, 'removeListener').mockImplementation(() => process);
+    const removeListenerSpy = vi.spyOn(process, 'removeListener').mockImplementation(() => process);
+    process.env.NPM_CONFIG_CACHE = '/before-signal';
+    process.env.UV_CACHE_DIR = '/before-signal-uv-cache';
+    getSettingsMock.mockReturnValue({
+      hooks: {},
+      worktreeEnv: { UV_CACHE_DIR: '.uv-cache' },
+    });
 
     await withWorktree(defaultOpts, async () => {
+      expect(process.env.NPM_CONFIG_CACHE).toBe(expectedNpmCachePath);
+      expect(process.env.UV_CACHE_DIR).toBe('.uv-cache');
       sigintListener?.();
     });
 
     expect(
       runWorktreeHookMock.mock.calls.filter(([event]) => event === 'worktree-teardown')
     ).toHaveLength(1);
+    expect(process.env.NPM_CONFIG_CACHE).toBe('/before-signal');
+    expect(process.env.UV_CACHE_DIR).toBe('/before-signal-uv-cache');
+
+    onSpy.mockRestore();
+    removeListenerSpy.mockRestore();
   });
 });

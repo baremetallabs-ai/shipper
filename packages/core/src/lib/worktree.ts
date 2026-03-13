@@ -417,19 +417,30 @@ export async function withWorktree<T>(
   };
 
   const settings = getSettings();
-  const { installCommand } = settings;
-  if (installCommand) {
-    await runAdvisoryHook('Install dependencies', installCommand, hookEnv, wtPath);
+  const worktreeEnv = {
+    NPM_CONFIG_CACHE: path.join(wtPath, '.npm-cache'),
+    ...(settings.worktreeEnv ?? {}),
+  };
+  const originalEnv = new Map<string, string | undefined>();
+  for (const [key, value] of Object.entries(worktreeEnv)) {
+    originalEnv.set(key, process.env[key]);
+    process.env[key] = value;
   }
 
   const { worktreeSetup, worktreeTeardown } = settings.hooks;
-
-  await runWorktreeHook('worktree-setup', hookEnv, worktreeSetup, wtPath);
-
   let cleanedUp = false;
   const cleanup = async () => {
     if (cleanedUp) return;
     cleanedUp = true;
+
+    for (const [key, value] of originalEnv) {
+      if (value === undefined) {
+        delete process.env[key];
+        continue;
+      }
+      process.env[key] = value;
+    }
+
     await runWorktreeHook('worktree-teardown', hookEnv, worktreeTeardown, wtPath);
     await removeWorktree(opts.repoRoot, wtPath);
   };
@@ -441,7 +452,13 @@ export async function withWorktree<T>(
   process.on('SIGINT', cleanupWithoutAwait);
   process.on('SIGTERM', cleanupWithoutAwait);
 
+  const { installCommand } = settings;
   try {
+    if (installCommand) {
+      await runAdvisoryHook('Install dependencies', installCommand, hookEnv, wtPath);
+    }
+
+    await runWorktreeHook('worktree-setup', hookEnv, worktreeSetup, wtPath);
     return await fn(wtPath);
   } finally {
     process.removeListener('SIGINT', cleanupWithoutAwait);
