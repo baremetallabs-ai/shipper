@@ -98,15 +98,16 @@ function spawnAsync(
     let timedOut = false;
 
     if (opts.timeoutMs && opts.timeoutMs > 0) {
+      const timeoutMs = opts.timeoutMs;
       killTimer = setTimeout(() => {
         timedOut = true;
-        const minutes = Math.round(opts.timeoutMs! / 60_000);
+        const minutes = Math.round(timeoutMs / 60_000);
         console.error(`Agent timed out after ${minutes} minutes`);
         child.kill('SIGTERM');
         graceTimer = setTimeout(() => {
           child.kill('SIGKILL');
         }, 10_000);
-      }, opts.timeoutMs);
+      }, timeoutMs);
     }
 
     child.on('error', (err) => {

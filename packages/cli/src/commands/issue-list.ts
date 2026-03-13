@@ -53,7 +53,10 @@ export async function issueListCommand(options: { status?: string }): Promise<vo
     const issueLabels = issue.labels.map((l) => l.name);
     const bestIndex = STAGE_LABEL_NAMES.findLastIndex((label) => issueLabels.includes(label));
     if (bestIndex >= 0) {
-      groups.get(STAGE_LABEL_NAMES[bestIndex]!)!.push(issue);
+      const label = STAGE_LABEL_NAMES[bestIndex];
+      if (label) {
+        groups.get(label)?.push(issue);
+      }
     }
   }
 

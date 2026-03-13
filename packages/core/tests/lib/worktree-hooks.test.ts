@@ -70,7 +70,7 @@ let originalUvCacheDir: string | undefined;
 
 function restoreEnvVar(key: 'NPM_CONFIG_CACHE' | 'UV_CACHE_DIR', value: string | undefined): void {
   if (value === undefined) {
-    delete process.env[key];
+    Reflect.deleteProperty(process.env, key);
     return;
   }
   process.env[key] = value;
