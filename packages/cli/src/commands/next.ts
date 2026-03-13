@@ -33,6 +33,8 @@ interface IssueData {
   labels: IssueLabel[];
 }
 
+const CONTROL_LABELS = [BLOCKED_LABEL, LOCKED_LABEL, FAILED_LABEL];
+
 async function resolvePrForIssue(repo: string, issueNumber: number): Promise<string> {
   const pr = await tryResolvePrForIssue(repo, issueNumber);
   if (!pr) {
@@ -71,9 +73,13 @@ export async function nextCommand(repo: string, ref: string, agent?: AgentName):
     .filter((name) => name.startsWith('shipper:'));
   const isBlocked = allLabels.includes(BLOCKED_LABEL);
   const isFailed = allLabels.includes(FAILED_LABEL);
-  const shipperLabels = allLabels.filter(
-    (name) => name !== BLOCKED_LABEL && name !== LOCKED_LABEL && name !== FAILED_LABEL
-  );
+
+  if (isFailed) {
+    console.error(`Issue #${issueNumber} has the shipper:failed label.`);
+    process.exit(1);
+  }
+
+  const shipperLabels = allLabels.filter((name) => !CONTROL_LABELS.includes(name));
 
   // Validate labels
   if (shipperLabels.length === 0) {
@@ -102,11 +108,6 @@ export async function nextCommand(repo: string, ref: string, agent?: AgentName):
     console.error(
       `Issue #${issueNumber} is blocked. Run 'shipper unblock ${issueNumber}' to check if it can proceed.`
     );
-    process.exit(1);
-  }
-
-  if (isFailed) {
-    console.error(`Issue #${issueNumber} has the shipper:failed label.`);
     process.exit(1);
   }
 
