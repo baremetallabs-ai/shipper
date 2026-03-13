@@ -49,10 +49,10 @@
   --color-ring: var(--ring);
   --color-success: var(--success);
   --color-success-foreground: var(--success-foreground);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: 0px;
+  --radius-md: calc(var(--radius) / 2);
   --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  --radius-xl: var(--radius);
 }
 
 @layer base {
@@ -75,6 +75,7 @@
   h2,
   h3,
   [data-slot='alert-title'] {
-    text-shadow: 0 0 calc(var(--glow-intensity) * 12px) oklch(0.65 0.18 145 / 0.6);
+    text-shadow: 0 0 calc(var(--glow-intensity) * 12px)
+      color-mix(in oklch, var(--primary), transparent 40%);
   }
 }
