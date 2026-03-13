@@ -428,21 +428,22 @@ export async function withWorktree<T>(
   }
 
   const { worktreeSetup, worktreeTeardown } = settings.hooks;
-  let cleanedUp = false;
+  let cleanupPromise: Promise<void> | undefined;
   const cleanup = async () => {
-    if (cleanedUp) return;
-    cleanedUp = true;
-
-    for (const [key, value] of originalEnv) {
-      if (value === undefined) {
-        delete process.env[key];
-        continue;
+    cleanupPromise ??= (async () => {
+      for (const [key, value] of originalEnv) {
+        if (value === undefined) {
+          delete process.env[key];
+          continue;
+        }
+        process.env[key] = value;
       }
-      process.env[key] = value;
-    }
 
-    await runWorktreeHook('worktree-teardown', hookEnv, worktreeTeardown, wtPath);
-    await removeWorktree(opts.repoRoot, wtPath);
+      await runWorktreeHook('worktree-teardown', hookEnv, worktreeTeardown, wtPath);
+      await removeWorktree(opts.repoRoot, wtPath);
+    })();
+
+    await cleanupPromise;
   };
 
   const cleanupWithoutAwait = () => {
