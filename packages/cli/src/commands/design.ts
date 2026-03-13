@@ -8,7 +8,8 @@ export async function designCommand(
   repo: string,
   issue?: string,
   mode?: CommandMode,
-  agent?: AgentName
+  agent?: AgentName,
+  model?: string
 ): Promise<void> {
   if (!issue) {
     const selected = await autoSelectIssue(repo, 'shipper:groomed');
@@ -27,7 +28,7 @@ export async function designCommand(
       await withStageHooks(
         'design',
         { issueNumber: issue },
-        async () => await runPrompt('design', { repo, issueRef: issue, mode, agent })
+        async () => await runPrompt('design', { repo, issueRef: issue, mode, agent, model })
       )
   );
 

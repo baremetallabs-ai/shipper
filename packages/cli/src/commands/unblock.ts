@@ -6,7 +6,8 @@ export async function unblockCommand(
   repo: string,
   issue: string,
   mode?: CommandMode,
-  agent?: AgentName
+  agent?: AgentName,
+  model?: string
 ): Promise<void> {
   if (!issue) {
     console.error('Error: Please provide an issue number.');
@@ -17,7 +18,7 @@ export async function unblockCommand(
   const code = await withIssueLock(
     repo,
     issue,
-    async () => await runPrompt('unblock', { repo, issueRef: issue, mode, agent })
+    async () => await runPrompt('unblock', { repo, issueRef: issue, mode, agent, model })
   );
   process.exitCode = code;
 }

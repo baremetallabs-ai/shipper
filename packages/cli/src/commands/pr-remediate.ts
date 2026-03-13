@@ -97,7 +97,8 @@ export async function prRemediateCommand(
   repo: string,
   pr?: string,
   mode?: CommandMode,
-  agent?: AgentName
+  agent?: AgentName,
+  model?: string
 ): Promise<void> {
   let issueNumber: string;
 
@@ -176,6 +177,7 @@ export async function prRemediateCommand(
                 cwd: wtPath,
                 mode,
                 agent,
+                model,
                 userInput: conflictContext ? formatConflictContext(conflictContext) : undefined,
               })
           );

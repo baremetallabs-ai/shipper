@@ -94,8 +94,8 @@ describe('loadSettings', () => {
       if (p === settingsPath) {
         return JSON.stringify({
           commands: {
-            default: { agent: 'claude' },
-            groom: { agent: 'codex' },
+            default: { agent: 'claude', model: 'opus' },
+            groom: { agent: 'codex', model: 'sonnet' },
           },
         });
       }
@@ -103,7 +103,7 @@ describe('loadSettings', () => {
         return JSON.stringify({
           commands: {
             default: { mode: 'interactive' },
-            groom: { mode: 'headless' },
+            groom: { mode: 'headless', model: 'haiku' },
           },
         });
       }
@@ -114,8 +114,8 @@ describe('loadSettings', () => {
     await loadSettings();
 
     expect(getSettings().commands).toEqual({
-      default: { agent: 'claude', mode: 'interactive' },
-      groom: { agent: 'codex', mode: 'headless' },
+      default: { agent: 'claude', model: 'opus', mode: 'interactive' },
+      groom: { agent: 'codex', model: 'haiku', mode: 'headless' },
     });
   });
 
@@ -479,6 +479,84 @@ describe('resolveMode', () => {
     await loadSettings();
 
     expect(() => resolveMode('groom')).toThrow('Invalid mode "banana" for step "groom"');
+  });
+});
+
+describe('resolveModel', () => {
+  it('returns undefined when no model is set anywhere', async () => {
+    readFileMock.mockImplementation(async (p: string) => {
+      if (p === settingsPath) {
+        return JSON.stringify({
+          commands: {
+            default: { agent: 'claude' },
+          },
+        });
+      }
+      throw enoent(p);
+    });
+
+    const { loadSettings, resolveModel } = await loadModule();
+    await loadSettings();
+
+    expect(resolveModel('groom')).toBeUndefined();
+  });
+
+  it('returns the per-step model when configured', async () => {
+    readFileMock.mockImplementation(async (p: string) => {
+      if (p === settingsPath) {
+        return JSON.stringify({
+          commands: {
+            default: { agent: 'claude', model: 'opus' },
+            implement: { model: 'sonnet' },
+          },
+        });
+      }
+      throw enoent(p);
+    });
+
+    const { loadSettings, resolveModel } = await loadModule();
+    await loadSettings();
+
+    expect(resolveModel('implement')).toBe('sonnet');
+  });
+
+  it('inherits the default model when the step does not set one', async () => {
+    readFileMock.mockImplementation(async (p: string) => {
+      if (p === settingsPath) {
+        return JSON.stringify({
+          commands: {
+            default: { agent: 'claude', model: 'opus' },
+            groom: { mode: 'headless' },
+          },
+        });
+      }
+      throw enoent(p);
+    });
+
+    const { loadSettings, resolveModel } = await loadModule();
+    await loadSettings();
+
+    expect(resolveModel('groom')).toBe('opus');
+  });
+
+  it('returns the CLI override when provided', async () => {
+    readFileMock.mockImplementation(async (p: string) => {
+      if (p === settingsPath) {
+        return JSON.stringify({
+          commands: {
+            default: { agent: 'claude', model: 'opus' },
+            groom: { model: 'sonnet' },
+          },
+        });
+      }
+      throw enoent(p);
+    });
+
+    const { loadSettings, resolveModel } = await loadModule();
+    await loadSettings();
+
+    expect(resolveModel('groom', 'haiku')).toBe('haiku');
+    expect(resolveModel('groom')).toBe('sonnet');
   });
 });
 

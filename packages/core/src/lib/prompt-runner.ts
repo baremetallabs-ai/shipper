@@ -8,6 +8,7 @@ import { agentPrompts } from './prompts.js';
 import {
   getSettings,
   resolveAgent,
+  resolveModel,
   resolveMode,
   type AgentName,
   type CommandMode,
@@ -22,6 +23,7 @@ export interface RunPromptOpts {
   baseBranch?: string;
   mode?: CommandMode;
   agent?: AgentName;
+  model?: string;
 }
 
 const CODEX_HEADLESS_CONFIG = 'sandbox_workspace_write.network_access=true';
@@ -123,6 +125,7 @@ function spawnAsync(
 
 export async function runPrompt(name: string, opts: RunPromptOpts): Promise<number> {
   const agent = resolveAgent(name, opts.agent);
+  const model = resolveModel(name, opts.model);
   const promptPath = path.resolve('.shipper', 'prompts', agent, `${name}.md`);
 
   let raw: string;
@@ -186,6 +189,16 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
         addDirArgs.push('--add-dir', worktreeDirs.commonDir);
       }
       args.splice(insertIdx, 0, ...addDirArgs);
+    }
+  }
+
+  if (model) {
+    if (agent === 'codex') {
+      const execIdx = args.indexOf('exec');
+      const insertIdx = execIdx === -1 ? 0 : execIdx;
+      args.splice(insertIdx, 0, '-m', model);
+    } else {
+      args.push('--model', model);
     }
   }
 

@@ -13,7 +13,8 @@ export async function prOpenCommand(
   repo: string,
   issue?: string,
   mode?: CommandMode,
-  agent?: AgentName
+  agent?: AgentName,
+  model?: string
 ): Promise<void> {
   if (!issue) {
     const selected = await autoSelectIssue(repo, 'shipper:implemented');
@@ -52,6 +53,7 @@ export async function prOpenCommand(
                   baseBranch,
                   mode,
                   agent,
+                  model,
                   userInput: conflictContext ? formatConflictContext(conflictContext) : undefined,
                 })
             );
