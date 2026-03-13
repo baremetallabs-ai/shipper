@@ -1142,7 +1142,16 @@ describe('shipCommand sequential auto runner parking', () => {
 
     const resumedCall = mockSpawnSync.mock.calls.find(([, args]) => (args as string[])[2] === '1');
     expect(resumedCall?.[2]).toMatchObject({
-      env: expect.objectContaining({ SHIPPER_SKIP_PR_REMEDIATE_WAIT: '1' }),
+      env: expect.objectContaining({
+        SHIPPER_LOCK_HELD: '1',
+        SHIPPER_SKIP_PR_REMEDIATE_WAIT: '1',
+      }),
+    });
+    const secondIssueCall = mockSpawnSync.mock.calls.find(
+      ([, args]) => (args as string[])[2] === '2'
+    );
+    expect(secondIssueCall?.[2]).toMatchObject({
+      env: expect.objectContaining({ SHIPPER_LOCK_HELD: '2' }),
     });
 
     const output = logSpy.mock.calls.map((call) => call[0]).join('\n');
