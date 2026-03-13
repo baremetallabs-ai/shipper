@@ -233,4 +233,46 @@ describe('withWorktree', () => {
     onSpy.mockRestore();
     removeListenerSpy.mockRestore();
   });
+
+  it('waits for signal-started cleanup to finish before resolving', async () => {
+    let sigintListener: (() => void) | undefined;
+    const onSpy = vi.spyOn(process, 'on').mockImplementation((event, listener) => {
+      if (event === 'SIGINT') {
+        sigintListener = listener as () => void;
+      }
+      return process;
+    });
+    const removeListenerSpy = vi.spyOn(process, 'removeListener').mockImplementation(() => process);
+
+    let releaseTeardown: (() => void) | undefined;
+    const teardownStarted = new Promise<void>((resolve) => {
+      runWorktreeHookMock.mockImplementation((event: string) => {
+        if (event === 'worktree-teardown') {
+          resolve();
+          return new Promise<void>((teardownResolve) => {
+            releaseTeardown = teardownResolve;
+          });
+        }
+        return Promise.resolve();
+      });
+    });
+
+    let resolved = false;
+    const worktreePromise = withWorktree(defaultOpts, async () => {
+      sigintListener?.();
+    }).then(() => {
+      resolved = true;
+    });
+
+    await teardownStarted;
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+
+    releaseTeardown?.();
+    await worktreePromise;
+    expect(resolved).toBe(true);
+
+    onSpy.mockRestore();
+    removeListenerSpy.mockRestore();
+  });
 });
