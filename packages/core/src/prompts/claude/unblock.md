@@ -73,6 +73,18 @@ The `shipper:blocked` label is present but no blocking-condition comment was fou
 2. Write `.shipper/output/result.json` with `"verdict": "reject"` and the comment path.
 3. Stop.
 
+## Agent Feedback
+
+Throughout your work on this stage, observe any friction you encounter. If you have anything worth reporting, append an `## Agent Feedback` section as the very last section of your unblock decision comment. If you have nothing to report, omit the section entirely — no heading, no placeholder.
+
+Reportable items include:
+
+- Commands that failed or required workarounds
+- Confusing or contradictory instructions in this prompt
+- Missing context that caused delays or wrong turns
+- Tooling limitations encountered during execution
+- Constructive suggestions for improving this workflow stage
+
 ---
 
 ## Writing Results

@@ -170,6 +170,18 @@ Your review has up to four parts depending on the verdict. No filler, no ceremon
 
 The review should be as short as possible and no shorter. For obvious NOT VIABLE verdicts, three sentences suffice. For complex accepts with significant design work, a full page may be needed. Let the problem dictate the length, not a template.
 
+## Agent Feedback
+
+Throughout your work on this stage, observe any friction you encounter. If you have anything worth reporting, append an `## Agent Feedback` section as the very last section of your review comment. If you have nothing to report, omit the section entirely — no heading, no placeholder.
+
+Reportable items include:
+
+- Commands that failed or required workarounds
+- Confusing or contradictory instructions in this prompt
+- Missing context that caused delays or wrong turns
+- Tooling limitations encountered during execution
+- Constructive suggestions for improving this workflow stage
+
 ---
 
 ## Writing Results

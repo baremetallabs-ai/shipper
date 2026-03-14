@@ -112,6 +112,18 @@ Write a comment suitable for posting on the GitHub Issue that documents:
    - If the sibling issues have a dependency order (one must be completed before another can proceed), identify which issues are blocked and what condition unblocks them.
    - The decomposition recommendation is required for both simple and complex issues.
 
+## Agent Feedback
+
+Throughout your work on this stage, observe any friction you encounter. If you have anything worth reporting, append an `## Agent Feedback` section as the very last section of your grooming summary comment. If you have nothing to report, omit the section entirely — no heading, no placeholder.
+
+Reportable items include:
+
+- Commands that failed or required workarounds
+- Confusing or contradictory instructions in this prompt
+- Missing context that caused delays or wrong turns
+- Tooling limitations encountered during execution
+- Constructive suggestions for improving this workflow stage
+
 ---
 
 ## GitHub actions (must do)
