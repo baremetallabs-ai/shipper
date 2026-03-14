@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { gh } from './gh.js';
+import { getPriorityTier } from './labels.js';
 import { isLockStale, releaseIssueLock } from './lock.js';
 
 const execFileAsync = promisify(execFile);
@@ -73,6 +74,18 @@ interface RawListIssueData {
   labels: { name: string }[];
   author: { login: string };
   createdAt: string;
+}
+
+interface StageIssueListItem {
+  number: number;
+  title: string;
+  labels: { name: string }[];
+}
+
+export interface StageIssueCandidate {
+  number: number;
+  title: string;
+  priority: 0 | 1 | 2;
 }
 
 export async function resolveBaseBranch(repo: string, configured?: string): Promise<string> {
@@ -320,11 +333,11 @@ export interface TimelineLabelEvent {
   created_at?: string;
 }
 
-export function sortIssuesByLabelTime(
-  issues: { number: number; title: string }[],
+export function sortIssuesByLabelTime<T extends { number: number; title: string }>(
+  issues: T[],
   timelinesByIssue: Map<number, TimelineLabelEvent[]>,
   label: string
-): { number: number; title: string }[] {
+): T[] {
   const withTimestamps = issues.map((issue) => {
     const events = timelinesByIssue.get(issue.number) ?? [];
     const labelEvents = events.filter(
@@ -348,7 +361,7 @@ export async function selectIssuesForStage(
   repo: string,
   label: string,
   staleLocked?: Set<number>
-): Promise<{ number: number; title: string }[]> {
+): Promise<StageIssueCandidate[]> {
   const issueSearchFilter =
     label === 'shipper:new'
       ? '-label:shipper:locked -label:shipper:failed'
@@ -357,7 +370,7 @@ export async function selectIssuesForStage(
     label === 'shipper:new'
       ? '-label:shipper:failed'
       : '-label:shipper:blocked -label:shipper:failed';
-  let issues: { number: number; title: string }[];
+  let issues: StageIssueListItem[];
   try {
     const result = await gh([
       'issue',
@@ -373,10 +386,10 @@ export async function selectIssuesForStage(
       '--search',
       issueSearchFilter,
       '--json',
-      'number,title',
+      'number,title,labels',
     ]);
     const output = result.stdout.trim();
-    issues = JSON.parse(output) as { number: number; title: string }[];
+    issues = JSON.parse(output) as StageIssueListItem[];
   } catch {
     return [];
   }
@@ -398,10 +411,10 @@ export async function selectIssuesForStage(
       '1000',
       ...(lockedSearchFilter ? ['--search', lockedSearchFilter] : []),
       '--json',
-      'number,title',
+      'number,title,labels',
     ]);
     const lockedOutput = result.stdout.trim();
-    const lockedIssues = JSON.parse(lockedOutput) as { number: number; title: string }[];
+    const lockedIssues = JSON.parse(lockedOutput) as StageIssueListItem[];
     for (const issue of lockedIssues) {
       if (await isLockStale(repo, String(issue.number))) {
         issues.push(issue);
@@ -413,7 +426,11 @@ export async function selectIssuesForStage(
   }
 
   if (issues.length <= 1) {
-    return issues;
+    return issues.map((issue) => ({
+      number: issue.number,
+      title: issue.title,
+      priority: getPriorityTier(issue.labels.map((candidate) => candidate.name)),
+    }));
   }
 
   const timelinesByIssue = new Map<number, TimelineLabelEvent[]>();
@@ -437,7 +454,15 @@ export async function selectIssuesForStage(
     }
   }
 
-  return sortIssuesByLabelTime(issues, timelinesByIssue, label);
+  const sortedIssues = sortIssuesByLabelTime(issues, timelinesByIssue, label);
+
+  return sortedIssues
+    .map((issue) => ({
+      number: issue.number,
+      title: issue.title,
+      priority: getPriorityTier(issue.labels.map((candidate) => candidate.name)),
+    }))
+    .sort((a, b) => a.priority - b.priority);
 }
 
 export async function clearStaleLockIfNeeded(
@@ -460,8 +485,9 @@ export async function autoSelectIssue(
   const candidate = issues[0] ?? null;
   if (candidate) {
     await clearStaleLockIfNeeded(repo, candidate.number, staleLocked);
+    return { number: candidate.number, title: candidate.title };
   }
-  return candidate;
+  return null;
 }
 
 export async function autoSelectPrForStage(
@@ -475,7 +501,7 @@ export async function autoSelectPrForStage(
     const resolved = await tryResolvePrForIssue(repo, issue.number);
     if (resolved) {
       await clearStaleLockIfNeeded(repo, issue.number, staleLocked);
-      return { pr: resolved, issue };
+      return { pr: resolved, issue: { number: issue.number, title: issue.title } };
     }
   }
   throw new Error(emptyMessage);

@@ -1,4 +1,4 @@
-import { Command, CommanderError, Option } from 'commander';
+import { Argument, Command, CommanderError, Option } from 'commander';
 import { writeSync } from 'node:fs';
 import { runPreflight } from '@dnsquared/shipper-core';
 import { getRepoNwo } from '@dnsquared/shipper-core';
@@ -7,6 +7,7 @@ import { CLI_VERSION, checkVersionFreshness } from '@dnsquared/shipper-core';
 import { initCommand } from './commands/init.js';
 import { newCommand } from './commands/new.js';
 import { adoptCommand, adoptAllCommand } from './commands/adopt.js';
+import { priorityCommand } from './commands/priority.js';
 import { groomCommand } from './commands/groom.js';
 import { designCommand } from './commands/design.js';
 import { planCommand } from './commands/plan.js';
@@ -172,6 +173,17 @@ program
       } else {
         await adoptCommand(issue as string);
       }
+    })
+  );
+
+program
+  .command('priority')
+  .description('Set priority on an issue')
+  .argument('<issue>', 'issue number')
+  .addArgument(new Argument('<level>', 'priority level').choices(['high', 'normal', 'low']))
+  .action(
+    wrapAction(async (issue: string, level: string) => {
+      await priorityCommand(requireResolvedRepo(), issue, level as 'high' | 'normal' | 'low');
     })
   );
 

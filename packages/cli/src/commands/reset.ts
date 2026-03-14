@@ -14,6 +14,7 @@ import {
   BLOCKED_LABEL,
   FAILED_LABEL,
   LOCKED_LABEL,
+  PRIORITY_LABEL_NAMES,
 } from '@dnsquared/shipper-core';
 
 const IMPLEMENTED_STAGE_INDEX = STAGE_LABEL_NAMES.indexOf(IMPLEMENTED_LABEL);
@@ -173,6 +174,10 @@ async function scanArtifacts(
   const targetIndex = getStageIndex(targetStage);
   const targetLabel = getStageLabel(targetStage);
   const labelsToRemove = labels.filter((label) => {
+    if (PRIORITY_LABEL_NAMES.includes(label)) {
+      return false;
+    }
+
     if (targetStage === 'new') {
       return label.startsWith('shipper:') && label !== getStageLabel(targetStage);
     }

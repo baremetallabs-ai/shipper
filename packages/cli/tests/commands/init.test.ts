@@ -34,6 +34,16 @@ const { canonicalLabels } = vi.hoisted(() => ({
       color: '6A0DAD',
       description: 'Failed after exhausting transition cap — requires manual intervention',
     },
+    {
+      name: 'shipper:priority-high',
+      color: 'D93F0B',
+      description: 'High-priority issue',
+    },
+    {
+      name: 'shipper:priority-low',
+      color: '0E8A16',
+      description: 'Low-priority issue',
+    },
   ],
 }));
 

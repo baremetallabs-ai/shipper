@@ -13,6 +13,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   resolveRef: vi.fn(),
   tryResolvePrForIssue: vi.fn(),
   BLOCKED_LABEL: 'shipper:blocked',
+  CONTROL_LABEL_NAMES: ['shipper:blocked', 'shipper:locked', 'shipper:failed'],
   FAILED_LABEL: 'shipper:failed',
   LOCKED_LABEL: 'shipper:locked',
   NEW_LABEL: 'shipper:new',
@@ -21,6 +22,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   PLANNED_LABEL: 'shipper:planned',
   IMPLEMENTED_LABEL: 'shipper:implemented',
   PR_OPEN_LABEL: 'shipper:pr-open',
+  PRIORITY_LABEL_NAMES: ['shipper:priority-high', 'shipper:priority-low'],
   PR_REVIEWED_LABEL: 'shipper:pr-reviewed',
   READY_LABEL: 'shipper:ready',
   withIssueLock: vi.fn(
@@ -137,6 +139,22 @@ describe('nextCommand', () => {
     await nextCommand(repo, '159', 'codex', 'gpt-5');
 
     expect(mockImplementCommand).toHaveBeenCalledWith(repo, '159', undefined, 'codex', 'gpt-5');
+  });
+
+  it('dispatches using the stage label when a priority label is also present', async () => {
+    mockGh.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        number: 159,
+        labels: [{ name: 'shipper:planned' }, { name: 'shipper:priority-high' }],
+      }),
+      stderr: '',
+    });
+
+    await nextCommand(repo, '159');
+
+    expect(mockImplementCommand).toHaveBeenCalledWith(repo, '159', undefined, undefined, undefined);
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(exitSpy).not.toHaveBeenCalled();
   });
 
   it.each([

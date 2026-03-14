@@ -2,7 +2,7 @@ export interface LabelDefinition {
   name: string;
   color: string;
   description: string;
-  kind: 'stage' | 'control';
+  kind: 'stage' | 'control' | 'priority';
   displayName: string;
   stageName?: string;
 }
@@ -93,14 +93,30 @@ export const LABELS: readonly LabelDefinition[] = [
     kind: 'control',
     displayName: 'Failed',
   },
+  {
+    name: 'shipper:priority-high',
+    color: 'D93F0B',
+    description: 'High-priority issue',
+    kind: 'priority',
+    displayName: 'High Priority',
+  },
+  {
+    name: 'shipper:priority-low',
+    color: '0E8A16',
+    description: 'Low-priority issue',
+    kind: 'priority',
+    displayName: 'Low Priority',
+  },
 ];
 
 export const WORKFLOW_LABELS = LABELS.filter((label) => label.kind === 'stage');
 export const CONTROL_LABELS = LABELS.filter((label) => label.kind === 'control');
+export const PRIORITY_LABELS = LABELS.filter((label) => label.kind === 'priority');
 
 export const ALL_LABEL_NAMES = LABELS.map((label) => label.name);
 export const STAGE_LABEL_NAMES = WORKFLOW_LABELS.map((label) => label.name);
 export const CONTROL_LABEL_NAMES = CONTROL_LABELS.map((label) => label.name);
+export const PRIORITY_LABEL_NAMES = PRIORITY_LABELS.map((label) => label.name);
 
 export const STAGE_NAME_MAP: Record<string, string> = Object.fromEntries(
   WORKFLOW_LABELS.map((label) => [label.name, label.stageName ?? label.displayName.toLowerCase()])
@@ -130,3 +146,17 @@ export const READY_LABEL = requireLabelName('shipper:ready');
 export const BLOCKED_LABEL = requireLabelName('shipper:blocked');
 export const LOCKED_LABEL = requireLabelName('shipper:locked');
 export const FAILED_LABEL = requireLabelName('shipper:failed');
+export const PRIORITY_HIGH_LABEL = requireLabelName('shipper:priority-high');
+export const PRIORITY_LOW_LABEL = requireLabelName('shipper:priority-low');
+
+export function getPriorityTier(labels: string[]): 0 | 1 | 2 {
+  if (labels.includes(PRIORITY_HIGH_LABEL)) {
+    return 0;
+  }
+
+  if (labels.includes(PRIORITY_LOW_LABEL)) {
+    return 2;
+  }
+
+  return 1;
+}

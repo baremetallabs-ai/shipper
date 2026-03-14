@@ -21,6 +21,7 @@ import {
   STAGE_LABEL_NAMES,
   NEW_LABEL,
   PR_REVIEWED_LABEL,
+  PRIORITY_LABEL_NAMES,
   READY_LABEL,
   BLOCKED_LABEL,
   LOCKED_LABEL,
@@ -173,7 +174,11 @@ async function getCurrentLabel(repo: string, issueStr: string): Promise<string |
   const shipperLabels = output
     .split(/\r?\n/)
     .filter(
-      (name) => name.startsWith('shipper:') && name !== BLOCKED_LABEL && name !== LOCKED_LABEL
+      (name) =>
+        name.startsWith('shipper:') &&
+        name !== BLOCKED_LABEL &&
+        name !== LOCKED_LABEL &&
+        !PRIORITY_LABEL_NAMES.includes(name)
     );
 
   if (shipperLabels.includes(FAILED_LABEL)) {
@@ -832,18 +837,70 @@ export async function selectNextCandidate(
   skippedIssues: Set<number>,
   activeIssues: ReadonlySet<number> = new Set<number>()
 ): Promise<{ number: number; title: string } | null> {
-  for (const label of AUTO_PRIORITY_LABELS) {
+  const allCandidates: Array<{
+    number: number;
+    title: string;
+    priority: 0 | 1 | 2;
+    stageIndex: number;
+    issueIndex: number;
+  }> = [];
+  const staleLockedByIssue = new Map<number, Set<number>>();
+
+  for (let stageIndex = 0; stageIndex < AUTO_PRIORITY_LABELS.length; stageIndex++) {
+    const label = AUTO_PRIORITY_LABELS[stageIndex];
+    if (!label) {
+      continue;
+    }
     const staleLocked = new Set<number>();
     const issues = await selectIssuesForStage(repo, label, staleLocked);
-    const candidate = issues.find(
-      (i) => !skippedIssues.has(i.number) && !activeIssues.has(i.number)
-    );
-    if (candidate) {
-      await clearStaleLockIfNeeded(repo, candidate.number, staleLocked);
-      return candidate;
+
+    for (let issueIndex = 0; issueIndex < issues.length; issueIndex++) {
+      const issue = issues[issueIndex];
+      if (!issue) {
+        continue;
+      }
+      if (skippedIssues.has(issue.number) || activeIssues.has(issue.number)) {
+        continue;
+      }
+
+      staleLockedByIssue.set(issue.number, staleLocked);
+      allCandidates.push({
+        number: issue.number,
+        title: issue.title,
+        priority: issue.priority ?? 1,
+        stageIndex,
+        issueIndex,
+      });
     }
   }
-  return null;
+
+  if (allCandidates.length === 0) {
+    return null;
+  }
+
+  allCandidates.sort((a, b) => {
+    if (a.priority !== b.priority) {
+      return a.priority - b.priority;
+    }
+
+    if (a.stageIndex !== b.stageIndex) {
+      return a.stageIndex - b.stageIndex;
+    }
+
+    return a.issueIndex - b.issueIndex;
+  });
+
+  const winner = allCandidates[0];
+  if (!winner) {
+    return null;
+  }
+
+  const staleLocked = staleLockedByIssue.get(winner.number);
+  if (staleLocked) {
+    await clearStaleLockIfNeeded(repo, winner.number, staleLocked);
+  }
+
+  return { number: winner.number, title: winner.title };
 }
 
 export async function selectBlockedIssues(

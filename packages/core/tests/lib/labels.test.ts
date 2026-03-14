@@ -4,13 +4,16 @@ import {
   LABELS,
   WORKFLOW_LABELS,
   CONTROL_LABELS,
+  PRIORITY_LABELS,
+  PRIORITY_LABEL_NAMES,
   STAGE_LABEL_NAMES,
   STAGE_NAME_MAP,
+  getPriorityTier,
 } from '../../src/lib/labels.js';
 
 describe('labels', () => {
-  it('defines the canonical set of 11 labels', () => {
-    expect(LABELS).toHaveLength(11);
+  it('defines the canonical set of 13 labels', () => {
+    expect(LABELS).toHaveLength(13);
     expect(LABELS.map((label) => label.name)).toEqual([
       'shipper:new',
       'shipper:groomed',
@@ -23,17 +26,21 @@ describe('labels', () => {
       'shipper:blocked',
       'shipper:locked',
       'shipper:failed',
+      'shipper:priority-high',
+      'shipper:priority-low',
     ]);
   });
 
-  it('splits workflow and control labels correctly', () => {
+  it('splits workflow, control, and priority labels correctly', () => {
     expect(WORKFLOW_LABELS).toHaveLength(8);
     expect(CONTROL_LABELS).toHaveLength(3);
+    expect(PRIORITY_LABELS).toHaveLength(2);
     expect(CONTROL_LABELS.map((label) => label.name)).toEqual([
       'shipper:blocked',
       'shipper:locked',
       'shipper:failed',
     ]);
+    expect(PRIORITY_LABEL_NAMES).toEqual(['shipper:priority-high', 'shipper:priority-low']);
   });
 
   it('defines shipper:failed as a generalized control label', () => {
@@ -67,5 +74,11 @@ describe('labels', () => {
     expect(STAGE_NAME_MAP).toMatchObject({
       'shipper:ready': 'ready',
     });
+  });
+
+  it('treats unlabeled issues as normal priority', () => {
+    expect(getPriorityTier(['shipper:new'])).toBe(1);
+    expect(getPriorityTier(['shipper:new', 'shipper:priority-high'])).toBe(0);
+    expect(getPriorityTier(['shipper:new', 'shipper:priority-low'])).toBe(2);
   });
 });

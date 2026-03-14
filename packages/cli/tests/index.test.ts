@@ -15,6 +15,7 @@ vi.mock('../src/commands/adopt.js', () => ({
   adoptCommand: vi.fn(),
   adoptAllCommand: vi.fn(),
 }));
+vi.mock('../src/commands/priority.js', () => ({ priorityCommand: vi.fn() }));
 vi.mock('../src/commands/groom.js', () => ({ groomCommand: vi.fn() }));
 vi.mock('../src/commands/design.js', () => ({ designCommand: vi.fn() }));
 vi.mock('../src/commands/plan.js', () => ({ planCommand: vi.fn() }));
@@ -35,6 +36,7 @@ vi.mock('../src/commands/setup.js', () => ({ setupCommand: vi.fn() }));
 import { shipCommand } from '../src/commands/ship.js';
 import { ejectCommand } from '../src/commands/eject.js';
 import { newCommand } from '../src/commands/new.js';
+import { priorityCommand } from '../src/commands/priority.js';
 import { groomCommand } from '../src/commands/groom.js';
 import { prReviewCommand } from '../src/commands/pr-review.js';
 import { setupCommand } from '../src/commands/setup.js';
@@ -44,6 +46,7 @@ import { runPreflight, loadSettings, getRepoNwo } from '@dnsquared/shipper-core'
 const mockShipCommand = vi.mocked(shipCommand);
 const mockEjectCommand = vi.mocked(ejectCommand);
 const mockNewCommand = vi.mocked(newCommand);
+const mockPriorityCommand = vi.mocked(priorityCommand);
 const mockGroomCommand = vi.mocked(groomCommand);
 const mockPrReviewCommand = vi.mocked(prReviewCommand);
 const mockSetupCommand = vi.mocked(setupCommand);
@@ -63,6 +66,7 @@ describe('shipper-cli', () => {
     });
     expect(output).toContain('init');
     expect(output).toContain('new');
+    expect(output).toContain('priority');
     expect(output).toContain('groom');
     expect(output).toContain('design');
     expect(output).toContain('plan');
@@ -110,6 +114,37 @@ describe('shipper-cli', () => {
       await importEntrypoint();
 
       expect(mockEjectCommand).toHaveBeenCalledWith('groom');
+      expect(mockLoadSettings).toHaveBeenCalled();
+      expect(mockGetRepoNwo).toHaveBeenCalled();
+      expect(mockRunPreflight).toHaveBeenCalledWith('owner/repo');
+    });
+  });
+
+  describe('priority command wiring', () => {
+    const originalArgv = [...process.argv];
+
+    beforeEach(() => {
+      vi.resetModules();
+      mockPriorityCommand.mockReset();
+      mockRunPreflight.mockClear();
+      mockLoadSettings.mockClear();
+      mockGetRepoNwo.mockClear();
+    });
+
+    afterEach(() => {
+      process.argv = [...originalArgv];
+    });
+
+    async function importEntrypoint() {
+      await import('../src/index.ts');
+    }
+
+    it('registers the priority command and resolves the repo before invoking it', async () => {
+      process.argv = ['node', 'src/index.ts', 'priority', '42', 'high'];
+
+      await importEntrypoint();
+
+      expect(mockPriorityCommand).toHaveBeenCalledWith('owner/repo', '42', 'high');
       expect(mockLoadSettings).toHaveBeenCalled();
       expect(mockGetRepoNwo).toHaveBeenCalled();
       expect(mockRunPreflight).toHaveBeenCalledWith('owner/repo');

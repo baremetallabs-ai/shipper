@@ -437,9 +437,19 @@ describe('selectIssuesForStage', () => {
 
   it('includes stale-locked issues in results', async () => {
     // First call: normal issues query
-    queueExecFileResult(JSON.stringify([{ number: 1, title: 'Normal' }]));
+    queueExecFileResult(
+      JSON.stringify([{ number: 1, title: 'Normal', labels: [{ name: 'shipper:new' }] }])
+    );
     // Second call: locked issues query
-    queueExecFileResult(JSON.stringify([{ number: 2, title: 'Stale locked' }]));
+    queueExecFileResult(
+      JSON.stringify([
+        {
+          number: 2,
+          title: 'Stale locked',
+          labels: [{ name: 'shipper:new' }, { name: 'shipper:locked' }],
+        },
+      ])
+    );
     mockIsLockStale.mockResolvedValueOnce(true);
     // Third + fourth calls: timeline for each issue
     queueExecFileResult('');
@@ -450,8 +460,8 @@ describe('selectIssuesForStage', () => {
 
     expect(result).toEqual(
       expect.arrayContaining([
-        { number: 1, title: 'Normal' },
-        { number: 2, title: 'Stale locked' },
+        { number: 1, title: 'Normal', priority: 1 },
+        { number: 2, title: 'Stale locked', priority: 1 },
       ])
     );
     expect(staleLocked.has(2)).toBe(true);
@@ -459,29 +469,51 @@ describe('selectIssuesForStage', () => {
   });
 
   it('excludes actively-locked issues', async () => {
-    queueExecFileResult(JSON.stringify([{ number: 1, title: 'Normal' }]));
-    queueExecFileResult(JSON.stringify([{ number: 2, title: 'Active locked' }]));
+    queueExecFileResult(
+      JSON.stringify([{ number: 1, title: 'Normal', labels: [{ name: 'shipper:new' }] }])
+    );
+    queueExecFileResult(
+      JSON.stringify([
+        {
+          number: 2,
+          title: 'Active locked',
+          labels: [{ name: 'shipper:new' }, { name: 'shipper:locked' }],
+        },
+      ])
+    );
     mockIsLockStale.mockResolvedValueOnce(false);
 
     const staleLocked = new Set<number>();
     const result = await selectIssuesForStage(repo, 'shipper:new', staleLocked);
 
-    expect(result).toEqual([{ number: 1, title: 'Normal' }]);
+    expect(result).toEqual([{ number: 1, title: 'Normal', priority: 1 }]);
     expect(staleLocked.size).toBe(0);
   });
 
   it('works when no locked issues exist', async () => {
-    queueExecFileResult(JSON.stringify([{ number: 1, title: 'Normal' }]));
+    queueExecFileResult(
+      JSON.stringify([{ number: 1, title: 'Normal', labels: [{ name: 'shipper:new' }] }])
+    );
     queueExecFileResult(JSON.stringify([]));
 
     const result = await selectIssuesForStage(repo, 'shipper:new');
 
-    expect(result).toEqual([{ number: 1, title: 'Normal' }]);
+    expect(result).toEqual([{ number: 1, title: 'Normal', priority: 1 }]);
   });
 
   it('works without staleLocked parameter', async () => {
-    queueExecFileResult(JSON.stringify([{ number: 1, title: 'Normal' }]));
-    queueExecFileResult(JSON.stringify([{ number: 2, title: 'Stale locked' }]));
+    queueExecFileResult(
+      JSON.stringify([{ number: 1, title: 'Normal', labels: [{ name: 'shipper:new' }] }])
+    );
+    queueExecFileResult(
+      JSON.stringify([
+        {
+          number: 2,
+          title: 'Stale locked',
+          labels: [{ name: 'shipper:new' }, { name: 'shipper:locked' }],
+        },
+      ])
+    );
     mockIsLockStale.mockResolvedValueOnce(true);
     // timelines (2 issues triggers sorting path)
     queueExecFileResult('');
@@ -491,8 +523,8 @@ describe('selectIssuesForStage', () => {
 
     expect(result).toEqual(
       expect.arrayContaining([
-        { number: 1, title: 'Normal' },
-        { number: 2, title: 'Stale locked' },
+        { number: 1, title: 'Normal', priority: 1 },
+        { number: 2, title: 'Stale locked', priority: 1 },
       ])
     );
   });
@@ -520,7 +552,7 @@ describe('selectIssuesForStage', () => {
         '--search',
         '-label:shipper:locked -label:shipper:failed',
         '--json',
-        'number,title',
+        'number,title,labels',
       ],
       { encoding: 'utf-8' },
       expect.any(Function)
@@ -544,7 +576,7 @@ describe('selectIssuesForStage', () => {
         '--search',
         '-label:shipper:failed',
         '--json',
-        'number,title',
+        'number,title,labels',
       ],
       { encoding: 'utf-8' },
       expect.any(Function)
@@ -574,7 +606,7 @@ describe('selectIssuesForStage', () => {
         '--search',
         '-label:shipper:blocked -label:shipper:locked -label:shipper:failed',
         '--json',
-        'number,title',
+        'number,title,labels',
       ],
       { encoding: 'utf-8' },
       expect.any(Function)
@@ -598,7 +630,7 @@ describe('selectIssuesForStage', () => {
         '--search',
         '-label:shipper:blocked -label:shipper:failed',
         '--json',
-        'number,title',
+        'number,title,labels',
       ],
       { encoding: 'utf-8' },
       expect.any(Function)
@@ -606,17 +638,84 @@ describe('selectIssuesForStage', () => {
   });
 
   it('handles locked issues query failure gracefully', async () => {
-    queueExecFileResult(JSON.stringify([{ number: 1, title: 'Normal' }]));
+    queueExecFileResult(
+      JSON.stringify([{ number: 1, title: 'Normal', labels: [{ name: 'shipper:new' }] }])
+    );
     queueExecFileError('gh failed');
     const stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const result = await selectIssuesForStage(repo, 'shipper:new');
 
-    expect(result).toEqual([{ number: 1, title: 'Normal' }]);
+    expect(result).toEqual([{ number: 1, title: 'Normal', priority: 1 }]);
     expect(stderrSpy).toHaveBeenCalledWith(
       'Warning: Could not check for stale-locked issues. Proceeding without them.'
     );
     stderrSpy.mockRestore();
+  });
+
+  it('sorts issues by priority tier before FIFO within the same stage', async () => {
+    queueExecFileResult(
+      JSON.stringify([
+        {
+          number: 30,
+          title: 'Low oldest',
+          labels: [{ name: 'shipper:new' }, { name: 'shipper:priority-low' }],
+        },
+        {
+          number: 20,
+          title: 'Normal oldest',
+          labels: [{ name: 'shipper:new' }],
+        },
+        {
+          number: 10,
+          title: 'High newest',
+          labels: [{ name: 'shipper:new' }, { name: 'shipper:priority-high' }],
+        },
+        {
+          number: 40,
+          title: 'High oldest',
+          labels: [{ name: 'shipper:new' }, { name: 'shipper:priority-high' }],
+        },
+      ])
+    );
+    queueExecFileResult(JSON.stringify([]));
+    queueExecFileResult(
+      JSON.stringify({
+        event: 'labeled',
+        label: { name: 'shipper:new' },
+        created_at: '2025-01-04T00:00:00Z',
+      })
+    );
+    queueExecFileResult(
+      JSON.stringify({
+        event: 'labeled',
+        label: { name: 'shipper:new' },
+        created_at: '2025-01-02T00:00:00Z',
+      })
+    );
+    queueExecFileResult(
+      JSON.stringify({
+        event: 'labeled',
+        label: { name: 'shipper:new' },
+        created_at: '2025-01-03T00:00:00Z',
+      })
+    );
+    queueExecFileResult(
+      JSON.stringify({
+        event: 'labeled',
+        label: { name: 'shipper:new' },
+        created_at: '2025-01-01T00:00:00Z',
+      })
+    );
+
+    const result = await selectIssuesForStage(repo, 'shipper:new');
+
+    expect(result).toEqual([
+      { number: 40, title: 'High oldest', priority: 0 },
+      { number: 10, title: 'High newest', priority: 0 },
+      { number: 20, title: 'Normal oldest', priority: 1 },
+      { number: 30, title: 'Low oldest', priority: 2 },
+    ]);
   });
 });
 
@@ -636,7 +735,15 @@ describe('autoSelectIssue', () => {
 
   it('clears stale lock on selected issue and prints message', async () => {
     queueExecFileResult(JSON.stringify([]));
-    queueExecFileResult(JSON.stringify([{ number: 42, title: 'Stale issue' }]));
+    queueExecFileResult(
+      JSON.stringify([
+        {
+          number: 42,
+          title: 'Stale issue',
+          labels: [{ name: 'shipper:new' }, { name: 'shipper:locked' }],
+        },
+      ])
+    );
     mockIsLockStale.mockResolvedValueOnce(true);
     const stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
@@ -648,7 +755,9 @@ describe('autoSelectIssue', () => {
   });
 
   it('does not clear lock for non-stale selected issue', async () => {
-    queueExecFileResult(JSON.stringify([{ number: 10, title: 'Normal issue' }]));
+    queueExecFileResult(
+      JSON.stringify([{ number: 10, title: 'Normal issue', labels: [{ name: 'shipper:new' }] }])
+    );
     queueExecFileResult(JSON.stringify([]));
 
     const result = await autoSelectIssue(repo, 'shipper:new');
@@ -670,8 +779,12 @@ describe('autoSelectIssue', () => {
   it('selects blocked and non-blocked shipper:new candidates from one time-ordered pool', async () => {
     queueExecFileResult(
       JSON.stringify([
-        { number: 20, title: 'Blocked issue' },
-        { number: 10, title: 'Normal issue' },
+        {
+          number: 20,
+          title: 'Blocked issue',
+          labels: [{ name: 'shipper:new' }, { name: 'shipper:blocked' }],
+        },
+        { number: 10, title: 'Normal issue', labels: [{ name: 'shipper:new' }] },
       ])
     );
     queueExecFileResult(JSON.stringify([]));
