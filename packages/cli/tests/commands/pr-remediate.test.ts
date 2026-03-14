@@ -55,10 +55,12 @@ vi.mock('@dnsquared/shipper-core', () => ({
 
 describe('prRemediateCommand', () => {
   let exitSpy: ReturnType<typeof vi.spyOn>;
+  const originalSkipPrRemediateWait = process.env.SHIPPER_SKIP_PR_REMEDIATE_WAIT;
 
   beforeEach(() => {
     vi.clearAllMocks();
     process.exitCode = undefined;
+    delete process.env.SHIPPER_SKIP_PR_REMEDIATE_WAIT;
     resolveRefMock.mockResolvedValue({ prNumber: '42', issueNumber: '10' });
     runPromptMock.mockResolvedValue(0);
     ghMock.mockImplementation(async (args: string[]) => {
@@ -85,6 +87,11 @@ describe('prRemediateCommand', () => {
 
   afterEach(() => {
     process.exitCode = undefined;
+    if (originalSkipPrRemediateWait === undefined) {
+      delete process.env.SHIPPER_SKIP_PR_REMEDIATE_WAIT;
+    } else {
+      process.env.SHIPPER_SKIP_PR_REMEDIATE_WAIT = originalSkipPrRemediateWait;
+    }
     vi.useRealTimers();
     exitSpy.mockRestore();
   });
