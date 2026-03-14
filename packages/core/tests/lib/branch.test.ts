@@ -22,7 +22,7 @@ vi.mock('node:child_process', () => ({
   execFile,
 }));
 
-const { generateBranchName } = await import('../../src/lib/branch.js');
+const { generateBranchName, findBranchForIssue } = await import('../../src/lib/branch.js');
 const repo = 'owner/repo';
 
 beforeEach(() => {
@@ -82,5 +82,56 @@ describe('generateBranchName', () => {
 
     const result = await generateBranchName(repo, '99');
     expect(result).toBe('shipper/99-implement');
+  });
+});
+
+describe('findBranchForIssue', () => {
+  it('strips worktree + prefix from local branch fallback', async () => {
+    execFileMock.mockReset();
+    execFileMock.mockImplementation((_cmd: string, args: string[], ...rest: unknown[]) => {
+      const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
+      if (args.includes('--prune')) {
+        // git fetch origin --prune
+        cb(null, '', '');
+        return;
+      }
+      if (args.includes('-r')) {
+        // git branch -r — no remote branches found
+        cb(null, '', '');
+        return;
+      }
+      if (args.includes('--list')) {
+        // git branch --list — branch checked out in a worktree
+        cb(null, '+ shipper/260-fix-prompts-remove-leniency\n', '');
+        return;
+      }
+      cb(null, '', '');
+    });
+
+    const result = await findBranchForIssue('260');
+    expect(result).toBe('shipper/260-fix-prompts-remove-leniency');
+  });
+
+  it('strips current branch * prefix from local branch fallback', async () => {
+    execFileMock.mockReset();
+    execFileMock.mockImplementation((_cmd: string, args: string[], ...rest: unknown[]) => {
+      const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
+      if (args.includes('--prune')) {
+        cb(null, '', '');
+        return;
+      }
+      if (args.includes('-r')) {
+        cb(null, '', '');
+        return;
+      }
+      if (args.includes('--list')) {
+        cb(null, '* shipper/42-add-login-flow\n', '');
+        return;
+      }
+      cb(null, '', '');
+    });
+
+    const result = await findBranchForIssue('42');
+    expect(result).toBe('shipper/42-add-login-flow');
   });
 });

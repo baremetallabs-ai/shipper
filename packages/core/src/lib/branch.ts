@@ -97,7 +97,7 @@ export async function findBranchForIssue(issueRef: string): Promise<string> {
   const localBranches = localOutput
     .trim()
     .split('\n')
-    .map((b) => b.trim().replace(/^\* /, ''))
+    .map((b) => b.trim().replace(/^[*+]\s*/, ''))
     .filter(Boolean);
 
   if (localBranches.length === 0) {
