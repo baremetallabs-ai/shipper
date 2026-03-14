@@ -87,6 +87,7 @@ vi.spyOn(console, 'error').mockImplementation(() => {});
 
 const settingsPath = path.resolve('.shipper', 'settings.json');
 const gitignorePath = path.resolve('.shipper', '.gitignore');
+const promptsDirPath = path.resolve('.shipper', 'prompts');
 const expectedLabels = canonicalLabels;
 
 beforeEach(() => {
@@ -165,7 +166,10 @@ describe('initCommand directories', () => {
   it('does not create .shipper/prompts directory', async () => {
     await initCommand({ agent: 'claude' });
     const promptDirCall = mkdirSyncMock.mock.calls.find(
-      (call: unknown[]) => typeof call[0] === 'string' && (call[0] as string).includes('prompts')
+      (call: unknown[]) =>
+        typeof call[0] === 'string' &&
+        ((call[0] as string) === promptsDirPath ||
+          (call[0] as string).startsWith(`${promptsDirPath}${path.sep}`))
     );
     expect(promptDirCall).toBeUndefined();
   });
@@ -375,7 +379,10 @@ describe('initCommand agent selection', () => {
     expect(written.agent).toBeUndefined();
 
     const promptCall = writeFileSyncMock.mock.calls.find(
-      (call: unknown[]) => typeof call[0] === 'string' && (call[0] as string).includes('prompts')
+      (call: unknown[]) =>
+        typeof call[0] === 'string' &&
+        ((call[0] as string) === promptsDirPath ||
+          (call[0] as string).startsWith(`${promptsDirPath}${path.sep}`))
     );
     expect(promptCall).toBeUndefined();
   });
