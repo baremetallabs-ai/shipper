@@ -9,5 +9,5 @@
     "noEmit": true,
     "types": ["vite/client"]
   },
-  "include": ["src/preload/index.d.ts", "src/renderer/**/*"]
+  "include": ["src/preload/index.d.ts", "src/renderer/**/*", "../core/src/lib/labels.ts"]
 }
