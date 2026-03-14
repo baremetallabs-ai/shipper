@@ -9,6 +9,7 @@ import { getSettings } from './settings.js';
 const WORKTREES_DIR = path.join(homedir(), '.shipper', 'worktrees');
 const execFileAsync = promisify(execFile);
 const MAX_REBASE_ATTEMPTS = 3;
+const MAX_PUSH_ATTEMPTS = 3;
 const CONFLICT_BLOCK_PATTERN = /^<{7}.*$\n[\s\S]*?^={7}$\n[\s\S]*?^>{7}.*(?:\n|$)?/gm;
 
 interface CommandOpts {
@@ -215,12 +216,44 @@ async function getConflictContextOrThrow(
   );
 }
 
-async function pushWorktreeBranch(opts: WorktreeGitOpts): Promise<void> {
-  const args =
-    opts.pushMode === 'new-branch'
-      ? ['push', '-u', 'origin', 'HEAD']
-      : ['push', '--force-with-lease'];
-  await spawnAsync('git', args, { cwd: opts.wtPath });
+function getPushArgs(opts: WorktreeGitOpts): string[] {
+  return opts.pushMode === 'new-branch'
+    ? ['push', '-u', 'origin', 'HEAD']
+    : ['push', '--force-with-lease'];
+}
+
+async function pushWorktreeBranch(opts: WorktreeGitOpts): Promise<CommandResult> {
+  return await execAsync('git', getPushArgs(opts), { cwd: opts.wtPath });
+}
+
+async function pushWithRetry(
+  opts: WorktreeGitOpts,
+  runAgent: (conflictContext?: ConflictContext, pushError?: string) => Promise<number>
+): Promise<number> {
+  const pushArgs = getPushArgs(opts);
+
+  for (let attempt = 0; attempt <= MAX_PUSH_ATTEMPTS; attempt++) {
+    const pushResult = await pushWorktreeBranch(opts);
+    if (pushResult.code === 0) {
+      return 0;
+    }
+
+    const pushError = formatCommandFailure('git', pushArgs, pushResult);
+    if (attempt === MAX_PUSH_ATTEMPTS) {
+      throw formatTransportError(
+        opts,
+        `Push failed after ${MAX_PUSH_ATTEMPTS} retry attempts.\n${pushError}`
+      );
+    }
+
+    const agentCode = await runAgent(undefined, pushError);
+    if (agentCode !== 0) {
+      console.error(`Agent exited with code ${agentCode} — skipping push.`);
+      return agentCode;
+    }
+  }
+
+  throw formatTransportError(opts, `Push failed after ${MAX_PUSH_ATTEMPTS} retry attempts.`);
 }
 
 export function formatConflictContext(conflictContext: ConflictContext): string {
@@ -268,7 +301,7 @@ export function formatConflictContext(conflictContext: ConflictContext): string 
 
 export async function withGitTransport(
   opts: WorktreeGitOpts,
-  runAgent: (conflictContext?: ConflictContext) => Promise<number>
+  runAgent: (conflictContext?: ConflictContext, pushError?: string) => Promise<number>
 ): Promise<number> {
   await spawnAsync('git', ['fetch', 'origin'], { cwd: opts.wtPath });
 
@@ -283,8 +316,7 @@ export async function withGitTransport(
       return agentCode;
     }
 
-    await pushWorktreeBranch(opts);
-    return 0;
+    return await pushWithRetry(opts, runAgent);
   }
 
   let conflictContext = await getConflictContextOrThrow(opts, initialRebase);
@@ -301,8 +333,7 @@ export async function withGitTransport(
       env: { GIT_EDITOR: 'true' },
     });
     if (continueResult.code === 0) {
-      await pushWorktreeBranch(opts);
-      return 0;
+      return await pushWithRetry(opts, runAgent);
     }
 
     const continueError = getRetryFailureText(continueResult);

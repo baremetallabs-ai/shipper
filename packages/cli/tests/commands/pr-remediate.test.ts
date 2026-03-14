@@ -7,7 +7,7 @@ const autoSelectPrForStageMock = vi.fn();
 const formatConflictContextMock = vi.fn(() => 'formatted conflict context');
 const runPromptMock = vi.fn();
 const withGitTransportMock = vi.fn(
-  async (_opts: unknown, fn: (conflictContext?: unknown) => Promise<unknown>) =>
+  async (_opts: unknown, fn: (conflictContext?: unknown, pushError?: string) => Promise<unknown>) =>
     await fn({
       files: ['src/conflict.ts'],
       conflicts: [
@@ -185,6 +185,30 @@ describe('prRemediateCommand', () => {
         issueRef: '10',
         prRef: '42',
         userInput: 'formatted conflict context',
+      })
+    );
+  });
+
+  it('forwards raw push failure text without conflict formatting', async () => {
+    withGitTransportMock.mockImplementationOnce(
+      async (
+        _opts: unknown,
+        fn: (conflictContext?: unknown, pushError?: string) => Promise<unknown>
+      ) =>
+        await fn(undefined, 'git push --force-with-lease exited with code 1:\npre-push hook failed')
+    );
+    const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
+
+    await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
+
+    expect(formatConflictContextMock).not.toHaveBeenCalled();
+    expect(runPromptMock).toHaveBeenCalledWith(
+      'pr_remediate',
+      expect.objectContaining({
+        repo,
+        issueRef: '10',
+        prRef: '42',
+        userInput: 'git push --force-with-lease exited with code 1:\npre-push hook failed',
       })
     );
   });

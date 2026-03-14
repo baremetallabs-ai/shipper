@@ -45,7 +45,7 @@ export async function prOpenCommand(
           async (wtPath) => {
             return await withGitTransport(
               { wtPath, repoRoot, baseBranch, pushMode: 'force-with-lease' },
-              async (conflictContext) =>
+              async (conflictContext, pushError) =>
                 await runPrompt('pr_open', {
                   repo,
                   issueRef: issue,
@@ -54,7 +54,9 @@ export async function prOpenCommand(
                   mode,
                   agent,
                   model,
-                  userInput: conflictContext ? formatConflictContext(conflictContext) : undefined,
+                  userInput: conflictContext
+                    ? formatConflictContext(conflictContext)
+                    : (pushError ?? undefined),
                 })
             );
           }

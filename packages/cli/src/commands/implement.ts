@@ -41,7 +41,7 @@ export async function implementCommand(
           async (wtPath) => {
             return await withGitTransport(
               { wtPath, repoRoot, baseBranch, pushMode: 'new-branch' },
-              async (conflictContext) =>
+              async (conflictContext, pushError) =>
                 await runPrompt('implement', {
                   repo,
                   issueRef: issue,
@@ -49,7 +49,9 @@ export async function implementCommand(
                   mode,
                   agent,
                   model,
-                  userInput: conflictContext ? formatConflictContext(conflictContext) : undefined,
+                  userInput: conflictContext
+                    ? formatConflictContext(conflictContext)
+                    : (pushError ?? undefined),
                 })
             );
           }
