@@ -95,7 +95,7 @@ describe('prepareUnblockContext', () => {
     expect(ghMock).toHaveBeenCalledTimes(4);
   });
 
-  it('skips writing dependency context when no refs remain after filtering', async () => {
+  it('writes an empty dependency status file when no refs remain after filtering', async () => {
     fetchIssueMock.mockResolvedValue(`
 <issue number="250">
   <comments>
@@ -106,8 +106,12 @@ describe('prepareUnblockContext', () => {
 
     await prepareUnblockContext('owner/repo', '250', '/tmp/project');
 
-    expect(setupProtocolDirsMock).not.toHaveBeenCalled();
-    expect(writeContextFileMock).not.toHaveBeenCalled();
+    expect(setupProtocolDirsMock).toHaveBeenCalledWith('/tmp/project');
+    expect(writeContextFileMock).toHaveBeenCalledWith(
+      '/tmp/project',
+      'dependencies.md',
+      '# Dependency Status\n'
+    );
     expect(ghMock).not.toHaveBeenCalled();
   });
 
@@ -139,6 +143,43 @@ describe('prepareUnblockContext', () => {
     const markdown = writeContextFileMock.mock.calls[0]?.[2];
     expect(markdown).toContain('## #251');
     expect(markdown).not.toContain('## #250');
+  });
+
+  it('records unknown dependency refs instead of aborting when an issue lookup fails', async () => {
+    fetchIssueMock.mockResolvedValue(`
+<issue number="250">
+  <comments>
+    <comment>Blocked by #248 and #9999.</comment>
+  </comments>
+</issue>`);
+    ghMock.mockImplementation(async (args: string[]) => {
+      if (args[0] === 'issue' && args[1] === 'view' && args[2] === '248') {
+        return {
+          stdout: JSON.stringify({ title: 'Core protocol infra', state: 'CLOSED' }),
+          stderr: '',
+        };
+      }
+
+      if (args[0] === 'issue' && args[1] === 'view' && args[2] === '9999') {
+        throw new Error('issue not found');
+      }
+
+      if (args[0] === 'pr' && args[1] === 'view' && args[2] === '248') {
+        throw new Error('not a pr');
+      }
+
+      throw new Error(`Unexpected gh args: ${args.join(' ')}`);
+    });
+
+    const { prepareUnblockContext } = await import('../../src/commands/unblock.js');
+
+    await prepareUnblockContext('owner/repo', '250', '/tmp/project');
+
+    const markdown = writeContextFileMock.mock.calls[0]?.[2];
+    expect(markdown).toContain('## #248');
+    expect(markdown).toContain('## #9999');
+    expect(markdown).toContain('- **Type**: Unknown');
+    expect(markdown).toContain('- **Detail**: issue not found');
   });
 });
 
