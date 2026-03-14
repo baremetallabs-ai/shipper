@@ -472,16 +472,18 @@ export async function withWorktree<T>(
   let cleanupPromise: Promise<void> | undefined;
   const cleanup = async () => {
     cleanupPromise ??= (async () => {
-      for (const [key, value] of originalEnv) {
-        if (value === undefined) {
-          Reflect.deleteProperty(process.env, key);
-          continue;
+      try {
+        await runWorktreeHook('worktree-teardown', hookEnv, worktreeTeardown, wtPath);
+        await removeWorktree(opts.repoRoot, wtPath);
+      } finally {
+        for (const [key, value] of originalEnv) {
+          if (value === undefined) {
+            Reflect.deleteProperty(process.env, key);
+            continue;
+          }
+          process.env[key] = value;
         }
-        process.env[key] = value;
       }
-
-      await runWorktreeHook('worktree-teardown', hookEnv, worktreeTeardown, wtPath);
-      await removeWorktree(opts.repoRoot, wtPath);
     })();
 
     await cleanupPromise;
