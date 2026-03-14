@@ -132,6 +132,18 @@ After all plan steps are complete, work through the verification tasks:
 
 **Every acceptance criterion from the issue must have a passing verification.** If you can't verify a criterion, do not skip it — flag it. However, if a verification step requires a runtime the sandbox cannot provide (e.g., launching a GUI app like Electron), note it as "deferred to review" in your implementation summary and proceed to Phase 4. Do not trigger the environment failure escape hatch when the only thing blocked is a verification step — if all code changes are committed and automated checks pass, the implementation succeeded.
 
+## Agent Feedback
+
+Throughout your work on this stage, observe any friction you encounter. If you have anything worth reporting, append an `## Agent Feedback` section as the very last section of your implementation summary comment. If you have nothing to report, omit the section entirely — no heading, no placeholder.
+
+Reportable items include:
+
+- Commands that failed or required workarounds
+- Confusing or contradictory instructions in this prompt
+- Missing context that caused delays or wrong turns
+- Tooling limitations encountered during execution
+- Constructive suggestions for improving this workflow stage
+
 ---
 
 ## Writing Results

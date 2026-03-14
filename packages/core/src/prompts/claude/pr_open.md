@@ -141,6 +141,18 @@ Requirements:
 - `head_branch` must come from `git branch --show-current`.
 - `draft` is `true` only if the branch should open as a draft based on the issue state.
 
+## Agent Feedback
+
+Throughout your work on this stage, observe any friction you encounter. If you have anything worth reporting, append an `## Agent Feedback` section as the very last section of the PR body. If you have nothing to report, omit the section entirely — no heading, no placeholder.
+
+Reportable items include:
+
+- Commands that failed or required workarounds
+- Confusing or contradictory instructions in this prompt
+- Missing context that caused delays or wrong turns
+- Tooling limitations encountered during execution
+- Constructive suggestions for improving this workflow stage
+
 ---
 
 ## Writing Results
