@@ -64,11 +64,16 @@ const defaultOpts = {
 };
 const expectedWtPath = path.join(WORKTREES_DIR, 'my-repo--wt--shipper-42-add-feature');
 const expectedNpmCachePath = path.join(expectedWtPath, '.npm-cache');
+const expectedXdgCachePath = path.join(expectedWtPath, '.cache');
 
 let originalNpmConfigCache: string | undefined;
+let originalXdgCacheHome: string | undefined;
 let originalUvCacheDir: string | undefined;
 
-function restoreEnvVar(key: 'NPM_CONFIG_CACHE' | 'UV_CACHE_DIR', value: string | undefined): void {
+function restoreEnvVar(
+  key: 'NPM_CONFIG_CACHE' | 'XDG_CACHE_HOME' | 'UV_CACHE_DIR',
+  value: string | undefined
+): void {
   if (value === undefined) {
     Reflect.deleteProperty(process.env, key);
     return;
@@ -78,6 +83,7 @@ function restoreEnvVar(key: 'NPM_CONFIG_CACHE' | 'UV_CACHE_DIR', value: string |
 
 beforeEach(() => {
   originalNpmConfigCache = process.env.NPM_CONFIG_CACHE;
+  originalXdgCacheHome = process.env.XDG_CACHE_HOME;
   originalUvCacheDir = process.env.UV_CACHE_DIR;
 
   execFileMock.mockReset();
@@ -102,6 +108,7 @@ beforeEach(() => {
 
 afterEach(() => {
   restoreEnvVar('NPM_CONFIG_CACHE', originalNpmConfigCache);
+  restoreEnvVar('XDG_CACHE_HOME', originalXdgCacheHome);
   restoreEnvVar('UV_CACHE_DIR', originalUvCacheDir);
 });
 
@@ -174,8 +181,19 @@ describe('withWorktree', () => {
     expect(process.env.NPM_CONFIG_CACHE).toBe('/original-cache');
   });
 
+  it('sets XDG_CACHE_HOME to a worktree-local path inside the callback', async () => {
+    process.env.XDG_CACHE_HOME = '/original-xdg-cache';
+
+    await withWorktree(defaultOpts, async (wtPath) => {
+      expect(process.env.XDG_CACHE_HOME).toBe(path.join(wtPath, '.cache'));
+    });
+
+    expect(process.env.XDG_CACHE_HOME).toBe('/original-xdg-cache');
+  });
+
   it('applies worktreeEnv values as-is and restores them after cleanup', async () => {
     process.env.NPM_CONFIG_CACHE = '/original-cache';
+    process.env.XDG_CACHE_HOME = '/original-xdg-cache';
     process.env.UV_CACHE_DIR = '/original-uv-cache';
     getSettingsMock.mockReturnValue({
       hooks: {},
@@ -184,10 +202,12 @@ describe('withWorktree', () => {
 
     await withWorktree(defaultOpts, async () => {
       expect(process.env.NPM_CONFIG_CACHE).toBe(expectedNpmCachePath);
+      expect(process.env.XDG_CACHE_HOME).toBe(expectedXdgCachePath);
       expect(process.env.UV_CACHE_DIR).toBe('.uv-cache');
     });
 
     expect(process.env.NPM_CONFIG_CACHE).toBe('/original-cache');
+    expect(process.env.XDG_CACHE_HOME).toBe('/original-xdg-cache');
     expect(process.env.UV_CACHE_DIR).toBe('/original-uv-cache');
   });
 
@@ -202,6 +222,17 @@ describe('withWorktree', () => {
     });
   });
 
+  it('lets worktreeEnv override the built-in XDG_CACHE_HOME default', async () => {
+    getSettingsMock.mockReturnValue({
+      hooks: {},
+      worktreeEnv: { XDG_CACHE_HOME: '/custom-cache' },
+    });
+
+    await withWorktree(defaultOpts, async () => {
+      expect(process.env.XDG_CACHE_HOME).toBe('/custom-cache');
+    });
+  });
+
   it('runs teardown only once when a signal fires during the callback', async () => {
     let sigintListener: (() => void) | undefined;
     const onSpy = vi.spyOn(process, 'on').mockImplementation((event, listener) => {
@@ -212,6 +243,7 @@ describe('withWorktree', () => {
     });
     const removeListenerSpy = vi.spyOn(process, 'removeListener').mockImplementation(() => process);
     process.env.NPM_CONFIG_CACHE = '/before-signal';
+    process.env.XDG_CACHE_HOME = '/before-signal-xdg-cache';
     process.env.UV_CACHE_DIR = '/before-signal-uv-cache';
     getSettingsMock.mockReturnValue({
       hooks: {},
@@ -220,6 +252,7 @@ describe('withWorktree', () => {
 
     await withWorktree(defaultOpts, async () => {
       expect(process.env.NPM_CONFIG_CACHE).toBe(expectedNpmCachePath);
+      expect(process.env.XDG_CACHE_HOME).toBe(expectedXdgCachePath);
       expect(process.env.UV_CACHE_DIR).toBe('.uv-cache');
       sigintListener?.();
     });
@@ -228,6 +261,7 @@ describe('withWorktree', () => {
       runWorktreeHookMock.mock.calls.filter(([event]) => event === 'worktree-teardown')
     ).toHaveLength(1);
     expect(process.env.NPM_CONFIG_CACHE).toBe('/before-signal');
+    expect(process.env.XDG_CACHE_HOME).toBe('/before-signal-xdg-cache');
     expect(process.env.UV_CACHE_DIR).toBe('/before-signal-uv-cache');
 
     onSpy.mockRestore();

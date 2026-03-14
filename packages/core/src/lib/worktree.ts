@@ -459,6 +459,7 @@ export async function withWorktree<T>(
   const settings = getSettings();
   const worktreeEnv = {
     NPM_CONFIG_CACHE: path.join(wtPath, '.npm-cache'),
+    XDG_CACHE_HOME: path.join(wtPath, '.cache'),
     ...(settings.worktreeEnv ?? {}),
   };
   const originalEnv = new Map<string, string | undefined>();
