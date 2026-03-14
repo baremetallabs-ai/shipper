@@ -66,32 +66,60 @@ export async function findBranchForIssue(issueRef: string): Promise<string> {
   );
   const output = stdout.trim();
 
-  if (!output) {
+  if (output) {
+    const branches = output
+      .split('\n')
+      .map((b) => b.trim())
+      .filter(Boolean);
+
+    if (branches.length > 1) {
+      throw new Error(
+        `Multiple branches found for issue ${issueRef}:\n` +
+          branches.map((b) => `  ${b}`).join('\n') +
+          '\nPlease specify the branch directly.'
+      );
+    }
+
+    const branch = branches[0];
+    if (branch) {
+      return branch.replace(/^origin\//, '');
+    }
+  }
+
+  // Fall back to local branches (e.g. when the implement push failed)
+  const { stdout: localOutput } = await execFileAsync(
+    'git',
+    ['branch', '--list', `shipper/${num}-*`],
+    {
+      encoding: 'utf-8',
+    }
+  );
+  const localBranches = localOutput
+    .trim()
+    .split('\n')
+    .map((b) => b.trim().replace(/^\* /, ''))
+    .filter(Boolean);
+
+  if (localBranches.length === 0) {
     throw new Error(
-      `No remote branch found matching origin/shipper/${num}-*.\n` +
+      `No branch found matching shipper/${num}-*.\n` +
         `Run \`shipper implement ${issueRef}\` first to create one.`
     );
   }
 
-  const branches = output
-    .split('\n')
-    .map((b) => b.trim())
-    .filter(Boolean);
-
-  if (branches.length > 1) {
+  if (localBranches.length > 1) {
     throw new Error(
-      `Multiple branches found for issue ${issueRef}:\n` +
-        branches.map((b) => `  ${b}`).join('\n') +
+      `Multiple local branches found for issue ${issueRef}:\n` +
+        localBranches.map((b) => `  ${b}`).join('\n') +
         '\nPlease specify the branch directly.'
     );
   }
 
-  // Strip "origin/" prefix
-  const branch = branches[0];
-  if (!branch) {
-    throw new Error(`No remote branch found matching origin/shipper/${num}-*.`);
+  const localBranch = localBranches[0];
+  if (!localBranch) {
+    throw new Error(`No branch found matching shipper/${num}-*.`);
   }
-  return branch.replace(/^origin\//, '');
+  return localBranch;
 }
 
 export async function getBranchForPR(repo: string, prRef: string): Promise<string> {

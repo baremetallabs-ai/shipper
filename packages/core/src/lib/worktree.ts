@@ -279,6 +279,7 @@ export async function withGitTransport(
   if (initialRebase.code === 0) {
     const agentCode = await runAgent();
     if (agentCode !== 0) {
+      console.error(`Agent exited with code ${agentCode} — skipping push.`);
       return agentCode;
     }
 
@@ -291,6 +292,7 @@ export async function withGitTransport(
   for (let attempt = 1; attempt <= MAX_REBASE_ATTEMPTS; attempt++) {
     const agentCode = await runAgent(conflictContext);
     if (agentCode !== 0) {
+      console.error(`Agent exited with code ${agentCode} — skipping push.`);
       return agentCode;
     }
 
