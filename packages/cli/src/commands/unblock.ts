@@ -38,8 +38,19 @@ function extractIssueRefs(issueXml: string, issueStr: string): string[] {
 async function fetchDependencyStates(repo: string, refs: string[]): Promise<string> {
   const sections = await Promise.all(
     refs.map(async (ref) => {
-      const issueResult = await gh(['issue', 'view', ref, '-R', repo, '--json', 'state,title']);
-      const issue = JSON.parse(issueResult.stdout) as DependencyIssueData;
+      let issue: DependencyIssueData;
+      try {
+        const issueResult = await gh(['issue', 'view', ref, '-R', repo, '--json', 'state,title']);
+        issue = JSON.parse(issueResult.stdout) as DependencyIssueData;
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        return [
+          `## #${ref}`,
+          '- **Type**: Unknown',
+          '- **Title**: Unable to fetch dependency',
+          `- **Detail**: ${detail}`,
+        ].join('\n');
+      }
 
       try {
         const prResult = await gh([
@@ -81,10 +92,6 @@ export async function prepareUnblockContext(
 ): Promise<void> {
   const issueXml = await fetchIssue(repo, issueStr);
   const refs = extractIssueRefs(issueXml, issueStr);
-  if (refs.length === 0) {
-    return;
-  }
-
   const depInfo = await fetchDependencyStates(repo, refs);
   await setupProtocolDirs(cwd);
   await writeContextFile(cwd, 'dependencies.md', depInfo);

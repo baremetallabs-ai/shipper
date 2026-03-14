@@ -143,9 +143,8 @@ If during investigation you discover that the design is wrong, incomplete, or ba
    - What you found that contradicts the design
    - Why planning cannot proceed
    - Which upstream command to run (`shipper design` or `shipper groom`)
-2. Write `.shipper/output/comment-<number>.md` with the explanation.
-3. Write `.shipper/output/result.json` with `"verdict": "reject"` and the comment path.
-4. Stop.
+2. Write `.shipper/output/result.json` with `"verdict": "reject"` and the comment path.
+3. Stop.
 
 ---
 
