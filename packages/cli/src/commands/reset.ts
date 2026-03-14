@@ -279,9 +279,10 @@ async function scanArtifacts(
     console.warn(`Warning: Could not fetch PRs for issue #${issueNum}: ${msg}`);
   }
 
-  const branchesToDelete = prs
-    .map((pr) => pr.headRefName)
-    .filter((branchName) => branchName.startsWith('shipper/'));
+  const branchesToDelete =
+    targetStage === 'implemented'
+      ? []
+      : prs.map((pr) => pr.headRefName).filter((branchName) => branchName.startsWith('shipper/'));
 
   const repoName = getWorktreeRepoName(repoRoot);
   const worktreesRoot = path.join(homedir(), '.shipper', 'worktrees');
@@ -309,51 +310,53 @@ async function scanArtifacts(
   }
 
   let localBranches: string[] = [];
-  try {
-    const raw = execFileSync(
-      'git',
-      ['branch', '--list', `shipper/${issueNum}`, `shipper/${issueNum}-*`],
-      {
-        cwd: repoRoot,
-        encoding: 'utf-8',
-      }
-    );
-    localBranches = raw
-      .split('\n')
-      .map((line) =>
-        line
-          .trim()
-          .replace(/^[*+]\s*/, '')
-          .trim()
-      )
-      .filter((branchName) => branchName !== '');
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`Warning: Could not scan local branches for issue #${issueNum}: ${msg}`);
-  }
-
-  if (localBranches.length > 0) {
+  if (targetStage !== 'implemented') {
     try {
-      const currentBranch = execFileSync('git', ['branch', '--show-current'], {
-        cwd: repoRoot,
-        encoding: 'utf-8',
-      }).trim();
-
-      if (currentBranch && localBranches.includes(currentBranch)) {
-        console.warn(
-          `Warning: Skipping local branch ${currentBranch} because it is currently checked out.`
-        );
-        localBranches = localBranches.filter((branchName) => branchName !== currentBranch);
-      }
+      const raw = execFileSync(
+        'git',
+        ['branch', '--list', `shipper/${issueNum}`, `shipper/${issueNum}-*`],
+        {
+          cwd: repoRoot,
+          encoding: 'utf-8',
+        }
+      );
+      localBranches = raw
+        .split('\n')
+        .map((line) =>
+          line
+            .trim()
+            .replace(/^[*+]\s*/, '')
+            .trim()
+        )
+        .filter((branchName) => branchName !== '');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.warn(
-        `Warning: Could not determine the current branch for issue #${issueNum}: ${msg}`
-      );
-      console.warn(
-        'Warning: Skipping local branch deletion because the checked-out branch is unknown.'
-      );
-      localBranches = [];
+      console.warn(`Warning: Could not scan local branches for issue #${issueNum}: ${msg}`);
+    }
+
+    if (localBranches.length > 0) {
+      try {
+        const currentBranch = execFileSync('git', ['branch', '--show-current'], {
+          cwd: repoRoot,
+          encoding: 'utf-8',
+        }).trim();
+
+        if (currentBranch && localBranches.includes(currentBranch)) {
+          console.warn(
+            `Warning: Skipping local branch ${currentBranch} because it is currently checked out.`
+          );
+          localBranches = localBranches.filter((branchName) => branchName !== currentBranch);
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(
+          `Warning: Could not determine the current branch for issue #${issueNum}: ${msg}`
+        );
+        console.warn(
+          'Warning: Skipping local branch deletion because the checked-out branch is unknown.'
+        );
+        localBranches = [];
+      }
     }
   }
 
@@ -398,7 +401,7 @@ function printDryRun(issueNum: number, scan: ArtifactScan): void {
     console.log(`  PRs to close: ${scan.prs.map((pr) => `#${pr.number}`).join(', ')}`);
   }
   if (scan.branchesToDelete.length > 0) {
-    console.log(`  Branches to delete: ${scan.branchesToDelete.join(', ')}`);
+    console.log(`  Remote branches to delete: ${scan.branchesToDelete.join(', ')}`);
   }
   if (scan.localWorktrees.length > 0) {
     console.log(`  Local worktrees to remove: ${scan.localWorktrees.join(', ')}`);
@@ -480,7 +483,7 @@ async function executeReset(
     }
   }
   if (deletableBranches.length > 0) {
-    actions.push(`Deleted branches: ${deletableBranches.join(', ')}`);
+    actions.push(`Deleted remote branches: ${deletableBranches.join(', ')}`);
   }
 
   for (const id of scan.commentIds) {
