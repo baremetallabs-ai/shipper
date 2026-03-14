@@ -268,6 +268,34 @@ describe('withWorktree', () => {
     removeListenerSpy.mockRestore();
   });
 
+  it('keeps worktree env vars applied while teardown runs, then restores them after cleanup', async () => {
+    process.env.NPM_CONFIG_CACHE = '/before-teardown';
+    process.env.XDG_CACHE_HOME = '/before-teardown-xdg-cache';
+    process.env.UV_CACHE_DIR = '/before-teardown-uv-cache';
+    getSettingsMock.mockReturnValue({
+      hooks: {},
+      worktreeEnv: { UV_CACHE_DIR: '.uv-cache' },
+    });
+
+    runWorktreeHookMock.mockImplementation(async (event: string) => {
+      if (event === 'worktree-teardown') {
+        expect(process.env.NPM_CONFIG_CACHE).toBe(expectedNpmCachePath);
+        expect(process.env.XDG_CACHE_HOME).toBe(expectedXdgCachePath);
+        expect(process.env.UV_CACHE_DIR).toBe('.uv-cache');
+      }
+    });
+
+    await withWorktree(defaultOpts, async () => {
+      expect(process.env.NPM_CONFIG_CACHE).toBe(expectedNpmCachePath);
+      expect(process.env.XDG_CACHE_HOME).toBe(expectedXdgCachePath);
+      expect(process.env.UV_CACHE_DIR).toBe('.uv-cache');
+    });
+
+    expect(process.env.NPM_CONFIG_CACHE).toBe('/before-teardown');
+    expect(process.env.XDG_CACHE_HOME).toBe('/before-teardown-xdg-cache');
+    expect(process.env.UV_CACHE_DIR).toBe('/before-teardown-uv-cache');
+  });
+
   it('waits for signal-started cleanup to finish before resolving', async () => {
     let sigintListener: (() => void) | undefined;
     const onSpy = vi.spyOn(process, 'on').mockImplementation((event, listener) => {
