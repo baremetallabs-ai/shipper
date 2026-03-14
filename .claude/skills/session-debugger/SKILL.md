@@ -15,13 +15,19 @@ Skill for investigating Claude Code and Codex CLI session transcripts produced b
 
 This skill is installed at `.claude/skills/session-debugger/` relative to the repo root.
 
-Run scripts from the skill directory:
+From the repo root, run scripts with the installed path:
 
 ```bash
 .claude/skills/session-debugger/scripts/find-sessions.sh <issue-number>
 ```
 
-Read reference docs:
+If you've already changed into `.claude/skills/session-debugger/`, use the same relative form shown in Quick Reference:
+
+```bash
+./scripts/find-sessions.sh <issue-number>
+```
+
+From the repo root, read reference docs with the installed path:
 
 ```bash
 cat .claude/skills/session-debugger/references/transcript-format.md
