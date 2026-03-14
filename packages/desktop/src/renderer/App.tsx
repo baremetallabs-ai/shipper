@@ -1,6 +1,19 @@
-import { useEffect, useEffectEvent, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import type { JSX } from 'react';
 
+import {
+  BLOCKED_LABEL,
+  DESIGNED_LABEL,
+  DISPLAY_NAME_MAP,
+  GROOMED_LABEL,
+  IMPLEMENTED_LABEL,
+  LOCKED_LABEL,
+  NEW_LABEL,
+  PLANNED_LABEL,
+  PR_OPEN_LABEL,
+  PR_REVIEWED_LABEL,
+  READY_LABEL,
+} from '../../../core/src/lib/labels.js';
 import type { ListIssueItem } from '@dnsquared/shipper-core';
 
 import { RepoPickerDialog } from './components/repo-picker-dialog.js';
@@ -29,6 +42,17 @@ const dateFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: 'medium',
   timeStyle: 'short',
 });
+const PIPELINE_COLUMNS = [
+  GROOMED_LABEL,
+  DESIGNED_LABEL,
+  PLANNED_LABEL,
+  IMPLEMENTED_LABEL,
+  PR_OPEN_LABEL,
+  PR_REVIEWED_LABEL,
+  READY_LABEL,
+] as const;
+
+type PipelineColumnLabel = (typeof PIPELINE_COLUMNS)[number];
 
 function isValidRepo(repo: string): boolean {
   return repoPattern.test(repo);
@@ -36,11 +60,6 @@ function isValidRepo(repo: string): boolean {
 
 function toRepoKey(repo: string): string {
   return repo.trim().toLowerCase();
-}
-
-function formatIssueDate(createdAt: string): string {
-  const parsed = new Date(createdAt);
-  return Number.isNaN(parsed.getTime()) ? createdAt : dateFormatter.format(parsed);
 }
 
 function getPrerequisiteMessage(prerequisites: Prerequisites | null): string | null {
@@ -59,8 +78,26 @@ function getPrerequisiteMessage(prerequisites: Prerequisites | null): string | n
   return null;
 }
 
-function getStateVariant(state: string): 'default' | 'outline' | 'success' {
-  return state.toLowerCase() === 'open' ? 'success' : 'outline';
+interface IssueCardProps {
+  issue: ListIssueItem;
+}
+
+function IssueCard({ issue }: IssueCardProps): JSX.Element {
+  const isBlocked = issue.labels.includes(BLOCKED_LABEL);
+  const isLocked = issue.labels.includes(LOCKED_LABEL);
+
+  return (
+    <article className="space-y-3 rounded-sm border border-border bg-background px-4 py-4">
+      <p className="text-sm font-medium text-muted-foreground">#{issue.number}</p>
+      <h4 className="text-sm font-semibold leading-snug text-foreground">{issue.title}</h4>
+      {isBlocked || isLocked ? (
+        <div className="flex flex-wrap gap-2">
+          {isBlocked ? <Badge variant="outline">Blocked</Badge> : null}
+          {isLocked ? <Badge variant="outline">Locked</Badge> : null}
+        </div>
+      ) : null}
+    </article>
+  );
 }
 
 export default function App(): JSX.Element {
@@ -77,6 +114,44 @@ export default function App(): JSX.Element {
   const prerequisiteMessage = getPrerequisiteMessage(prerequisites);
   const canFetch = prerequisites !== null && prerequisiteMessage === null;
   const hasActiveRepo = activeRepo.length > 0 && isValidRepo(activeRepo);
+  const { attentionIssues, columnMap } = useMemo(() => {
+    const nextColumnMap = new Map<PipelineColumnLabel, ListIssueItem[]>(
+      PIPELINE_COLUMNS.map((label) => [label, []])
+    );
+    const nextAttentionIssues: ListIssueItem[] = [];
+
+    for (const issue of issues) {
+      if (issue.labels.includes(NEW_LABEL)) {
+        nextAttentionIssues.push(issue);
+        continue;
+      }
+
+      let stageLabel: PipelineColumnLabel | null = null;
+      for (let index = PIPELINE_COLUMNS.length - 1; index >= 0; index -= 1) {
+        const label = PIPELINE_COLUMNS[index];
+        if (label && issue.labels.includes(label)) {
+          stageLabel = label;
+          break;
+        }
+      }
+
+      if (!stageLabel) {
+        continue;
+      }
+
+      const columnIssues = nextColumnMap.get(stageLabel);
+      if (!columnIssues) {
+        throw new Error(`Invariant failed: missing issue bucket for ${stageLabel}`);
+      }
+
+      columnIssues.push(issue);
+    }
+
+    return {
+      attentionIssues: nextAttentionIssues,
+      columnMap: nextColumnMap,
+    };
+  }, [issues]);
 
   function clearIssueState(): void {
     requestVersionRef.current += 1;
@@ -275,7 +350,7 @@ export default function App(): JSX.Element {
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">
                 Shipper Desktop
               </p>
-              <h1 className="text-2xl font-semibold tracking-tight">Issue inbox</h1>
+              <h1 className="text-2xl font-semibold tracking-tight">Pipeline</h1>
             </div>
             <div className="flex items-center gap-3">
               {lastUpdated ? (
@@ -362,9 +437,9 @@ export default function App(): JSX.Element {
             <div className="border-b border-border px-6 py-4">
               <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
                 <div>
-                  <h2 className="text-lg font-semibold">Shipper-labeled issues</h2>
+                  <h2 className="text-lg font-semibold">Issues by workflow stage</h2>
                   <p className="text-sm text-muted-foreground">
-                    Showing read-only issue metadata from the active repository.
+                    Review the current repository as a pipeline organized by shipper stage.
                   </p>
                 </div>
                 {activeRepo ? (
@@ -384,40 +459,63 @@ export default function App(): JSX.Element {
                 No shipper-labeled issues found for this repository.
               </div>
             ) : (
-              <div className="divide-y divide-border">
-                {issues.map((issue) => (
-                  <article
-                    key={issue.number}
-                    className="grid gap-4 px-6 py-5 md:grid-cols-[1fr_auto]"
-                  >
-                    <div className="space-y-3">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant={getStateVariant(issue.state)}>{issue.state}</Badge>
-                        <span className="text-sm font-medium text-muted-foreground">
-                          #{issue.number}
-                        </span>
-                        <span className="text-sm text-muted-foreground">
-                          opened by {issue.author}
-                        </span>
-                      </div>
-                      <div>
-                        <h3 className="text-base font-semibold leading-tight text-foreground">
-                          {issue.title}
-                        </h3>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {issue.labels.map((label) => (
-                          <Badge key={label} variant="outline">
-                            {label}
-                          </Badge>
-                        ))}
-                      </div>
+              <div className="space-y-6 px-6 py-6">
+                {attentionIssues.length > 0 ? (
+                  <div className="space-y-3 border-b border-border pb-6">
+                    <div>
+                      <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                        Needs attention
+                      </h3>
+                      <p className="text-sm text-muted-foreground">
+                        New issues stay here until they are groomed into the pipeline.
+                      </p>
                     </div>
-                    <div className="text-sm text-muted-foreground md:text-right">
-                      Created {formatIssueDate(issue.createdAt)}
+                    <div className="flex flex-wrap gap-3">
+                      {attentionIssues.map((issue) => (
+                        <div key={issue.number} className="min-w-[240px] flex-1 basis-[240px]">
+                          <IssueCard issue={issue} />
+                        </div>
+                      ))}
                     </div>
-                  </article>
-                ))}
+                  </div>
+                ) : null}
+
+                <div className="overflow-x-auto pb-1">
+                  <div className="flex min-w-max items-start gap-4">
+                    {PIPELINE_COLUMNS.map((label) => {
+                      const stageIssues = columnMap.get(label) ?? [];
+                      const isReadyColumn = label === READY_LABEL;
+
+                      return (
+                        <section
+                          key={label}
+                          className={[
+                            'flex min-w-[240px] flex-1 basis-[240px] flex-col gap-4 rounded-sm border px-4 py-4',
+                            isReadyColumn
+                              ? 'border-success/30 bg-success/10'
+                              : 'border-border bg-background/40',
+                          ].join(' ')}
+                        >
+                          <div>
+                            <h3 className="text-sm font-semibold">{DISPLAY_NAME_MAP[label]}</h3>
+                          </div>
+
+                          <div className="space-y-3">
+                            {stageIssues.length > 0 ? (
+                              stageIssues.map((issue) => (
+                                <IssueCard key={issue.number} issue={issue} />
+                              ))
+                            ) : (
+                              <p className="rounded-sm border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
+                                No issues
+                              </p>
+                            )}
+                          </div>
+                        </section>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
             )}
           </section>
