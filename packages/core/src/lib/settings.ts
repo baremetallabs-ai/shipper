@@ -127,7 +127,7 @@ export async function loadSettings(): Promise<void> {
     commands: mergedCommands,
   };
 
-  if ('hooks' in base || 'hooks' in local) {
+  if ((isPlainObject(base) && 'hooks' in base) || (isPlainObject(local) && 'hooks' in local)) {
     console.warn(
       'Warning: Unknown setting "hooks" — settings-based hooks have been removed. Use file-based hooks in .shipper/hooks/ instead.'
     );
