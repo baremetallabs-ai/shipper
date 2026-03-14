@@ -7,9 +7,12 @@ import {
   classifyChecks,
   clearStaleLockIfNeeded,
   fetchChecks,
+  handleAgentCrash,
   selectIssuesForStage,
   gh,
   getSettings,
+  processResult,
+  scrubOutputDir,
   withStageHooks,
   releaseIssueLock,
   withIssueLock,
@@ -27,6 +30,7 @@ import type { AgentName } from '@dnsquared/shipper-core';
 import { postMerge } from './merge.js';
 import type { QueuedPR } from './merge.js';
 import { buildReadyCheck, SKIP_PR_REMEDIATE_WAIT_ENV_VAR } from './pr-remediate.js';
+import { prepareUnblockContext } from './unblock.js';
 
 const MAX_TRANSITIONS = 15;
 const MERGE_FAILURE_PREFIX = 'Merge failed for PR #';
@@ -901,33 +905,27 @@ async function attemptUnblock(
   agent?: AgentName,
   model?: string
 ): Promise<boolean> {
-  await withIssueLock(
-    repo,
-    issueStr,
-    async () => await runPrompt('unblock', { repo, issueRef: issueStr, agent, model })
-  );
+  const cwd = process.cwd();
 
-  // Check whether the blocked label was removed; that is the reliable unblock signal.
-  let output: string;
-  try {
-    const result = await gh([
-      'issue',
-      'view',
-      issueStr,
-      '-R',
-      repo,
-      '--json',
-      'labels',
-      '--jq',
-      '.labels[].name',
-    ]);
-    output = result.stdout.trim();
-  } catch {
-    return false;
-  }
+  return await withIssueLock(repo, issueStr, async () => {
+    await scrubOutputDir(cwd);
+    await prepareUnblockContext(repo, issueStr, cwd);
+    await runPrompt('unblock', { repo, issueRef: issueStr, agent, model });
 
-  const labels = output.split(/\r?\n/).filter(Boolean);
-  return !labels.includes(BLOCKED_LABEL);
+    try {
+      const result = await processResult({
+        repo,
+        issueNumber: issueStr,
+        stage: 'unblock',
+        cwd,
+      });
+      return result.verdict === 'accept';
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      await handleAgentCrash(repo, issueStr, 'unblock', detail);
+      return false;
+    }
+  });
 }
 
 function wait(ms: number): Promise<void> {

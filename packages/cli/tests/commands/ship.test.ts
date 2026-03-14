@@ -19,8 +19,22 @@ const getSettingsMock = vi.hoisted(() =>
     prReviewWait: { mode: 'checks', timeoutMinutes: 15 },
   }))
 );
+const handleAgentCrashMock = vi.hoisted(() => vi.fn(async () => {}));
 const buildReadyCheckMock = vi.hoisted(() => vi.fn());
 const postMergeMock = vi.hoisted(() => vi.fn(async () => {}));
+const prepareUnblockContextMock = vi.hoisted(() => vi.fn(async () => {}));
+const processResultMock = vi.hoisted(() =>
+  vi.fn(async (result?: { issueNumber?: string; stage?: string }) => {
+    if (result?.stage === 'unblock') {
+      const issue = mockIssues.get(Number(result.issueNumber));
+      if (issue) {
+        issue.labels = issue.labels.filter((label) => label !== 'shipper:blocked');
+      }
+    }
+
+    return { verdict: 'accept', comment: '.shipper/output/comment-7.md' };
+  })
+);
 const labelFixtures = vi.hoisted(() => ({
   stageLabelNames: [
     'shipper:new',
@@ -53,6 +67,10 @@ vi.mock('../../src/commands/merge.js', () => ({
   postMerge: (...args: unknown[]) => postMergeMock(...args),
 }));
 
+vi.mock('../../src/commands/unblock.js', () => ({
+  prepareUnblockContext: (...args: unknown[]) => prepareUnblockContextMock(...args),
+}));
+
 import {
   STAGE_NAME,
   AUTO_PRIORITY_LABELS,
@@ -69,6 +87,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   gh: vi.fn(),
   fetchChecks: vi.fn(async () => []),
   classifyChecks: vi.fn(() => ({ pending: [], failed: [], passed: [], total: 0 })),
+  handleAgentCrash: (...args: unknown[]) => handleAgentCrashMock(...args),
   STAGE_NAME_MAP: labelFixtures.stageNameMap,
   STAGE_LABEL_NAMES: labelFixtures.stageLabelNames,
   NEW_LABEL: 'shipper:new',
@@ -78,6 +97,8 @@ vi.mock('@dnsquared/shipper-core', () => ({
   LOCKED_LABEL: 'shipper:locked',
   FAILED_LABEL: 'shipper:failed',
   getSettings: () => getSettingsMock(),
+  processResult: (...args: unknown[]) => processResultMock(...args),
+  scrubOutputDir: vi.fn(async () => {}),
   withStageHooks: vi.fn(
     async (_stage: string, _env: unknown, fn: () => Promise<unknown>) => await fn()
   ),
@@ -155,6 +176,9 @@ const mockWithStageHooks = vi.mocked(withStageHooks);
 const mockWithIssueLock = vi.mocked(withIssueLock);
 const mockReleaseIssueLock = vi.mocked(releaseIssueLock);
 const mockRunPrompt = vi.mocked(runPrompt);
+const mockHandleAgentCrash = handleAgentCrashMock;
+const mockPrepareUnblockContext = prepareUnblockContextMock;
+const mockProcessResult = processResultMock;
 const mockBuildReadyCheck = buildReadyCheckMock;
 const mockSpawn = vi.mocked(spawn);
 const mockSpawnSync = vi.mocked(spawnSync);
@@ -1577,6 +1601,26 @@ describe('shipCommand parallel auto runner', () => {
     mockGh.mockResolvedValue({ stdout: '[]', stderr: '' });
     mockRunPrompt.mockReset();
     mockRunPrompt.mockResolvedValue(0);
+    mockHandleAgentCrash.mockReset();
+    mockHandleAgentCrash.mockResolvedValue(undefined);
+    mockPrepareUnblockContext.mockReset();
+    mockPrepareUnblockContext.mockResolvedValue(undefined);
+    mockProcessResult.mockReset();
+    mockProcessResult.mockImplementation(
+      async (result?: { issueNumber?: string; stage?: string }) => {
+        if (result?.stage === 'unblock') {
+          const issue = mockIssues.get(Number(result.issueNumber));
+          if (issue) {
+            issue.labels = issue.labels.filter((label) => label !== 'shipper:blocked');
+          }
+        }
+
+        return {
+          verdict: 'accept',
+          comment: '.shipper/output/comment-7.md',
+        };
+      }
+    );
     mockSpawn.mockReset();
     mockSpawnSync.mockReset();
     mockReleaseIssueLock.mockReset();
@@ -1727,6 +1771,13 @@ describe('shipCommand parallel auto runner', () => {
       agent: undefined,
       model: 'haiku',
     });
+    expect(mockPrepareUnblockContext).toHaveBeenCalledWith(repo, '7', process.cwd());
+    expect(mockProcessResult).toHaveBeenCalledWith({
+      repo,
+      issueNumber: '7',
+      stage: 'unblock',
+      cwd: process.cwd(),
+    });
   });
 
   it('captures combined child output in per-issue log files and prints prefixed parallel status lines', async () => {
@@ -1762,6 +1813,10 @@ describe('shipCommand parallel auto runner', () => {
       }
 
       return { stdout: '[]', stderr: '' };
+    });
+    mockProcessResult.mockResolvedValue({
+      verdict: 'reject',
+      comment: '.shipper/output/comment-7.md',
     });
 
     const child1 = new FakeChildProcess();
@@ -1818,6 +1873,43 @@ describe('shipCommand parallel auto runner', () => {
     expect(fsMockState.capturedLogs.get(logFile1)).toContain('lock acquired');
     expect(fsMockState.capturedLogs.get(logFile2)).toContain('Running stage: merge');
     expect(fsMockState.capturedLogs.get(logFile2)).toContain('boom');
+
+    logSpy.mockRestore();
+  });
+
+  it('treats unblock protocol crashes as still blocked in auto mode', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    let blockedReturned = false;
+    mockSelectIssuesForStage.mockImplementation(async () => []);
+    mockGh.mockImplementation(async (args: string[]) => {
+      if (args[0] === 'issue' && args[1] === 'list' && !blockedReturned) {
+        blockedReturned = true;
+        return {
+          stdout: JSON.stringify([
+            {
+              number: 7,
+              title: 'Blocked issue',
+              labels: [{ name: 'shipper:planned' }, { name: 'shipper:blocked' }],
+            },
+          ]),
+          stderr: '',
+        };
+      }
+
+      if (args[0] === 'issue' && args[1] === 'list') {
+        return { stdout: '[]', stderr: '' };
+      }
+
+      return { stdout: '[]', stderr: '' };
+    });
+    mockProcessResult.mockRejectedValueOnce(new Error('Missing result.json'));
+
+    await shipCommand(repo, undefined, { auto: true, merge: false, parallel: 1 });
+
+    const output = logSpy.mock.calls.map((call) => call[0]).join('\n');
+    expect(output).toContain('still blocked');
+    expect(mockHandleAgentCrash).toHaveBeenCalledWith(repo, '7', 'unblock', 'Missing result.json');
 
     logSpy.mockRestore();
   });
