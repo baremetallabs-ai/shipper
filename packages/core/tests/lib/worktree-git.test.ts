@@ -114,6 +114,10 @@ describe('withGitTransport', () => {
       ['rebase', 'origin/main'],
       ['push', '-u', 'origin', 'HEAD'],
     ]);
+    expect(execFileMock.mock.calls[1]?.[2]).toMatchObject({
+      cwd: '/tmp/wt',
+      maxBuffer: 10 * 1024 * 1024,
+    });
   });
 
   it('passes grouped conflict markers to the agent and force-pushes after rebase continuation succeeds', async () => {
