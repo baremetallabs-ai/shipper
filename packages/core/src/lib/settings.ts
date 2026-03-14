@@ -30,10 +30,6 @@ export interface Settings {
   defaultBaseBranch?: string;
   installCommand?: string;
   worktreeEnv?: Record<string, string>;
-  hooks: {
-    worktreeSetup?: string;
-    worktreeTeardown?: string;
-  };
   merge: MergeSettings;
   cliVersion?: string;
 }
@@ -43,7 +39,6 @@ export const DEFAULTS: Settings = {
   lockTimeoutMinutes: 30,
   agentTimeoutMinutes: 60,
   commands: { default: { agent: 'claude' as const } },
-  hooks: {},
   merge: { requirePassingChecks: true },
 };
 
@@ -64,9 +59,6 @@ export const SETTING_DESCRIPTIONS: Record<string, string> = {
     'shell command to install project dependencies (e.g. npm ci, pnpm install --frozen-lockfile)',
   worktreeEnv:
     'flat env-var map applied inside worktree execution; values are passed through exactly as configured',
-  'hooks.worktreeSetup':
-    'shell command to run after a worktree is created (before the agent starts)',
-  'hooks.worktreeTeardown': 'shell command to run before a worktree is removed',
   'merge.requirePassingChecks': 'require all CI checks to pass before auto-merging (default: true)',
 };
 
@@ -131,10 +123,15 @@ export async function loadSettings(): Promise<void> {
     ...DEFAULTS,
     ...base,
     ...local,
-    hooks: { ...DEFAULTS.hooks, ...base?.hooks, ...local?.hooks },
     merge: { ...DEFAULTS.merge, ...base?.merge, ...local?.merge },
     commands: mergedCommands,
   };
+
+  if ('hooks' in base || 'hooks' in local) {
+    console.warn(
+      'Warning: Unknown setting "hooks" — settings-based hooks have been removed. Use file-based hooks in .shipper/hooks/ instead.'
+    );
+  }
 
   for (const [command, config] of Object.entries(settings.commands)) {
     validateModel(config?.model, command);
@@ -152,7 +149,6 @@ export function getSettings(): Settings {
     settings ?? {
       ...DEFAULTS,
       commands: { default: { ...DEFAULTS.commands.default } },
-      hooks: { ...DEFAULTS.hooks },
       merge: { ...DEFAULTS.merge },
     }
   );

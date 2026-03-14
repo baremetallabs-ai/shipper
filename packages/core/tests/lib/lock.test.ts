@@ -19,7 +19,6 @@ const execFile = Object.assign((...args: unknown[]) => execFileMock(...args), {
 });
 const mockGetSettings = vi.fn(() => ({
   lockTimeoutMinutes: 30,
-  hooks: {},
 }));
 
 vi.mock('node:child_process', async () => {

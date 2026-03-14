@@ -132,14 +132,11 @@ describe('runWorktreeHook', () => {
     SHIPPER_BRANCH_NAME: 'shipper/42-branch',
   };
 
-  it('prefers file-based hooks over settings hooks', async () => {
+  it('runs the file-based hook when present', async () => {
     mockSpawnResult();
 
-    await runWorktreeHook('worktree-setup', env, 'echo setup', cwd);
+    await runWorktreeHook('worktree-setup', env, cwd);
 
-    expect(warnMock).toHaveBeenCalledWith(
-      '  Warning: Both .shipper/hooks/worktree-setup and settings-based hooks.worktreeSetup found. Using file-based hook; settings-based hook skipped.'
-    );
     expect(spawnMock).toHaveBeenCalledWith(
       path.join(cwd, '.shipper', 'hooks', 'worktree-setup'),
       [],
@@ -147,20 +144,13 @@ describe('runWorktreeHook', () => {
     );
   });
 
-  it('falls back to deprecated settings hooks when no file exists', async () => {
+  it('does nothing when no file hook exists', async () => {
     statMock.mockRejectedValueOnce(new Error('ENOENT'));
-    mockSpawnResult();
 
-    await runWorktreeHook('worktree-teardown', env, 'echo teardown', cwd);
+    await runWorktreeHook('worktree-teardown', env, cwd);
 
-    expect(warnMock).toHaveBeenCalledWith(
-      '  Warning: settings-based hooks.worktreeTeardown is deprecated. Move your command to .shipper/hooks/worktree-teardown and make it executable.'
-    );
-    expect(spawnMock).toHaveBeenCalledWith(
-      'echo teardown',
-      [],
-      expect.objectContaining({ cwd, shell: true })
-    );
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(warnMock).not.toHaveBeenCalled();
   });
 });
 

@@ -468,12 +468,11 @@ export async function withWorktree<T>(
     process.env[key] = value;
   }
 
-  const { worktreeSetup, worktreeTeardown } = settings.hooks;
   let cleanupPromise: Promise<void> | undefined;
   const cleanup = async () => {
     cleanupPromise ??= (async () => {
       try {
-        await runWorktreeHook('worktree-teardown', hookEnv, worktreeTeardown, wtPath);
+        await runWorktreeHook('worktree-teardown', hookEnv, wtPath);
         await removeWorktree(opts.repoRoot, wtPath);
       } finally {
         for (const [key, value] of originalEnv) {
@@ -502,7 +501,7 @@ export async function withWorktree<T>(
       await runAdvisoryHook('Install dependencies', installCommand, hookEnv, wtPath);
     }
 
-    await runWorktreeHook('worktree-setup', hookEnv, worktreeSetup, wtPath);
+    await runWorktreeHook('worktree-setup', hookEnv, wtPath);
     return await fn(wtPath);
   } finally {
     process.removeListener('SIGINT', cleanupWithoutAwait);

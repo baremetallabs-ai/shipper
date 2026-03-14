@@ -6,11 +6,9 @@ const HOOKS_DIR = path.join('.shipper', 'hooks');
 const WORKTREE_HOOK_META = {
   'worktree-setup': {
     label: 'Worktree setup',
-    settingsKey: 'worktreeSetup',
   },
   'worktree-teardown': {
     label: 'Worktree teardown',
-    settingsKey: 'worktreeTeardown',
   },
 } as const;
 
@@ -154,38 +152,24 @@ export async function runPostHook(stage: string, env: Record<string, string>): P
 export async function runWorktreeHook(
   event: WorktreeHookEvent,
   env: Record<string, string>,
-  settingsHookCommand: string | undefined,
   cwd?: string
 ): Promise<void> {
   const meta = WORKTREE_HOOK_META[event];
   const displayPath = path.join(HOOKS_DIR, event);
   const hookPath = path.join(cwd ?? process.cwd(), HOOKS_DIR, event);
 
-  if (await hookExists(hookPath)) {
-    if (!(await hookIsExecutable(hookPath))) {
-      warnNonExecutableHook(displayPath);
-    } else {
-      if (settingsHookCommand) {
-        console.warn(
-          `  Warning: Both ${displayPath} and settings-based hooks.${meta.settingsKey} found. Using file-based hook; settings-based hook skipped.`
-        );
-      }
+  if (!(await hookExists(hookPath))) return;
 
-      await runFileHook(hookPath, meta.label, env, {
-        blocking: false,
-        cwd,
-        resultLabel: meta.label,
-      });
-      return;
-    }
+  if (!(await hookIsExecutable(hookPath))) {
+    warnNonExecutableHook(displayPath);
+    return;
   }
 
-  if (!settingsHookCommand) return;
-
-  console.warn(
-    `  Warning: settings-based hooks.${meta.settingsKey} is deprecated. Move your command to ${displayPath} and make it executable.`
-  );
-  await runAdvisoryHook(meta.label, settingsHookCommand, env, cwd);
+  await runFileHook(hookPath, meta.label, env, {
+    blocking: false,
+    cwd,
+    resultLabel: meta.label,
+  });
 }
 
 export async function withStageHooks<T>(

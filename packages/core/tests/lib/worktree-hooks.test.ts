@@ -102,7 +102,7 @@ beforeEach(() => {
   });
   runAdvisoryHookMock.mockResolvedValue(undefined);
   runWorktreeHookMock.mockResolvedValue(undefined);
-  getSettingsMock.mockReturnValue({ hooks: {} });
+  getSettingsMock.mockReturnValue({});
   mockSpawnSuccess();
 });
 
@@ -140,7 +140,6 @@ describe('withWorktree', () => {
         SHIPPER_ISSUE_NUMBER: '42',
         SHIPPER_BRANCH_NAME: 'shipper/42-add-feature',
       },
-      undefined,
       expectedWtPath
     );
   });
@@ -148,7 +147,6 @@ describe('withWorktree', () => {
   it('runs installCommand before setup hooks', async () => {
     getSettingsMock.mockReturnValue({
       installCommand: 'npm ci',
-      hooks: { worktreeSetup: 'echo setup' },
     });
 
     const callOrder: string[] = [];
@@ -196,7 +194,6 @@ describe('withWorktree', () => {
     process.env.XDG_CACHE_HOME = '/original-xdg-cache';
     process.env.UV_CACHE_DIR = '/original-uv-cache';
     getSettingsMock.mockReturnValue({
-      hooks: {},
       worktreeEnv: { UV_CACHE_DIR: '.uv-cache' },
     });
 
@@ -213,7 +210,6 @@ describe('withWorktree', () => {
 
   it('lets worktreeEnv override the built-in NPM_CONFIG_CACHE default', async () => {
     getSettingsMock.mockReturnValue({
-      hooks: {},
       worktreeEnv: { NPM_CONFIG_CACHE: '/custom-cache' },
     });
 
@@ -224,7 +220,6 @@ describe('withWorktree', () => {
 
   it('lets worktreeEnv override the built-in XDG_CACHE_HOME default', async () => {
     getSettingsMock.mockReturnValue({
-      hooks: {},
       worktreeEnv: { XDG_CACHE_HOME: '/custom-cache' },
     });
 
@@ -246,7 +241,6 @@ describe('withWorktree', () => {
     process.env.XDG_CACHE_HOME = '/before-signal-xdg-cache';
     process.env.UV_CACHE_DIR = '/before-signal-uv-cache';
     getSettingsMock.mockReturnValue({
-      hooks: {},
       worktreeEnv: { UV_CACHE_DIR: '.uv-cache' },
     });
 
@@ -273,7 +267,6 @@ describe('withWorktree', () => {
     process.env.XDG_CACHE_HOME = '/before-teardown-xdg-cache';
     process.env.UV_CACHE_DIR = '/before-teardown-uv-cache';
     getSettingsMock.mockReturnValue({
-      hooks: {},
       worktreeEnv: { UV_CACHE_DIR: '.uv-cache' },
     });
 

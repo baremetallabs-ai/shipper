@@ -32,7 +32,6 @@ beforeEach(() => {
   errorMock.mockClear();
   getSettingsMock.mockReturnValue({
     prReviewWait: { mode: 'checks', timeoutMinutes: 30 },
-    hooks: {},
     merge: { requirePassingChecks: true },
   });
 });
@@ -347,7 +346,6 @@ describe('requirePassingChecks', () => {
   it('skips check verification when requirePassingChecks is false', async () => {
     getSettingsMock.mockReturnValue({
       prReviewWait: { mode: 'checks', timeoutMinutes: 30 },
-      hooks: {},
       merge: { requirePassingChecks: false },
     });
     mockPRLookup('CLEAN');

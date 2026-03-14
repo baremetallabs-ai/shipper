@@ -44,7 +44,6 @@ describe('loadSettings', () => {
       lockTimeoutMinutes: 30,
       agentTimeoutMinutes: 60,
       commands: { default: { agent: 'claude' } },
-      hooks: {},
       merge: { requirePassingChecks: true },
     });
   });
@@ -187,6 +186,24 @@ describe('loadSettings', () => {
     );
   });
 
+  it('warns when settings-based hooks are present', async () => {
+    readFileMock.mockImplementation(async (p: string) => {
+      if (p === settingsPath) {
+        return JSON.stringify({
+          hooks: { worktreeSetup: 'echo done' },
+        });
+      }
+      throw enoent(p);
+    });
+
+    const { loadSettings } = await loadModule();
+    await loadSettings();
+
+    expect(warnMock).toHaveBeenCalledWith(
+      'Warning: Unknown setting "hooks" — settings-based hooks have been removed. Use file-based hooks in .shipper/hooks/ instead.'
+    );
+  });
+
   it('throws on a non-string model value', async () => {
     readFileMock.mockImplementation(async (p: string) => {
       if (p === settingsPath) {
@@ -259,7 +276,6 @@ describe('getSettings', () => {
       lockTimeoutMinutes: 30,
       agentTimeoutMinutes: 60,
       commands: { default: { agent: 'claude' } },
-      hooks: {},
       merge: { requirePassingChecks: true },
     });
   });
@@ -359,29 +375,6 @@ describe('agentTimeoutMinutes', () => {
     const { loadSettings, getSettings } = await loadModule();
     await loadSettings();
     expect(getSettings().agentTimeoutMinutes).toBe(0);
-  });
-});
-
-describe('hooks settings', () => {
-  it('loads hooks from settings', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
-      if (p === settingsPath) return '{"hooks": {"worktreeSetup": "echo done"}}';
-      throw enoent(p);
-    });
-    const { loadSettings, getSettings } = await loadModule();
-    await loadSettings();
-    expect(getSettings().hooks.worktreeSetup).toBe('echo done');
-  });
-
-  it('local hooks override base hooks', async () => {
-    readFileMock.mockImplementation(async (p: string) => {
-      if (p === settingsPath) return '{"hooks": {"worktreeSetup": "echo base"}}';
-      if (p === localPath) return '{"hooks": {"worktreeSetup": "echo local"}}';
-      throw enoent(p);
-    });
-    const { loadSettings, getSettings } = await loadModule();
-    await loadSettings();
-    expect(getSettings().hooks.worktreeSetup).toBe('echo local');
   });
 });
 

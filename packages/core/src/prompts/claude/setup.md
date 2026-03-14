@@ -117,9 +117,6 @@ Use `packages/core/src/lib/settings.ts` as the source of truth. The current cano
 | `defaultBaseBranch`          | Optional `string`                                       | auto-detected from GitHub                | Default base branch for PRs.                                                        |
 | `installCommand`             | Optional `string`                                       | none                                     | Shell command used to install project dependencies.                                 |
 | `worktreeEnv`                | Optional `Record<string, string>`                       | none                                     | Env vars injected into the worktree exactly as configured.                          |
-| `hooks`                      | `{ worktreeSetup?: string, worktreeTeardown?: string }` | `{}`                                     | Worktree lifecycle hook commands.                                                   |
-| `hooks.worktreeSetup`        | Optional `string`                                       | none                                     | Deprecated settings-based setup hook. Prefer `.shipper/hooks/worktree-setup`.       |
-| `hooks.worktreeTeardown`     | Optional `string`                                       | none                                     | Deprecated settings-based teardown hook. Prefer `.shipper/hooks/worktree-teardown`. |
 | `merge`                      | `{ requirePassingChecks: boolean }`                     | `{ requirePassingChecks: true }`         | Merge behavior settings.                                                            |
 | `merge.requirePassingChecks` | `boolean`                                               | `true`                                   | Require all CI checks to pass before auto-merging.                                  |
 | `cliVersion`                 | Optional `string`                                       | none                                     | Pin Shipper CLI to a specific version.                                              |
@@ -138,7 +135,7 @@ Use `packages/core/src/lib/settings.ts` as the source of truth. The current cano
 - Settings files live in `.shipper/settings.json` and `.shipper/settings.local.json`.
 - `.shipper/settings.local.json` is for local-only overrides. It is gitignored and is usually absent in a clean worktree.
 - Settings merge precedence is: built-in defaults -> `.shipper/settings.json` -> `.shipper/settings.local.json`.
-- `commands`, `hooks`, and `merge` are deep-merged across those layers. Other top-level fields use last-wins replacement.
+- `commands` and `merge` are deep-merged across those layers. Other top-level fields use last-wins replacement.
 
 ## Troubleshooting
 

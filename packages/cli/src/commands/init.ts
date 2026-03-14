@@ -114,7 +114,6 @@ export async function initCommand(options: { agent?: string }) {
   let merged: Record<string, unknown> = {
     ...DEFAULTS,
     commands: { default: { ...DEFAULTS.commands.default } },
-    hooks: { ...DEFAULTS.hooks },
   };
   let existingAgent: string | undefined;
   if (existsSync(settingsPath)) {
@@ -169,10 +168,6 @@ export async function initCommand(options: { agent?: string }) {
         ...DEFAULTS,
         ...existing,
         commands: migratedCommands,
-        hooks: {
-          ...DEFAULTS.hooks,
-          ...(isPlainObject(existing.hooks) ? existing.hooks : {}),
-        },
       };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -195,6 +190,7 @@ export async function initCommand(options: { agent?: string }) {
   delete merged.agent;
   delete merged.agents;
   delete merged.headless;
+  delete merged.hooks;
   merged.cliVersion = CLI_VERSION;
   writeFileSync(settingsPath, JSON.stringify(merged, null, 2) + '\n');
   console.log('Wrote .shipper/settings.json with default settings:');
