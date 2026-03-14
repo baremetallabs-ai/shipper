@@ -45,7 +45,10 @@ vi.mock('../../src/lib/settings.js', () => ({
 }));
 vi.mock('../../src/lib/prompts.js', () => ({
   agentPrompts: {
-    claude: { 'test.md': '---\ncmd: claude\n---\n\nbundled body' },
+    claude: {
+      'test.md': '---\ncmd: claude\n---\n\nbundled body',
+      'stale.md': '---\ncmd: claude\n---\n\ngh issue edit 248 --add-label "shipper:planned"',
+    },
   },
 }));
 
@@ -231,6 +234,37 @@ describe('runPrompt', () => {
 
     const args = spawnMock.mock.calls[0][1] as string[];
     expect(args).toContain('bundled body');
+  });
+
+  it('warns once for a local override prompt with gh mutation commands and still spawns', async () => {
+    readFileMock.mockResolvedValueOnce(
+      ['---', 'cmd: claude', '---', '', 'gh issue edit 248 --add-label "shipper:planned"'].join(
+        '\n'
+      )
+    );
+    const warnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockSpawnResult();
+
+    await expect(runPrompt('test', {})).resolves.toBe(0);
+
+    expect(warnMock).toHaveBeenCalledTimes(1);
+    expect(warnMock).toHaveBeenCalledWith(
+      "Warning: Ejected prompt 'test' contains gh commands for state mutations.\nThese are now handled by shipper. Re-eject with 'shipper eject test' or manually update."
+    );
+    expect(spawnMock).toHaveBeenCalled();
+    warnMock.mockRestore();
+  });
+
+  it('does not warn for bundled fallback prompts with gh mutation commands', async () => {
+    readFileMock.mockRejectedValueOnce(new Error('ENOENT'));
+    const warnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockSpawnResult();
+
+    await expect(runPrompt('stale', {})).resolves.toBe(0);
+
+    expect(warnMock).not.toHaveBeenCalled();
+    expect(spawnMock).toHaveBeenCalled();
+    warnMock.mockRestore();
   });
 
   it('returns 1 when neither a local nor bundled prompt exists', async () => {

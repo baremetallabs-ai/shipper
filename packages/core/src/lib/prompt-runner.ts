@@ -28,6 +28,12 @@ export interface RunPromptOpts {
 
 const CODEX_HEADLESS_CONFIG = 'sandbox_workspace_write.network_access=true';
 const CODEX_HEADLESS_ARGS = ['exec', '--full-auto', '-c', CODEX_HEADLESS_CONFIG] as const;
+const GH_MUTATION_PATTERNS = [
+  /gh\s+issue\s+edit\b/,
+  /gh\s+issue\s+comment\b/,
+  /gh\s+pr\s+create\b/,
+  /gh\s+pr\s+review\b/,
+] as const;
 
 interface WorktreeDirs {
   gitDir: string;
@@ -130,8 +136,10 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
   const promptPath = path.resolve('.shipper', 'prompts', agent, `${name}.md`);
 
   let raw: string;
+  let isLocalOverride = false;
   try {
     raw = await readFile(promptPath, 'utf-8');
+    isLocalOverride = true;
   } catch {
     const bundled = agentPrompts[agent]?.[`${name}.md`];
     if (!bundled) {
@@ -143,6 +151,12 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
   }
 
   const { frontmatter, body } = parseFrontmatter(raw);
+
+  if (isLocalOverride && GH_MUTATION_PATTERNS.some((pattern) => pattern.test(body))) {
+    console.warn(
+      `Warning: Ejected prompt '${name}' contains gh commands for state mutations.\nThese are now handled by shipper. Re-eject with 'shipper eject ${name}' or manually update.`
+    );
+  }
 
   if (frontmatter.cmd !== agent) {
     console.error(
