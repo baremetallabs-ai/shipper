@@ -12,6 +12,7 @@ export interface ResultJson {
 }
 
 export const VALID_VERDICTS = ['accept', 'reject', 'fail'] as const;
+const PROTOCOL_OUTPUT_DIR = path.join('.shipper', 'output');
 
 export class ResultValidationError extends Error {
   readonly errors: string[];
@@ -27,14 +28,35 @@ function isRecord(data: unknown): data is Record<string, unknown> {
   return typeof data === 'object' && data !== null && !Array.isArray(data);
 }
 
+function isProtocolOutputPath(value: string): boolean {
+  if (path.isAbsolute(value)) {
+    return false;
+  }
+
+  const normalized = path.normalize(value);
+  const relative = path.relative(PROTOCOL_OUTPUT_DIR, normalized);
+  return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative);
+}
+
+function validateProtocolPath(field: string, value: unknown, errors: string[]): void {
+  if (typeof value !== 'string') {
+    errors.push(`'${field}' must be a string path`);
+    return;
+  }
+
+  if (!isProtocolOutputPath(value)) {
+    errors.push(`'${field}' must be a relative path under .shipper/output`);
+  }
+}
+
 function validateOptionalPath(
   data: Record<string, unknown>,
   field: 'pr_spec' | 'review_payload' | 'replies',
   errors: string[]
 ): void {
   const value = data[field];
-  if (value !== undefined && typeof value !== 'string') {
-    errors.push(`'${field}' must be a string path`);
+  if (value !== undefined) {
+    validateProtocolPath(field, value, errors);
   }
 }
 
@@ -56,8 +78,8 @@ export function validateResult(data: unknown): ResultJson {
 
   if (!('comment' in data)) {
     errors.push("missing required field 'comment'");
-  } else if (typeof data.comment !== 'string') {
-    errors.push("'comment' must be a string path");
+  } else {
+    validateProtocolPath('comment', data.comment, errors);
   }
 
   validateOptionalPath(data, 'pr_spec', errors);
@@ -94,8 +116,13 @@ export async function readResultFile(outputDir: string): Promise<ResultJson> {
   let raw: string;
   try {
     raw = await readFile(resultPath, 'utf-8');
-  } catch {
-    throw new Error(`Missing result.json at ${resultPath}`);
+  } catch (error) {
+    if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') {
+      throw new Error(`Missing result.json at ${resultPath}`);
+    }
+
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to read result.json at ${resultPath}: ${message}`);
   }
 
   let parsed: unknown;

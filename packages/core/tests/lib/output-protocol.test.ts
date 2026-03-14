@@ -67,6 +67,12 @@ describe('output protocol helpers', () => {
     ).resolves.toBe('issue snapshot');
   });
 
+  it('rejects context file paths that escape the protocol input directory', async () => {
+    await expect(writeContextFile(tempDir, '../issue-248.md', 'issue snapshot')).rejects.toThrow(
+      `context filename must stay within ${path.join(tempDir, PROTOCOL_INPUT_DIR)}`
+    );
+  });
+
   it('posts label transitions with gh issue edit', async () => {
     await executeTransition('owner/repo', '248', {
       add: ['shipper:planned'],
@@ -163,6 +169,32 @@ describe('output protocol helpers', () => {
       })
     ).rejects.toThrowError(
       `Missing result.json at ${path.join(tempDir, PROTOCOL_OUTPUT_DIR, 'result.json')}`
+    );
+
+    expect(ghMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects comment paths that escape the protocol output directory', async () => {
+    const outputDir = path.join(tempDir, PROTOCOL_OUTPUT_DIR);
+    await mkdir(outputDir, { recursive: true });
+    await writeFile(
+      path.join(outputDir, 'result.json'),
+      JSON.stringify({
+        verdict: 'accept',
+        comment: '.shipper/input/comment-248.md',
+      }),
+      'utf-8'
+    );
+
+    await expect(
+      processResult({
+        repo: 'owner/repo',
+        issueNumber: '248',
+        stage: 'design',
+        cwd: tempDir,
+      })
+    ).rejects.toThrowError(
+      `Invalid result.json at ${path.join(outputDir, 'result.json')}:\n- 'comment' must be a relative path under .shipper/output`
     );
 
     expect(ghMock).not.toHaveBeenCalled();

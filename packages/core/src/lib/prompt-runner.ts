@@ -34,6 +34,7 @@ const GH_MUTATION_PATTERNS = [
   /gh\s+pr\s+create\b/,
   /gh\s+pr\s+review\b/,
 ] as const;
+const warnedPromptPaths = new Set<string>();
 
 interface WorktreeDirs {
   gitDir: string;
@@ -152,7 +153,12 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
 
   const { frontmatter, body } = parseFrontmatter(raw);
 
-  if (isLocalOverride && GH_MUTATION_PATTERNS.some((pattern) => pattern.test(body))) {
+  if (
+    isLocalOverride &&
+    !warnedPromptPaths.has(promptPath) &&
+    GH_MUTATION_PATTERNS.some((pattern) => pattern.test(body))
+  ) {
+    warnedPromptPaths.add(promptPath);
     console.warn(
       `Warning: Ejected prompt '${name}' contains gh commands for state mutations.\nThese are now handled by shipper. Re-eject with 'shipper eject ${name}' or manually update.`
     );
