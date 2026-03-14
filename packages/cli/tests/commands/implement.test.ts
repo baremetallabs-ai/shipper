@@ -5,8 +5,14 @@ const formatConflictContextMock = vi.fn(() => 'formatted conflict context');
 const generateBranchNameMock = vi.fn(async () => 'shipper/239-branch');
 const getRepoRootMock = vi.fn(async () => '/tmp/fake-repo');
 const getSettingsMock = vi.fn(() => ({ defaultBaseBranch: 'main' }));
+const handleAgentCrashMock = vi.fn(async () => {});
+const processResultMock = vi.fn(async () => ({
+  verdict: 'accept',
+  comment: '.shipper/output/comment-239.md',
+}));
 const resolveBaseBranchMock = vi.fn(async () => 'main');
 const runPromptMock = vi.fn(async () => 0);
+const scrubOutputDirMock = vi.fn(async () => {});
 const withGitTransportMock = vi.fn(
   async (_opts: unknown, fn: (conflictContext?: unknown, pushError?: string) => Promise<unknown>) =>
     await fn({
@@ -35,8 +41,11 @@ vi.mock('@dnsquared/shipper-core', () => ({
   generateBranchName: generateBranchNameMock,
   getRepoRoot: getRepoRootMock,
   getSettings: getSettingsMock,
+  handleAgentCrash: handleAgentCrashMock,
+  processResult: processResultMock,
   resolveBaseBranch: resolveBaseBranchMock,
   runPrompt: runPromptMock,
+  scrubOutputDir: scrubOutputDirMock,
   withGitTransport: withGitTransportMock,
   withIssueLock: withIssueLockMock,
   withStageHooks: withStageHooksMock,
@@ -64,9 +73,10 @@ describe('implementCommand', () => {
 
     await expect(implementCommand('owner/repo', '239')).resolves.toBeUndefined();
     expect(exitSpy).not.toHaveBeenCalled();
-    expect(process.exitCode).toBe(0);
+    expect(process.exitCode).toBeUndefined();
 
     expect(resolveBaseBranchMock).toHaveBeenCalledWith('owner/repo', 'main');
+    expect(scrubOutputDirMock).toHaveBeenCalledWith('/tmp/fake-wt');
     expect(withGitTransportMock).toHaveBeenCalledWith(
       expect.objectContaining({
         wtPath: '/tmp/fake-wt',
@@ -94,6 +104,13 @@ describe('implementCommand', () => {
         userInput: 'formatted conflict context',
       })
     );
+    expect(processResultMock).toHaveBeenCalledWith({
+      repo: 'owner/repo',
+      issueNumber: '239',
+      stage: 'implement',
+      cwd: '/tmp/fake-wt',
+    });
+    expect(handleAgentCrashMock).not.toHaveBeenCalled();
   });
 
   it('forwards raw push failure text through transport without conflict formatting', async () => {
@@ -117,5 +134,20 @@ describe('implementCommand', () => {
         userInput: 'git push -u origin HEAD exited with code 1:\npre-push hook failed',
       })
     );
+  });
+
+  it('reports protocol crashes and exits with code 1', async () => {
+    processResultMock.mockRejectedValueOnce(new Error('Missing result.json'));
+    const { implementCommand } = await import('../../src/commands/implement.js');
+
+    await expect(implementCommand('owner/repo', '239')).resolves.toBeUndefined();
+
+    expect(handleAgentCrashMock).toHaveBeenCalledWith(
+      'owner/repo',
+      '239',
+      'implement',
+      'Missing result.json'
+    );
+    expect(process.exitCode).toBe(1);
   });
 });

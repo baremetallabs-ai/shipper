@@ -3,6 +3,7 @@ import { autoSelectIssue } from '@dnsquared/shipper-core';
 import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
 import { formatConflictContext } from '@dnsquared/shipper-core';
 import { getSettings, resolveBaseBranch } from '@dnsquared/shipper-core';
+import { handleAgentCrash, processResult, scrubOutputDir } from '@dnsquared/shipper-core';
 import { withStageHooks } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
 import { withGitTransport } from '@dnsquared/shipper-core';
@@ -26,7 +27,7 @@ export async function implementCommand(
     issue = String(selected.number);
   }
 
-  const code = await withIssueLock(repo, issue, async () => {
+  await withIssueLock(repo, issue, async () => {
     const repoRoot = await getRepoRoot();
     const branch = await generateBranchName(repo, issue);
     const settings = getSettings();
@@ -39,7 +40,8 @@ export async function implementCommand(
         await withWorktree(
           { repoRoot, branch, createBranch: true, issueNumber: issue, stage: 'implement' },
           async (wtPath) => {
-            return await withGitTransport(
+            await scrubOutputDir(wtPath);
+            await withGitTransport(
               { wtPath, repoRoot, baseBranch, pushMode: 'new-branch' },
               async (conflictContext, pushError) =>
                 await runPrompt('implement', {
@@ -54,10 +56,16 @@ export async function implementCommand(
                     : (pushError ?? undefined),
                 })
             );
+            try {
+              await processResult({ repo, issueNumber: issue, stage: 'implement', cwd: wtPath });
+            } catch (error) {
+              const detail = error instanceof Error ? error.message : String(error);
+              await handleAgentCrash(repo, issue, 'implement', detail);
+              process.exitCode = 1;
+              return;
+            }
           }
         )
     );
   });
-
-  process.exitCode = code;
 }

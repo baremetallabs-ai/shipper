@@ -7,7 +7,7 @@ args:
   - --permission-mode
   - acceptEdits
   - --allowedTools
-  - Bash(gh issue view *),Bash(gh issue comment *),Bash(gh issue edit *),Bash(gh label list *),WebSearch
+  - WebSearch
 append-issue: true
 ---
 
@@ -36,10 +36,9 @@ Extract and internalize:
 
 If the issue is missing a design review comment or is not labeled `shipper:designed`, tell the user to run `shipper design` first and stop. When this happens:
 
-1. Write an explanation to `./.shipper/tmp/plan-blocked-<number>.md` documenting that planning was attempted but no design review comment was found on the issue.
-2. Post it as a comment: `gh issue comment <ISSUE> --body-file ./.shipper/tmp/plan-blocked-<number>.md`
-3. Roll back labels: `gh issue edit <ISSUE> --add-label "shipper:groomed" --remove-label "shipper:designed"`
-4. Stop.
+1. Write an explanation to `.shipper/output/comment-<number>.md` documenting that planning was attempted but no design review comment was found on the issue.
+2. Write `.shipper/output/result.json` with `"verdict": "reject"` and the comment path.
+3. Stop.
 
 ### Step 2: Codebase investigation
 
@@ -143,35 +142,39 @@ The implementer runs in an ephemeral worktree that only contains tracked files. 
 
 If during investigation you discover that the design is wrong, incomplete, or based on incorrect assumptions about the codebase, **do not plan around the problem.** A plan built on a flawed design produces a flawed implementation. Instead:
 
-1. Write an explanation to `./.shipper/tmp/plan-blocked-<number>.md` (using the issue number) documenting:
+1. Write an explanation to `.shipper/output/comment-<number>.md` (using the issue number) documenting:
    - What you found that contradicts the design
    - Why planning cannot proceed
    - Which upstream command to run (`shipper design` or `shipper groom`)
-2. Post it as a comment:
-   ```bash
-   gh issue comment <ISSUE> --body-file ./.shipper/tmp/plan-blocked-<number>.md
-   ```
-3. Roll back labels:
-   - If recommending `shipper design`: `gh issue edit <ISSUE> --add-label "shipper:groomed" --remove-label "shipper:designed"`
-   - If recommending `shipper groom`: `gh issue edit <ISSUE> --add-label "shipper:new" --remove-label "shipper:designed"`
+2. Write `.shipper/output/comment-<number>.md` with the explanation.
+3. Write `.shipper/output/result.json` with `"verdict": "reject"` and the comment path.
 4. Stop.
 
 ---
 
-## Phase 3: Post to GitHub
+## Writing Results
 
-1. Use the **Write** tool to save the plan to `./.shipper/tmp/plan-<number>.md` (using the issue number).
-2. Post the plan as a comment:
+When you reach your verdict, write two files:
 
-```bash
-gh issue comment <ISSUE> --body-file ./.shipper/tmp/plan-<number>.md
+1. **Comment file** — Write the implementation plan to `.shipper/output/comment-<number>.md` (where `<number>` is the issue number).
+2. **Result file** — Write `.shipper/output/result.json`:
+
+```json
+{
+  "verdict": "accept",
+  "comment": ".shipper/output/comment-<number>.md"
+}
 ```
 
-3. Update labels:
+Valid verdicts: `accept`, `reject`, `fail`.
 
-```bash
-gh issue edit <ISSUE> --add-label "shipper:planned" --remove-label "shipper:designed"
-```
+Verdict mapping:
+
+- Plan created -> `accept`
+- Blocked because the design is missing, flawed, or contradicted by the codebase -> `reject`
+- Environment failures -> `fail`
+
+Do not mutate GitHub directly. The orchestrator handles comments and label transitions after you exit.
 
 ---
 
@@ -190,47 +193,10 @@ Use a general heuristic to distinguish environment failures from code failures. 
 
 **When you detect an environment failure:**
 
-1. Stop the current operation immediately. Do not retry or attempt workarounds.
-2. Write a structured failure report to `./.shipper/tmp/env-failure-<number>.md` (using the issue number):
-
-   ````markdown
-   ## Environment Failure
-
-   ### What failed
-
-   [Description of the command or operation that failed]
-
-   ### Error output
-
-   ```
-   [Relevant error output, trimmed to the essential lines]
-   ```
-
-   ### Likely cause
-
-   [Your assessment of why this is an environment/config issue, not a code issue]
-
-   ### Suggested fix
-
-   [What the human should check or fix before re-running]
-
-   ### How to re-run
-
-   Remove the `shipper:failed` label, then run `shipper plan` again.
-   ````
-
-3. Post the comment: `gh issue comment <ISSUE> --body-file ./.shipper/tmp/env-failure-<number>.md`
-4. Update labels: `gh issue edit <ISSUE> --add-label "shipper:failed" --remove-label "shipper:locked"`
-5. Stop. Do **not** roll back the stage label — the plan/design is not what failed.
-
----
-
-## Stop conditions
-
-- If the issue is missing a design review, tell the user to run `shipper design` and stop.
-- If the design is flawed or the codebase contradicts it, follow the scope guard procedure: post a comment explaining the problem and roll back labels before stopping.
-- If product questions are unresolved, follow the scope guard procedure: post a comment and roll back labels before stopping.
-- If any GitHub command fails, report the error **and which prior steps (if any) already completed** (e.g., "the comment was posted but the label change failed").
+1. Stop immediately. Do not retry.
+2. Write the failure report to `.shipper/output/comment-<number>.md`.
+3. Write `.shipper/output/result.json` with `"verdict": "fail"` and the comment path.
+4. Stop.
 
 ---
 

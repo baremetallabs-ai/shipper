@@ -1,5 +1,6 @@
 import { autoSelectIssue } from '@dnsquared/shipper-core';
 import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
+import { handleAgentCrash, processResult, scrubOutputDir } from '@dnsquared/shipper-core';
 import { withStageHooks } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
 import { runPrompt } from '@dnsquared/shipper-core';
@@ -21,16 +22,22 @@ export async function planCommand(
     issue = String(selected.number);
   }
 
-  const code = await withIssueLock(
+  await withIssueLock(
     repo,
     issue,
     async () =>
-      await withStageHooks(
-        'plan',
-        { issueNumber: issue },
-        async () => await runPrompt('plan', { repo, issueRef: issue, mode, agent, model })
-      )
+      await withStageHooks('plan', { issueNumber: issue }, async () => {
+        const cwd = process.cwd();
+        await scrubOutputDir(cwd);
+        await runPrompt('plan', { repo, issueRef: issue, mode, agent, model });
+        try {
+          await processResult({ repo, issueNumber: issue, stage: 'plan', cwd });
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          await handleAgentCrash(repo, issue, 'plan', detail);
+          process.exitCode = 1;
+          return;
+        }
+      })
   );
-
-  process.exitCode = code;
 }

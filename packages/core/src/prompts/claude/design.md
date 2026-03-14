@@ -7,7 +7,7 @@ args:
   - --permission-mode
   - acceptEdits
   - --allowedTools
-  - Bash(gh issue view *),Bash(gh issue comment *),Bash(gh issue edit *),Bash(gh label list *),WebSearch
+  - WebSearch
 append-issue: true
 ---
 
@@ -175,57 +175,29 @@ The review should be as short as possible and no shorter. For obvious NOT VIABLE
 
 ---
 
-## Applying the Verdict
+## Writing Results
 
-**Important:** Always use the Write tool to save the review body to `./.shipper/tmp/design-review-<number>.md` (using the issue number), then post with `--body-file`.
+When you reach your verdict, write two files:
 
-### For ACCEPT:
+1. **Comment file** — Write your review to `.shipper/output/comment-<number>.md` (where `<number>` is the issue number).
+2. **Result file** — Write `.shipper/output/result.json`:
 
-1. Use the **Write** tool to save your review to `./.shipper/tmp/design-review-<number>.md`
-2. Then run:
-
-```bash
-gh issue comment <ISSUE> --body-file ./.shipper/tmp/design-review-<number>.md
-gh issue edit <ISSUE> --add-label "shipper:designed" --remove-label "shipper:groomed"
+```json
+{
+  "verdict": "accept",
+  "comment": ".shipper/output/comment-<number>.md"
+}
 ```
 
-Your comment gives the implementer everything they need to proceed to planning: the verdict, the evidence, and the design. The next step in the workflow is `shipper plan`.
+Valid verdicts: `accept`, `reject`, `fail`.
 
-### For NOT VIABLE:
+Verdict mapping:
 
-1. Use the **Write** tool to save your review to `./.shipper/tmp/design-review-<number>.md`
-2. Then run:
+- `ACCEPT` -> `accept`
+- `NOT VIABLE`, `NEEDS GROOMING`, and `REDIRECT` -> `reject`
+- Environment failures -> `fail`
 
-```bash
-gh issue comment <ISSUE> --body-file ./.shipper/tmp/design-review-<number>.md
-gh issue edit <ISSUE> --add-label "shipper:new" --remove-label "shipper:groomed"
-```
-
-Be direct about why. Cite the specific code, framework behavior, or architecture that makes the issue non-viable. If the issue author's mental model of the platform was wrong, correct it — that's a service to them and to anyone who reads the issue later. The issue returns to the product owner to decide whether to close it, re-scope it, or re-groom it with the new information. Recommend the user run `shipper groom` if re-scoping makes sense, or close the issue if the problem genuinely doesn't exist.
-
-### For NEEDS GROOMING:
-
-1. Use the **Write** tool to save your review to `./.shipper/tmp/design-review-<number>.md`
-2. Then run:
-
-```bash
-gh issue comment <ISSUE> --body-file ./.shipper/tmp/design-review-<number>.md
-gh issue edit <ISSUE> --add-label "shipper:new" --remove-label "shipper:groomed"
-```
-
-List every open product question explicitly. For each, explain what the technical implementation depends on and what the tradeoffs of each option are. The issue returns to grooming — recommend the user run `shipper groom` to resolve the gaps.
-
-### For REDIRECT:
-
-1. Use the **Write** tool to save your review to `./.shipper/tmp/design-review-<number>.md`
-2. Then run:
-
-```bash
-gh issue comment <ISSUE> --body-file ./.shipper/tmp/design-review-<number>.md
-gh issue edit <ISSUE> --add-label "shipper:new" --remove-label "shipper:groomed"
-```
-
-Rewrite the problem statement. Give the real diagnosis. Provide the design for the fix that actually matters. Strip out the parts that don't. The issue returns to the product owner so they can review your reframing before it proceeds — a redirect is a claim that the issue got the problem wrong, and that claim needs human sign-off just like any other product-level change.
+Do not mutate GitHub directly. The orchestrator handles comments and label transitions after you exit.
 
 ---
 
@@ -266,44 +238,10 @@ Use a general heuristic to distinguish environment failures from code failures. 
 
 **When you detect an environment failure:**
 
-1. Stop the current operation immediately. Do not retry or attempt workarounds.
-2. Write a structured failure report to `./.shipper/tmp/env-failure-<number>.md` (using the issue number):
-
-   ````markdown
-   ## Environment Failure
-
-   ### What failed
-
-   [Description of the command or operation that failed]
-
-   ### Error output
-
-   ```
-   [Relevant error output, trimmed to the essential lines]
-   ```
-
-   ### Likely cause
-
-   [Your assessment of why this is an environment/config issue, not a code issue]
-
-   ### Suggested fix
-
-   [What the human should check or fix before re-running]
-
-   ### How to re-run
-
-   Remove the `shipper:failed` label, then run `shipper design` again.
-   ````
-
-3. Post the comment: `gh issue comment <ISSUE> --body-file ./.shipper/tmp/env-failure-<number>.md`
-4. Update labels: `gh issue edit <ISSUE> --add-label "shipper:failed" --remove-label "shipper:locked"`
-5. Stop. Do **not** roll back the stage label — the plan/design is not what failed.
-
----
-
-## Stop conditions
-
-- If any GitHub command fails, report the error **and which prior steps (if any) already completed** (e.g., "the comment was posted but the label change failed").
+1. Stop immediately. Do not retry.
+2. Write the failure report to `.shipper/output/comment-<number>.md`.
+3. Write `.shipper/output/result.json` with `"verdict": "fail"` and the comment path.
+4. Stop.
 
 ---
 

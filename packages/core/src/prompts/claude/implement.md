@@ -8,7 +8,7 @@ args:
   - acceptEdits
   - --settings
   # prettier-ignore
-  - {"permissions":{"allow":["Bash(git add *)","Bash(git commit *)","Bash(./.shipper/scripts/install-deps.sh)","Bash(gh issue view *)","Bash(gh issue comment *)","Bash(gh issue edit *)","WebSearch"]},"sandbox":{"enabled":true,"autoAllowBashIfSandboxed":true,"excludedCommands":["git add *","git commit *","./.shipper/scripts/install-deps.sh","gh issue view *","gh issue comment *","gh issue edit *"]},"network":{"allowedDomains":["github.com","api.github.com","uploads.github.com","registry.npmjs.org"]}}
+  - {"permissions":{"allow":["Bash(git add *)","Bash(git commit *)","Bash(./.shipper/scripts/install-deps.sh)","WebSearch"]},"sandbox":{"enabled":true,"autoAllowBashIfSandboxed":true,"excludedCommands":["git add *","git commit *","./.shipper/scripts/install-deps.sh"]},"network":{"allowedDomains":["registry.npmjs.org"]}}
 append-issue: true
 append-user-input: true
 ---
@@ -40,10 +40,9 @@ Extract and internalize:
 
 If the issue is missing an implementation plan comment or is not labeled `shipper:planned`, tell the user to run `shipper plan` first and stop. When this happens:
 
-1. Write an explanation to `./.shipper/tmp/implement-blocked-<number>.md` documenting that implementation was attempted but no plan comment was found on the issue.
-2. Post it as a comment: `gh issue comment <ISSUE> --body-file ./.shipper/tmp/implement-blocked-<number>.md`
-3. Roll back labels: `gh issue edit <ISSUE> --add-label "shipper:designed" --remove-label "shipper:planned"`
-4. Stop.
+1. Write an explanation to `.shipper/output/comment-<number>.md` documenting that implementation was attempted but no plan comment was found on the issue.
+2. Write `.shipper/output/result.json` with `"verdict": "reject"` and the comment path.
+3. Stop.
 
 ### Step 2: Build the todo list
 
@@ -115,19 +114,12 @@ If during implementation you discover any of the following **major** issues, sto
 When you stop for a scope guard issue (other than scope creep), you must:
 
 1. Update the todo list to reflect the blocked state.
-2. Write an explanation to `./.shipper/tmp/implement-blocked-<number>.md` (using the issue number) documenting:
+2. Write an explanation to `.shipper/output/comment-<number>.md` (using the issue number) documenting:
    - What you found that blocks implementation
    - What work was completed before the block (if any)
    - Which upstream command to run
-3. Post it as a comment:
-   ```bash
-   gh issue comment <ISSUE> --body-file ./.shipper/tmp/implement-blocked-<number>.md
-   ```
-4. Roll back labels:
-   - If recommending `shipper plan`: `gh issue edit <ISSUE> --add-label "shipper:designed" --remove-label "shipper:planned"`
-   - If recommending `shipper design`: `gh issue edit <ISSUE> --add-label "shipper:groomed" --remove-label "shipper:planned"`
-   - If recommending `shipper groom`: `gh issue edit <ISSUE> --add-label "shipper:new" --remove-label "shipper:planned"`
-5. Stop.
+3. Write `.shipper/output/result.json` with `"verdict": "reject"` and the comment path.
+4. Stop.
 
 ---
 
@@ -146,21 +138,11 @@ After all plan steps are complete, work through the verification tasks:
 
 ---
 
-## Phase 4: Commit, push, and report
+## Writing Results
 
-Once all implementation and verification tasks are complete:
+Once all implementation and verification tasks are complete, write two files:
 
-### Step 1: Final commit
-
-Ensure all changes are committed. If you have uncommitted work, commit it now with a descriptive message referencing the issue number.
-
-### Step 2: Leave branch pushing to the orchestrator
-
-Do not run `git push` or `./.shipper/scripts/safe-push.sh`. After you exit successfully, shipper will push the branch outside the sandbox.
-
-### Step 3: Post implementation summary
-
-Write a summary comment for the issue documenting what was done. Structure it as:
+1. **Comment file** — Write the implementation summary to `.shipper/output/comment-<number>.md` (where `<number>` is the issue number). Structure it as:
 
 ```markdown
 ## Implementation Summary
@@ -180,24 +162,24 @@ Write a summary comment for the issue documenting what was done. Structure it as
 - [Anything the reviewer should know: tricky spots, deviations from plan (with justification), follow-up items noticed but not addressed]
 ```
 
-Save and post:
+2. **Result file** — Write `.shipper/output/result.json`:
 
-1. Use the **Write** tool to save the summary to `./.shipper/tmp/implement-summary-<number>.md` (using the issue number).
-2. Post the comment:
-
-```bash
-gh issue comment <ISSUE> --body-file ./.shipper/tmp/implement-summary-<number>.md
+```json
+{
+  "verdict": "accept",
+  "comment": ".shipper/output/comment-<number>.md"
+}
 ```
 
-3. Update labels:
+Valid verdicts: `accept`, `reject`, `fail`.
 
-```bash
-gh issue edit <ISSUE> --add-label "shipper:implemented" --remove-label "shipper:planned"
-```
+Verdict mapping:
 
-### Step 4: Confirm completion
+- Implementation complete -> `accept`
+- Scope guard / blocked implementation -> `reject`
+- Environment failures -> `fail`
 
-Mark the final commit-and-push task as `completed`. Verify the todo list shows all tasks completed. Report the branch name and issue URL to the user.
+Do not mutate GitHub directly. The orchestrator handles comments and label transitions after you exit.
 
 ---
 
@@ -216,46 +198,10 @@ Use a general heuristic to distinguish environment failures from code failures. 
 
 **When you detect an environment failure:**
 
-1. Stop the current operation immediately. Do not retry or attempt workarounds.
-2. Write a structured failure report to `./.shipper/tmp/env-failure-<number>.md` (using the issue number):
-
-   ````markdown
-   ## Environment Failure
-
-   ### What failed
-
-   [Description of the command or operation that failed]
-
-   ### Error output
-
-   ```
-   [Relevant error output, trimmed to the essential lines]
-   ```
-
-   ### Likely cause
-
-   [Your assessment of why this is an environment/config issue, not a code issue]
-
-   ### Suggested fix
-
-   [What the human should check or fix before re-running]
-
-   ### How to re-run
-
-   Remove the `shipper:failed` label, then run `shipper implement` again.
-   ````
-
-3. Post the comment: `gh issue comment <ISSUE> --body-file ./.shipper/tmp/env-failure-<number>.md`
-4. Update labels: `gh issue edit <ISSUE> --add-label "shipper:failed" --remove-label "shipper:locked"`
-5. Stop. Do **not** roll back the stage label — the plan/design is not what failed.
-
----
-
-## Stop conditions
-
-- If the issue is missing an implementation plan, tell the user to run `shipper plan` and stop.
-- If the plan contradicts the codebase in ways that can't be explained by a partial prior run, a design flaw surfaces, or product questions are unresolved, follow the scope guard procedure: post a comment, roll back labels, then stop.
-- If any GitHub command fails, report the error **and which prior steps (if any) already completed** (e.g., "the comment was posted but the label change failed").
+1. Stop immediately. Do not retry.
+2. Write the failure report to `.shipper/output/comment-<number>.md`.
+3. Write `.shipper/output/result.json` with `"verdict": "fail"` and the comment path.
+4. Stop.
 
 ---
 
