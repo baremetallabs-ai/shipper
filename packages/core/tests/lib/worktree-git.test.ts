@@ -28,7 +28,7 @@ vi.mock('../../src/lib/hooks.js', () => ({
 }));
 
 vi.mock('../../src/lib/settings.js', () => ({
-  getSettings: vi.fn(() => ({ hooks: {} })),
+  getSettings: vi.fn(() => ({})),
 }));
 
 const { formatConflictContext, withGitTransport } = await import('../../src/lib/worktree.js');

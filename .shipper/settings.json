@@ -19,7 +19,6 @@
       "agent": "codex"
     }
   },
-  "hooks": {},
   "merge": {
     "requirePassingChecks": true
   },

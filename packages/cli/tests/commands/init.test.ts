@@ -73,7 +73,6 @@ vi.mock('@dnsquared/shipper-core', () => ({
     prReviewWait: { mode: 'checks', timeoutMinutes: 15 },
     lockTimeoutMinutes: 30,
     commands: { default: { agent: 'claude' } },
-    hooks: {},
   },
   SETTING_DESCRIPTIONS: {},
   CLI_VERSION: '1.2.3',
@@ -196,6 +195,7 @@ describe('initCommand settings', () => {
     const written = JSON.parse(settingsCall[1] as string);
     expect(written.commands).toEqual({ default: { agent: 'claude' } });
     expect(written.agent).toBeUndefined();
+    expect(written.hooks).toBeUndefined();
   });
 
   it('preserves existing commands content on re-init', async () => {
@@ -273,6 +273,25 @@ describe('initCommand settings', () => {
     const written = JSON.parse(settingsCall?.[1] as string);
     expect(written.commands).toEqual({ default: { agent: 'claude' } });
     expect((Object.prototype as Record<string, unknown>).mode).toBeUndefined();
+  });
+
+  it('strips deprecated hooks from existing settings on re-init', async () => {
+    existsSyncMock.mockImplementation((p: string) => p === settingsPath);
+    readFileSyncMock.mockImplementation((p: string) => {
+      if (p === settingsPath) {
+        return '{"commands":{"default":{"agent":"claude"}},"hooks":{"worktreeSetup":"echo setup"}}';
+      }
+      return '';
+    });
+
+    await initCommand({ agent: 'claude' });
+
+    const settingsCall = writeFileSyncMock.mock.calls.find(
+      (call: unknown[]) => call[0] === settingsPath
+    );
+    expect(settingsCall).toBeDefined();
+    const written = JSON.parse(settingsCall?.[1] as string);
+    expect(written.hooks).toBeUndefined();
   });
 
   it('gitignore includes expected generated entries', async () => {

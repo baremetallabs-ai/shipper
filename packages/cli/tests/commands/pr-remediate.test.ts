@@ -78,7 +78,6 @@ describe('prRemediateCommand', () => {
     });
     getSettingsMock.mockReturnValue({
       prReviewWait: { mode: 'timer', timeoutMinutes: 0 },
-      hooks: {},
     });
     exitSpy = vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
       throw new Error(`exit:${code}`);
@@ -223,7 +222,6 @@ describe('prRemediateCommand', () => {
   it('in timer mode with timeoutMinutes 0, skips wait and runs prompt', async () => {
     getSettingsMock.mockReturnValue({
       prReviewWait: { mode: 'timer', timeoutMinutes: 0 },
-      hooks: {},
     });
     const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
 
@@ -237,7 +235,6 @@ describe('prRemediateCommand', () => {
   it('in checks mode, polls and proceeds when all checks complete', async () => {
     getSettingsMock.mockReturnValue({
       prReviewWait: { mode: 'checks', timeoutMinutes: 1 },
-      hooks: {},
     });
     fetchChecksMock.mockResolvedValue([
       { name: 'build', state: 'COMPLETED', bucket: 'pass' },
@@ -256,7 +253,6 @@ describe('prRemediateCommand', () => {
   it('in checks mode with zero checks, retries then proceeds', async () => {
     getSettingsMock.mockReturnValue({
       prReviewWait: { mode: 'checks', timeoutMinutes: 1 },
-      hooks: {},
     });
     // Return empty array for all calls (initial + 3 grace retries)
     fetchChecksMock.mockResolvedValue([]);
