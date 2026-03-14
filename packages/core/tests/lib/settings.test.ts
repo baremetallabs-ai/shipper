@@ -204,6 +204,29 @@ describe('loadSettings', () => {
     );
   });
 
+  it('ignores primitive JSON settings values without crashing', async () => {
+    readFileMock.mockImplementation(async (p: string) => {
+      if (p === settingsPath) {
+        return '123';
+      }
+      throw enoent(p);
+    });
+
+    const { loadSettings, getSettings } = await loadModule();
+    await loadSettings();
+
+    expect(getSettings()).toEqual({
+      prReviewWait: { mode: 'checks', timeoutMinutes: 15 },
+      lockTimeoutMinutes: 30,
+      agentTimeoutMinutes: 60,
+      commands: { default: { agent: 'claude' } },
+      merge: { requirePassingChecks: true },
+    });
+    expect(warnMock).not.toHaveBeenCalledWith(
+      'Warning: Unknown setting "hooks" — settings-based hooks have been removed. Use file-based hooks in .shipper/hooks/ instead.'
+    );
+  });
+
   it('throws on a non-string model value', async () => {
     readFileMock.mockImplementation(async (p: string) => {
       if (p === settingsPath) {
