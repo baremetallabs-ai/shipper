@@ -978,87 +978,52 @@ describe('resetCommand', () => {
     expect(firstDeleteCall?.[3]).toBe('repos/owner/repo/issues/comments/502');
   });
 
-  it('preserves remote and local branches when resetting pr-open back to implemented', async () => {
-    const localWorktree = getLocalWorktreePath('fake-repo--wt--shipper-18-add-reset');
-    setupExecMock({
-      issueJson: mockIssueView('OPEN', ['shipper:implemented', 'shipper:pr-open']),
-      prJson: JSON.stringify([{ number: 42, headRefName: 'shipper/18-add-reset' }]),
-      localBranchesOutput: '  shipper/18-add-reset\n',
-      timelineByStage: { implemented: '2024-01-15T12:00:00Z\n' },
-      commentsWithDates: '',
-      worktreeEntries: [{ name: 'fake-repo--wt--shipper-18-add-reset' }],
-      existingPaths: [localWorktree],
-    });
-    mockConfirm.mockResolvedValue(false);
+  it.each([
+    ['pr-open', 'shipper:pr-open'],
+    ['pr-reviewed', 'shipper:pr-reviewed'],
+  ])(
+    'preserves remote and local branches when resetting %s back to implemented',
+    async (_stage, label) => {
+      const localWorktree = getLocalWorktreePath('fake-repo--wt--shipper-18-add-reset');
+      setupExecMock({
+        issueJson: mockIssueView('OPEN', ['shipper:implemented', label]),
+        prJson: JSON.stringify([{ number: 42, headRefName: 'shipper/18-add-reset' }]),
+        localBranchesOutput: '  shipper/18-add-reset\n',
+        timelineByStage: { implemented: '2024-01-15T12:00:00Z\n' },
+        commentsWithDates: '',
+        worktreeEntries: [{ name: 'fake-repo--wt--shipper-18-add-reset' }],
+        existingPaths: [localWorktree],
+      });
+      mockConfirm.mockResolvedValue(false);
 
-    await resetCommand('18', { force: false, to: 'implemented' });
-    await resetCommand('18', { force: true, to: 'implemented' });
+      await resetCommand('18', { force: false, to: 'implemented' });
+      await resetCommand('18', { force: true, to: 'implemented' });
 
-    expect(mockConsoleLog).toHaveBeenCalledWith('\nReset summary for issue #18:');
-    expect(mockConsoleLog).not.toHaveBeenCalledWith(
-      '  Remote branches to delete: shipper/18-add-reset'
-    );
-    expect(mockConsoleLog).not.toHaveBeenCalledWith(
-      '  Local branches to delete: shipper/18-add-reset'
-    );
-    expect(mockExecFileSync).not.toHaveBeenCalledWith(
-      'git',
-      ['branch', '--list', 'shipper/18', 'shipper/18-*'],
-      expect.any(Object)
-    );
-    expect(mockExecFileSync).not.toHaveBeenCalledWith(
-      'git',
-      ['push', 'origin', '--delete', 'shipper/18-add-reset'],
-      expect.any(Object)
-    );
-    expect(mockRemoveWorktree).toHaveBeenCalledWith('/tmp/fake-repo', localWorktree);
-    expect(mockGh).toHaveBeenCalledWith(['pr', 'close', '42']);
+      expect(mockConsoleLog).toHaveBeenCalledWith('\nReset summary for issue #18:');
+      expect(mockConsoleLog).not.toHaveBeenCalledWith(
+        '  Remote branches to delete: shipper/18-add-reset'
+      );
+      expect(mockConsoleLog).not.toHaveBeenCalledWith(
+        '  Local branches to delete: shipper/18-add-reset'
+      );
+      expect(mockExecFileSync).not.toHaveBeenCalledWith(
+        'git',
+        ['branch', '--list', 'shipper/18', 'shipper/18-*'],
+        expect.any(Object)
+      );
+      expect(mockExecFileSync).not.toHaveBeenCalledWith(
+        'git',
+        ['push', 'origin', '--delete', 'shipper/18-add-reset'],
+        expect.any(Object)
+      );
+      expect(mockRemoveWorktree).toHaveBeenCalledWith('/tmp/fake-repo', localWorktree);
+      expect(mockGh).toHaveBeenCalledWith(['pr', 'close', '42']);
 
-    const editArgs = getIssueEditArgs();
-    expect(editArgs[editArgs.indexOf('--remove-label') + 1]).toBe('shipper:pr-open');
-    expect(editArgs).not.toContain('--add-label');
-  });
-
-  it('preserves remote and local branches when resetting pr-reviewed back to implemented', async () => {
-    const localWorktree = getLocalWorktreePath('fake-repo--wt--shipper-18-add-reset');
-    setupExecMock({
-      issueJson: mockIssueView('OPEN', ['shipper:implemented', 'shipper:pr-reviewed']),
-      prJson: JSON.stringify([{ number: 42, headRefName: 'shipper/18-add-reset' }]),
-      localBranchesOutput: '  shipper/18-add-reset\n',
-      timelineByStage: { implemented: '2024-01-15T12:00:00Z\n' },
-      commentsWithDates: '',
-      worktreeEntries: [{ name: 'fake-repo--wt--shipper-18-add-reset' }],
-      existingPaths: [localWorktree],
-    });
-    mockConfirm.mockResolvedValue(false);
-
-    await resetCommand('18', { force: false, to: 'implemented' });
-    await resetCommand('18', { force: true, to: 'implemented' });
-
-    expect(mockConsoleLog).toHaveBeenCalledWith('\nReset summary for issue #18:');
-    expect(mockConsoleLog).not.toHaveBeenCalledWith(
-      '  Remote branches to delete: shipper/18-add-reset'
-    );
-    expect(mockConsoleLog).not.toHaveBeenCalledWith(
-      '  Local branches to delete: shipper/18-add-reset'
-    );
-    expect(mockExecFileSync).not.toHaveBeenCalledWith(
-      'git',
-      ['branch', '--list', 'shipper/18', 'shipper/18-*'],
-      expect.any(Object)
-    );
-    expect(mockExecFileSync).not.toHaveBeenCalledWith(
-      'git',
-      ['push', 'origin', '--delete', 'shipper/18-add-reset'],
-      expect.any(Object)
-    );
-    expect(mockRemoveWorktree).toHaveBeenCalledWith('/tmp/fake-repo', localWorktree);
-    expect(mockGh).toHaveBeenCalledWith(['pr', 'close', '42']);
-
-    const editArgs = getIssueEditArgs();
-    expect(editArgs[editArgs.indexOf('--remove-label') + 1]).toBe('shipper:pr-reviewed');
-    expect(editArgs).not.toContain('--add-label');
-  });
+      const editArgs = getIssueEditArgs();
+      expect(editArgs[editArgs.indexOf('--remove-label') + 1]).toBe(label);
+      expect(editArgs).not.toContain('--add-label');
+    }
+  );
 
   it('filters branches to only shipper-prefixed names for deletion', async () => {
     setupExecMock({
