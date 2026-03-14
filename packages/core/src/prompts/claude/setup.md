@@ -155,11 +155,11 @@ Use `packages/core/src/lib/settings.ts` as the source of truth. The current cano
 ### Sandbox cache errors (EPERM)
 
 If you see `EPERM` errors for `~/.npm/_cacache/` or another user-level cache directory, the agent is trying to write outside the sandboxed worktree.
-Shipper automatically sets `NPM_CONFIG_CACHE` to a worktree-local `.npm-cache` for every worktree.
-For other package managers, set a worktree-local cache path in `.shipper/settings.json`, for example:
+Shipper automatically sets `NPM_CONFIG_CACHE` to `.shipper/tmp/.npm-cache` and `XDG_CACHE_HOME` to `.shipper/tmp/.cache` inside every worktree, so npm and tools that respect XDG (like `gh`) work without sandbox escapes.
+For other package managers, set a worktree-local cache path in `.shipper/settings.json` under `.shipper/tmp/` so the cache is also gitignored, for example:
 
 ```json
-{ "worktreeEnv": { "UV_CACHE_DIR": ".uv-cache" } }
+{ "worktreeEnv": { "UV_CACHE_DIR": ".shipper/tmp/.uv-cache" } }
 ```
 
 `worktreeEnv` values are passed through exactly as configured, so relative paths stay relative to the worktree.

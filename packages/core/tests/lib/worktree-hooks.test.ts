@@ -63,8 +63,8 @@ const defaultOpts = {
   stage: 'implement',
 };
 const expectedWtPath = path.join(WORKTREES_DIR, 'my-repo--wt--shipper-42-add-feature');
-const expectedNpmCachePath = path.join(expectedWtPath, '.npm-cache');
-const expectedXdgCachePath = path.join(expectedWtPath, '.cache');
+const expectedNpmCachePath = path.join(expectedWtPath, '.shipper', 'tmp', '.npm-cache');
+const expectedXdgCachePath = path.join(expectedWtPath, '.shipper', 'tmp', '.cache');
 
 let originalNpmConfigCache: string | undefined;
 let originalXdgCacheHome: string | undefined;
@@ -175,7 +175,7 @@ describe('withWorktree', () => {
     process.env.NPM_CONFIG_CACHE = '/original-cache';
 
     await withWorktree(defaultOpts, async (wtPath) => {
-      expect(process.env.NPM_CONFIG_CACHE).toBe(path.join(wtPath, '.npm-cache'));
+      expect(process.env.NPM_CONFIG_CACHE).toBe(path.join(wtPath, '.shipper', 'tmp', '.npm-cache'));
     });
 
     expect(process.env.NPM_CONFIG_CACHE).toBe('/original-cache');
@@ -185,7 +185,7 @@ describe('withWorktree', () => {
     process.env.XDG_CACHE_HOME = '/original-xdg-cache';
 
     await withWorktree(defaultOpts, async (wtPath) => {
-      expect(process.env.XDG_CACHE_HOME).toBe(path.join(wtPath, '.cache'));
+      expect(process.env.XDG_CACHE_HOME).toBe(path.join(wtPath, '.shipper', 'tmp', '.cache'));
     });
 
     expect(process.env.XDG_CACHE_HOME).toBe('/original-xdg-cache');
