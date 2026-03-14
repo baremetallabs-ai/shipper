@@ -867,7 +867,7 @@ export async function selectNextCandidate(
       allCandidates.push({
         number: issue.number,
         title: issue.title,
-        priority: issue.priority ?? 1,
+        priority: issue.priority,
         stageIndex,
         issueIndex,
       });
