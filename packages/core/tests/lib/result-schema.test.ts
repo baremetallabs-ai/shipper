@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -92,6 +92,17 @@ describe('validateResult', () => {
     ).toThrowError("Invalid result.json:\n- 'comment' must be a string path");
   });
 
+  it('rejects comment paths outside .shipper/output', () => {
+    expect(() =>
+      validateResult({
+        verdict: 'accept',
+        comment: '../comment-248.md',
+      })
+    ).toThrowError(
+      "Invalid result.json:\n- 'comment' must be a relative path under .shipper/output"
+    );
+  });
+
   it('rejects optional fields with non-string values', () => {
     expect(() =>
       validateResult({
@@ -103,6 +114,20 @@ describe('validateResult', () => {
       })
     ).toThrowError(
       "Invalid result.json:\n- 'pr_spec' must be a string path\n- 'review_payload' must be a string path\n- 'replies' must be a string path"
+    );
+  });
+
+  it('rejects optional payload paths outside .shipper/output', () => {
+    expect(() =>
+      validateResult({
+        verdict: 'accept',
+        comment: '.shipper/output/comment-248.md',
+        pr_spec: '/tmp/pr-spec.json',
+        review_payload: 'review.json',
+        replies: '../replies',
+      })
+    ).toThrowError(
+      "Invalid result.json:\n- 'pr_spec' must be a relative path under .shipper/output\n- 'review_payload' must be a relative path under .shipper/output\n- 'replies' must be a relative path under .shipper/output"
     );
   });
 });
@@ -147,6 +172,17 @@ describe('readResultFile', () => {
 
     await expect(readResultFile(tempDir)).rejects.toThrowError(
       new RegExp(`^Failed to parse ${escapeRegExp(path.join(tempDir, 'result.json'))}:`)
+    );
+  });
+
+  it('preserves non-ENOENT read failures', async () => {
+    tempDir = await mkdtemp(path.join(tmpdir(), 'shipper-result-schema-'));
+    await mkdir(path.join(tempDir, 'result.json'));
+
+    await expect(readResultFile(tempDir)).rejects.toThrowError(
+      new RegExp(
+        `^Failed to read result\\.json at ${escapeRegExp(path.join(tempDir, 'result.json'))}:`
+      )
     );
   });
 

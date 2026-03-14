@@ -8,6 +8,31 @@ import { resolveTransition, type LabelTransition, type StageName } from './stage
 export const PROTOCOL_INPUT_DIR = path.join('.shipper', 'input');
 export const PROTOCOL_OUTPUT_DIR = path.join('.shipper', 'output');
 
+function resolveContainedPath(rootDir: string, relativePath: string, label: string): string {
+  if (path.isAbsolute(relativePath)) {
+    throw new Error(`${label} must be a relative path`);
+  }
+
+  const resolvedPath = path.resolve(rootDir, relativePath);
+  const relativeToRoot = path.relative(rootDir, resolvedPath);
+  if (relativeToRoot.startsWith('..') || path.isAbsolute(relativeToRoot)) {
+    throw new Error(`${label} must stay within ${rootDir}`);
+  }
+
+  return resolvedPath;
+}
+
+function resolveOutputPath(cwd: string, outputPath: string): string {
+  const outputDir = path.resolve(cwd, PROTOCOL_OUTPUT_DIR);
+  const resolvedPath = path.resolve(cwd, outputPath);
+  const relativeToOutputDir = path.relative(outputDir, resolvedPath);
+  if (relativeToOutputDir.startsWith('..') || path.isAbsolute(relativeToOutputDir)) {
+    throw new Error(`comment path must stay within ${outputDir}`);
+  }
+
+  return resolvedPath;
+}
+
 export async function setupProtocolDirs(cwd: string): Promise<void> {
   await mkdir(path.resolve(cwd, PROTOCOL_INPUT_DIR), { recursive: true });
   await mkdir(path.resolve(cwd, PROTOCOL_OUTPUT_DIR), { recursive: true });
@@ -38,7 +63,8 @@ export async function writeContextFile(
   filename: string,
   content: string
 ): Promise<void> {
-  const filePath = path.resolve(cwd, PROTOCOL_INPUT_DIR, filename);
+  const inputDir = path.resolve(cwd, PROTOCOL_INPUT_DIR);
+  const filePath = resolveContainedPath(inputDir, filename, 'context filename');
   await mkdir(path.dirname(filePath), { recursive: true });
   await writeFile(filePath, content, 'utf-8');
 }
@@ -78,7 +104,7 @@ export async function processResult(opts: {
   cwd: string;
 }): Promise<ResultJson> {
   const result = await readResultFile(path.resolve(opts.cwd, PROTOCOL_OUTPUT_DIR));
-  const commentPath = path.resolve(opts.cwd, result.comment);
+  const commentPath = resolveOutputPath(opts.cwd, result.comment);
 
   await postComment(opts.repo, opts.issueNumber, commentPath);
   await executeTransition(
@@ -100,7 +126,7 @@ export function formatCorrectionMessage(errors: string[]): string {
 export async function handleAgentCrash(
   repo: string,
   issueNumber: string,
-  stage: string,
+  stage: StageName,
   errorDetail: string
 ): Promise<void> {
   const body = [

@@ -255,6 +255,24 @@ describe('runPrompt', () => {
     warnMock.mockRestore();
   });
 
+  it('warns only once per process for the same local override prompt', async () => {
+    readFileMock.mockResolvedValue(
+      ['---', 'cmd: claude', '---', '', 'gh issue edit 248 --add-label "shipper:planned"'].join(
+        '\n'
+      )
+    );
+    const warnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockSpawnResult();
+    mockSpawnResult();
+
+    await expect(runPrompt('warn-once', {})).resolves.toBe(0);
+    await expect(runPrompt('warn-once', {})).resolves.toBe(0);
+
+    expect(warnMock).toHaveBeenCalledTimes(1);
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+    warnMock.mockRestore();
+  });
+
   it('does not warn for bundled fallback prompts with gh mutation commands', async () => {
     readFileMock.mockRejectedValueOnce(new Error('ENOENT'));
     const warnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
