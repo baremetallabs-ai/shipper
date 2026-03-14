@@ -76,53 +76,25 @@ export async function priorityCommand(
   const hasHigh = labels.includes(PRIORITY_HIGH_LABEL);
   const hasLow = labels.includes(PRIORITY_LOW_LABEL);
 
-  if (level === 'high') {
-    await gh([
-      'issue',
-      'edit',
-      issueStr,
-      '-R',
-      repo,
-      '--add-label',
-      PRIORITY_HIGH_LABEL,
-      '--remove-label',
-      PRIORITY_LOW_LABEL,
-    ]);
-    console.log(`Issue #${issueStr} priority set to high.`);
-    return;
-  }
-
-  if (level === 'low') {
-    await gh([
-      'issue',
-      'edit',
-      issueStr,
-      '-R',
-      repo,
-      '--add-label',
-      PRIORITY_LOW_LABEL,
-      '--remove-label',
-      PRIORITY_HIGH_LABEL,
-    ]);
-    console.log(`Issue #${issueStr} priority set to low.`);
-    return;
-  }
-
-  if (!hasHigh && !hasLow) {
+  if (level === 'normal' && !hasHigh && !hasLow) {
     console.log(`Issue #${issueStr} is already at normal priority.`);
     return;
   }
 
-  await gh([
-    'issue',
-    'edit',
-    issueStr,
-    '-R',
-    repo,
-    '--remove-label',
-    PRIORITY_HIGH_LABEL,
-    '--remove-label',
-    PRIORITY_LOW_LABEL,
-  ]);
-  console.log(`Issue #${issueStr} priority set to normal.`);
+  const args = ['issue', 'edit', issueStr, '-R', repo];
+  let message: string;
+
+  if (level === 'high') {
+    args.push('--add-label', PRIORITY_HIGH_LABEL, '--remove-label', PRIORITY_LOW_LABEL);
+    message = `Issue #${issueStr} priority set to high.`;
+  } else if (level === 'low') {
+    args.push('--add-label', PRIORITY_LOW_LABEL, '--remove-label', PRIORITY_HIGH_LABEL);
+    message = `Issue #${issueStr} priority set to low.`;
+  } else {
+    args.push('--remove-label', PRIORITY_HIGH_LABEL, '--remove-label', PRIORITY_LOW_LABEL);
+    message = `Issue #${issueStr} priority set to normal.`;
+  }
+
+  await gh(args);
+  console.log(message);
 }
