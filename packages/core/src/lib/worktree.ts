@@ -10,11 +10,13 @@ const WORKTREES_DIR = path.join(homedir(), '.shipper', 'worktrees');
 const execFileAsync = promisify(execFile);
 const MAX_REBASE_ATTEMPTS = 3;
 const MAX_PUSH_ATTEMPTS = 3;
+const PUSH_OUTPUT_MAX_BUFFER = 10 * 1024 * 1024;
 const CONFLICT_BLOCK_PATTERN = /^<{7}.*$\n[\s\S]*?^={7}$\n[\s\S]*?^>{7}.*(?:\n|$)?/gm;
 
 interface CommandOpts {
   cwd?: string;
   env?: typeof process.env;
+  maxBuffer?: number;
 }
 
 interface CommandResult {
@@ -80,6 +82,7 @@ async function execAsync(
       {
         cwd: opts.cwd,
         env: { ...process.env, ...opts.env },
+        maxBuffer: opts.maxBuffer,
       },
       (error, stdout, stderr) => {
         if (!error) {
@@ -223,7 +226,10 @@ function getPushArgs(opts: WorktreeGitOpts): string[] {
 }
 
 async function pushWorktreeBranch(opts: WorktreeGitOpts): Promise<CommandResult> {
-  return await execAsync('git', getPushArgs(opts), { cwd: opts.wtPath });
+  return await execAsync('git', getPushArgs(opts), {
+    cwd: opts.wtPath,
+    maxBuffer: PUSH_OUTPUT_MAX_BUFFER,
+  });
 }
 
 async function pushWithRetry(
@@ -231,15 +237,16 @@ async function pushWithRetry(
   runAgent: (conflictContext?: ConflictContext, pushError?: string) => Promise<number>
 ): Promise<number> {
   const pushArgs = getPushArgs(opts);
+  let retries = 0;
 
-  for (let attempt = 0; attempt <= MAX_PUSH_ATTEMPTS; attempt++) {
+  while (true) {
     const pushResult = await pushWorktreeBranch(opts);
     if (pushResult.code === 0) {
       return 0;
     }
 
     const pushError = formatCommandFailure('git', pushArgs, pushResult);
-    if (attempt === MAX_PUSH_ATTEMPTS) {
+    if (retries === MAX_PUSH_ATTEMPTS) {
       throw formatTransportError(
         opts,
         `Push failed after ${MAX_PUSH_ATTEMPTS} retry attempts.\n${pushError}`
@@ -251,9 +258,9 @@ async function pushWithRetry(
       console.error(`Agent exited with code ${agentCode} — skipping push.`);
       return agentCode;
     }
-  }
 
-  throw formatTransportError(opts, `Push failed after ${MAX_PUSH_ATTEMPTS} retry attempts.`);
+    retries += 1;
+  }
 }
 
 export function formatConflictContext(conflictContext: ConflictContext): string {
