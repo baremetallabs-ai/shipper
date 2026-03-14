@@ -64,6 +64,19 @@ For any path that `git check-ignore` confirms is ignored:
 - **Inline the relevant content** (structure, key values, the specific sections the implementer needs) directly in the plan step. Do not tell the implementer to read a file that won't be there.
 - **State explicitly** that the file is gitignored and absent from the worktree.
 
+### Step 4: Pre-push hook discovery
+
+Check whether the repo has a pre-push hook by looking for these files in order:
+
+1. `.husky/pre-push`
+2. `.git/hooks/pre-push`
+
+If one of these files exists, read the first one you find and extract each runnable command it invokes (for example, `npm run lint` or `npm run test`). Record those exact commands so you can include each one as an explicit verification step in Phase 2.
+
+If the hook file uses shell control flow or other logic that is too complex to cleanly decompose into runnable commands, record the hook file path and tell the implementer to review it manually instead of inventing or paraphrasing commands.
+
+If no pre-push hook is found in any of these locations, note this so you can record it in the Verification section.
+
 ---
 
 ## Phase 2: Write the implementation plan
@@ -94,9 +107,12 @@ Produce a plan comment structured exactly as follows:
 
 ## Verification
 
-1. [Specific, testable check — e.g. "Run `npm test` and confirm all existing tests pass"]
-2. [Another check tied to acceptance criteria]
-3. [...]
+1. [Pre-push hook command — e.g. "Run `npm run lint` and confirm it passes"]
+2. [Additional pre-push hook commands, one per step]
+3. [Acceptance-criteria check — e.g. "Verify that ..."]
+4. [...]
+
+> If no pre-push hook was found: "No pre-push hook found — verification covers acceptance criteria only."
 
 ## Notes for implementer
 
@@ -111,6 +127,7 @@ Produce a plan comment structured exactly as follows:
 - **Include current state for every file you touch.** The implementer should be able to verify they're looking at the right code before changing it.
 - **Keep the design's constraints.** If the design review said "do not add a new abstraction" or "reuse the existing X," the plan must respect that. Do not smuggle in scope or complexity that the design rejected.
 - **Verification must trace back to acceptance criteria.** Every acceptance criterion from the issue should have at least one corresponding verification step.
+- **Include pre-push hook checks in verification.** If Step 4 discovered a pre-push hook, list each command from the hook as a separate verification step, using the exact command from the hook file. These steps appear in the same `## Verification` section as acceptance-criteria checks, not in a separate section. If no pre-push hook was found, include this note in the Verification section: `No pre-push hook found — verification covers acceptance criteria only.`
 - **Name new dependencies explicitly.** If a plan step requires a package that is not already in the project's dependency manifest, the step must name the exact package (e.g., `zod`, `chalk@5`) and instruct the implementer to add it to the manifest file and install it. Do not assume dependencies are pre-installed.
 
 #### Gitignored files
