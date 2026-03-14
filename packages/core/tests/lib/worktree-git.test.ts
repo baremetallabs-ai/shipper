@@ -93,7 +93,7 @@ describe('withGitTransport', () => {
   it('fetches, runs the agent, and pushes a new branch after a clean rebase', async () => {
     queueSpawnExit();
     queueExecResult();
-    queueSpawnExit();
+    queueExecResult();
     const runAgent = vi.fn().mockResolvedValue(0);
 
     await expect(
@@ -109,11 +109,11 @@ describe('withGitTransport', () => {
     ).resolves.toBe(0);
 
     expect(runAgent).toHaveBeenCalledWith();
-    expect(gitArgsFromSpawnCalls()).toEqual([
-      ['fetch', 'origin'],
+    expect(gitArgsFromSpawnCalls()).toEqual([['fetch', 'origin']]);
+    expect(gitArgsFromExecCalls()).toEqual([
+      ['rebase', 'origin/main'],
       ['push', '-u', 'origin', 'HEAD'],
     ]);
-    expect(gitArgsFromExecCalls()).toEqual([['rebase', 'origin/main']]);
   });
 
   it('passes grouped conflict markers to the agent and force-pushes after rebase continuation succeeds', async () => {
@@ -130,7 +130,7 @@ describe('withGitTransport', () => {
         ['<<<<<<< HEAD', 'left', '=======', 'right', '>>>>>>> origin/main'].join('\n')
       );
     queueExecResult();
-    queueSpawnExit();
+    queueExecResult();
     const runAgent = vi.fn().mockResolvedValue(0);
 
     await expect(
@@ -160,14 +160,95 @@ describe('withGitTransport', () => {
       ],
       continueError: undefined,
     });
-    expect(gitArgsFromSpawnCalls()).toEqual([
-      ['fetch', 'origin'],
-      ['push', '--force-with-lease'],
-    ]);
+    expect(gitArgsFromSpawnCalls()).toEqual([['fetch', 'origin']]);
     expect(gitArgsFromExecCalls()).toEqual([
       ['rebase', 'origin/main'],
       ['diff', '--name-only', '--diff-filter=U'],
       ['rebase', '--continue'],
+      ['push', '--force-with-lease'],
+    ]);
+  });
+
+  it('re-invokes the agent with push failure context after a clean rebase and retries the push', async () => {
+    queueSpawnExit();
+    queueExecResult();
+    queueExecResult({ code: 1, stderr: 'pre-push hook failed', stdout: 'npm run lint' });
+    queueExecResult();
+    const runAgent = vi.fn().mockResolvedValue(0);
+
+    await expect(
+      withGitTransport(
+        {
+          wtPath: '/tmp/wt',
+          repoRoot: '/tmp/repo',
+          baseBranch: 'main',
+          pushMode: 'new-branch',
+        },
+        runAgent
+      )
+    ).resolves.toBe(0);
+
+    expect(runAgent.mock.calls).toEqual([
+      [],
+      [
+        undefined,
+        'git push -u origin HEAD exited with code 1:\npre-push hook failed\nnpm run lint',
+      ],
+    ]);
+    expect(gitArgsFromSpawnCalls()).toEqual([['fetch', 'origin']]);
+    expect(gitArgsFromExecCalls()).toEqual([
+      ['rebase', 'origin/main'],
+      ['push', '-u', 'origin', 'HEAD'],
+      ['push', '-u', 'origin', 'HEAD'],
+    ]);
+  });
+
+  it('retries push failures after conflict resolution with push error context', async () => {
+    queueSpawnExit();
+    queueExecResult({ code: 1, stderr: 'conflict' });
+    queueExecResult({ stdout: 'src/conflict.ts\n' });
+    readFileMock.mockResolvedValueOnce(
+      ['<<<<<<< HEAD', 'ours', '=======', 'theirs', '>>>>>>> origin/main'].join('\n')
+    );
+    queueExecResult();
+    queueExecResult({ code: 1, stderr: 'pre-push hook failed' });
+    queueExecResult();
+    const runAgent = vi.fn().mockResolvedValue(0);
+
+    await expect(
+      withGitTransport(
+        {
+          wtPath: '/tmp/wt',
+          repoRoot: '/tmp/repo',
+          baseBranch: 'main',
+          pushMode: 'force-with-lease',
+        },
+        runAgent
+      )
+    ).resolves.toBe(0);
+
+    expect(runAgent).toHaveBeenCalledTimes(2);
+    expect(runAgent.mock.calls[0]?.[0]).toEqual({
+      files: ['src/conflict.ts'],
+      conflicts: [
+        {
+          path: 'src/conflict.ts',
+          markers: ['<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> origin/main'],
+        },
+      ],
+      continueError: undefined,
+    });
+    expect(runAgent.mock.calls[1]).toEqual([
+      undefined,
+      'git push --force-with-lease exited with code 1:\npre-push hook failed',
+    ]);
+    expect(gitArgsFromSpawnCalls()).toEqual([['fetch', 'origin']]);
+    expect(gitArgsFromExecCalls()).toEqual([
+      ['rebase', 'origin/main'],
+      ['diff', '--name-only', '--diff-filter=U'],
+      ['rebase', '--continue'],
+      ['push', '--force-with-lease'],
+      ['push', '--force-with-lease'],
     ]);
   });
 
@@ -221,7 +302,7 @@ describe('withGitTransport', () => {
       ['<<<<<<< HEAD', 'resolved-ish', '=======', 'incoming', '>>>>>>> origin/main'].join('\n')
     );
     queueExecResult();
-    queueSpawnExit();
+    queueExecResult();
     const runAgent = vi.fn().mockResolvedValue(0);
 
     await expect(
@@ -247,6 +328,82 @@ describe('withGitTransport', () => {
       ],
       continueError: 'still conflicted after continue',
     });
+    expect(gitArgsFromExecCalls()).toEqual([
+      ['rebase', 'origin/main'],
+      ['diff', '--name-only', '--diff-filter=U'],
+      ['rebase', '--continue'],
+      ['diff', '--name-only', '--diff-filter=U'],
+      ['rebase', '--continue'],
+      ['push', '--force-with-lease'],
+    ]);
+  });
+
+  it('returns the push-retry agent exit code without retrying push again', async () => {
+    queueSpawnExit();
+    queueExecResult();
+    queueExecResult({ code: 1, stderr: 'pre-push hook failed' });
+    const runAgent = vi.fn().mockResolvedValueOnce(0).mockResolvedValueOnce(2);
+
+    await expect(
+      withGitTransport(
+        {
+          wtPath: '/tmp/wt',
+          repoRoot: '/tmp/repo',
+          baseBranch: 'main',
+          pushMode: 'new-branch',
+        },
+        runAgent
+      )
+    ).resolves.toBe(2);
+
+    expect(runAgent.mock.calls).toEqual([
+      [],
+      [undefined, 'git push -u origin HEAD exited with code 1:\npre-push hook failed'],
+    ]);
+    expect(gitArgsFromSpawnCalls()).toEqual([['fetch', 'origin']]);
+    expect(gitArgsFromExecCalls()).toEqual([
+      ['rebase', 'origin/main'],
+      ['push', '-u', 'origin', 'HEAD'],
+    ]);
+  });
+
+  it('throws the final captured push failure after exhausting push retries', async () => {
+    queueSpawnExit();
+    queueExecResult();
+    queueExecResult({ code: 1, stderr: 'pre-push hook failed', stdout: 'attempt 1' });
+    queueExecResult({ code: 1, stderr: 'pre-push hook failed', stdout: 'attempt 2' });
+    queueExecResult({ code: 1, stderr: 'pre-push hook failed', stdout: 'attempt 3' });
+    queueExecResult({ code: 1, stderr: 'pre-push hook failed', stdout: 'attempt 4' });
+    const runAgent = vi.fn().mockResolvedValue(0);
+
+    await expect(
+      withGitTransport(
+        {
+          wtPath: '/tmp/wt',
+          repoRoot: '/tmp/repo',
+          baseBranch: 'main',
+          pushMode: 'new-branch',
+        },
+        runAgent
+      )
+    ).rejects.toThrow(
+      'Push failed after 3 retry attempts.\ngit push -u origin HEAD exited with code 1:\npre-push hook failed\nattempt 4'
+    );
+
+    expect(runAgent.mock.calls).toEqual([
+      [],
+      [undefined, 'git push -u origin HEAD exited with code 1:\npre-push hook failed\nattempt 1'],
+      [undefined, 'git push -u origin HEAD exited with code 1:\npre-push hook failed\nattempt 2'],
+      [undefined, 'git push -u origin HEAD exited with code 1:\npre-push hook failed\nattempt 3'],
+    ]);
+    expect(gitArgsFromSpawnCalls()).toEqual([['fetch', 'origin']]);
+    expect(gitArgsFromExecCalls()).toEqual([
+      ['rebase', 'origin/main'],
+      ['push', '-u', 'origin', 'HEAD'],
+      ['push', '-u', 'origin', 'HEAD'],
+      ['push', '-u', 'origin', 'HEAD'],
+      ['push', '-u', 'origin', 'HEAD'],
+    ]);
   });
 
   it('returns the agent exit code without continuing the rebase or pushing when conflict resolution fails', async () => {

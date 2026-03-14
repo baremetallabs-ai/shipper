@@ -8,7 +8,7 @@ const getSettingsMock = vi.fn(() => ({ defaultBaseBranch: 'main' }));
 const resolveBaseBranchMock = vi.fn(async () => 'main');
 const runPromptMock = vi.fn(async () => 0);
 const withGitTransportMock = vi.fn(
-  async (_opts: unknown, fn: (conflictContext?: unknown) => Promise<unknown>) =>
+  async (_opts: unknown, fn: (conflictContext?: unknown, pushError?: string) => Promise<unknown>) =>
     await fn({
       files: ['src/conflict.ts'],
       conflicts: [
@@ -92,6 +92,29 @@ describe('implementCommand', () => {
         issueRef: '239',
         cwd: '/tmp/fake-wt',
         userInput: 'formatted conflict context',
+      })
+    );
+  });
+
+  it('forwards raw push failure text through transport without conflict formatting', async () => {
+    withGitTransportMock.mockImplementationOnce(
+      async (
+        _opts: unknown,
+        fn: (conflictContext?: unknown, pushError?: string) => Promise<unknown>
+      ) => await fn(undefined, 'git push -u origin HEAD exited with code 1:\npre-push hook failed')
+    );
+    const { implementCommand } = await import('../../src/commands/implement.js');
+
+    await expect(implementCommand('owner/repo', '239')).resolves.toBeUndefined();
+
+    expect(formatConflictContextMock).not.toHaveBeenCalled();
+    expect(runPromptMock).toHaveBeenCalledWith(
+      'implement',
+      expect.objectContaining({
+        repo: 'owner/repo',
+        issueRef: '239',
+        cwd: '/tmp/fake-wt',
+        userInput: 'git push -u origin HEAD exited with code 1:\npre-push hook failed',
       })
     );
   });

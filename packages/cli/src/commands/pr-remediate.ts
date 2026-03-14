@@ -219,7 +219,7 @@ export async function prRemediateCommand(
         async (wtPath) => {
           return await withGitTransport(
             { wtPath, repoRoot, baseBranch, pushMode: 'force-with-lease' },
-            async (conflictContext) =>
+            async (conflictContext, pushError) =>
               await runPrompt('pr_remediate', {
                 repo,
                 issueRef: issueNumber,
@@ -228,7 +228,9 @@ export async function prRemediateCommand(
                 mode,
                 agent,
                 model,
-                userInput: conflictContext ? formatConflictContext(conflictContext) : undefined,
+                userInput: conflictContext
+                  ? formatConflictContext(conflictContext)
+                  : (pushError ?? undefined),
               })
           );
         }
