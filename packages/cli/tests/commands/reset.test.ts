@@ -53,6 +53,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   BLOCKED_LABEL: 'shipper:blocked',
   FAILED_LABEL: 'shipper:failed',
   LOCKED_LABEL: 'shipper:locked',
+  PRIORITY_LABEL_NAMES: ['shipper:priority-high', 'shipper:priority-low'],
 }));
 
 vi.mock('node:child_process', () => ({
@@ -408,6 +409,19 @@ describe('resetCommand', () => {
     const editArgs = getIssueEditArgs();
     expect(editArgs).toContain('--remove-label');
     expect(editArgs[editArgs.indexOf('--remove-label') + 1]).toBe('shipper:planned,shipper:failed');
+  });
+
+  it('preserves priority labels when resetting to new', async () => {
+    setupExecMock({
+      issueJson: mockIssueView('OPEN', ['shipper:new', 'shipper:planned', 'shipper:priority-high']),
+      commentIds: '101\n',
+    });
+
+    await resetCommand('18', { force: true, to: 'new' });
+
+    const editArgs = getIssueEditArgs();
+    expect(editArgs).toContain('--remove-label');
+    expect(editArgs[editArgs.indexOf('--remove-label') + 1]).toBe('shipper:planned');
   });
 
   it('shows all earlier workflow stages for a planned issue', async () => {

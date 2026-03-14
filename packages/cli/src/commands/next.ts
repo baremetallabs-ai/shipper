@@ -3,14 +3,15 @@ import {
   resolveRef,
   tryResolvePrForIssue,
   BLOCKED_LABEL,
+  CONTROL_LABEL_NAMES,
   FAILED_LABEL,
-  LOCKED_LABEL,
   NEW_LABEL,
   GROOMED_LABEL,
   DESIGNED_LABEL,
   PLANNED_LABEL,
   IMPLEMENTED_LABEL,
   PR_OPEN_LABEL,
+  PRIORITY_LABEL_NAMES,
   PR_REVIEWED_LABEL,
   READY_LABEL,
 } from '@dnsquared/shipper-core';
@@ -32,8 +33,6 @@ interface IssueData {
   number: number;
   labels: IssueLabel[];
 }
-
-const CONTROL_LABELS = [BLOCKED_LABEL, LOCKED_LABEL, FAILED_LABEL];
 
 async function resolvePrForIssue(repo: string, issueNumber: number): Promise<string> {
   const pr = await tryResolvePrForIssue(repo, issueNumber);
@@ -84,7 +83,9 @@ export async function nextCommand(
     process.exit(1);
   }
 
-  const shipperLabels = allLabels.filter((name) => !CONTROL_LABELS.includes(name));
+  const shipperLabels = allLabels.filter(
+    (name) => !CONTROL_LABEL_NAMES.includes(name) && !PRIORITY_LABEL_NAMES.includes(name)
+  );
 
   // Validate labels
   if (shipperLabels.length === 0) {

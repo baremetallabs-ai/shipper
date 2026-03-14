@@ -102,6 +102,16 @@ Ask as many or as few questions as the issue demands. Simple issues may need 2�
 
 Ask in logical batches. Do not re-ask things already answered in the issue or comments — incorporate them. Answers often surface follow-up questions — continue until all product decisions are resolved.
 
+After all other product decisions are resolved, ask one final question about issue priority:
+
+- **High** — This issue should be processed before normal-priority work across the entire pipeline.
+- **Normal** (default) — Standard priority. No priority label is applied.
+- **Low** — This issue should yield to normal and high-priority work.
+
+If the issue already has a `shipper:priority-high` or `shipper:priority-low` label (set via `shipper priority` before grooming), present the current priority as the default and allow the product owner to confirm or change it.
+
+This determines the `shipper:priority-high` or `shipper:priority-low` label applied during the label transition step.
+
 **Do not proceed to Phase 4 until every question has been answered.** If the product owner's answers raise new questions, ask them. The compile phase produces the final artifacts — it must not begin while decisions remain open.
 
 ### Phase 4: Compile groomed outputs
@@ -153,10 +163,16 @@ After producing the final artifacts, you must update GitHub using repo-local tem
    **If the parent is not blocked by any hard conflict, dependency, or sibling-ordering constraint:**
    - Add `shipper:groomed`, remove `shipper:new` / `shipper:blocked` (if present)
    - Use `gh issue edit <ISSUE> --add-label "shipper:groomed" --remove-label "shipper:new" --remove-label "shipper:blocked"`
+   - If the product owner chose **high** priority, also run: `gh issue edit <ISSUE> --add-label "shipper:priority-high" --remove-label "shipper:priority-low"`
+   - If the product owner chose **low** priority, also run: `gh issue edit <ISSUE> --add-label "shipper:priority-low" --remove-label "shipper:priority-high"`
+   - If the product owner chose **normal** priority, also run: `gh issue edit <ISSUE> --remove-label "shipper:priority-high" --remove-label "shipper:priority-low"` (this is a no-op if neither label exists)
 
    **If the parent is still blocked by a hard conflict, dependency, or sibling-ordering constraint:**
    - Add both `shipper:groomed` and `shipper:blocked`, remove `shipper:new`
    - Use `gh issue edit <ISSUE> --add-label "shipper:groomed" --add-label "shipper:blocked" --remove-label "shipper:new"`
+   - If the product owner chose **high** priority, also run: `gh issue edit <ISSUE> --add-label "shipper:priority-high" --remove-label "shipper:priority-low"`
+   - If the product owner chose **low** priority, also run: `gh issue edit <ISSUE> --add-label "shipper:priority-low" --remove-label "shipper:priority-high"`
+   - If the product owner chose **normal** priority, also run: `gh issue edit <ISSUE> --remove-label "shipper:priority-high" --remove-label "shipper:priority-low"` (this is a no-op if neither label exists)
    - Post a separate `## Blocked` comment after the grooming summary comment, referencing the conflicting/dependent issue number(s) and stating the unblock condition. Save it to `.shipper/tmp/blocked_comment-<number>.md` and post with `gh issue comment <ISSUE> --body-file ./.shipper/tmp/blocked_comment-<number>.md`. Example format:
 
      ```

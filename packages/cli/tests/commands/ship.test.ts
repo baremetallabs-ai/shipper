@@ -92,6 +92,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   STAGE_LABEL_NAMES: labelFixtures.stageLabelNames,
   NEW_LABEL: 'shipper:new',
   PR_REVIEWED_LABEL: 'shipper:pr-reviewed',
+  PRIORITY_LABEL_NAMES: ['shipper:priority-high', 'shipper:priority-low'],
   READY_LABEL: 'shipper:ready',
   BLOCKED_LABEL: 'shipper:blocked',
   LOCKED_LABEL: 'shipper:locked',
@@ -343,7 +344,25 @@ function setMockIssues(issues: MockIssueState[]): void {
 }
 
 function getStageLabel(issue: MockIssueState): string | undefined {
-  return issue.labels.find((label) => label.startsWith('shipper:') && label !== 'shipper:blocked');
+  return issue.labels.find(
+    (label) =>
+      label.startsWith('shipper:') &&
+      label !== 'shipper:blocked' &&
+      label !== 'shipper:priority-high' &&
+      label !== 'shipper:priority-low'
+  );
+}
+
+function getPriority(issue: MockIssueState): 0 | 1 | 2 {
+  if (issue.labels.includes('shipper:priority-high')) {
+    return 0;
+  }
+
+  if (issue.labels.includes('shipper:priority-low')) {
+    return 2;
+  }
+
+  return 1;
 }
 
 function installSequentialCliMocks(): void {
@@ -352,7 +371,7 @@ function installSequentialCliMocks(): void {
       .filter((issue) => getStageLabel(issue) === label)
       .filter((issue) => !issue.labels.includes('shipper:blocked'))
       .filter((issue) => !lockState.lockedIssues.has(String(issue.number)))
-      .map((issue) => ({ number: issue.number, title: issue.title }));
+      .map((issue) => ({ number: issue.number, title: issue.title, priority: getPriority(issue) }));
   });
 
   mockGh.mockImplementation(async (args: string[]) => {
@@ -503,12 +522,12 @@ describe('selectNextCandidate', () => {
     mockClearStaleLockIfNeeded.mockReset();
   });
 
-  it('returns the issue from the highest-priority label', async () => {
+  it('returns the issue from the highest-priority stage when priorities are equal', async () => {
     mockSelectIssuesForStage.mockImplementation(async (_repo: string, label: string) => {
       if (label === 'shipper:ready') return [];
       if (label === 'shipper:pr-reviewed') return [];
-      if (label === 'shipper:pr-open') return [{ number: 10, title: 'PR open issue' }];
-      if (label === 'shipper:groomed') return [{ number: 20, title: 'Groomed issue' }];
+      if (label === 'shipper:pr-open') return [{ number: 10, title: 'PR open issue', priority: 1 }];
+      if (label === 'shipper:groomed') return [{ number: 20, title: 'Groomed issue', priority: 1 }];
       return [];
     });
 
@@ -520,8 +539,8 @@ describe('selectNextCandidate', () => {
     mockSelectIssuesForStage.mockImplementation(async (_repo: string, label: string) => {
       if (label === 'shipper:pr-open')
         return [
-          { number: 10, title: 'Skipped issue' },
-          { number: 11, title: 'Next issue' },
+          { number: 10, title: 'Skipped issue', priority: 1 },
+          { number: 11, title: 'Next issue', priority: 1 },
         ];
       return [];
     });
@@ -539,7 +558,7 @@ describe('selectNextCandidate', () => {
 
   it('returns null when all candidates are skipped', async () => {
     mockSelectIssuesForStage.mockImplementation(async (_repo: string, label: string) => {
-      if (label === 'shipper:planned') return [{ number: 5, title: 'Only issue' }];
+      if (label === 'shipper:planned') return [{ number: 5, title: 'Only issue', priority: 1 }];
       return [];
     });
 
@@ -547,12 +566,12 @@ describe('selectNextCandidate', () => {
     expect(result).toBeNull();
   });
 
-  it('returns the first issue within a label (already sorted by time-in-state)', async () => {
+  it('uses FIFO ordering as the tiebreaker within the same priority and stage', async () => {
     mockSelectIssuesForStage.mockImplementation(async (_repo: string, label: string) => {
       if (label === 'shipper:groomed')
         return [
-          { number: 1, title: 'Oldest' },
-          { number: 2, title: 'Newer' },
+          { number: 1, title: 'Oldest', priority: 1 },
+          { number: 2, title: 'Newer', priority: 1 },
         ];
       return [];
     });
@@ -565,7 +584,7 @@ describe('selectNextCandidate', () => {
     mockSelectIssuesForStage.mockImplementation(
       async (_repo: string, label: string, staleLocked?: Set<number>) => {
         if (label === 'shipper:planned') {
-          const issues = [{ number: 7, title: 'Stale locked issue' }];
+          const issues = [{ number: 7, title: 'Stale locked issue', priority: 1 as const }];
           staleLocked?.add(7);
           return issues;
         }
@@ -580,7 +599,7 @@ describe('selectNextCandidate', () => {
 
   it('calls clearStaleLockIfNeeded with empty staleLocked set for non-stale candidate', async () => {
     mockSelectIssuesForStage.mockImplementation(async (_repo: string, label: string) => {
-      if (label === 'shipper:planned') return [{ number: 7, title: 'Normal issue' }];
+      if (label === 'shipper:planned') return [{ number: 7, title: 'Normal issue', priority: 1 }];
       return [];
     });
 
@@ -593,14 +612,32 @@ describe('selectNextCandidate', () => {
     mockSelectIssuesForStage.mockImplementation(async (_repo: string, label: string) => {
       if (label === 'shipper:planned')
         return [
-          { number: 7, title: 'Active issue' },
-          { number: 8, title: 'Available issue' },
+          { number: 7, title: 'Active issue', priority: 1 },
+          { number: 8, title: 'Available issue', priority: 1 },
         ];
       return [];
     });
 
     const result = await selectNextCandidate(repo, new Set(), new Set([7]));
     expect(result).toEqual({ number: 8, title: 'Available issue' });
+  });
+
+  it('prefers higher-priority issues over more advanced normal-priority issues', async () => {
+    mockSelectIssuesForStage.mockImplementation(async (_repo: string, label: string) => {
+      if (label === 'shipper:pr-open') {
+        return [{ number: 30, title: 'Normal PR open issue', priority: 1 }];
+      }
+
+      if (label === 'shipper:groomed') {
+        return [{ number: 40, title: 'High groomed issue', priority: 0 }];
+      }
+
+      return [];
+    });
+
+    const result = await selectNextCandidate(repo, new Set());
+
+    expect(result).toEqual({ number: 40, title: 'High groomed issue' });
   });
 });
 
@@ -889,6 +926,18 @@ describe('shipCommand single-issue path', () => {
 
     logSpy.mockRestore();
     errorSpy.mockRestore();
+  });
+
+  it('keeps prioritized issues shippable in the single-issue path', async () => {
+    mockIssueViewSequence([
+      'shipper:planned\nshipper:priority-high',
+      'shipper:ready\nshipper:priority-high',
+    ]);
+
+    await shipCommand(repo, '42', { auto: false, merge: false });
+
+    expect(mockSpawnSync).toHaveBeenCalledTimes(1);
+    expect(exitSpy).toHaveBeenCalledWith(0);
   });
 
   it('keeps the same-label safeguard when grooming stays on shipper:new', async () => {
