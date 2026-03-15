@@ -1,11 +1,13 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { mockRunPrompt } = vi.hoisted(() => ({
-  mockRunPrompt: vi.fn(),
+  mockRunPrompt:
+    vi.fn<(name: string, opts: { userInput: string; mode?: string }) => Promise<number>>(),
 }));
 
 vi.mock('@dnsquared/shipper-core', () => ({
-  runPrompt: (...args: unknown[]) => mockRunPrompt(...args),
+  runPrompt: (name: string, opts: { userInput: string; mode?: string }) =>
+    mockRunPrompt(name, opts),
 }));
 
 import { newCommand } from '../../src/commands/new.js';

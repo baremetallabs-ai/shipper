@@ -41,6 +41,19 @@ class PollingInterruptedError extends Error {
   }
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parseCreatedAt(json: string): string {
+  const parsed: unknown = JSON.parse(json);
+  if (!isPlainObject(parsed) || typeof parsed.createdAt !== 'string') {
+    throw new Error('GitHub CLI returned an invalid createdAt payload.');
+  }
+
+  return parsed.createdAt;
+}
+
 async function waitForChecks(repo: string, pr: string, timeoutMinutes: number): Promise<void> {
   const deadline = Date.now() + timeoutMinutes * 60_000;
   let previousCompleted = -1;
@@ -50,27 +63,30 @@ async function waitForChecks(repo: string, pr: string, timeoutMinutes: number): 
     interrupted = true;
     console.log('\nCheck polling interrupted.');
   };
+  const isInterrupted = (): boolean => interrupted;
   process.on('SIGINT', sigHandler);
 
   try {
     // Zero-checks grace period: retry up to 3 times at 10s intervals
     let checks = await fetchChecksGraceful(repo, pr);
     if (checks !== null && checks.length === 0) {
-      for (let retry = 0; retry < 3 && !interrupted; retry++) {
+      for (let retry = 0; retry < 3; retry++) {
+        if (isInterrupted()) break;
         if (Date.now() >= deadline) break;
         await sleepMs(10_000);
-        if (interrupted) break;
+        if (isInterrupted()) break;
         checks = await fetchChecksGraceful(repo, pr);
         if (checks !== null && checks.length > 0) break;
       }
-      if (!interrupted && (checks === null || checks.length === 0)) {
+      if (!isInterrupted() && (checks === null || checks.length === 0)) {
         console.log('No CI checks found. Proceeding.');
         return;
       }
     }
 
     // Main poll loop
-    while (!interrupted) {
+    for (;;) {
+      if (isInterrupted()) break;
       if (Date.now() >= deadline) {
         console.log('Check polling timed out. Proceeding.');
         break;
@@ -97,7 +113,7 @@ async function waitForChecks(repo: string, pr: string, timeoutMinutes: number): 
     process.removeListener('SIGINT', sigHandler);
   }
 
-  if (interrupted) {
+  if (isInterrupted()) {
     throw new PollingInterruptedError();
   }
 }
@@ -204,15 +220,15 @@ export async function buildReadyCheck(
   prReviewWait: PrReviewWait
 ): Promise<() => Promise<boolean>> {
   if (prReviewWait.timeoutMinutes <= 0) {
-    return async () => true;
+    return () => Promise.resolve(true);
   }
 
   if (prReviewWait.mode === 'timer') {
     const { stdout } = await gh(['pr', 'view', pr, '-R', repo, '--json', 'createdAt']);
-    const { createdAt } = JSON.parse(stdout) as { createdAt: string };
+    const createdAt = parseCreatedAt(stdout);
     const deadline = new Date(createdAt).getTime() + prReviewWait.timeoutMinutes * 60_000;
 
-    return async () => Date.now() >= deadline;
+    return () => Promise.resolve(Date.now() >= deadline);
   }
 
   const deadline = Date.now() + prReviewWait.timeoutMinutes * 60_000;

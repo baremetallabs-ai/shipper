@@ -15,16 +15,16 @@ const {
   mockExistsSync,
   mockHomedir,
 } = vi.hoisted(() => ({
-  mockConfirm: vi.fn(),
-  mockPromptChoice: vi.fn(),
+  mockConfirm: vi.fn<(message?: string) => Promise<boolean>>(),
+  mockPromptChoice: vi.fn<(message: string, choices: string[]) => Promise<string>>(),
   mockGetRepoNwo: vi.fn(() => 'owner/repo'),
-  mockGetRepoRoot: vi.fn(async () => '/tmp/fake-repo'),
-  mockRemoveWorktree: vi.fn(async () => {}),
-  mockExecFileSync: vi.fn(),
-  mockGh: vi.fn(),
-  mockIsLockStale: vi.fn(() => true),
-  mockReaddirSync: vi.fn(),
-  mockExistsSync: vi.fn(),
+  mockGetRepoRoot: vi.fn(() => Promise.resolve('/tmp/fake-repo')),
+  mockRemoveWorktree: vi.fn(() => Promise.resolve()),
+  mockExecFileSync: vi.fn<(command: string, args: string[]) => string>(),
+  mockGh: vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>(),
+  mockIsLockStale: vi.fn<(repo: string, issue: string) => boolean>(() => true),
+  mockReaddirSync: vi.fn<(path: string) => Array<{ name: string; isDirectory: () => boolean }>>(),
+  mockExistsSync: vi.fn<(path: string) => boolean>(),
   mockHomedir: vi.fn(() => '/tmp/home'),
 }));
 
@@ -36,9 +36,9 @@ vi.mock('../../src/lib/confirm.js', () => ({
 vi.mock('@dnsquared/shipper-core', () => ({
   getRepoNwo: () => mockGetRepoNwo(),
   getRepoRoot: () => mockGetRepoRoot(),
-  gh: (...args: unknown[]) => mockGh(...args),
-  isLockStale: (...args: unknown[]) => mockIsLockStale(...args),
-  removeWorktree: (...args: unknown[]) => mockRemoveWorktree(...args),
+  gh: (args: string[]) => mockGh(args),
+  isLockStale: (repo: string, issue: string) => mockIsLockStale(repo, issue),
+  removeWorktree: (repoRoot: string, wtPath: string) => mockRemoveWorktree(repoRoot, wtPath),
   STAGE_LABEL_NAMES: [
     'shipper:new',
     'shipper:groomed',
@@ -57,12 +57,12 @@ vi.mock('@dnsquared/shipper-core', () => ({
 }));
 
 vi.mock('node:child_process', () => ({
-  execFileSync: (...args: unknown[]) => mockExecFileSync(...args),
+  execFileSync: (command: string, args: string[]) => mockExecFileSync(command, args),
 }));
 
 vi.mock('node:fs', () => ({
-  readdirSync: (...args: unknown[]) => mockReaddirSync(...args),
-  existsSync: (...args: unknown[]) => mockExistsSync(...args),
+  readdirSync: (path: string) => mockReaddirSync(path),
+  existsSync: (path: string) => mockExistsSync(path),
 }));
 
 vi.mock('node:os', () => ({
@@ -130,9 +130,9 @@ function setupExecMock(overrides?: {
   const existingPaths = new Set(overrides?.existingPaths ?? []);
   const persistentWorktreePaths = new Set(overrides?.persistentWorktreePaths ?? []);
 
-  mockGh.mockImplementation(async (args: string[]) => {
+  mockGh.mockImplementation((args: string[]) => {
     if (args[0] === 'issue' && args[1] === 'view') {
-      return { stdout: issueJson, stderr: '' };
+      return Promise.resolve({ stdout: issueJson, stderr: '' });
     }
 
     if (args[0] === 'api' && typeof args[1] === 'string' && args[1].includes('/timeline')) {
@@ -140,7 +140,7 @@ function setupExecMock(overrides?: {
       const jq = jqIndex === -1 ? '' : (args[jqIndex + 1] ?? '');
       const match = jq.match(/shipper:([a-z-]+)/);
       const stage = match?.[1];
-      return { stdout: stage ? (timelineByStage[stage] ?? '') : '', stderr: '' };
+      return Promise.resolve({ stdout: stage ? (timelineByStage[stage] ?? '') : '', stderr: '' });
     }
 
     if (
@@ -151,32 +151,37 @@ function setupExecMock(overrides?: {
     ) {
       const jqIndex = args.indexOf('--jq');
       const jq = jqIndex === -1 ? '' : (args[jqIndex + 1] ?? '');
-      return { stdout: jq.includes('created_at') ? commentsWithDates : commentIds, stderr: '' };
+      return Promise.resolve({
+        stdout: jq.includes('created_at') ? commentsWithDates : commentIds,
+        stderr: '',
+      });
     }
 
-    if (args[0] === 'pr' && args[1] === 'list') return { stdout: prJson, stderr: '' };
+    if (args[0] === 'pr' && args[1] === 'list') {
+      return Promise.resolve({ stdout: prJson, stderr: '' });
+    }
 
     if (args[0] === 'pr' && args[1] === 'close') {
       operationLog?.push(`gh pr close ${args[2]}`);
-      return { stdout: '', stderr: '' };
+      return Promise.resolve({ stdout: '', stderr: '' });
     }
 
     if (args[0] === 'api' && args.includes('DELETE')) {
       operationLog?.push(`gh delete comment ${args[3]}`);
-      return { stdout: '', stderr: '' };
+      return Promise.resolve({ stdout: '', stderr: '' });
     }
 
     if (args[0] === 'issue' && args[1] === 'edit') {
       operationLog?.push('gh issue edit');
-      return { stdout: '', stderr: '' };
+      return Promise.resolve({ stdout: '', stderr: '' });
     }
 
     if (args[0] === 'issue' && args[1] === 'comment') {
       operationLog?.push('gh issue comment');
-      return { stdout: '', stderr: '' };
+      return Promise.resolve({ stdout: '', stderr: '' });
     }
 
-    return { stdout: '', stderr: '' };
+    return Promise.resolve({ stdout: '', stderr: '' });
   });
 
   mockReaddirSync.mockImplementation(() => {
@@ -192,11 +197,12 @@ function setupExecMock(overrides?: {
 
   mockExistsSync.mockImplementation((candidate: string) => existingPaths.has(candidate));
 
-  mockRemoveWorktree.mockImplementation(async (_repoRoot: string, wtPath: string) => {
+  mockRemoveWorktree.mockImplementation((_repoRoot: string, wtPath: string) => {
     operationLog?.push(`removeWorktree ${wtPath}`);
     if (!persistentWorktreePaths.has(wtPath)) {
       existingPaths.delete(wtPath);
     }
+    return Promise.resolve();
   });
 
   mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
@@ -248,19 +254,15 @@ function setupExecMock(overrides?: {
 }
 
 function getIssueEditArgs(): string[] {
-  const call = mockGh.mock.calls.find(
-    ([args]) => (args as string[])[0] === 'issue' && (args as string[])[1] === 'edit'
-  );
+  const call = mockGh.mock.calls.find(([args]) => args[0] === 'issue' && args[1] === 'edit');
 
   return call?.[0] as string[];
 }
 
 function getIssueCommentBody(): string {
-  const call = mockGh.mock.calls.find(
-    ([args]) => (args as string[])[0] === 'issue' && (args as string[])[1] === 'comment'
-  );
+  const call = mockGh.mock.calls.find(([args]) => args[0] === 'issue' && args[1] === 'comment');
 
-  return ((call?.[0] as string[]) ?? [])[4] ?? '';
+  return (call?.[0] ?? [])[4] ?? '';
 }
 
 function getLocalWorktreePath(name: string): string {
@@ -534,7 +536,7 @@ describe('resetCommand', () => {
     await resetCommand('18', { force: false });
 
     expect(mockConsoleLog).toHaveBeenCalledWith('Reset cancelled.');
-    const deleteCalls = mockGh.mock.calls.filter(([args]) => (args as string[]).includes('DELETE'));
+    const deleteCalls = mockGh.mock.calls.filter(([args]) => args.includes('DELETE'));
     expect(deleteCalls).toHaveLength(0);
   });
 
@@ -628,11 +630,12 @@ describe('resetCommand', () => {
       expect.any(Object)
     );
     expect(mockGh).toHaveBeenCalledWith(['pr', 'close', '42']);
-    expect(mockExecFileSync).toHaveBeenCalledWith(
-      'git',
-      ['push', 'origin', '--delete', 'shipper/18-add-reset'],
-      expect.any(Object)
-    );
+    expect(mockExecFileSync).toHaveBeenCalledWith('git', [
+      'push',
+      'origin',
+      '--delete',
+      'shipper/18-add-reset',
+    ]);
     expect(getIssueCommentBody()).toContain('This issue has been reset to `shipper:planned`.');
   });
 
@@ -698,14 +701,7 @@ describe('resetCommand', () => {
     await resetCommand('18', { force: true, to: 'new' });
 
     expect(mockRemoveWorktree).not.toHaveBeenCalled();
-    expect(mockExecFileSync).toHaveBeenCalledWith(
-      'git',
-      ['branch', '-D', 'shipper/18-add-reset'],
-      expect.objectContaining({
-        cwd: '/tmp/fake-repo',
-        stdio: ['ignore', 'ignore', 'ignore'],
-      })
-    );
+    expect(mockExecFileSync).toHaveBeenCalledWith('git', ['branch', '-D', 'shipper/18-add-reset']);
   });
 
   it('strips linked-worktree + markers before deleting local branches', async () => {
@@ -718,14 +714,7 @@ describe('resetCommand', () => {
 
     await resetCommand('18', { force: true, to: 'new' });
 
-    expect(mockExecFileSync).toHaveBeenCalledWith(
-      'git',
-      ['branch', '-D', 'shipper/18-add-reset'],
-      expect.objectContaining({
-        cwd: '/tmp/fake-repo',
-        stdio: ['ignore', 'ignore', 'ignore'],
-      })
-    );
+    expect(mockExecFileSync).toHaveBeenCalledWith('git', ['branch', '-D', 'shipper/18-add-reset']);
   });
 
   it('derives the worktree repo prefix from the git common dir when running inside a worktree', async () => {
@@ -895,9 +884,9 @@ describe('resetCommand', () => {
 
     await resetCommand('18', { force: true, to: 'designed' });
 
-    const deleteCalls = mockGh.mock.calls.filter(([args]) => (args as string[]).includes('DELETE'));
+    const deleteCalls = mockGh.mock.calls.filter(([args]) => args.includes('DELETE'));
     expect(deleteCalls).toHaveLength(1);
-    const firstDeleteCall = deleteCalls[0]?.[0] as string[] | undefined;
+    const firstDeleteCall = deleteCalls[0]?.[0];
     expect(firstDeleteCall).toBeDefined();
     expect(firstDeleteCall?.[3]).toBe('repos/owner/repo/issues/comments/303');
   });
@@ -910,7 +899,7 @@ describe('resetCommand', () => {
 
     await resetCommand('18', { force: true, to: 'new' });
 
-    const deleteCalls = mockGh.mock.calls.filter(([args]) => (args as string[]).includes('DELETE'));
+    const deleteCalls = mockGh.mock.calls.filter(([args]) => args.includes('DELETE'));
     expect(deleteCalls).toHaveLength(3);
   });
 
@@ -964,7 +953,7 @@ describe('resetCommand', () => {
     expect(editArgs).not.toContain('--add-label');
 
     const closeCalls = mockGh.mock.calls.filter(
-      ([args]) => (args as string[])[0] === 'pr' && (args as string[])[1] === 'close'
+      ([args]) => args[0] === 'pr' && args[1] === 'close'
     );
     expect(closeCalls).toHaveLength(2);
 
@@ -985,9 +974,9 @@ describe('resetCommand', () => {
       expect.any(Object)
     );
 
-    const deleteCalls = mockGh.mock.calls.filter(([args]) => (args as string[]).includes('DELETE'));
+    const deleteCalls = mockGh.mock.calls.filter(([args]) => args.includes('DELETE'));
     expect(deleteCalls).toHaveLength(1);
-    const firstDeleteCall = deleteCalls[0]?.[0] as string[] | undefined;
+    const firstDeleteCall = deleteCalls[0]?.[0];
     expect(firstDeleteCall).toBeDefined();
     expect(firstDeleteCall?.[3]).toBe('repos/owner/repo/issues/comments/502');
   });
@@ -1056,11 +1045,12 @@ describe('resetCommand', () => {
 
     await resetCommand('18', { force: true, to: 'planned' });
 
-    expect(mockExecFileSync).toHaveBeenCalledWith(
-      'git',
-      ['push', 'origin', '--delete', 'shipper/18-add-reset'],
-      expect.any(Object)
-    );
+    expect(mockExecFileSync).toHaveBeenCalledWith('git', [
+      'push',
+      'origin',
+      '--delete',
+      'shipper/18-add-reset',
+    ]);
 
     const deleteCalls = mockExecFileSync.mock.calls.filter(
       (entry: unknown[]) =>
@@ -1086,10 +1076,10 @@ describe('resetCommand', () => {
     await resetCommand('18', { force: true, to: 'implemented' });
 
     const closeCalls = mockGh.mock.calls.filter(
-      ([args]) => (args as string[])[0] === 'pr' && (args as string[])[1] === 'close'
+      ([args]) => args[0] === 'pr' && args[1] === 'close'
     );
     expect(closeCalls).toHaveLength(1);
-    const firstCloseCall = closeCalls[0]?.[0] as string[] | undefined;
+    const firstCloseCall = closeCalls[0]?.[0];
     expect(firstCloseCall).toBeDefined();
     expect(firstCloseCall?.[2]).toBe('52');
   });

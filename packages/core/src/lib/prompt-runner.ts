@@ -185,50 +185,48 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
   const timeoutMs =
     effectiveMode === 'headless' && timeoutMinutes > 0 ? timeoutMinutes * 60_000 : undefined;
 
-  if (effectiveMode === 'headless') {
-    if (agent === 'claude' && !args.includes('-p')) {
+  if (agent === 'claude') {
+    if (effectiveMode === 'headless' && !args.includes('-p')) {
       args.unshift('-p');
-    } else if (agent === 'codex') {
-      normalizeCodexHeadlessArgs(args);
-    }
-  } else if (effectiveMode === 'interactive') {
-    if (agent === 'claude') {
+    } else if (effectiveMode === 'interactive') {
       const pIdx = args.indexOf('-p');
       if (pIdx !== -1) args.splice(pIdx, 1);
-    } else if (agent === 'codex') {
+    }
+  } else {
+    if (effectiveMode === 'headless') {
+      normalizeCodexHeadlessArgs(args);
+    } else if (effectiveMode === 'interactive') {
       stripCodexHeadlessArgs(args);
     }
-  }
 
-  if (agent === 'codex' && opts.cwd) {
-    const worktreeDirs = resolveWorktreeGitDir(opts.cwd);
-    if (worktreeDirs) {
-      const execIdx = args.indexOf('exec');
-      const insertIdx = execIdx === -1 ? 0 : execIdx;
-      const addDirArgs = ['--add-dir', worktreeDirs.gitDir];
-      if (worktreeDirs.commonDir) {
-        addDirArgs.push('--add-dir', worktreeDirs.commonDir);
+    if (opts.cwd) {
+      const worktreeDirs = resolveWorktreeGitDir(opts.cwd);
+      if (worktreeDirs) {
+        const execIdx = args.indexOf('exec');
+        const insertIdx = execIdx === -1 ? 0 : execIdx;
+        const addDirArgs = ['--add-dir', worktreeDirs.gitDir];
+        if (worktreeDirs.commonDir) {
+          addDirArgs.push('--add-dir', worktreeDirs.commonDir);
+        }
+        args.splice(insertIdx, 0, ...addDirArgs);
       }
-      args.splice(insertIdx, 0, ...addDirArgs);
     }
   }
 
   if (model) {
-    if (agent === 'codex') {
+    if (agent === 'claude') {
+      args.push('--model', model);
+    } else {
       const execIdx = args.indexOf('exec');
       const insertIdx = execIdx === -1 ? 0 : execIdx;
       args.splice(insertIdx, 0, '-m', model);
-    } else {
-      args.push('--model', model);
     }
   }
 
   if (agent === 'claude') {
     args.push('--append-system-prompt', promptBody);
-  } else if (agent === 'codex') {
-    args.push(promptBody);
   } else {
-    args.push('--append-system-prompt', promptBody);
+    args.push(promptBody);
   }
 
   const messageParts: string[] = [];

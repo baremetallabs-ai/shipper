@@ -138,9 +138,9 @@ describe('resolveTransition', () => {
     expect(resolveTransition(testCase.stage, testCase.verdict)).toEqual(testCase.expected);
   });
 
-  it('throws on an unknown stage', () => {
-    expect(() => resolveTransition('unknown' as StageName, 'accept')).toThrow(
-      'Unknown stage: unknown'
-    );
+  it('throws a clear error for an unknown stage at runtime', () => {
+    expect(() => {
+      resolveTransition('unknown' as StageName, 'accept');
+    }).toThrow('Unknown stage: unknown');
   });
 });

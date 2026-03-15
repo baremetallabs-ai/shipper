@@ -2,21 +2,30 @@ import { promisify } from 'node:util';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const execFileMock = vi.fn();
-const execFile = Object.assign((...args: unknown[]) => execFileMock(...args), {
-  [promisify.custom]: (...args: unknown[]) =>
-    new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-      execFileMock(
-        ...args,
-        (err: unknown, stdout: string | Buffer = '', stderr: string | Buffer = '') => {
-          if (err) {
-            reject(err);
-            return;
+function normalizeError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+const execFile = Object.assign(
+  (...args: unknown[]) => {
+    execFileMock(...args);
+  },
+  {
+    [promisify.custom]: (...args: unknown[]) =>
+      new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+        execFileMock(
+          ...args,
+          (err: unknown, stdout: string | Buffer = '', stderr: string | Buffer = '') => {
+            if (err) {
+              reject(normalizeError(err));
+              return;
+            }
+            resolve({ stdout: String(stdout), stderr: String(stderr) });
           }
-          resolve({ stdout: String(stdout), stderr: String(stderr) });
-        }
-      );
-    }),
-});
+        );
+      }),
+  }
+);
 
 vi.mock('node:child_process', async () => {
   const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');

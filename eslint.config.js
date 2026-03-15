@@ -11,7 +11,7 @@ export default [
       'packages/*/out/',
       'node_modules/',
       'coverage/',
-      '*.config.*',
+      '**/*.config.*',
     ],
   },
   eslint.configs.recommended,
@@ -22,6 +22,12 @@ export default [
       parserOptions: {
         ecmaVersion: 2022,
         sourceType: 'module',
+        project: [
+          './packages/cli/tsconfig.eslint.json',
+          './packages/core/tsconfig.eslint.json',
+          './packages/desktop/tsconfig.eslint.node.json',
+          './packages/desktop/tsconfig.eslint.web.json',
+        ],
       },
       globals: {
         console: 'readonly',
@@ -38,7 +44,7 @@ export default [
       '@typescript-eslint': tseslint,
     },
     rules: {
-      ...tseslint.configs.strict.rules,
+      ...tseslint.configs['strict-type-checked'].rules,
 
       '@typescript-eslint/no-unused-vars': [
         'error',
@@ -49,6 +55,19 @@ export default [
       ],
       '@typescript-eslint/explicit-function-return-type': 'off',
       '@typescript-eslint/explicit-module-boundary-types': 'off',
+      '@typescript-eslint/restrict-template-expressions': [
+        'error',
+        {
+          allowNumber: true,
+          allowBoolean: true,
+        },
+      ],
+      '@typescript-eslint/restrict-plus-operands': [
+        'error',
+        {
+          allowNumberAndString: true,
+        },
+      ],
 
       'no-console': 'off',
       'prefer-const': 'error',

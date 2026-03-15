@@ -1,27 +1,29 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const autoSelectPrForStageMock = vi.fn();
-const getBranchForPRMock = vi.fn(async () => 'shipper/10-feature');
-const getRepoRootMock = vi.fn(async () => '/tmp/fake-repo');
+const getBranchForPRMock = vi.fn(() => Promise.resolve('shipper/10-feature'));
+const getRepoRootMock = vi.fn(() => Promise.resolve('/tmp/fake-repo'));
 const ghMock = vi.fn();
-const handleAgentCrashMock = vi.fn(async () => {});
-const processResultMock = vi.fn(async () => ({
-  verdict: 'accept',
-  comment: '.shipper/output/comment-10.md',
-}));
-const resolveRefMock = vi.fn(async () => ({ prNumber: '42', issueNumber: '10' }));
-const runPromptMock = vi.fn(async () => 0);
-const scrubOutputDirMock = vi.fn(async () => {});
-const withIssueLockMock = vi.fn(
-  async (_repo: unknown, _issue: unknown, fn: () => Promise<unknown>) => await fn()
+const handleAgentCrashMock = vi.fn(() => Promise.resolve());
+const processResultMock = vi.fn(() =>
+  Promise.resolve({
+    verdict: 'accept',
+    comment: '.shipper/output/comment-10.md',
+  })
 );
-const withStageHooksMock = vi.fn(
-  async (_stage: unknown, _env: unknown, fn: () => Promise<unknown>) => await fn()
+const resolveRefMock = vi.fn(() => Promise.resolve({ prNumber: '42', issueNumber: '10' }));
+const runPromptMock = vi.fn(() => Promise.resolve(0));
+const scrubOutputDirMock = vi.fn(() => Promise.resolve());
+const withIssueLockMock = vi.fn((_repo: unknown, _issue: unknown, fn: () => Promise<unknown>) =>
+  fn()
 );
-const withWorktreeMock = vi.fn(
-  async (_opts: unknown, fn: (wtPath: string) => Promise<unknown>) => await fn('/tmp/fake-wt')
+const withStageHooksMock = vi.fn((_stage: unknown, _env: unknown, fn: () => Promise<unknown>) =>
+  fn()
 );
-const writeContextFileMock = vi.fn(async () => {});
+const withWorktreeMock = vi.fn((_opts: unknown, fn: (wtPath: string) => Promise<unknown>) =>
+  fn('/tmp/fake-wt')
+);
+const writeContextFileMock = vi.fn(() => Promise.resolve());
 const repo = 'owner/repo';
 
 vi.mock('@dnsquared/shipper-core', () => ({
@@ -92,6 +94,9 @@ describe('prReviewCommand', () => {
       'api',
       `repos/${repo}/pulls/42/files`,
       '--paginate',
+      '--slurp',
+      '--jq',
+      'add',
     ]);
     expect(ghMock).toHaveBeenNthCalledWith(3, [
       'pr',

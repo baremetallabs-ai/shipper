@@ -2,19 +2,34 @@ import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const execFileMock = vi.fn();
-const spawnMock = vi.fn();
-const accessMock = vi.fn();
-const mkdirMock = vi.fn();
-const runAdvisoryHookMock = vi.fn();
-const runWorktreeHookMock = vi.fn();
-const getSettingsMock = vi.fn();
+const execFileMock =
+  vi.fn<
+    (
+      command: string,
+      args: string[],
+      execOpts: unknown,
+      callback: (error: Error | null, stdout: string, stderr: string) => void
+    ) => void
+  >();
+const spawnMock =
+  vi.fn<(command: string, args?: string[], options?: Record<string, unknown>) => EventEmitter>();
+const accessMock = vi.fn<(path: string) => Promise<void>>();
+const mkdirMock = vi.fn<(path: string, options?: Record<string, unknown>) => Promise<void>>();
+const runAdvisoryHookMock =
+  vi.fn<
+    (label: string, command: string, env: Record<string, string>, cwd?: string) => Promise<void>
+  >();
+const runWorktreeHookMock =
+  vi.fn<(event: string, env: Record<string, string>, cwd: string) => Promise<void>>();
+const getSettingsMock = vi.fn<() => Record<string, unknown>>();
 
 vi.mock('node:child_process', async () => {
   const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
   return {
     ...actual,
-    execFile: (...args: unknown[]) => execFileMock(...args),
+    execFile: (...args: unknown[]) => {
+      execFileMock(...args);
+    },
     spawn: (...args: unknown[]) => spawnMock(...args),
   };
 });
@@ -115,13 +130,14 @@ afterEach(() => {
 describe('withWorktree', () => {
   it('runs setup before the callback and teardown after it', async () => {
     const callOrder: string[] = [];
-    runWorktreeHookMock.mockImplementation(async (event: string) => {
+    runWorktreeHookMock.mockImplementation((event: string) => {
       callOrder.push(event);
+      return Promise.resolve();
     });
 
-    const result = await withWorktree(defaultOpts, async () => {
+    const result = await withWorktree(defaultOpts, () => {
       callOrder.push('callback');
-      return 'ok';
+      return Promise.resolve('ok');
     });
 
     expect(result).toBe('ok');
@@ -129,7 +145,7 @@ describe('withWorktree', () => {
   });
 
   it('passes the expected hook environment and cwd', async () => {
-    await withWorktree(defaultOpts, async () => undefined);
+    await withWorktree(defaultOpts, () => Promise.resolve(undefined));
 
     expect(runWorktreeHookMock).toHaveBeenNthCalledWith(
       1,
@@ -150,15 +166,18 @@ describe('withWorktree', () => {
     });
 
     const callOrder: string[] = [];
-    runAdvisoryHookMock.mockImplementation(async (label: string) => {
+    runAdvisoryHookMock.mockImplementation((label: string) => {
       callOrder.push(label);
+      return Promise.resolve();
     });
-    runWorktreeHookMock.mockImplementation(async (event: string) => {
+    runWorktreeHookMock.mockImplementation((event: string) => {
       callOrder.push(event);
+      return Promise.resolve();
     });
 
-    await withWorktree(defaultOpts, async () => {
+    await withWorktree(defaultOpts, () => {
       callOrder.push('callback');
+      return Promise.resolve();
     });
 
     expect(callOrder).toEqual([
@@ -172,8 +191,9 @@ describe('withWorktree', () => {
   it('sets NPM_CONFIG_CACHE to a worktree-local path inside the callback', async () => {
     process.env.NPM_CONFIG_CACHE = '/original-cache';
 
-    await withWorktree(defaultOpts, async (wtPath) => {
+    await withWorktree(defaultOpts, (wtPath) => {
       expect(process.env.NPM_CONFIG_CACHE).toBe(path.join(wtPath, '.shipper', 'tmp', '.npm-cache'));
+      return Promise.resolve();
     });
 
     expect(process.env.NPM_CONFIG_CACHE).toBe('/original-cache');
@@ -182,8 +202,9 @@ describe('withWorktree', () => {
   it('sets XDG_CACHE_HOME to a worktree-local path inside the callback', async () => {
     process.env.XDG_CACHE_HOME = '/original-xdg-cache';
 
-    await withWorktree(defaultOpts, async (wtPath) => {
+    await withWorktree(defaultOpts, (wtPath) => {
       expect(process.env.XDG_CACHE_HOME).toBe(path.join(wtPath, '.shipper', 'tmp', '.cache'));
+      return Promise.resolve();
     });
 
     expect(process.env.XDG_CACHE_HOME).toBe('/original-xdg-cache');
@@ -197,10 +218,11 @@ describe('withWorktree', () => {
       worktreeEnv: { UV_CACHE_DIR: '.uv-cache' },
     });
 
-    await withWorktree(defaultOpts, async () => {
+    await withWorktree(defaultOpts, () => {
       expect(process.env.NPM_CONFIG_CACHE).toBe(expectedNpmCachePath);
       expect(process.env.XDG_CACHE_HOME).toBe(expectedXdgCachePath);
       expect(process.env.UV_CACHE_DIR).toBe('.uv-cache');
+      return Promise.resolve();
     });
 
     expect(process.env.NPM_CONFIG_CACHE).toBe('/original-cache');
@@ -213,8 +235,9 @@ describe('withWorktree', () => {
       worktreeEnv: { NPM_CONFIG_CACHE: '/custom-cache' },
     });
 
-    await withWorktree(defaultOpts, async () => {
+    await withWorktree(defaultOpts, () => {
       expect(process.env.NPM_CONFIG_CACHE).toBe('/custom-cache');
+      return Promise.resolve();
     });
   });
 
@@ -223,8 +246,9 @@ describe('withWorktree', () => {
       worktreeEnv: { XDG_CACHE_HOME: '/custom-cache' },
     });
 
-    await withWorktree(defaultOpts, async () => {
+    await withWorktree(defaultOpts, () => {
       expect(process.env.XDG_CACHE_HOME).toBe('/custom-cache');
+      return Promise.resolve();
     });
   });
 
@@ -244,11 +268,12 @@ describe('withWorktree', () => {
       worktreeEnv: { UV_CACHE_DIR: '.uv-cache' },
     });
 
-    await withWorktree(defaultOpts, async () => {
+    await withWorktree(defaultOpts, () => {
       expect(process.env.NPM_CONFIG_CACHE).toBe(expectedNpmCachePath);
       expect(process.env.XDG_CACHE_HOME).toBe(expectedXdgCachePath);
       expect(process.env.UV_CACHE_DIR).toBe('.uv-cache');
       sigintListener?.();
+      return Promise.resolve();
     });
 
     expect(
@@ -270,18 +295,20 @@ describe('withWorktree', () => {
       worktreeEnv: { UV_CACHE_DIR: '.uv-cache' },
     });
 
-    runWorktreeHookMock.mockImplementation(async (event: string) => {
+    runWorktreeHookMock.mockImplementation((event: string) => {
       if (event === 'worktree-teardown') {
         expect(process.env.NPM_CONFIG_CACHE).toBe(expectedNpmCachePath);
         expect(process.env.XDG_CACHE_HOME).toBe(expectedXdgCachePath);
         expect(process.env.UV_CACHE_DIR).toBe('.uv-cache');
       }
+      return Promise.resolve();
     });
 
-    await withWorktree(defaultOpts, async () => {
+    await withWorktree(defaultOpts, () => {
       expect(process.env.NPM_CONFIG_CACHE).toBe(expectedNpmCachePath);
       expect(process.env.XDG_CACHE_HOME).toBe(expectedXdgCachePath);
       expect(process.env.UV_CACHE_DIR).toBe('.uv-cache');
+      return Promise.resolve();
     });
 
     expect(process.env.NPM_CONFIG_CACHE).toBe('/before-teardown');
@@ -313,8 +340,9 @@ describe('withWorktree', () => {
     });
 
     let resolved = false;
-    const worktreePromise = withWorktree(defaultOpts, async () => {
+    const worktreePromise = withWorktree(defaultOpts, () => {
       sigintListener?.();
+      return Promise.resolve();
     }).then(() => {
       resolved = true;
     });

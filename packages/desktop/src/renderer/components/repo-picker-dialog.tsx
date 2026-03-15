@@ -154,7 +154,13 @@ export function RepoPickerDialog({
             {filteredRepos.length > 0 ? (
               <CommandGroup heading="Your repositories">
                 {filteredRepos.map((repo) => (
-                  <CommandItem key={repo} value={repo} onSelect={() => handleSelect(repo)}>
+                  <CommandItem
+                    key={repo}
+                    value={repo}
+                    onSelect={() => {
+                      handleSelect(repo);
+                    }}
+                  >
                     <PlusCircle className="size-4 text-muted-foreground" />
                     <span>{repo}</span>
                   </CommandItem>
@@ -169,7 +175,9 @@ export function RepoPickerDialog({
                   {showManualAdd ? (
                     <CommandItem
                       value={`manual:${normalizedQuery}`}
-                      onSelect={() => handleSelect(normalizedQuery)}
+                      onSelect={() => {
+                        handleSelect(normalizedQuery);
+                      }}
                     >
                       <PlusCircle className="size-4 text-muted-foreground" />
                       <span>Add &quot;{normalizedQuery}&quot;</span>

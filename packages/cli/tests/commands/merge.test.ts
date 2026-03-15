@@ -1,20 +1,38 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-const tryResolvePrForIssueMock = vi.fn();
-const getSettingsMock = vi.fn();
-const ghMock = vi.fn();
-const fetchChecksMock = vi.fn();
-const classifyChecksMock = vi.fn();
+const tryResolvePrForIssueMock =
+  vi.fn<(repo: string, issueNumber: number) => Promise<string | undefined>>();
+const getSettingsMock = vi.fn<
+  () => {
+    prReviewWait: { mode: 'checks'; timeoutMinutes: number };
+    merge: { requirePassingChecks: boolean };
+  }
+>();
+const ghMock = vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>();
+interface MockCheck {
+  name: string;
+  state: string;
+  bucket: string;
+}
+
+const fetchChecksMock = vi.fn<(repo: string, pr: string) => Promise<MockCheck[]>>();
+const classifyChecksMock = vi.fn<
+  (checks: MockCheck[]) => {
+    pending: MockCheck[];
+    failed: MockCheck[];
+    passed: MockCheck[];
+    total: number;
+  }
+>();
 vi.mock('@dnsquared/shipper-core', () => ({
   getSettings: () => getSettingsMock(),
-  gh: (...args: unknown[]) => ghMock(...args),
-  tryResolvePrForIssue: (...args: unknown[]) => tryResolvePrForIssueMock(...args),
+  gh: (args: string[]) => ghMock(args),
+  tryResolvePrForIssue: (repo: string, issueNumber: number) =>
+    tryResolvePrForIssueMock(repo, issueNumber),
   getRepoNwo: () => 'owner/repo',
-  withStageHooks: vi.fn(
-    async (_stage: unknown, _env: unknown, fn: () => Promise<unknown>) => await fn()
-  ),
-  fetchChecks: (...args: unknown[]) => fetchChecksMock(...args),
-  classifyChecks: (...args: unknown[]) => classifyChecksMock(...args),
+  withStageHooks: vi.fn((_stage: unknown, _env: unknown, fn: () => Promise<unknown>) => fn()),
+  fetchChecks: (repo: string, pr: string) => fetchChecksMock(repo, pr),
+  classifyChecks: (checks: MockCheck[]) => classifyChecksMock(checks),
 }));
 
 const logMock = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -229,14 +247,14 @@ describe('requirePassingChecks', () => {
   });
 
   function mockPRLookup(mergeStateStatus: string) {
-    ghMock.mockImplementation(async (args: string[]) => {
+    ghMock.mockImplementation((args: string[]) => {
       if (args[0] === 'pr' && args[1] === 'view') {
         const jsonFields = args[args.indexOf('--json') + 1] ?? '';
         if (jsonFields.includes('mergeStateStatus')) {
-          return { stdout: JSON.stringify({ mergeStateStatus }), stderr: '' };
+          return Promise.resolve({ stdout: JSON.stringify({ mergeStateStatus }), stderr: '' });
         }
         if (jsonFields.includes('state')) {
-          return {
+          return Promise.resolve({
             stdout: JSON.stringify({
               number: 42,
               title: 'Test PR',
@@ -246,19 +264,19 @@ describe('requirePassingChecks', () => {
               labels: [{ name: 'shipper:ready' }],
             }),
             stderr: '',
-          };
+          });
         }
         if (jsonFields.includes('body')) {
-          return { stdout: JSON.stringify({ body: 'Closes #10' }), stderr: '' };
+          return Promise.resolve({ stdout: JSON.stringify({ body: 'Closes #10' }), stderr: '' });
         }
       }
       if (args[0] === 'pr' && args[1] === 'merge') {
-        return { stdout: '', stderr: '' };
+        return Promise.resolve({ stdout: '', stderr: '' });
       }
       if (args[0] === 'issue') {
-        return { stdout: '', stderr: '' };
+        return Promise.resolve({ stdout: '', stderr: '' });
       }
-      return { stdout: '', stderr: '' };
+      return Promise.resolve({ stdout: '', stderr: '' });
     });
   }
 

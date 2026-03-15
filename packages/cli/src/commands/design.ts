@@ -27,25 +27,22 @@ export async function designCommand(
     const repoRoot = await getRepoRoot();
     const branch = await generateBranchName(repo, issue);
 
-    return await withStageHooks(
-      'design',
-      { issueNumber: issue, branchName: branch },
-      async () =>
-        await withWorktree(
-          { repoRoot, branch, createBranch: true, issueNumber: issue, stage: 'design' },
-          async (wtPath) => {
-            await scrubOutputDir(wtPath);
-            await runPrompt('design', { repo, issueRef: issue, cwd: wtPath, mode, agent, model });
-            try {
-              await processResult({ repo, issueNumber: issue, stage: 'design', cwd: wtPath });
-            } catch (error) {
-              const detail = error instanceof Error ? error.message : String(error);
-              await handleAgentCrash(repo, issue, 'design', detail);
-              process.exitCode = 1;
-              return;
-            }
+    await withStageHooks('design', { issueNumber: issue, branchName: branch }, async () => {
+      await withWorktree(
+        { repoRoot, branch, createBranch: true, issueNumber: issue, stage: 'design' },
+        async (wtPath) => {
+          await scrubOutputDir(wtPath);
+          await runPrompt('design', { repo, issueRef: issue, cwd: wtPath, mode, agent, model });
+          try {
+            await processResult({ repo, issueNumber: issue, stage: 'design', cwd: wtPath });
+          } catch (error) {
+            const detail = error instanceof Error ? error.message : String(error);
+            await handleAgentCrash(repo, issue, 'design', detail);
+            process.exitCode = 1;
+            return;
           }
-        )
-    );
+        }
+      );
+    });
   });
 }

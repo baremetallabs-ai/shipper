@@ -1,9 +1,18 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const spawnMock = vi.fn();
-const execFileMock = vi.fn();
-const readFileMock = vi.fn();
+const spawnMock =
+  vi.fn<(command: string, args?: string[], options?: Record<string, unknown>) => EventEmitter>();
+const execFileMock =
+  vi.fn<
+    (
+      command: string,
+      args: string[],
+      execOpts: unknown,
+      callback: (error: Error | null, stdout: string, stderr: string) => void
+    ) => object
+  >();
+const readFileMock = vi.fn<(path: string, encoding: string) => Promise<string>>();
 
 vi.mock('node:child_process', async () => {
   const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
@@ -75,11 +84,11 @@ function queueExecResult(opts: { code?: number; stdout?: string; stderr?: string
 }
 
 function gitArgsFromSpawnCalls(): string[][] {
-  return spawnMock.mock.calls.map(([, args]) => args as string[]);
+  return spawnMock.mock.calls.map(([, args]) => args ?? []);
 }
 
 function gitArgsFromExecCalls(): string[][] {
-  return execFileMock.mock.calls.map(([, args]) => args as string[]);
+  return execFileMock.mock.calls.map(([, args]) => args);
 }
 
 describe('syncWorktree', () => {
