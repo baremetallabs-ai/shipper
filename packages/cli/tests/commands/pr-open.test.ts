@@ -5,9 +5,15 @@ const findBranchForIssueMock = vi.fn(async () => 'shipper/239-branch');
 const formatConflictContextMock = vi.fn(() => 'formatted conflict context');
 const getRepoRootMock = vi.fn(async () => '/tmp/fake-repo');
 const getSettingsMock = vi.fn(() => ({ defaultBaseBranch: 'main' }));
+const handleAgentCrashMock = vi.fn(async () => {});
+const processResultMock = vi.fn(async () => ({
+  verdict: 'accept',
+  comment: '.shipper/output/comment-239.md',
+}));
 const resolveBaseBranchMock = vi.fn(async () => 'release/2026');
 const resolveRefMock = vi.fn(async () => ({ issueNumber: '239' }));
 const runPromptMock = vi.fn(async () => 0);
+const scrubOutputDirMock = vi.fn(async () => {});
 const withGitTransportMock = vi.fn(
   async (_opts: unknown, fn: (conflictContext?: unknown, pushError?: string) => Promise<unknown>) =>
     await fn({
@@ -36,9 +42,12 @@ vi.mock('@dnsquared/shipper-core', () => ({
   formatConflictContext: formatConflictContextMock,
   getRepoRoot: getRepoRootMock,
   getSettings: getSettingsMock,
+  handleAgentCrash: handleAgentCrashMock,
+  processResult: processResultMock,
   resolveBaseBranch: resolveBaseBranchMock,
   resolveRef: resolveRefMock,
   runPrompt: runPromptMock,
+  scrubOutputDir: scrubOutputDirMock,
   withGitTransport: withGitTransportMock,
   withIssueLock: withIssueLockMock,
   withStageHooks: withStageHooksMock,
@@ -66,10 +75,11 @@ describe('prOpenCommand', () => {
 
     await expect(prOpenCommand('owner/repo', '239')).resolves.toBeUndefined();
     expect(exitSpy).not.toHaveBeenCalled();
-    expect(process.exitCode).toBe(0);
+    expect(process.exitCode).toBeUndefined();
 
     expect(resolveRefMock).toHaveBeenCalledWith('owner/repo', '239', 'issue');
     expect(resolveBaseBranchMock).toHaveBeenCalledWith('owner/repo', 'main');
+    expect(scrubOutputDirMock).toHaveBeenCalledWith('/tmp/fake-wt');
     expect(withGitTransportMock).toHaveBeenCalledWith(
       expect.objectContaining({
         wtPath: '/tmp/fake-wt',
@@ -90,6 +100,13 @@ describe('prOpenCommand', () => {
         userInput: 'formatted conflict context',
       })
     );
+    expect(processResultMock).toHaveBeenCalledWith({
+      repo: 'owner/repo',
+      issueNumber: '239',
+      stage: 'pr_open',
+      cwd: '/tmp/fake-wt',
+    });
+    expect(handleAgentCrashMock).not.toHaveBeenCalled();
   });
 
   it('forwards raw push failure text without conflict formatting', async () => {
@@ -114,5 +131,20 @@ describe('prOpenCommand', () => {
         userInput: 'git push --force-with-lease exited with code 1:\npre-push hook failed',
       })
     );
+  });
+
+  it('reports protocol crashes and exits with code 1', async () => {
+    processResultMock.mockRejectedValueOnce(new Error('Missing result.json'));
+    const { prOpenCommand } = await import('../../src/commands/pr-open.js');
+
+    await expect(prOpenCommand('owner/repo', '239')).resolves.toBeUndefined();
+
+    expect(handleAgentCrashMock).toHaveBeenCalledWith(
+      'owner/repo',
+      '239',
+      'pr_open',
+      'Missing result.json'
+    );
+    expect(process.exitCode).toBe(1);
   });
 });

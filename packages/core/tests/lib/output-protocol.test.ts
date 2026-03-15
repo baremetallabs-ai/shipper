@@ -11,6 +11,7 @@ vi.mock('../../src/lib/gh.js', () => ({
 }));
 
 const {
+  createPrFromSpec,
   PROTOCOL_INPUT_DIR,
   PROTOCOL_OUTPUT_DIR,
   executeTransition,
@@ -19,6 +20,7 @@ const {
   postComment,
   processResult,
   scrubOutputDir,
+  submitReviewPayload,
   setupProtocolDirs,
   writeContextFile,
 } = await import('../../src/lib/output-protocol.js');
@@ -112,18 +114,217 @@ describe('output protocol helpers', () => {
     ]);
   });
 
-  it('processes a result by posting the comment before changing labels', async () => {
+  it('creates a PR from a spec file and body file', async () => {
     const outputDir = path.join(tempDir, PROTOCOL_OUTPUT_DIR);
     await mkdir(outputDir, { recursive: true });
+    await writeFile(path.join(outputDir, 'pr-body-248.md'), 'body', 'utf-8');
+    await writeFile(
+      path.join(outputDir, 'pr-spec-248.json'),
+      JSON.stringify({
+        title: 'feat(#248): migrate protocol',
+        body_file: '.shipper/output/pr-body-248.md',
+        base: 'main',
+        head_branch: 'shipper/248-migrate-protocol',
+        draft: false,
+      }),
+      'utf-8'
+    );
+    ghMock
+      .mockResolvedValueOnce({ stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ stdout: 'https://github.com/owner/repo/pull/248\n', stderr: '' });
+
+    await expect(
+      createPrFromSpec('owner/repo', tempDir, '.shipper/output/pr-spec-248.json')
+    ).resolves.toBe('https://github.com/owner/repo/pull/248');
+
+    expect(ghMock).toHaveBeenNthCalledWith(1, [
+      'pr',
+      'list',
+      '-R',
+      'owner/repo',
+      '--head',
+      'shipper/248-migrate-protocol',
+      '--json',
+      'url',
+      '-q',
+      '.[0].url',
+    ]);
+    expect(ghMock).toHaveBeenNthCalledWith(2, [
+      'pr',
+      'create',
+      '-R',
+      'owner/repo',
+      '--base',
+      'main',
+      '--title',
+      'feat(#248): migrate protocol',
+      '--body-file',
+      path.join(tempDir, '.shipper/output/pr-body-248.md'),
+    ]);
+  });
+
+  it('short-circuits PR creation when a matching PR already exists', async () => {
+    const outputDir = path.join(tempDir, PROTOCOL_OUTPUT_DIR);
+    await mkdir(outputDir, { recursive: true });
+    await writeFile(path.join(outputDir, 'pr-body-248.md'), 'body', 'utf-8');
+    await writeFile(
+      path.join(outputDir, 'pr-spec-248.json'),
+      JSON.stringify({
+        title: 'feat(#248): migrate protocol',
+        body_file: '.shipper/output/pr-body-248.md',
+        base: 'main',
+        head_branch: 'shipper/248-migrate-protocol',
+        draft: true,
+      }),
+      'utf-8'
+    );
+    ghMock.mockResolvedValueOnce({
+      stdout: 'https://github.com/owner/repo/pull/248\n',
+      stderr: '',
+    });
+
+    await expect(
+      createPrFromSpec('owner/repo', tempDir, '.shipper/output/pr-spec-248.json')
+    ).resolves.toBe('https://github.com/owner/repo/pull/248');
+
+    expect(ghMock).toHaveBeenCalledTimes(1);
+    expect(ghMock).toHaveBeenCalledWith([
+      'pr',
+      'list',
+      '-R',
+      'owner/repo',
+      '--head',
+      'shipper/248-migrate-protocol',
+      '--json',
+      'url',
+      '-q',
+      '.[0].url',
+    ]);
+  });
+
+  it('submits a review payload through the GitHub reviews API', async () => {
+    const outputDir = path.join(tempDir, PROTOCOL_OUTPUT_DIR);
+    const payloadPath = path.join(outputDir, 'review-payload-248.json');
+    await mkdir(outputDir, { recursive: true });
+    await writeFile(
+      payloadPath,
+      JSON.stringify({
+        commit_id: 'abc123',
+        body: 'Looks good.',
+        event: 'APPROVE',
+        comments: [
+          {
+            path: 'src/file.ts',
+            line: 42,
+            side: 'RIGHT',
+            body: 'Nice.',
+          },
+        ],
+      }),
+      'utf-8'
+    );
+    ghMock
+      .mockResolvedValueOnce({ stdout: 'reviewer\n', stderr: '' })
+      .mockResolvedValueOnce({ stdout: 'author\n', stderr: '' })
+      .mockResolvedValueOnce({ stdout: '', stderr: '' });
+
+    await submitReviewPayload(
+      'owner/repo',
+      '248',
+      tempDir,
+      '.shipper/output/review-payload-248.json'
+    );
+
+    expect(ghMock).toHaveBeenNthCalledWith(1, ['api', 'user', '-q', '.login']);
+    expect(ghMock).toHaveBeenNthCalledWith(2, [
+      'pr',
+      'view',
+      '248',
+      '-R',
+      'owner/repo',
+      '--json',
+      'author',
+      '--jq',
+      '.author.login',
+    ]);
+    expect(ghMock).toHaveBeenNthCalledWith(3, [
+      'api',
+      'repos/owner/repo/pulls/248/reviews',
+      '--method',
+      'POST',
+      '--input',
+      payloadPath,
+    ]);
+    await expect(readFile(payloadPath, 'utf-8')).resolves.toContain('"event":"APPROVE"');
+  });
+
+  it('downgrades self-authored approval reviews to comment before submission', async () => {
+    const outputDir = path.join(tempDir, PROTOCOL_OUTPUT_DIR);
+    const payloadPath = path.join(outputDir, 'review-payload-248.json');
+    await mkdir(outputDir, { recursive: true });
+    await writeFile(
+      payloadPath,
+      JSON.stringify({
+        commit_id: 'abc123',
+        body: 'Needs follow-up.',
+        event: 'REQUEST_CHANGES',
+        comments: [],
+      }),
+      'utf-8'
+    );
+    ghMock
+      .mockResolvedValueOnce({ stdout: 'author\n', stderr: '' })
+      .mockResolvedValueOnce({ stdout: 'author\n', stderr: '' })
+      .mockResolvedValueOnce({ stdout: '', stderr: '' });
+
+    await submitReviewPayload(
+      'owner/repo',
+      '248',
+      tempDir,
+      '.shipper/output/review-payload-248.json'
+    );
+
+    await expect(readFile(payloadPath, 'utf-8')).resolves.toContain('"event":"COMMENT"');
+    expect(ghMock).toHaveBeenNthCalledWith(3, [
+      'api',
+      'repos/owner/repo/pulls/248/reviews',
+      '--method',
+      'POST',
+      '--input',
+      payloadPath,
+    ]);
+  });
+
+  it('processes PR creation before posting the comment and changing labels', async () => {
+    const outputDir = path.join(tempDir, PROTOCOL_OUTPUT_DIR);
+    await mkdir(outputDir, { recursive: true });
+    await writeFile(path.join(outputDir, 'pr-body-248.md'), 'body', 'utf-8');
+    await writeFile(
+      path.join(outputDir, 'pr-spec-248.json'),
+      JSON.stringify({
+        title: 'feat(#248): migrate protocol',
+        body_file: '.shipper/output/pr-body-248.md',
+        base: 'main',
+        head_branch: 'shipper/248-migrate-protocol',
+        draft: false,
+      }),
+      'utf-8'
+    );
     await writeFile(
       path.join(outputDir, 'result.json'),
       JSON.stringify({
         verdict: 'accept',
         comment: '.shipper/output/comment-248.md',
+        pr_spec: '.shipper/output/pr-spec-248.json',
       }),
       'utf-8'
     );
     await writeFile(path.join(outputDir, 'comment-248.md'), 'summary', 'utf-8');
+    ghMock
+      .mockResolvedValueOnce({ stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ stdout: 'https://github.com/owner/repo/pull/248\n', stderr: '' })
+      .mockResolvedValueOnce({ stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ stdout: '', stderr: '' });
 
     await expect(
       processResult({
@@ -135,9 +336,34 @@ describe('output protocol helpers', () => {
     ).resolves.toEqual({
       verdict: 'accept',
       comment: '.shipper/output/comment-248.md',
+      pr_spec: '.shipper/output/pr-spec-248.json',
     });
 
     expect(ghMock).toHaveBeenNthCalledWith(1, [
+      'pr',
+      'list',
+      '-R',
+      'owner/repo',
+      '--head',
+      'shipper/248-migrate-protocol',
+      '--json',
+      'url',
+      '-q',
+      '.[0].url',
+    ]);
+    expect(ghMock).toHaveBeenNthCalledWith(2, [
+      'pr',
+      'create',
+      '-R',
+      'owner/repo',
+      '--base',
+      'main',
+      '--title',
+      'feat(#248): migrate protocol',
+      '--body-file',
+      path.join(tempDir, '.shipper/output/pr-body-248.md'),
+    ]);
+    expect(ghMock).toHaveBeenNthCalledWith(3, [
       'issue',
       'comment',
       '248',
@@ -146,7 +372,7 @@ describe('output protocol helpers', () => {
       '--body-file',
       path.join(tempDir, '.shipper/output/comment-248.md'),
     ]);
-    expect(ghMock).toHaveBeenNthCalledWith(2, [
+    expect(ghMock).toHaveBeenNthCalledWith(4, [
       'issue',
       'edit',
       '248',
@@ -156,6 +382,93 @@ describe('output protocol helpers', () => {
       'shipper:planned',
       '--remove-label',
       'shipper:designed',
+    ]);
+  });
+
+  it('processes review submission before posting the comment and changing labels', async () => {
+    const outputDir = path.join(tempDir, PROTOCOL_OUTPUT_DIR);
+    const payloadPath = path.join(outputDir, 'review-payload-248.json');
+    await mkdir(outputDir, { recursive: true });
+    await writeFile(
+      payloadPath,
+      JSON.stringify({
+        commit_id: 'abc123',
+        body: 'Looks good.',
+        event: 'APPROVE',
+        comments: [],
+      }),
+      'utf-8'
+    );
+    await writeFile(
+      path.join(outputDir, 'result.json'),
+      JSON.stringify({
+        verdict: 'accept',
+        comment: '.shipper/output/comment-248.md',
+        review_payload: '.shipper/output/review-payload-248.json',
+      }),
+      'utf-8'
+    );
+    await writeFile(path.join(outputDir, 'comment-248.md'), 'summary', 'utf-8');
+    ghMock
+      .mockResolvedValueOnce({ stdout: 'reviewer\n', stderr: '' })
+      .mockResolvedValueOnce({ stdout: 'author\n', stderr: '' })
+      .mockResolvedValueOnce({ stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ stdout: '', stderr: '' });
+
+    await expect(
+      processResult({
+        repo: 'owner/repo',
+        issueNumber: '248',
+        stage: 'pr_review',
+        cwd: tempDir,
+        prNumber: '77',
+      })
+    ).resolves.toEqual({
+      verdict: 'accept',
+      comment: '.shipper/output/comment-248.md',
+      review_payload: '.shipper/output/review-payload-248.json',
+    });
+
+    expect(ghMock).toHaveBeenNthCalledWith(1, ['api', 'user', '-q', '.login']);
+    expect(ghMock).toHaveBeenNthCalledWith(2, [
+      'pr',
+      'view',
+      '77',
+      '-R',
+      'owner/repo',
+      '--json',
+      'author',
+      '--jq',
+      '.author.login',
+    ]);
+    expect(ghMock).toHaveBeenNthCalledWith(3, [
+      'api',
+      'repos/owner/repo/pulls/77/reviews',
+      '--method',
+      'POST',
+      '--input',
+      payloadPath,
+    ]);
+    expect(ghMock).toHaveBeenNthCalledWith(4, [
+      'issue',
+      'comment',
+      '248',
+      '-R',
+      'owner/repo',
+      '--body-file',
+      path.join(tempDir, '.shipper/output/comment-248.md'),
+    ]);
+    expect(ghMock).toHaveBeenNthCalledWith(5, [
+      'issue',
+      'edit',
+      '248',
+      '-R',
+      'owner/repo',
+      '--add-label',
+      'shipper:pr-reviewed',
+      '--remove-label',
+      'shipper:pr-open',
     ]);
   });
 
