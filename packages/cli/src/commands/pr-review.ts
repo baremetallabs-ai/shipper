@@ -51,6 +51,9 @@ export async function prReviewCommand(
           'api',
           `repos/${repo}/pulls/${pr}/files`,
           '--paginate',
+          '--slurp',
+          '--jq',
+          'add',
         ]);
         await writeContextFile(cwd, 'pr-files.json', prFiles);
 

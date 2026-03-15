@@ -127,7 +127,7 @@ Determine the current branch name with `git branch --show-current`. Write `.ship
 {
   "title": "feat(#42): concise pr title",
   "body_file": ".shipper/output/pr-body-42.md",
-  "base": "<base branch from context>",
+  "base": "{{BASE_BRANCH}}",
   "head_branch": "<current branch name>",
   "draft": false
 }
@@ -137,7 +137,7 @@ Requirements:
 
 - `title` must be concise, under 72 characters, and aligned with the repo's commit-title conventions.
 - `body_file` must point to the PR body file you wrote under `.shipper/output/`.
-- `base` must match the base-branch context already supplied for this run.
+- `base` must be `{{BASE_BRANCH}}`.
 - `head_branch` must come from `git branch --show-current`.
 - `draft` is `true` only if the branch should open as a draft based on the issue state.
 
