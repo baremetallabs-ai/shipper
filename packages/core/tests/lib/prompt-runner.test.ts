@@ -2,18 +2,46 @@ import { EventEmitter } from 'node:events';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+type PromptStdout = EventEmitter & {
+  pipe: (destination: EventEmitter) => EventEmitter;
+};
+
 type PromptChild = EventEmitter & {
   stderr?: EventEmitter;
-  stdout?: EventEmitter;
+  stdout?: PromptStdout;
 };
 
 const spawnMock =
   vi.fn<(command: string, args?: string[], options?: Record<string, unknown>) => PromptChild>();
 const readFileMock = vi.fn<(path: string, encoding: string) => Promise<string>>();
+const mkdirMock = vi.fn<(path: string, options?: Record<string, unknown>) => Promise<void>>();
 const statSyncMock = vi.fn<(path: string) => unknown>();
+const createWriteStreamMock = vi.fn<(path: string) => EventEmitter>();
 const readFileSyncMock = vi.fn<(path: string, encoding: string) => string>();
 const fetchIssueMock = vi.fn<(repo: string, issueRef: string) => Promise<string>>();
 const fetchPRMock = vi.fn<(repo: string, prRef: string) => Promise<string>>();
+const resolveSessionRepoMock = vi
+  .fn<(opts: { repo?: string; cwd?: string }) => Promise<{ repo: string; repoSlug: string }>>()
+  .mockResolvedValue({ repo: 'owner/repo', repoSlug: 'owner-repo' });
+const getSessionPathsMock = vi
+  .fn<
+    (
+      repoSlug: string,
+      issueRef?: string,
+      stage?: string,
+      timestamp?: Date
+    ) => { logFile: string; metaFile: string }
+  >()
+  .mockImplementation((repoSlug, issueRef = 'unlinked', stage = 'test', timestamp = new Date()) => {
+    const token = timestamp.toISOString().replace(/[:.]/g, '-');
+    const base = `${issueRef}-${stage}-${token}`;
+    return {
+      logFile: `/home/user/.shipper/sessions/${repoSlug}/${base}.jsonl`,
+      metaFile: `/home/user/.shipper/sessions/${repoSlug}/${base}.meta.json`,
+    };
+  });
+const writeSessionMetaMock =
+  vi.fn<(metaFile: string, meta: Record<string, unknown>) => Promise<void>>();
 const resolveAgentMock = vi
   .fn<(promptName: string, agent?: string) => 'claude' | 'codex'>()
   .mockReturnValue('claude');
@@ -34,13 +62,18 @@ vi.mock('node:child_process', async () => {
 
 vi.mock('node:fs/promises', async () => {
   const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
-  return { ...actual, readFile: (...args: unknown[]) => readFileMock(...args) };
+  return {
+    ...actual,
+    mkdir: (...args: unknown[]) => mkdirMock(...args),
+    readFile: (...args: unknown[]) => readFileMock(...args),
+  };
 });
 
 vi.mock('node:fs', async () => {
   const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
   return {
     ...actual,
+    createWriteStream: (...args: unknown[]) => createWriteStreamMock(...args),
     statSync: (...args: unknown[]) => statSyncMock(...args),
     readFileSync: (...args: unknown[]) => readFileSyncMock(...args),
   };
@@ -66,19 +99,36 @@ vi.mock('../../src/lib/prompts.js', () => ({
   },
 }));
 
+vi.mock('../../src/lib/session.js', () => ({
+  resolveSessionRepo: (...args: unknown[]) => resolveSessionRepoMock(...args),
+  getSessionPaths: (...args: unknown[]) => getSessionPathsMock(...args),
+  writeSessionMeta: (...args: unknown[]) => writeSessionMetaMock(...args),
+}));
+
 function mockSpawnResult(opts: { code?: number; error?: Error } = {}): void {
   const { code = 0, error } = opts;
   spawnMock.mockImplementationOnce(() => {
-    const child = new EventEmitter() as EventEmitter & {
+    let pipedStream: EventEmitter | undefined;
+    const stdout = Object.assign(new EventEmitter(), {
+      pipe(destination: EventEmitter) {
+        pipedStream = destination;
+        return destination;
+      },
+    }) as PromptStdout;
+    const child = new EventEmitter() as PromptChild & {
       stderr?: EventEmitter;
-      stdout?: EventEmitter;
+      stdout?: PromptStdout;
     };
+    child.stdout = stdout;
     globalThis.queueMicrotask(() => {
       if (error) {
         child.emit('error', error);
         return;
       }
       child.emit('close', code);
+      globalThis.queueMicrotask(() => {
+        pipedStream?.emit('finish');
+      });
     });
     return child;
   });
@@ -102,6 +152,27 @@ function spawnedArgs(): string[] {
   return spawnMock.mock.calls[0]?.[1] ?? [];
 }
 
+function makeTimeoutChild(): PromptChild & {
+  kill: ReturnType<typeof vi.fn>;
+  finishLog: () => void;
+} {
+  let pipedStream: EventEmitter | undefined;
+  const stdout = Object.assign(new EventEmitter(), {
+    pipe(destination: EventEmitter) {
+      pipedStream = destination;
+      return destination;
+    },
+  }) as PromptStdout;
+
+  return Object.assign(new EventEmitter(), {
+    stdout,
+    kill: vi.fn(),
+    finishLog() {
+      pipedStream?.emit('finish');
+    },
+  });
+}
+
 afterEach(() => {
   vi.clearAllMocks();
   resolveAgentMock.mockReturnValue('claude');
@@ -110,9 +181,13 @@ afterEach(() => {
   getSettingsMock.mockReturnValue({ agentTimeoutMinutes: 60 });
   fetchIssueMock.mockResolvedValue('issue body');
   fetchPRMock.mockResolvedValue('pr body');
+  resolveSessionRepoMock.mockResolvedValue({ repo: 'owner/repo', repoSlug: 'owner-repo' });
+  writeSessionMetaMock.mockResolvedValue(undefined);
   statSyncMock.mockImplementation(() => {
     throw new Error('ENOENT');
   });
+  mkdirMock.mockResolvedValue(undefined);
+  createWriteStreamMock.mockImplementation(() => new EventEmitter());
 });
 
 describe('runPrompt', () => {
@@ -361,6 +436,9 @@ describe('runPrompt', () => {
     await runPrompt('test', { mode: 'headless' });
 
     expect(spawnedArgs().slice(0, 3)).toEqual(['-p', '--model', 'opus']);
+    expect(spawnedArgs()).toContain('--verbose');
+    expect(spawnedArgs()).toContain('--output-format');
+    expect(spawnedArgs()).toContain('stream-json');
   });
 
   it('does not duplicate -p for claude headless mode when already present', async () => {
@@ -371,6 +449,8 @@ describe('runPrompt', () => {
     await runPrompt('test', { mode: 'headless' });
 
     expect(spawnedArgs().filter((arg) => arg === '-p')).toHaveLength(1);
+    expect(spawnedArgs().filter((arg) => arg === '--verbose')).toHaveLength(1);
+    expect(spawnedArgs().filter((arg) => arg === '--output-format')).toHaveLength(1);
   });
 
   it('strips -p for claude interactive mode', async () => {
@@ -392,6 +472,103 @@ describe('runPrompt', () => {
     await runPrompt('test', { mode: 'default' });
 
     expect(spawnedArgs().slice(0, 2)).toEqual(['--model', 'opus']);
+  });
+
+  it('captures headless stdout to a session log and writes metadata after exit', async () => {
+    resolveModeMock.mockReturnValue('headless');
+    readFileMock.mockResolvedValueOnce(makePrompt('claude'));
+    mockSpawnResult();
+
+    await expect(
+      runPrompt('implement', { mode: 'headless', repo: 'owner/repo', issueRef: '308' })
+    ).resolves.toBe(0);
+
+    expect(resolveSessionRepoMock).toHaveBeenCalledWith({ repo: 'owner/repo', cwd: undefined });
+    expect(getSessionPathsMock).toHaveBeenCalledWith(
+      'owner-repo',
+      '308',
+      'implement',
+      expect.any(Date)
+    );
+    expect(mkdirMock).toHaveBeenCalledWith('/home/user/.shipper/sessions/owner-repo', {
+      recursive: true,
+    });
+    expect(createWriteStreamMock).toHaveBeenCalledWith(
+      expect.stringContaining('/home/user/.shipper/sessions/owner-repo/308-implement-')
+    );
+    expect(spawnMock.mock.calls[0]?.[2]).toMatchObject({
+      cwd: undefined,
+      env: process.env,
+      stdio: ['inherit', 'pipe', 'inherit'],
+    });
+    const writeMetaCall = writeSessionMetaMock.mock.calls[0];
+    expect(writeMetaCall?.[0]).toContain('/home/user/.shipper/sessions/owner-repo/308-implement-');
+    expect(writeMetaCall?.[1]).toMatchObject({
+      repo: 'owner/repo',
+      issue: '308',
+      stage: 'implement',
+      agent: 'claude',
+      model: 'default',
+      exitCode: 0,
+    });
+    expect((writeMetaCall?.[1] as { logFile: string }).logFile).toContain(
+      '/home/user/.shipper/sessions/owner-repo/308-implement-'
+    );
+  });
+
+  it('resolves session paths for headless runs even when opts.repo is omitted', async () => {
+    resolveModeMock.mockReturnValue('headless');
+    readFileMock.mockResolvedValueOnce(makePrompt('claude'));
+    resolveSessionRepoMock.mockResolvedValueOnce({ repo: '_unlinked', repoSlug: '_unlinked' });
+    mockSpawnResult();
+
+    await expect(runPrompt('setup', { mode: 'headless', cwd: '/tmp/no-repo' })).resolves.toBe(0);
+
+    expect(resolveSessionRepoMock).toHaveBeenCalledWith({ repo: undefined, cwd: '/tmp/no-repo' });
+    expect(getSessionPathsMock).toHaveBeenCalledWith(
+      '_unlinked',
+      undefined,
+      'setup',
+      expect.any(Date)
+    );
+    expect(writeSessionMetaMock).toHaveBeenCalledWith(
+      expect.stringContaining('/_unlinked/unlinked-setup-'),
+      expect.objectContaining({
+        repo: '_unlinked',
+        issue: 'unlinked',
+        stage: 'setup',
+      })
+    );
+  });
+
+  it('leaves interactive runs on inherited stdio and skips session logging', async () => {
+    resolveModeMock.mockReturnValue('interactive');
+    readFileMock.mockResolvedValueOnce(makePrompt('claude'));
+    mockSpawnResult();
+
+    await expect(runPrompt('test', { mode: 'interactive', repo: 'owner/repo' })).resolves.toBe(0);
+
+    expect(resolveSessionRepoMock).not.toHaveBeenCalled();
+    expect(getSessionPathsMock).not.toHaveBeenCalled();
+    expect(mkdirMock).not.toHaveBeenCalled();
+    expect(createWriteStreamMock).not.toHaveBeenCalled();
+    expect(writeSessionMetaMock).not.toHaveBeenCalled();
+    expect(spawnMock.mock.calls[0]?.[2]).toMatchObject({
+      stdio: 'inherit',
+    });
+  });
+
+  it('warns on metadata write failure and still returns the agent exit code', async () => {
+    resolveModeMock.mockReturnValue('headless');
+    readFileMock.mockResolvedValueOnce(makePrompt('claude'));
+    writeSessionMetaMock.mockRejectedValueOnce(new Error('disk full'));
+    const warnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockSpawnResult({ code: 17 });
+
+    await expect(runPrompt('test', { mode: 'headless', repo: 'owner/repo' })).resolves.toBe(17);
+
+    expect(warnMock).toHaveBeenCalledWith('Warning: Failed to write session metadata: disk full');
+    warnMock.mockRestore();
   });
 
   it('injects codex headless args when absent', async () => {
@@ -588,12 +765,11 @@ describe('agent timeout', () => {
     getSettingsMock.mockReturnValue({ agentTimeoutMinutes: 60 });
     readFileMock.mockResolvedValueOnce(makePrompt('claude'));
 
-    const child = Object.assign(new EventEmitter(), { kill: vi.fn() }) as EventEmitter & {
-      kill: ReturnType<typeof vi.fn>;
-    };
+    const child = makeTimeoutChild();
     spawnMock.mockReturnValueOnce(child);
 
     const promise = runPrompt('test', { mode: 'headless' });
+    await vi.advanceTimersByTimeAsync(0);
 
     await vi.advanceTimersByTimeAsync(60 * 60_000);
 
@@ -601,6 +777,7 @@ describe('agent timeout', () => {
     expect(errorMock).toHaveBeenCalledWith('Agent timed out after 60 minutes');
 
     child.emit('close', 143);
+    child.finishLog();
     await expect(promise).resolves.toBe(143);
   });
 
@@ -609,12 +786,11 @@ describe('agent timeout', () => {
     getSettingsMock.mockReturnValue({ agentTimeoutMinutes: 60 });
     readFileMock.mockResolvedValueOnce(makePrompt('claude'));
 
-    const child = Object.assign(new EventEmitter(), { kill: vi.fn() }) as EventEmitter & {
-      kill: ReturnType<typeof vi.fn>;
-    };
+    const child = makeTimeoutChild();
     spawnMock.mockReturnValueOnce(child);
 
     const promise = runPrompt('test', { mode: 'headless' });
+    await vi.advanceTimersByTimeAsync(0);
 
     await vi.advanceTimersByTimeAsync(60 * 60_000);
     expect(child.kill).toHaveBeenCalledWith('SIGTERM');
@@ -623,6 +799,7 @@ describe('agent timeout', () => {
     expect(child.kill).toHaveBeenCalledWith('SIGKILL');
 
     child.emit('close', 137);
+    child.finishLog();
     await expect(promise).resolves.toBe(137);
   });
 
@@ -650,17 +827,17 @@ describe('agent timeout', () => {
     getSettingsMock.mockReturnValue({ agentTimeoutMinutes: 0 });
     readFileMock.mockResolvedValueOnce(makePrompt('claude'));
 
-    const child = Object.assign(new EventEmitter(), { kill: vi.fn() }) as EventEmitter & {
-      kill: ReturnType<typeof vi.fn>;
-    };
+    const child = makeTimeoutChild();
     spawnMock.mockReturnValueOnce(child);
 
     const promise = runPrompt('test', { mode: 'headless' });
+    await vi.advanceTimersByTimeAsync(0);
 
     await vi.advanceTimersByTimeAsync(120 * 60_000);
     expect(child.kill).not.toHaveBeenCalled();
 
     child.emit('close', 0);
+    child.finishLog();
     await expect(promise).resolves.toBe(0);
   });
 
@@ -669,18 +846,18 @@ describe('agent timeout', () => {
     getSettingsMock.mockReturnValue({ agentTimeoutMinutes: 60 });
     readFileMock.mockResolvedValueOnce(makePrompt('claude'));
 
-    const child = Object.assign(new EventEmitter(), { kill: vi.fn() }) as EventEmitter & {
-      kill: ReturnType<typeof vi.fn>;
-    };
+    const child = makeTimeoutChild();
     spawnMock.mockReturnValueOnce(child);
 
     const promise = runPrompt('test', { mode: 'headless' });
+    await vi.advanceTimersByTimeAsync(0);
 
     await vi.advanceTimersByTimeAsync(60 * 60_000);
     expect(child.kill).toHaveBeenCalledWith('SIGTERM');
 
     // Agent handles SIGTERM and exits with 0
     child.emit('close', 0);
+    child.finishLog();
     await expect(promise).resolves.toBe(1);
   });
 
@@ -689,9 +866,7 @@ describe('agent timeout', () => {
     getSettingsMock.mockReturnValue({ agentTimeoutMinutes: 60 });
     readFileMock.mockResolvedValueOnce(makePrompt('claude'));
 
-    const child = Object.assign(new EventEmitter(), { kill: vi.fn() }) as EventEmitter & {
-      kill: ReturnType<typeof vi.fn>;
-    };
+    const child = makeTimeoutChild();
     spawnMock.mockReturnValueOnce(child);
 
     const promise = runPrompt('test', { mode: 'headless' });
@@ -701,6 +876,7 @@ describe('agent timeout', () => {
 
     // Process exits normally before timeout
     child.emit('close', 0);
+    child.finishLog();
     await expect(promise).resolves.toBe(0);
 
     // Advance past the timeout — should not fire
