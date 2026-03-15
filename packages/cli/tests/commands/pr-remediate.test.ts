@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type {
+  CheckClassification,
+  LabelTransition,
+  PRChecksLine,
+  ResultJson,
+} from '@dnsquared/shipper-core';
 
 const getSettingsMock =
   vi.fn<() => { prReviewWait: { mode: 'timer' | 'checks'; timeoutMinutes: number } }>();
-interface MockCheck {
-  name: string;
-  state: string;
-  bucket: string;
-}
-
-const fetchChecksMock = vi.fn<(repo: string, pr: string) => Promise<MockCheck[]>>();
-const classifyChecksMock = vi.fn();
+const fetchChecksMock = vi.fn<(repo: string, pr: string) => Promise<PRChecksLine[]>>();
+const classifyChecksMock = vi.fn<(checks: PRChecksLine[]) => CheckClassification>();
 const resolveRefMock = vi.fn();
 const autoSelectPrForStageMock = vi.fn();
 const formatConflictContextMock = vi.fn(() => 'formatted conflict context');
@@ -32,12 +32,12 @@ const sleepMsMock = vi.fn(() => Promise.resolve());
 const setupProtocolDirsMock = vi.fn(() => Promise.resolve());
 const writeContextFileMock = vi.fn(() => Promise.resolve());
 const scrubOutputDirMock = vi.fn(() => Promise.resolve());
-const readResultFileMock = vi.fn();
+const readResultFileMock = vi.fn<() => Promise<ResultJson>>();
 const postRepliesMock = vi.fn(() => Promise.resolve());
 const postCommentMock = vi.fn(() => Promise.resolve());
 const executeTransitionMock = vi.fn(() => Promise.resolve());
 const handleAgentCrashMock = vi.fn(() => Promise.resolve());
-const resolveTransitionMock = vi.fn(() => ({
+const resolveTransitionMock = vi.fn<() => LabelTransition>(() => ({
   add: ['shipper:ready'],
   remove: ['shipper:pr-reviewed'],
 }));
@@ -60,9 +60,9 @@ vi.mock('@dnsquared/shipper-core', () => ({
   getRepoRoot: getRepoRootMock,
   gh: ghMock,
   sleepMs: sleepMsMock,
-  getSettings: () => getSettingsMock(),
-  fetchChecks: (currentRepo: string, pr: string) => fetchChecksMock(currentRepo, pr),
-  classifyChecks: (checks: MockCheck[]) => classifyChecksMock(checks),
+  getSettings: getSettingsMock,
+  fetchChecks: fetchChecksMock,
+  classifyChecks: classifyChecksMock,
   setupProtocolDirs: setupProtocolDirsMock,
   writeContextFile: writeContextFileMock,
   scrubOutputDir: scrubOutputDirMock,
@@ -77,7 +77,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   PROTOCOL_OUTPUT_DIR: '.shipper/output',
 }));
 
-function classifyChecksImpl(checks: Array<{ bucket: string }>) {
+function classifyChecksImpl(checks: PRChecksLine[]): CheckClassification {
   return {
     pending: checks.filter((check) => check.bucket === 'pending'),
     failed: checks.filter((check) => check.bucket === 'fail' || check.bucket === 'cancel'),
@@ -224,26 +224,30 @@ describe('prRemediateCommand', () => {
 
   it('accepts on the first pass, posts artifacts in order, and transitions to ready on green CI', async () => {
     const events: string[] = [];
-    fetchChecksMock.mockImplementation(async () => {
+    fetchChecksMock.mockImplementation(() => {
       events.push('fetchChecks');
-      return PASS_CHECKS;
+      return Promise.resolve(PASS_CHECKS);
     });
     readResultFileMock.mockResolvedValue({
       verdict: 'accept',
       comment: '.shipper/output/comment-10.md',
       replies: '.shipper/output/replies',
     });
-    pushWorktreeMock.mockImplementation(async () => {
+    pushWorktreeMock.mockImplementation(() => {
       events.push('pushWorktree');
+      return Promise.resolve();
     });
-    postRepliesMock.mockImplementation(async () => {
+    postRepliesMock.mockImplementation(() => {
       events.push('postReplies');
+      return Promise.resolve();
     });
-    postCommentMock.mockImplementation(async () => {
+    postCommentMock.mockImplementation(() => {
       events.push('postComment');
+      return Promise.resolve();
     });
-    executeTransitionMock.mockImplementation(async () => {
+    executeTransitionMock.mockImplementation(() => {
       events.push('executeTransition');
+      return Promise.resolve();
     });
 
     const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
@@ -302,9 +306,9 @@ describe('prRemediateCommand', () => {
 
   it('retries after red CI, refreshes preflight context, and succeeds on a later green pass', async () => {
     let fetchCall = 0;
-    fetchChecksMock.mockImplementation(async () => {
+    fetchChecksMock.mockImplementation(() => {
       fetchCall += 1;
-      return fetchCall <= 4 ? FAIL_CHECKS : PASS_CHECKS;
+      return Promise.resolve(fetchCall <= 4 ? FAIL_CHECKS : PASS_CHECKS);
     });
     readResultFileMock
       .mockResolvedValueOnce({
