@@ -115,11 +115,12 @@ describe('output protocol helpers', () => {
     ]);
   });
 
-  it('posts one review-thread reply per markdown file', async () => {
+  it('posts one review-thread reply per numeric markdown file in stable order', async () => {
     const repliesDir = path.join(tempDir, PROTOCOL_OUTPUT_DIR, 'replies');
     await mkdir(repliesDir, { recursive: true });
-    await writeFile(path.join(repliesDir, '101.md'), 'First reply', 'utf-8');
     await writeFile(path.join(repliesDir, '102.md'), 'Second reply', 'utf-8');
+    await writeFile(path.join(repliesDir, '101.md'), 'First reply', 'utf-8');
+    await writeFile(path.join(repliesDir, 'abc.md'), 'skip me', 'utf-8');
     await writeFile(path.join(repliesDir, 'notes.txt'), 'ignore me', 'utf-8');
     await mkdir(path.join(repliesDir, 'nested'));
 

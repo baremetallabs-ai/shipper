@@ -261,6 +261,9 @@ describe('prRemediateCommand', () => {
       ['/tmp/fake-wt', 'pr-diff.patch', 'diff --git a/file b/file\n'],
       ['/tmp/fake-wt', 'pass-info.json', JSON.stringify({ pass: 1, maxPasses: 5 }, null, 2)],
     ]);
+    expect(writeContextFileMock.mock.invocationCallOrder[3]).toBeLessThan(
+      syncWorktreeMock.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY
+    );
     expect(readResultFileMock).toHaveBeenCalledWith('/tmp/fake-wt/.shipper/output');
     expect(events).toEqual([
       'fetchChecks',
@@ -397,6 +400,41 @@ describe('prRemediateCommand', () => {
     );
     expect(process.exitCode).toBe(1);
     expect(pushWorktreeMock).not.toHaveBeenCalled();
+    expect(executeTransitionMock).not.toHaveBeenCalled();
+  });
+
+  it('handles sync failures as agent crashes', async () => {
+    fetchChecksMock.mockResolvedValue(PASS_CHECKS);
+    syncWorktreeMock.mockRejectedValue(new Error('rebase failed'));
+
+    const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
+
+    await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
+
+    expect(handleAgentCrashMock).toHaveBeenCalledWith(
+      'owner/repo',
+      '10',
+      'pr_remediate',
+      'rebase failed'
+    );
+    expect(process.exitCode).toBe(1);
+    expect(runPromptMock).not.toHaveBeenCalled();
+    expect(pushWorktreeMock).not.toHaveBeenCalled();
+  });
+
+  it('does not transition to ready when no checks have appeared yet', async () => {
+    fetchChecksMock.mockResolvedValue([]);
+    readResultFileMock.mockResolvedValue({
+      verdict: 'accept',
+      comment: '.shipper/output/comment-10.md',
+    });
+
+    const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
+
+    await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
+
+    expect(syncWorktreeMock).toHaveBeenCalledTimes(5);
+    expect(pushWorktreeMock).toHaveBeenCalledTimes(5);
     expect(executeTransitionMock).not.toHaveBeenCalled();
   });
 });
