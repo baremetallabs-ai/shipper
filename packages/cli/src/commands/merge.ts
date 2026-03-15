@@ -439,7 +439,7 @@ export async function postMerge(
 
 async function runPostMergeActions(pr: QueuedPR, nwo: string, dryRun: boolean): Promise<void> {
   const issueNumber = await getLinkedIssueNumber(pr.number, nwo);
-  if (issueNumber == null) {
+  if (issueNumber === null) {
     console.warn(
       `  Warning: Could not determine linked issue for PR #${pr.number}. Skipping post-merge actions.`
     );

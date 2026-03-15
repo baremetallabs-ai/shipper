@@ -68,6 +68,19 @@ export default [
           allowNumberAndString: true,
         },
       ],
+      // Phase 3: Targeted rules (#280)
+      '@typescript-eslint/consistent-type-imports': [
+        'error',
+        {
+          disallowTypeAnnotations: false,
+        },
+      ],
+      '@typescript-eslint/no-unnecessary-condition': 'error',
+      '@typescript-eslint/switch-exhaustiveness-check': 'error',
+      '@typescript-eslint/no-floating-promises': 'error',
+      '@typescript-eslint/no-misused-promises': 'error',
+      '@typescript-eslint/require-await': 'error',
+      eqeqeq: 'error',
 
       'no-console': 'off',
       'prefer-const': 'error',

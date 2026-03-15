@@ -637,8 +637,10 @@ export async function autoSelectPrForStage(
 }
 
 export function resolveRef(repo: string, ref: string, need: 'both'): Promise<ResolvedRefBoth>;
+// TypeScript overload signatures intentionally redeclare the function name before the implementation.
 // eslint-disable-next-line no-redeclare
 export function resolveRef(repo: string, ref: string, need: 'issue' | 'pr'): Promise<ResolvedRef>;
+// TypeScript overload signatures intentionally redeclare the function name before the implementation.
 // eslint-disable-next-line no-redeclare
 export async function resolveRef(
   repo: string,
