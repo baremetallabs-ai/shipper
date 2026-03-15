@@ -2,6 +2,7 @@ import { findBranchForIssue, getRepoRoot } from '@dnsquared/shipper-core';
 import { autoSelectIssue, resolveBaseBranch, resolveRef } from '@dnsquared/shipper-core';
 import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
 import { formatConflictContext } from '@dnsquared/shipper-core';
+import { handleAgentCrash, processResult, scrubOutputDir } from '@dnsquared/shipper-core';
 import { withStageHooks } from '@dnsquared/shipper-core';
 import { getSettings } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
@@ -32,7 +33,7 @@ export async function prOpenCommand(
   const settings = getSettings();
   const baseBranch = await resolveBaseBranch(repo, settings.defaultBaseBranch);
 
-  const code = await withIssueLock(repo, issue, async () => {
+  await withIssueLock(repo, issue, async () => {
     const repoRoot = await getRepoRoot();
     const branch = await findBranchForIssue(issue);
 
@@ -43,7 +44,8 @@ export async function prOpenCommand(
         await withWorktree(
           { repoRoot, branch, createBranch: false, issueNumber: issue, stage: 'pr-open' },
           async (wtPath) => {
-            return await withGitTransport(
+            await scrubOutputDir(wtPath);
+            await withGitTransport(
               { wtPath, repoRoot, baseBranch, pushMode: 'force-with-lease' },
               async (conflictContext, pushError) =>
                 await runPrompt('pr_open', {
@@ -59,10 +61,16 @@ export async function prOpenCommand(
                     : (pushError ?? undefined),
                 })
             );
+            try {
+              await processResult({ repo, issueNumber: issue, stage: 'pr_open', cwd: wtPath });
+            } catch (error) {
+              const detail = error instanceof Error ? error.message : String(error);
+              await handleAgentCrash(repo, issue, 'pr_open', detail);
+              process.exitCode = 1;
+              return;
+            }
           }
         )
     );
   });
-
-  process.exitCode = code;
 }
