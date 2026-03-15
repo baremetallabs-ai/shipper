@@ -151,7 +151,7 @@ Requirements:
 
 ## Agent Feedback
 
-Throughout your work on this stage, observe any friction you encounter. If you have anything worth reporting, append an `## Agent Feedback` section as the very last section of the issue comment (the note posted via `gh issue comment`), not the PR review body. If Step 4 is skipped because no issue comment is posted, omit the section entirely. If you have nothing to report, omit the section entirely — no heading, no placeholder.
+Throughout your work on this stage, observe any friction you encounter. If you have anything worth reporting, append an `## Agent Feedback` section as the very last section of the issue comment that Shipper posts for this stage, not the PR review body. If Step 4 is skipped because no issue comment is posted, omit the section entirely. If you have nothing to report, omit the section entirely — no heading, no placeholder.
 
 Reportable items include:
 
