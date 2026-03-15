@@ -81,9 +81,6 @@ describe('prReviewCommand', () => {
       'api',
       `repos/${repo}/pulls/42/files`,
       '--paginate',
-      '--slurp',
-      '--jq',
-      'add',
     ]);
     expect(mockGh).toHaveBeenNthCalledWith(3, [
       'pr',
