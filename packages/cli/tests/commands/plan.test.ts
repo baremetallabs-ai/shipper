@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const autoSelectIssueMock = vi.fn();
+const generateBranchNameMock = vi.fn(async () => 'shipper/123-branch');
+const getRepoRootMock = vi.fn(async () => '/tmp/fake-repo');
 const handleAgentCrashMock = vi.fn(async () => {});
 const processResultMock = vi.fn(async () => ({
   verdict: 'accept',
@@ -14,15 +16,21 @@ const withIssueLockMock = vi.fn(
 const withStageHooksMock = vi.fn(
   async (_stage: unknown, _env: unknown, fn: () => Promise<unknown>) => await fn()
 );
+const withWorktreeMock = vi.fn(
+  async (_opts: unknown, fn: (wtPath: string) => Promise<unknown>) => await fn('/tmp/fake-wt')
+);
 
 vi.mock('@dnsquared/shipper-core', () => ({
   autoSelectIssue: autoSelectIssueMock,
+  generateBranchName: generateBranchNameMock,
+  getRepoRoot: getRepoRootMock,
   handleAgentCrash: handleAgentCrashMock,
   processResult: processResultMock,
   runPrompt: runPromptMock,
   scrubOutputDir: scrubOutputDirMock,
   withIssueLock: withIssueLockMock,
   withStageHooks: withStageHooksMock,
+  withWorktree: withWorktreeMock,
 }));
 
 describe('planCommand', () => {
@@ -41,16 +49,32 @@ describe('planCommand', () => {
     exitSpy.mockRestore();
   });
 
-  it('scrubs output and processes protocol results after running the prompt', async () => {
+  it('runs the planning stage inside a worktree and processes results there', async () => {
     const { planCommand } = await import('../../src/commands/plan.js');
-    const cwd = process.cwd();
 
     await expect(planCommand('owner/repo', '123')).resolves.toBeUndefined();
 
-    expect(scrubOutputDirMock).toHaveBeenCalledWith(cwd);
+    expect(generateBranchNameMock).toHaveBeenCalledWith('owner/repo', '123');
+    expect(withStageHooksMock).toHaveBeenCalledWith(
+      'plan',
+      { issueNumber: '123', branchName: 'shipper/123-branch' },
+      expect.any(Function)
+    );
+    expect(withWorktreeMock).toHaveBeenCalledWith(
+      {
+        repoRoot: '/tmp/fake-repo',
+        branch: 'shipper/123-branch',
+        createBranch: true,
+        issueNumber: '123',
+        stage: 'plan',
+      },
+      expect.any(Function)
+    );
+    expect(scrubOutputDirMock).toHaveBeenCalledWith('/tmp/fake-wt');
     expect(runPromptMock).toHaveBeenCalledWith('plan', {
       repo: 'owner/repo',
       issueRef: '123',
+      cwd: '/tmp/fake-wt',
       mode: undefined,
       agent: undefined,
       model: undefined,
@@ -59,7 +83,7 @@ describe('planCommand', () => {
       repo: 'owner/repo',
       issueNumber: '123',
       stage: 'plan',
-      cwd,
+      cwd: '/tmp/fake-wt',
     });
     expect(handleAgentCrashMock).not.toHaveBeenCalled();
     expect(process.exitCode).toBeUndefined();
@@ -79,5 +103,15 @@ describe('planCommand', () => {
       'Invalid result.json'
     );
     expect(process.exitCode).toBe(1);
+  });
+
+  it('fails hard when worktree creation fails', async () => {
+    withWorktreeMock.mockRejectedValueOnce(new Error('worktree add failed'));
+    const { planCommand } = await import('../../src/commands/plan.js');
+
+    await expect(planCommand('owner/repo', '123')).rejects.toThrow('worktree add failed');
+
+    expect(runPromptMock).not.toHaveBeenCalled();
+    expect(processResultMock).not.toHaveBeenCalled();
   });
 });
