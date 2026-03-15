@@ -187,3 +187,5 @@ If you hit an environment problem that you cannot fix inside the sandbox:
 3. Stop immediately.
 
 Do not attempt to mutate GitHub directly. Shipper will read the output files, create the PR, post the issue comment, and apply the label transition after you exit.
+
+The `.shipper/output/` directory is gitignored by design — the orchestrator reads output files directly from the filesystem, not from git. Do not modify `.shipper/.gitignore`.

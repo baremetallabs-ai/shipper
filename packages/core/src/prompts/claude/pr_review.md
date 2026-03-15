@@ -187,3 +187,5 @@ If an environment problem prevents you from completing the review:
 3. Stop immediately.
 
 Do not submit the review yourself and do not attempt direct GitHub mutation. Shipper will consume the payload, submit the review, post the issue comment, and transition the stage after you exit.
+
+The `.shipper/output/` directory is gitignored by design — the orchestrator reads output files directly from the filesystem, not from git. Do not modify `.shipper/.gitignore`.
