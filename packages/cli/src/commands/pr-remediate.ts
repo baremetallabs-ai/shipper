@@ -321,20 +321,27 @@ export async function prRemediateCommand(
           const gitOpts = { wtPath, repoRoot, baseBranch, pushMode: 'force-with-lease' as const };
 
           for (let pass = 1; pass <= MAX_REMEDIATION_PASSES; pass++) {
-            await syncWorktree(gitOpts, async (conflictContext) => {
-              return await runPrompt('pr_remediate', {
-                repo,
-                issueRef: issueNumber,
-                prRef,
-                cwd: wtPath,
-                mode,
-                agent,
-                model,
-                userInput: formatConflictContext(conflictContext),
-              });
-            });
-
             await preflight(wtPath, repo, prRef, pass, MAX_REMEDIATION_PASSES);
+
+            try {
+              await syncWorktree(gitOpts, async (conflictContext) => {
+                return await runPrompt('pr_remediate', {
+                  repo,
+                  issueRef: issueNumber,
+                  prRef,
+                  cwd: wtPath,
+                  mode,
+                  agent,
+                  model,
+                  userInput: formatConflictContext(conflictContext),
+                });
+              });
+            } catch (error) {
+              const detail = error instanceof Error ? error.message : String(error);
+              await handleAgentCrash(repo, issueNumber, 'pr_remediate', detail);
+              return 1;
+            }
+
             await scrubOutputDir(wtPath);
 
             const agentCode = await runPrompt('pr_remediate', {
@@ -384,7 +391,7 @@ export async function prRemediateCommand(
             const checks = await fetchChecks(repo, prRef);
             const { failed, pending } = classifyChecks(checks);
 
-            if (failed.length === 0 && pending.length === 0) {
+            if (checks.length > 0 && failed.length === 0 && pending.length === 0) {
               await executeTransition(
                 repo,
                 issueNumber,
@@ -395,7 +402,7 @@ export async function prRemediateCommand(
 
             console.error(
               `Pass ${pass}/${MAX_REMEDIATION_PASSES}: CI not green yet ` +
-                `(${failed.length} failing, ${pending.length} pending).`
+                `(${checks.length} total, ${failed.length} failing, ${pending.length} pending).`
             );
           }
 

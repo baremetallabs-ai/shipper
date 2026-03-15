@@ -367,12 +367,16 @@ export async function postReplies(
     throw error;
   }
 
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith('.md')) {
-      continue;
-    }
+  const replyEntries = entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
+    .map((entry) => ({
+      entry,
+      commentId: entry.name.slice(0, -'.md'.length),
+    }))
+    .filter(({ commentId }) => /^\d+$/.test(commentId))
+    .sort((a, b) => Number(a.commentId) - Number(b.commentId));
 
-    const commentId = entry.name.slice(0, -'.md'.length);
+  for (const { entry, commentId } of replyEntries) {
     const body = await readFile(path.join(repliesDir, entry.name), 'utf-8');
     await gh([
       'api',
