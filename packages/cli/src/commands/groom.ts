@@ -1,7 +1,8 @@
-import { autoSelectIssue } from '@dnsquared/shipper-core';
+import { autoSelectIssue, generateBranchName, getRepoRoot } from '@dnsquared/shipper-core';
 import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
 import { withStageHooks } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
+import { withWorktree } from '@dnsquared/shipper-core';
 import { runPrompt } from '@dnsquared/shipper-core';
 import { printAutoSummary, type AutoResult } from './ship.js';
 
@@ -19,13 +20,21 @@ async function groomOneIssue(
   agent?: AgentName,
   model?: string
 ): Promise<{ success: boolean; error?: string }> {
-  const code = await withIssueLock(repo, issueStr, () =>
-    withStageHooks(
+  const code = await withIssueLock(repo, issueStr, async () => {
+    const repoRoot = await getRepoRoot();
+    const branch = await generateBranchName(repo, issueStr);
+
+    return await withStageHooks(
       'groom',
-      { issueNumber: issueStr },
-      async () => await runPrompt('groom', { repo, issueRef: issueStr, mode, agent, model })
-    )
-  );
+      { issueNumber: issueStr, branchName: branch },
+      async () =>
+        await withWorktree(
+          { repoRoot, branch, createBranch: true, issueNumber: issueStr, stage: 'groom' },
+          async (wtPath) =>
+            await runPrompt('groom', { repo, issueRef: issueStr, cwd: wtPath, mode, agent, model })
+        )
+    );
+  });
   return code === 0
     ? { success: true }
     : { success: false, error: 'agent exited with non-zero status' };
