@@ -45,7 +45,7 @@ export async function prOpenCommand(
           { repoRoot, branch, createBranch: false, issueNumber: issue, stage: 'pr-open' },
           async (wtPath) => {
             await scrubOutputDir(wtPath);
-            await withGitTransport(
+            const transportCode = await withGitTransport(
               { wtPath, repoRoot, baseBranch, pushMode: 'force-with-lease' },
               async (conflictContext, pushError) =>
                 await runPrompt('pr_open', {
@@ -61,6 +61,10 @@ export async function prOpenCommand(
                     : (pushError ?? undefined),
                 })
             );
+            if (transportCode !== 0) {
+              process.exitCode = transportCode;
+              return;
+            }
             try {
               await processResult({ repo, issueNumber: issue, stage: 'pr_open', cwd: wtPath });
             } catch (error) {

@@ -34,6 +34,8 @@ describe('pr_open prompts', () => {
       expect(prompt).toContain('.shipper/output/pr-body-<number>.md');
       expect(prompt).toContain('.shipper/output/pr-spec-<number>.json');
       expect(prompt).toContain('.shipper/output/result.json');
+      expect(prompt).toContain('{{BASE_BRANCH}}');
+      expect(prompt).not.toContain('<base branch from context>');
       expect(prompt).not.toContain('gh pr create');
       expect(prompt).not.toContain('gh pr checks');
       expect(prompt).not.toContain('gh issue comment');

@@ -143,6 +143,14 @@ function validateReviewComment(
     errors.push(`'comments[${index}].start_side' must be LEFT or RIGHT`);
   }
 
+  const hasStartLine = comment.start_line !== undefined;
+  const hasStartSide = comment.start_side !== undefined;
+  if (hasStartLine !== hasStartSide) {
+    errors.push(
+      `'comments[${index}].start_line' and 'comments[${index}].start_side' must be provided together`
+    );
+  }
+
   if (
     pathValue === undefined ||
     lineValue === undefined ||
@@ -367,6 +375,8 @@ export async function createPrFromSpec(
     'create',
     '-R',
     repo,
+    '--head',
+    spec.head_branch,
     '--base',
     spec.base,
     '--title',
@@ -420,6 +430,16 @@ export async function processResult(opts: {
 }): Promise<ResultJson> {
   const result = await readResultFile(path.resolve(opts.cwd, PROTOCOL_OUTPUT_DIR));
   const commentPath = resolveOutputPath(opts.cwd, result.comment, 'comment path');
+
+  if (result.pr_spec && opts.stage !== 'pr_open') {
+    throw new Error(`result.pr_spec is only supported for the pr_open stage (got ${opts.stage})`);
+  }
+
+  if (result.review_payload && opts.stage !== 'pr_review') {
+    throw new Error(
+      `result.review_payload is only supported for the pr_review stage (got ${opts.stage})`
+    );
+  }
 
   if (result.verdict === 'accept' && result.pr_spec) {
     await createPrFromSpec(opts.repo, opts.cwd, result.pr_spec);

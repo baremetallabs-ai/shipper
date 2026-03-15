@@ -154,6 +154,8 @@ describe('output protocol helpers', () => {
       'create',
       '-R',
       'owner/repo',
+      '--head',
+      'shipper/248-migrate-protocol',
       '--base',
       'main',
       '--title',
@@ -295,6 +297,83 @@ describe('output protocol helpers', () => {
     ]);
   });
 
+  it('rejects review comments that include only one multiline range field', async () => {
+    const outputDir = path.join(tempDir, PROTOCOL_OUTPUT_DIR);
+    await mkdir(outputDir, { recursive: true });
+    await writeFile(
+      path.join(outputDir, 'review-payload-248.json'),
+      JSON.stringify({
+        commit_id: 'abc123',
+        body: 'Needs work.',
+        event: 'COMMENT',
+        comments: [
+          {
+            path: 'src/file.ts',
+            line: 42,
+            side: 'RIGHT',
+            body: 'Range is incomplete.',
+            start_line: 40,
+          },
+        ],
+      }),
+      'utf-8'
+    );
+
+    await expect(
+      submitReviewPayload('owner/repo', '248', tempDir, '.shipper/output/review-payload-248.json')
+    ).rejects.toThrow(
+      "'comments[0].start_line' and 'comments[0].start_side' must be provided together"
+    );
+    expect(ghMock).not.toHaveBeenCalled();
+  });
+
+  it('processes a plain result by posting the comment before changing labels', async () => {
+    const outputDir = path.join(tempDir, PROTOCOL_OUTPUT_DIR);
+    await mkdir(outputDir, { recursive: true });
+    await writeFile(
+      path.join(outputDir, 'result.json'),
+      JSON.stringify({
+        verdict: 'accept',
+        comment: '.shipper/output/comment-248.md',
+      }),
+      'utf-8'
+    );
+    await writeFile(path.join(outputDir, 'comment-248.md'), 'summary', 'utf-8');
+
+    await expect(
+      processResult({
+        repo: 'owner/repo',
+        issueNumber: '248',
+        stage: 'plan',
+        cwd: tempDir,
+      })
+    ).resolves.toEqual({
+      verdict: 'accept',
+      comment: '.shipper/output/comment-248.md',
+    });
+
+    expect(ghMock).toHaveBeenNthCalledWith(1, [
+      'issue',
+      'comment',
+      '248',
+      '-R',
+      'owner/repo',
+      '--body-file',
+      path.join(tempDir, '.shipper/output/comment-248.md'),
+    ]);
+    expect(ghMock).toHaveBeenNthCalledWith(2, [
+      'issue',
+      'edit',
+      '248',
+      '-R',
+      'owner/repo',
+      '--add-label',
+      'shipper:planned',
+      '--remove-label',
+      'shipper:designed',
+    ]);
+  });
+
   it('processes PR creation before posting the comment and changing labels', async () => {
     const outputDir = path.join(tempDir, PROTOCOL_OUTPUT_DIR);
     await mkdir(outputDir, { recursive: true });
@@ -330,7 +409,7 @@ describe('output protocol helpers', () => {
       processResult({
         repo: 'owner/repo',
         issueNumber: '248',
-        stage: 'plan',
+        stage: 'pr_open',
         cwd: tempDir,
       })
     ).resolves.toEqual({
@@ -356,6 +435,8 @@ describe('output protocol helpers', () => {
       'create',
       '-R',
       'owner/repo',
+      '--head',
+      'shipper/248-migrate-protocol',
       '--base',
       'main',
       '--title',
@@ -379,10 +460,35 @@ describe('output protocol helpers', () => {
       '-R',
       'owner/repo',
       '--add-label',
-      'shipper:planned',
+      'shipper:pr-open',
       '--remove-label',
-      'shipper:designed',
+      'shipper:implemented',
     ]);
+  });
+
+  it('rejects PR side effects for non-pr_open stages', async () => {
+    const outputDir = path.join(tempDir, PROTOCOL_OUTPUT_DIR);
+    await mkdir(outputDir, { recursive: true });
+    await writeFile(
+      path.join(outputDir, 'result.json'),
+      JSON.stringify({
+        verdict: 'accept',
+        comment: '.shipper/output/comment-248.md',
+        pr_spec: '.shipper/output/pr-spec-248.json',
+      }),
+      'utf-8'
+    );
+    await writeFile(path.join(outputDir, 'comment-248.md'), 'summary', 'utf-8');
+
+    await expect(
+      processResult({
+        repo: 'owner/repo',
+        issueNumber: '248',
+        stage: 'plan',
+        cwd: tempDir,
+      })
+    ).rejects.toThrow('result.pr_spec is only supported for the pr_open stage');
+    expect(ghMock).not.toHaveBeenCalled();
   });
 
   it('processes review submission before posting the comment and changing labels', async () => {

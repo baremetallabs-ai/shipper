@@ -147,4 +147,15 @@ describe('prOpenCommand', () => {
     );
     expect(process.exitCode).toBe(1);
   });
+
+  it('skips result processing when transport returns a non-zero exit code', async () => {
+    withGitTransportMock.mockResolvedValueOnce(1);
+    const { prOpenCommand } = await import('../../src/commands/pr-open.js');
+
+    await expect(prOpenCommand('owner/repo', '239')).resolves.toBeUndefined();
+
+    expect(processResultMock).not.toHaveBeenCalled();
+    expect(handleAgentCrashMock).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
 });
