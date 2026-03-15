@@ -20,15 +20,34 @@ if ! command -v jq &>/dev/null; then
   exit 1
 fi
 
+meta_file_for() {
+  echo "${1%.jsonl}.meta.json"
+}
+
 detect_agent() {
+  local meta
   local first_type
 
-  first_type=$(head -n 1 "$1" | jq -r '.type // ""' 2>/dev/null)
+  meta=$(meta_file_for "$1")
+  if [[ -f "$meta" ]]; then
+    local meta_agent
+    meta_agent=$(jq -r '.agent // empty' "$meta" 2>/dev/null || true)
+    if [[ -n "$meta_agent" ]]; then
+      echo "$meta_agent"
+      return
+    fi
+  fi
+
+  first_type=$(head -n 1 "$1" | jq -r '.type // ""' 2>/dev/null || true)
   if [[ "$first_type" == "session_meta" ]]; then
     echo "codex"
   else
     echo "claude"
   fi
+}
+
+is_json_capture() {
+  head -n 1 "$1" | jq -e . >/dev/null 2>&1
 }
 
 extract_issue_num() {
@@ -49,13 +68,41 @@ extract_issue_num() {
 }
 
 agent=$(detect_agent "$FILE")
+meta_file=$(meta_file_for "$FILE")
 stage=""
+repo="unknown"
 cwd="unknown"
 branch="unknown"
 prompt_preview=""
 summary=""
 verdict_text=""
 command_text=""
+
+if [[ -f "$meta_file" ]]; then
+  repo=$(jq -r '.repo // "unknown"' "$meta_file" 2>/dev/null || echo "unknown")
+  stage=$(jq -r '.stage // "unknown"' "$meta_file" 2>/dev/null || echo "unknown")
+  issue_num=$(jq -r '.issue // "unknown"' "$meta_file" 2>/dev/null || echo "unknown")
+
+  if [[ "$agent" == "claude" ]]; then
+    summary=$(jq -r '
+      select(.type == "assistant") |
+      .message.content[]? |
+      select(type == "object" and .type == "text") |
+      .text
+    ' "$FILE" 2>/dev/null | head -1 | cut -c1-120)
+  elif ! is_json_capture "$FILE"; then
+    summary="<unavailable for raw capture>"
+  fi
+
+  echo "Agent:   $agent"
+  echo "Stage:   ${stage:-unknown}"
+  echo "Repo:    ${repo:-unknown}"
+  echo "Issue:   ${issue_num:-unknown}"
+  echo "Branch:  $branch"
+  echo "CWD:     $cwd"
+  echo "Summary: ${summary:-<no text>}"
+  exit 0
+fi
 
 if [[ "$agent" == "claude" ]]; then
   first_user=$(jq -c 'select(.type == "user" and (.toolUseResult | not))' "$FILE" | head -1)
@@ -201,6 +248,7 @@ fi
 
 echo "Agent:   $agent"
 echo "Stage:   $stage"
+echo "Repo:    $repo"
 echo "Issue:   $issue_num"
 echo "Branch:  $branch"
 echo "CWD:     $cwd"

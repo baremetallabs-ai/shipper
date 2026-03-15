@@ -20,15 +20,40 @@ if ! command -v jq &>/dev/null; then
   exit 1
 fi
 
+meta_file_for() {
+  echo "${1%.jsonl}.meta.json"
+}
+
 detect_agent() {
+  local meta
   local first_type
 
-  first_type=$(head -n 1 "$1" | jq -r '.type // ""' 2>/dev/null)
+  meta=$(meta_file_for "$1")
+  if [[ -f "$meta" ]]; then
+    local meta_agent
+    meta_agent=$(jq -r '.agent // empty' "$meta" 2>/dev/null || true)
+    if [[ -n "$meta_agent" ]]; then
+      echo "$meta_agent"
+      return
+    fi
+  fi
+
+  first_type=$(head -n 1 "$1" | jq -r '.type // ""' 2>/dev/null || true)
   if [[ "$first_type" == "session_meta" ]]; then
     echo "codex"
   else
     echo "claude"
   fi
+}
+
+is_raw_codex_capture() {
+  local file="$1"
+  local agent="$2"
+  [[ "$agent" == "codex" ]] && ! head -n 1 "$file" | jq -e . >/dev/null 2>&1
+}
+
+print_raw_capture_message() {
+  echo "Raw capture file - structured extraction requires native Codex transcripts under ~/.codex/sessions/"
 }
 
 CODEX_ERROR_PATTERN='fatal:|[Ee]rror:|EACCES|ENOENT|EPERM|Permission denied|command not found|No such file|403 Forbidden|404 Not Found|401 Unauthorized|exit code [1-9]|exit status [1-9]|[Ff]ailed to|FAILED|panic:|Traceback|SyntaxError|TypeError|ReferenceError|ModuleNotFoundError|Process exited with code [1-9]|Exit code: [1-9]|could not lock config file|unable to write upstream branch configuration|cannot lock ref|cannot create temp file for here document|sandbox.*denied|not allowed in sandbox|execution not permitted|unable to create .+\.lock'
@@ -50,6 +75,11 @@ find_error_line() {
 }
 
 agent=$(detect_agent "$FILE")
+
+if is_raw_codex_capture "$FILE" "$agent"; then
+  print_raw_capture_message
+  exit 0
+fi
 
 if [[ "$agent" == "claude" ]]; then
   ERROR_PATTERN='fatal:|[Ee]rror:|EACCES|ENOENT|EPERM|Permission denied|command not found|No such file|403 Forbidden|404 Not Found|401 Unauthorized|exit code [1-9]|exit status [1-9]|[Ff]ailed to|FAILED|panic:|Traceback|SyntaxError|TypeError|ReferenceError|ModuleNotFoundError'

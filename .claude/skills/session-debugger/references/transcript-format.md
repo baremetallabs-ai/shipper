@@ -1,5 +1,61 @@
 # Claude Code Transcript Format
 
+## Shipper-Captured Sessions
+
+Headless shipper runs write their canonical session artifacts under `~/.shipper/sessions/`:
+
+```text
+~/.shipper/sessions/<owner-repo>/
+  <issue>-<stage>-<timestamp>.jsonl
+  <issue>-<stage>-<timestamp>.meta.json
+```
+
+The `.jsonl` file is the captured agent output. The `.meta.json` sidecar is the lookup index that
+the session-debugger scripts should use first.
+
+### Metadata Sidecar Schema
+
+Each `.meta.json` file contains:
+
+```json
+{
+  "repo": "owner/repo",
+  "issue": "308",
+  "stage": "implement",
+  "agent": "claude",
+  "model": "claude-opus-4-6",
+  "timestamp": "2026-03-15T23:25:12.345Z",
+  "exitCode": 0,
+  "logFile": "/Users/dan/.shipper/sessions/owner-repo/308-implement-2026-03-15T23-25-12-345Z.jsonl"
+}
+```
+
+Notes:
+
+- `repo` is `owner/repo` when shipper can resolve the repo, otherwise `_unlinked`
+- `issue` is the issue number string or `unlinked`
+- `stage` uses shipper's existing internal stage token (`plan`, `implement`, `pr_open`, `pr_review`, etc.)
+- `logFile` is an absolute path to the captured `.jsonl`
+
+### Claude Stream-JSON Captures
+
+Shipper captures Claude headless output from `claude -p --verbose --output-format stream-json ...`.
+These logs are JSONL and stay compatible with the existing Claude extractor jq filters because the
+important records still use the same `message.content[]` shape:
+
+- `system` records appear at session start
+- `assistant` records contain `text` and `tool_use` blocks in `message.content[]`
+- `user` records contain `tool_result` blocks in `message.content[]`
+- `result` records summarize the run outcome
+- additional bookkeeping records such as `rate_limit_event` may appear and should be ignored unless needed
+
+### Codex Captures
+
+Shipper captures Codex headless output as raw stdout. These files are useful for chronology and
+final-output inspection, but they are not structured Codex transcripts. Use the `.meta.json`
+sidecar for agent, stage, issue, and repo classification. Structured extraction of tool calls or
+tool results still requires a native Codex transcript under `~/.codex/sessions/`.
+
 Session transcripts are JSONL files stored under `~/.claude/projects/`. Each line is a self-contained JSON object representing one event in the conversation.
 
 ## Where Transcripts Live
