@@ -119,7 +119,7 @@ describe('syncWorktree', () => {
 
     expect(resolveConflicts).not.toHaveBeenCalled();
     expect(gitArgsFromSpawnCalls()).toEqual([['fetch', 'origin']]);
-    expect(gitArgsFromExecCalls()).toEqual([['rebase', 'origin/main']]);
+    expect(gitArgsFromExecCalls()).toEqual([['rebase', '--autostash', 'origin/main']]);
   });
 
   it('passes conflict context through the conflict-resolution path and stops before push', async () => {
@@ -167,7 +167,7 @@ describe('syncWorktree', () => {
     });
     expect(gitArgsFromSpawnCalls()).toEqual([['fetch', 'origin']]);
     expect(gitArgsFromExecCalls()).toEqual([
-      ['rebase', 'origin/main'],
+      ['rebase', '--autostash', 'origin/main'],
       ['diff', '--name-only', '--diff-filter=U'],
       ['rebase', '--continue'],
     ]);
@@ -258,7 +258,7 @@ describe('withGitTransport', () => {
     expect(runAgent).toHaveBeenCalledWith();
     expect(gitArgsFromSpawnCalls()).toEqual([['fetch', 'origin']]);
     expect(gitArgsFromExecCalls()).toEqual([
-      ['rebase', 'origin/main'],
+      ['rebase', '--autostash', 'origin/main'],
       ['push', '-u', 'origin', 'HEAD'],
     ]);
     expect(execFileMock.mock.calls[1]?.[2]).toMatchObject({
@@ -313,7 +313,7 @@ describe('withGitTransport', () => {
     });
     expect(gitArgsFromSpawnCalls()).toEqual([['fetch', 'origin']]);
     expect(gitArgsFromExecCalls()).toEqual([
-      ['rebase', 'origin/main'],
+      ['rebase', '--autostash', 'origin/main'],
       ['diff', '--name-only', '--diff-filter=U'],
       ['rebase', '--continue'],
       ['push', '--force-with-lease'],
@@ -348,7 +348,7 @@ describe('withGitTransport', () => {
     ]);
     expect(gitArgsFromSpawnCalls()).toEqual([['fetch', 'origin']]);
     expect(gitArgsFromExecCalls()).toEqual([
-      ['rebase', 'origin/main'],
+      ['rebase', '--autostash', 'origin/main'],
       ['push', '-u', 'origin', 'HEAD'],
       ['push', '-u', 'origin', 'HEAD'],
     ]);
@@ -395,7 +395,7 @@ describe('withGitTransport', () => {
     ]);
     expect(gitArgsFromSpawnCalls()).toEqual([['fetch', 'origin']]);
     expect(gitArgsFromExecCalls()).toEqual([
-      ['rebase', 'origin/main'],
+      ['rebase', '--autostash', 'origin/main'],
       ['diff', '--name-only', '--diff-filter=U'],
       ['rebase', '--continue'],
       ['push', '--force-with-lease'],
@@ -480,7 +480,7 @@ describe('withGitTransport', () => {
       continueError: 'still conflicted after continue',
     });
     expect(gitArgsFromExecCalls()).toEqual([
-      ['rebase', 'origin/main'],
+      ['rebase', '--autostash', 'origin/main'],
       ['diff', '--name-only', '--diff-filter=U'],
       ['rebase', '--continue'],
       ['diff', '--name-only', '--diff-filter=U'],
@@ -513,7 +513,7 @@ describe('withGitTransport', () => {
     ]);
     expect(gitArgsFromSpawnCalls()).toEqual([['fetch', 'origin']]);
     expect(gitArgsFromExecCalls()).toEqual([
-      ['rebase', 'origin/main'],
+      ['rebase', '--autostash', 'origin/main'],
       ['push', '-u', 'origin', 'HEAD'],
     ]);
   });
@@ -549,7 +549,7 @@ describe('withGitTransport', () => {
     ]);
     expect(gitArgsFromSpawnCalls()).toEqual([['fetch', 'origin']]);
     expect(gitArgsFromExecCalls()).toEqual([
-      ['rebase', 'origin/main'],
+      ['rebase', '--autostash', 'origin/main'],
       ['push', '-u', 'origin', 'HEAD'],
       ['push', '-u', 'origin', 'HEAD'],
       ['push', '-u', 'origin', 'HEAD'],
@@ -581,7 +581,7 @@ describe('withGitTransport', () => {
     expect(runAgent).toHaveBeenCalledTimes(1);
     expect(gitArgsFromSpawnCalls()).toEqual([['fetch', 'origin']]);
     expect(gitArgsFromExecCalls()).toEqual([
-      ['rebase', 'origin/main'],
+      ['rebase', '--autostash', 'origin/main'],
       ['diff', '--name-only', '--diff-filter=U'],
     ]);
   });
@@ -621,7 +621,7 @@ describe('withGitTransport', () => {
       ['rebase', '--abort'],
     ]);
     expect(gitArgsFromExecCalls()).toEqual([
-      ['rebase', 'origin/main'],
+      ['rebase', '--autostash', 'origin/main'],
       ['diff', '--name-only', '--diff-filter=U'],
       ['rebase', '--continue'],
       ['diff', '--name-only', '--diff-filter=U'],

@@ -285,9 +285,11 @@ export async function syncWorktree(
 ): Promise<void> {
   await spawnAsync('git', ['fetch', 'origin'], { cwd: opts.wtPath });
 
-  const initialRebase = await execAsync('git', ['rebase', `origin/${opts.baseBranch}`], {
-    cwd: opts.wtPath,
-  });
+  const initialRebase = await execAsync(
+    'git',
+    ['rebase', '--autostash', `origin/${opts.baseBranch}`],
+    { cwd: opts.wtPath }
+  );
   if (initialRebase.code === 0) {
     return;
   }
@@ -410,9 +412,11 @@ export async function withGitTransport(
 ): Promise<number> {
   await spawnAsync('git', ['fetch', 'origin'], { cwd: opts.wtPath });
 
-  const initialRebase = await execAsync('git', ['rebase', `origin/${opts.baseBranch}`], {
-    cwd: opts.wtPath,
-  });
+  const initialRebase = await execAsync(
+    'git',
+    ['rebase', '--autostash', `origin/${opts.baseBranch}`],
+    { cwd: opts.wtPath }
+  );
 
   if (initialRebase.code !== 0) {
     let conflictContext = await getConflictContextOrThrow(opts, initialRebase);
