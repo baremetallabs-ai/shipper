@@ -9,6 +9,7 @@ if [[ $# -lt 1 ]]; then
 fi
 
 ISSUE_NUM="$1"
+SHIPPER_SESSIONS_DIR="$HOME/.shipper/sessions"
 PROJECTS_DIR="$HOME/.claude/projects"
 CODEX_DIR="$HOME/.codex/sessions"
 MATCH_BYTES=40000
@@ -19,9 +20,11 @@ if ! [[ "$ISSUE_NUM" =~ ^[0-9]+$ ]]; then
 fi
 
 # Derive repo name from git remote
+REPO_NWO=""
 REPO_NAME=""
 if remote_url=$(git remote get-url origin 2>/dev/null); then
-  REPO_NAME=$(basename "$remote_url" .git)
+  REPO_NWO=$(echo "$remote_url" | sed -E 's#.*[:/]([^/]+/[^/.]+)(\.git)?$#\1#')
+  REPO_NAME=$(basename "$REPO_NWO")
 fi
 
 if [[ -z "$REPO_NAME" ]]; then
@@ -29,8 +32,8 @@ if [[ -z "$REPO_NAME" ]]; then
   exit 1
 fi
 
-if [[ ! -d "$PROJECTS_DIR" ]] && [[ ! -d "$CODEX_DIR" ]]; then
-  echo "Error: neither $PROJECTS_DIR nor $CODEX_DIR exists" >&2
+if [[ ! -d "$SHIPPER_SESSIONS_DIR" ]] && [[ ! -d "$PROJECTS_DIR" ]] && [[ ! -d "$CODEX_DIR" ]]; then
+  echo "Error: no shipper, Claude, or Codex session directories exist" >&2
   exit 1
 fi
 
@@ -61,6 +64,49 @@ append_result() {
   [[ -n "$mtime" ]] || return 0
 
   results+=("[$agent]  $mtime  $file")
+}
+
+collect_shipper_meta_dir() {
+  local dir="$1"
+  local meta_file
+  local issue_val
+  local log_file
+  local agent
+
+  [[ -d "$dir" ]] || return 0
+
+  for meta_file in "$dir"/*.meta.json; do
+    [[ -f "$meta_file" ]] || continue
+
+    issue_val=$(jq -r '.issue // ""' "$meta_file" 2>/dev/null)
+    [[ "$issue_val" == "$ISSUE_NUM" ]] || continue
+
+    log_file=$(jq -r '.logFile // ""' "$meta_file" 2>/dev/null)
+    agent=$(jq -r '.agent // "unknown"' "$meta_file" 2>/dev/null)
+    [[ -f "$log_file" ]] || continue
+
+    append_result "$agent" "$log_file"
+  done
+}
+
+collect_shipper_sessions() {
+  local repo_slug="${REPO_NWO/\//-}"
+  local dir
+  local dirname
+
+  [[ -d "$SHIPPER_SESSIONS_DIR" ]] || return 0
+
+  if [[ -n "$repo_slug" ]]; then
+    collect_shipper_meta_dir "$SHIPPER_SESSIONS_DIR/$repo_slug"
+  fi
+
+  for dir in "$SHIPPER_SESSIONS_DIR"/*/; do
+    [[ -d "$dir" ]] || continue
+    dirname=$(basename "$dir")
+    [[ -n "$repo_slug" && "$dirname" == "$repo_slug" ]] && continue
+    is_repo_path "$dirname" || continue
+    collect_shipper_meta_dir "$dir"
+  done
 }
 
 collect_claude_sessions() {
@@ -141,6 +187,7 @@ collect_codex_sessions() {
   done < <(find "$CODEX_DIR" -type f -name '*.jsonl' -print0 2>/dev/null)
 }
 
+collect_shipper_sessions
 collect_claude_sessions
 collect_codex_sessions
 

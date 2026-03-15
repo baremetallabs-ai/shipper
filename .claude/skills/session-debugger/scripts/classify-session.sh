@@ -9,6 +9,7 @@ if [[ $# -lt 1 ]]; then
 fi
 
 FILE="$1"
+META_FILE="${FILE%.jsonl}.meta.json"
 
 if [[ ! -f "$FILE" ]]; then
   echo "Error: file not found: $FILE" >&2
@@ -21,7 +22,16 @@ if ! command -v jq &>/dev/null; then
 fi
 
 detect_agent() {
+  local meta_agent
   local first_type
+
+  if [[ -f "$META_FILE" ]]; then
+    meta_agent=$(jq -r '.agent // ""' "$META_FILE" 2>/dev/null)
+    if [[ -n "$meta_agent" ]]; then
+      echo "$meta_agent"
+      return
+    fi
+  fi
 
   first_type=$(head -n 1 "$1" | jq -r '.type // ""' 2>/dev/null)
   if [[ "$first_type" == "session_meta" ]]; then
@@ -48,6 +58,14 @@ extract_issue_num() {
   echo "unknown"
 }
 
+is_json_capture() {
+  local first_line
+
+  first_line=$(head -n 1 "$1" 2>/dev/null || true)
+  [[ -n "$first_line" ]] || return 1
+  printf '%s\n' "$first_line" | jq -e . >/dev/null 2>&1
+}
+
 agent=$(detect_agent "$FILE")
 stage=""
 cwd="unknown"
@@ -56,27 +74,30 @@ prompt_preview=""
 summary=""
 verdict_text=""
 command_text=""
+issue_num="unknown"
+
+if [[ -f "$META_FILE" ]]; then
+  stage=$(jq -r '.stage // ""' "$META_FILE" 2>/dev/null)
+  issue_num=$(jq -r '.issue // "unknown"' "$META_FILE" 2>/dev/null)
+fi
 
 if [[ "$agent" == "claude" ]]; then
   first_user=$(jq -c 'select(.type == "user" and (.toolUseResult | not))' "$FILE" | head -1)
 
-  if [[ -z "$first_user" ]]; then
-    echo "Error: no user message found in $FILE" >&2
-    exit 1
+  if [[ -n "$first_user" ]]; then
+    cwd=$(echo "$first_user" | jq -r '.cwd // "unknown"')
+    branch=$(echo "$first_user" | jq -r '.gitBranch // "unknown"')
+
+    prompt_preview=$(echo "$first_user" | jq -r '
+      if (.message.content | type) == "string" then
+        .message.content[:2000]
+      elif (.message.content | type) == "array" then
+        [.message.content[] | select(.type == "text") | .text][0][:2000] // ""
+      else
+        ""
+      end
+    ')
   fi
-
-  cwd=$(echo "$first_user" | jq -r '.cwd // "unknown"')
-  branch=$(echo "$first_user" | jq -r '.gitBranch // "unknown"')
-
-  prompt_preview=$(echo "$first_user" | jq -r '
-    if (.message.content | type) == "string" then
-      .message.content[:2000]
-    elif (.message.content | type) == "array" then
-      [.message.content[] | select(.type == "text") | .text][0][:2000] // ""
-    else
-      ""
-    end
-  ')
 
   command_text=$(jq -r '
     select(.type == "assistant") |
@@ -98,7 +119,7 @@ if [[ "$agent" == "claude" ]]; then
     select(type == "object" and .type == "text") |
     .text
   ' "$FILE" 2>/dev/null | head -1 | cut -c1-120)
-else
+elif is_json_capture "$FILE"; then
   session_meta=$(jq -c 'select(.type == "session_meta")' "$FILE" | head -1)
 
   if [[ -z "$session_meta" ]]; then
@@ -154,20 +175,24 @@ else
     select(.type == "response_item" and .payload.type == "message" and .payload.role == "assistant") |
     [.payload.content[]? | select(.type == "output_text") | .text] | join("\n")
   ' "$FILE" 2>/dev/null | head -1 | cut -c1-120)
+else
+  summary="Raw Codex stdout capture"
 fi
 
-issue_num=$(extract_issue_num "$branch" "$prompt_preview")
+if [[ -z "$issue_num" || "$issue_num" == "unknown" ]]; then
+  issue_num=$(extract_issue_num "$branch" "$prompt_preview")
+fi
 
 # Priority 1: tool calls and verdict keywords
-if echo "$command_text" | grep -q 'gh pr create'; then
+if [[ -z "$stage" ]] && echo "$command_text" | grep -q 'gh pr create'; then
   stage="pr-open"
-elif echo "$command_text" | grep -q 'gh pr review'; then
+elif [[ -z "$stage" ]] && echo "$command_text" | grep -q 'gh pr review'; then
   stage="pr-review"
-elif echo "$command_text" | grep -q 'shipper:implemented'; then
+elif [[ -z "$stage" ]] && echo "$command_text" | grep -q 'shipper:implemented'; then
   stage="implement"
 fi
 
-if echo "$verdict_text" | grep -qE '\b(READY|RETRY|NEEDS UPSTREAM)\b'; then
+if [[ -z "$stage" ]] && echo "$verdict_text" | grep -qE '\b(READY|RETRY|NEEDS UPSTREAM)\b'; then
   stage="pr-remediate"
 fi
 

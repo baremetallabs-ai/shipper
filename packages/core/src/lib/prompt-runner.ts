@@ -1,10 +1,11 @@
-import { spawn } from 'node:child_process';
-import { readFileSync, statSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { spawn, type ChildProcess, type StdioOptions } from 'node:child_process';
+import { createWriteStream, readFileSync, statSync } from 'node:fs';
+import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseFrontmatter } from './frontmatter.js';
 import { fetchIssue, fetchPR } from './github.js';
 import { agentPrompts } from './prompts.js';
+import { getSessionPaths, writeSessionMeta } from './session.js';
 import {
   getSettings,
   resolveAgent,
@@ -91,18 +92,52 @@ function resolveWorktreeGitDir(cwd: string): WorktreeDirs | undefined {
 function spawnAsync(
   command: string,
   args: string[],
-  opts: { cwd?: string; timeoutMs?: number }
+  opts: { cwd?: string; timeoutMs?: number; logFile?: string }
 ): Promise<number> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
-      stdio: 'inherit',
+    const stdio: StdioOptions = opts.logFile ? ['inherit', 'pipe', 'inherit'] : 'inherit';
+    const child: ChildProcess = spawn(command, args, {
+      stdio,
       env: process.env,
       cwd: opts.cwd,
     });
+    const logStream = opts.logFile ? createWriteStream(opts.logFile) : undefined;
 
     let killTimer: ReturnType<typeof setTimeout> | undefined;
     let graceTimer: ReturnType<typeof setTimeout> | undefined;
     let timedOut = false;
+    let exitCode = 1;
+    let processClosed = false;
+    let streamFinished = !logStream;
+
+    const finalize = () => {
+      if (!processClosed || !streamFinished) {
+        return;
+      }
+      clearTimeout(killTimer);
+      clearTimeout(graceTimer);
+      resolve(exitCode);
+    };
+
+    if (logStream) {
+      if (!child.stdout) {
+        clearTimeout(killTimer);
+        clearTimeout(graceTimer);
+        reject(new Error(`Failed to capture stdout for ${command}`));
+        return;
+      }
+
+      child.stdout.pipe(logStream);
+      logStream.on('finish', () => {
+        streamFinished = true;
+        finalize();
+      });
+      logStream.on('error', (err: Error) => {
+        clearTimeout(killTimer);
+        clearTimeout(graceTimer);
+        reject(err);
+      });
+    }
 
     if (opts.timeoutMs && opts.timeoutMs > 0) {
       const timeoutMs = opts.timeoutMs;
@@ -117,16 +152,17 @@ function spawnAsync(
       }, timeoutMs);
     }
 
-    child.on('error', (err) => {
+    child.on('error', (err: Error) => {
+      logStream?.destroy();
       clearTimeout(killTimer);
       clearTimeout(graceTimer);
       reject(err);
     });
 
-    child.on('close', (code) => {
-      clearTimeout(killTimer);
-      clearTimeout(graceTimer);
-      resolve(timedOut ? code || 1 : (code ?? 1));
+    child.on('close', (code: number | null) => {
+      exitCode = timedOut ? code || 1 : (code ?? 1);
+      processClosed = true;
+      finalize();
     });
   });
 }
@@ -184,10 +220,31 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
   const timeoutMinutes = getSettings().agentTimeoutMinutes;
   const timeoutMs =
     effectiveMode === 'headless' && timeoutMinutes > 0 ? timeoutMinutes * 60_000 : undefined;
+  const repoForSession = opts.repo ?? path.basename(process.cwd());
+  let logFile: string | undefined;
+  let metaFile: string | undefined;
+
+  if (effectiveMode === 'headless') {
+    try {
+      const sessionPaths = getSessionPaths(opts.repo, opts.issueRef, name);
+      await mkdir(path.dirname(sessionPaths.logFile), { recursive: true });
+      logFile = sessionPaths.logFile;
+      metaFile = sessionPaths.metaFile;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`Warning: Failed to initialize session logging: ${message}`);
+    }
+  }
 
   if (agent === 'claude') {
     if (effectiveMode === 'headless' && !args.includes('-p')) {
       args.unshift('-p');
+    }
+    if (effectiveMode === 'headless') {
+      if (!args.includes('--verbose')) {
+        args.push('--verbose');
+      }
+      args.push('--output-format', 'stream-json');
     } else if (effectiveMode === 'interactive') {
       const pIdx = args.indexOf('-p');
       if (pIdx !== -1) args.splice(pIdx, 1);
@@ -268,7 +325,27 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
   }
 
   try {
-    return await spawnAsync(agent, args, { cwd: opts.cwd, timeoutMs });
+    const exitCode = await spawnAsync(agent, args, { cwd: opts.cwd, timeoutMs, logFile });
+
+    if (metaFile && logFile) {
+      try {
+        await writeSessionMeta(metaFile, {
+          repo: repoForSession,
+          issue: opts.issueRef ?? 'unlinked',
+          stage: name,
+          agent,
+          model: model ?? 'default',
+          timestamp: new Date().toISOString(),
+          exitCode,
+          logFile,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.warn(`Warning: Failed to write session metadata: ${message}`);
+      }
+    }
+
+    return exitCode;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`Error: Failed to spawn ${agent}: ${message}`);

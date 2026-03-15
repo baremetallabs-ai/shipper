@@ -2,11 +2,13 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { mockRunPrompt } = vi.hoisted(() => ({
   mockRunPrompt:
-    vi.fn<(name: string, opts: { userInput: string; mode?: string }) => Promise<number>>(),
+    vi.fn<
+      (name: string, opts: { repo: string; userInput: string; mode?: string }) => Promise<number>
+    >(),
 }));
 
 vi.mock('@dnsquared/shipper-core', () => ({
-  runPrompt: (name: string, opts: { userInput: string; mode?: string }) =>
+  runPrompt: (name: string, opts: { repo: string; userInput: string; mode?: string }) =>
     mockRunPrompt(name, opts),
 }));
 
@@ -30,11 +32,12 @@ afterAll(() => {
 
 describe('newCommand', () => {
   it('passes the selected mode through to runPrompt', async () => {
-    await expect(newCommand(['my', 'request'], { mode: 'headless' })).rejects.toThrow(
+    await expect(newCommand('owner/repo', ['my', 'request'], { mode: 'headless' })).rejects.toThrow(
       'process.exit:0'
     );
 
     expect(mockRunPrompt).toHaveBeenCalledWith('new', {
+      repo: 'owner/repo',
       userInput: 'my request',
       mode: 'headless',
     });
@@ -42,9 +45,10 @@ describe('newCommand', () => {
   });
 
   it('uses runPrompt without a mode override when none is provided', async () => {
-    await expect(newCommand(['my', 'request'])).rejects.toThrow('process.exit:0');
+    await expect(newCommand('owner/repo', ['my', 'request'])).rejects.toThrow('process.exit:0');
 
     expect(mockRunPrompt).toHaveBeenCalledWith('new', {
+      repo: 'owner/repo',
       userInput: 'my request',
       mode: undefined,
     });
@@ -52,7 +56,9 @@ describe('newCommand', () => {
   });
 
   it('exits with the existing usage error when the request is empty', async () => {
-    await expect(newCommand(['   '], { mode: 'interactive' })).rejects.toThrow('process.exit:1');
+    await expect(newCommand('owner/repo', ['   '], { mode: 'interactive' })).rejects.toThrow(
+      'process.exit:1'
+    );
 
     expect(errorMock).toHaveBeenCalledWith('Error: Please provide a request for the new issue.');
     expect(errorMock).toHaveBeenCalledWith('Usage: shipper new <request>');

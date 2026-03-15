@@ -9,7 +9,7 @@ description: |
 
 # Session Debugger
 
-Skill for investigating Claude Code and Codex CLI session transcripts produced by `ship --auto` runs. Provides scripts to find, classify, and extract data from JSONL transcript files under `~/.claude/projects/` and `~/.codex/sessions/`.
+Skill for investigating Claude Code and Codex CLI session transcripts produced by headless shipper runs. The primary data source is the shipper-owned session store under `~/.shipper/sessions/`, with native agent transcript stores kept as fallback for older sessions and unsupported raw Codex captures.
 
 ## Skill Location
 
@@ -47,31 +47,33 @@ cat .claude/skills/session-debugger/references/transcript-format.md
 
 Notes:
 
+- `find-sessions.sh` checks `~/.shipper/sessions/` first, then falls back to native Claude/Codex transcript stores
 - `find-sessions.sh` returns a mixed timeline with `[claude]` / `[codex]` prefixes
 - `classify-session.sh` prints `Agent: claude` or `Agent: codex`
 
 ## Prerequisites
 
 - `jq` must be installed (`brew install jq` on macOS)
-- Session transcripts must exist under `~/.claude/projects/` or `~/.codex/sessions/`
+- Headless shipper session logs normally live under `~/.shipper/sessions/<repo-slug>/`
+- Native fallback transcripts may still exist under `~/.claude/projects/` or `~/.codex/sessions/`
 
 ## Reference Docs
 
-- [Transcript Format](references/transcript-format.md) — Claude Code and Codex CLI JSONL schema, directory layout, matching sessions to shipper stages
+- [Transcript Format](references/transcript-format.md) — shipper session metadata, Claude stream-json records, Codex raw capture limitations, native fallback formats
 
 ## Task Workflows
 
 ### Investigate a specific stage run
 
-1. `./scripts/find-sessions.sh <issue>` — list all session files for the issue across Claude and Codex, using the `[claude]` / `[codex]` prefix to identify the agent
+1. `./scripts/find-sessions.sh <issue>` — resolve the shipper-owned `.jsonl` path via `.meta.json` lookup, with native transcript scanning as fallback
 2. Pick the session matching the timeframe or stage of interest
-3. `./scripts/classify-session.sh <file>` — confirm the agent type and stage (implement, pr-open, pr-review, pr-remediate)
+3. `./scripts/classify-session.sh <file>` — confirm the agent type and stage from metadata when available
 4. `./scripts/extract-tool-calls.sh <file>` — get numbered list of tool calls with error status
 5. Read the JSONL file directly to inspect interesting spans (e.g., around ERROR entries)
 
 ### Find all sessions for an issue
 
-1. `./scripts/find-sessions.sh <issue>` — get all session files from both transcript stores
+1. `./scripts/find-sessions.sh <issue>` — get all matching shipper session files first, then any native fallback transcripts
 2. For each file, run `./scripts/classify-session.sh <file>` to identify the agent and stage
 3. Build a timeline of what ran and when
 
@@ -89,3 +91,8 @@ Notes:
 2. `./scripts/extract-errors.sh <file>` — scan for errors in one pass
 3. If content errors found, use `./scripts/show-tool-result.sh <file> <N>` to see full output
 4. `./scripts/extract-final-message.sh <file>` — check if the agent acknowledged the failure
+
+## Fallback Behavior
+
+- Native Claude and Codex transcript discovery remains available for sessions captured before shipper-owned logging landed.
+- Shipper-captured Codex logs are raw stdout in v1. Metadata lookup and stage classification still work, but the extractor scripts will tell you to inspect native Codex transcripts under `~/.codex/sessions/` when structured parsing is unavailable.

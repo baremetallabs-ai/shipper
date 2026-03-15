@@ -1,6 +1,7 @@
 import { runPrompt, type AgentName, type CommandMode } from '@dnsquared/shipper-core';
 
 export async function newCommand(
+  repo: string,
   requestWords: string[],
   options: { mode?: CommandMode; agent?: AgentName; model?: string } = {}
 ): Promise<void> {
@@ -12,6 +13,7 @@ export async function newCommand(
   }
 
   const exitCode = await runPrompt('new', {
+    repo,
     userInput: request,
     mode: options.mode,
     agent: options.agent,

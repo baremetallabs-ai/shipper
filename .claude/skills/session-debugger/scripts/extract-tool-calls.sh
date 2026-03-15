@@ -9,6 +9,8 @@ if [[ $# -lt 1 ]]; then
 fi
 
 FILE="$1"
+META_FILE="${FILE%.jsonl}.meta.json"
+RAW_CODEX_CAPTURE_MSG="This is a raw capture file - structured extraction requires native Codex transcripts under ~/.codex/sessions/"
 
 if [[ ! -f "$FILE" ]]; then
   echo "Error: file not found: $FILE" >&2
@@ -21,7 +23,16 @@ if ! command -v jq &>/dev/null; then
 fi
 
 detect_agent() {
+  local meta_agent
   local first_type
+
+  if [[ -f "$META_FILE" ]]; then
+    meta_agent=$(jq -r '.agent // ""' "$META_FILE" 2>/dev/null)
+    if [[ -n "$meta_agent" ]]; then
+      echo "$meta_agent"
+      return
+    fi
+  fi
 
   first_type=$(head -n 1 "$1" | jq -r '.type // ""' 2>/dev/null)
   if [[ "$first_type" == "session_meta" ]]; then
@@ -41,7 +52,20 @@ is_codex_error_output() {
   printf '%s\n' "$cleaned" | grep -qE "$CODEX_ERROR_PATTERN" 2>/dev/null
 }
 
+is_json_capture() {
+  local first_line
+
+  first_line=$(head -n 1 "$1" 2>/dev/null || true)
+  [[ -n "$first_line" ]] || return 1
+  printf '%s\n' "$first_line" | jq -e . >/dev/null 2>&1
+}
+
 agent=$(detect_agent "$FILE")
+
+if [[ "$agent" == "codex" ]] && ! is_json_capture "$FILE"; then
+  echo "$RAW_CODEX_CAPTURE_MSG"
+  exit 0
+fi
 
 if [[ "$agent" == "claude" ]]; then
   tool_results_json=$(jq -c '

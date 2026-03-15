@@ -141,7 +141,7 @@ addModelOption(
               request: string[],
               options: { mode: string; agent?: string; model?: string }
             ) => {
-              await newCommand(request, {
+              await newCommand(requireResolvedRepo(), request, {
                 mode: options.mode as CommandMode,
                 agent: options.agent as AgentName | undefined,
                 model: options.model,

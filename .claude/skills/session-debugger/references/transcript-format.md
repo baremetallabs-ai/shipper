@@ -1,3 +1,49 @@
+# Shipper-Captured Session Format
+
+Headless shipper runs now write a shipper-owned session pair under `~/.shipper/sessions/<slug>/`:
+
+- `<issue-or-unlinked>-<stage>-<timestamp>.jsonl`
+- `<issue-or-unlinked>-<stage>-<timestamp>.meta.json`
+
+The repo slug is normally `<owner>-<repo>`. When `runPrompt()` has no repo, shipper falls back to `basename(process.cwd())`, which keeps repo-less `setup` sessions out of ephemeral worktrees while still making them discoverable.
+
+## Metadata Sidecar
+
+Each `.meta.json` file contains:
+
+```json
+{
+  "repo": "owner/repo",
+  "issue": "308",
+  "stage": "implement",
+  "agent": "claude",
+  "model": "claude-opus-4-6",
+  "timestamp": "2026-03-15T14:00:01.234Z",
+  "exitCode": 0,
+  "logFile": "/Users/dan/.shipper/sessions/owner-repo/308-implement-2026-03-15T14-00-01-234Z.jsonl"
+}
+```
+
+The session-debugger scripts use the sidecar as the primary index:
+
+- `find-sessions.sh` reads `.meta.json` instead of grepping transcript bodies
+- `classify-session.sh` trusts `agent`, `stage`, and `issue` from metadata when present
+- extractor scripts use the `.meta.json` sibling to detect the agent type reliably
+
+## Claude Headless Capture
+
+Claude headless runs are captured with `--verbose --output-format stream-json`. The output is JSONL and includes:
+
+- `system` records at the start
+- `assistant` and `user` records that retain the same `message.content[]` structure used by the existing extractor jq filters
+- a trailing `result` record
+
+The debugger scripts intentionally ignore the extra `system` and `result` records and operate on the `assistant` / `user` messages.
+
+## Codex Headless Capture
+
+Codex headless runs are captured as raw stdout in v1. Metadata discovery still works, but structured extraction does not. The debugger scripts return a clear unsupported/raw-capture message and direct you to native Codex transcripts under `~/.codex/sessions/` when you need tool-level parsing.
+
 # Claude Code Transcript Format
 
 Session transcripts are JSONL files stored under `~/.claude/projects/`. Each line is a self-contained JSON object representing one event in the conversation.
