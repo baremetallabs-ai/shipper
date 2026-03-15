@@ -22,6 +22,10 @@ let claudeLogFile: string;
 let codexLogFile: string;
 
 beforeAll(() => {
+  if (!hasJq) {
+    return;
+  }
+
   tempDir = mkdtempSync(path.join(tmpdir(), 'session-debugger-'));
   homeDir = path.join(tempDir, 'home');
   repoDir = path.join(tempDir, 'repo');
@@ -128,14 +132,23 @@ beforeAll(() => {
   );
 
   execFileSync('git', ['init'], { cwd: repoDir, stdio: 'pipe' });
-  execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:owner/repo.git'], {
-    cwd: repoDir,
-    stdio: 'pipe',
-  });
+  try {
+    execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:owner/repo.git'], {
+      cwd: repoDir,
+      stdio: 'pipe',
+    });
+  } catch {
+    execFileSync('git', ['remote', 'set-url', 'origin', 'git@github.com:owner/repo.git'], {
+      cwd: repoDir,
+      stdio: 'pipe',
+    });
+  }
 });
 
 afterAll(() => {
-  rmSync(tempDir, { recursive: true, force: true });
+  if (tempDir) {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
 });
 
 function runScript(
