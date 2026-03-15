@@ -20,7 +20,7 @@ function setupRepo(tempRoot: string): string {
   const repoDir = path.join(tempRoot, 'repo');
   mkdirSync(repoDir, { recursive: true });
   execFileSync('git', ['init'], { cwd: repoDir, stdio: 'ignore' });
-  execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:owner/repo.git'], {
+  execFileSync('git', ['config', '--local', 'remote.origin.url', 'git@github.com:owner/repo.git'], {
     cwd: repoDir,
     stdio: 'ignore',
   });
