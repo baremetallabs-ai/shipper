@@ -1,20 +1,38 @@
+import path from 'node:path';
+
 import { getBranchForPR, getRepoRoot } from '@dnsquared/shipper-core';
 import { fetchChecks, classifyChecks } from '@dnsquared/shipper-core';
 import { autoSelectPrForStage, resolveRef } from '@dnsquared/shipper-core';
 import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
 import { formatConflictContext } from '@dnsquared/shipper-core';
+import { FAILED_LABEL, PR_REVIEWED_LABEL } from '@dnsquared/shipper-core';
 import { gh } from '@dnsquared/shipper-core';
 import { withStageHooks } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
-import { withGitTransport } from '@dnsquared/shipper-core';
 import { withWorktree } from '@dnsquared/shipper-core';
 import { runPrompt } from '@dnsquared/shipper-core';
 import { getSettings } from '@dnsquared/shipper-core';
 import type { PrReviewWait } from '@dnsquared/shipper-core';
+import {
+  executeTransition,
+  handleAgentCrash,
+  postComment,
+  postReplies,
+  PROTOCOL_OUTPUT_DIR,
+  readResultFile,
+  resolveTransition,
+  scrubOutputDir,
+  setupProtocolDirs,
+  syncWorktree,
+  pushWorktree,
+  writeContextFile,
+} from '@dnsquared/shipper-core';
 
 import { sleepMs } from '@dnsquared/shipper-core';
 
 const ZERO_CHECKS_GRACE_MS = 30_000;
+const CI_WAIT_TIMEOUT_MINUTES = 30;
+const MAX_REMEDIATION_PASSES = 5;
 export const SKIP_PR_REMEDIATE_WAIT_ENV_VAR = 'SHIPPER_SKIP_PR_REMEDIATE_WAIT';
 
 class PollingInterruptedError extends Error {
@@ -95,6 +113,89 @@ async function fetchChecksGraceful(
     console.warn(`Warning: Failed to fetch CI checks: ${msg}`);
     return null;
   }
+}
+
+async function preflight(
+  wtPath: string,
+  repo: string,
+  prNumber: string,
+  pass: number,
+  maxPasses: number
+): Promise<void> {
+  await setupProtocolDirs(wtPath);
+
+  const [owner, repoName] = repo.split('/');
+  if (!owner || !repoName) {
+    throw new Error(`Invalid repo slug: ${repo}`);
+  }
+
+  const reviewThreadsQuery = [
+    'query($owner: String!, $repo: String!, $number: Int!) {',
+    '  repository(owner: $owner, name: $repo) {',
+    '    pullRequest(number: $number) {',
+    '      reviewThreads(first: 100) {',
+    '        nodes {',
+    '          path',
+    '          line',
+    '          isResolved',
+    '          isOutdated',
+    '          comments(first: 100) {',
+    '            nodes {',
+    '              databaseId',
+    '              author {',
+    '                login',
+    '              }',
+    '              body',
+    '              createdAt',
+    '            }',
+    '          }',
+    '        }',
+    '      }',
+    '    }',
+    '  }',
+    '}',
+  ].join('\n');
+  const reviewThreadsJq = [
+    '.data.repository.pullRequest.reviewThreads.nodes',
+    '| map({',
+    '    path,',
+    '    line,',
+    '    isResolved,',
+    '    isOutdated,',
+    '    comments: (',
+    '      .comments.nodes',
+    '      | map({',
+    '          id: .databaseId,',
+    '          author: .author.login,',
+    '          body,',
+    '          createdAt',
+    '        })',
+    '    )',
+    '  })',
+  ].join('\n');
+  const { stdout: reviewThreads } = await gh([
+    'api',
+    'graphql',
+    '-f',
+    `owner=${owner}`,
+    '-f',
+    `repo=${repoName}`,
+    '-F',
+    `number=${prNumber}`,
+    '-f',
+    `query=${reviewThreadsQuery}`,
+    '--jq',
+    reviewThreadsJq,
+  ]);
+  await writeContextFile(wtPath, 'review-threads.json', reviewThreads);
+
+  const checks = await fetchChecks(repo, prNumber);
+  await writeContextFile(wtPath, 'ci-status.json', JSON.stringify(classifyChecks(checks), null, 2));
+
+  const { stdout: diff } = await gh(['pr', 'diff', prNumber, '-R', repo]);
+  await writeContextFile(wtPath, 'pr-diff.patch', diff);
+
+  await writeContextFile(wtPath, 'pass-info.json', JSON.stringify({ pass, maxPasses }, null, 2));
 }
 
 export async function buildReadyCheck(
@@ -217,10 +318,11 @@ export async function prRemediateCommand(
       return await withWorktree(
         { repoRoot, branch, createBranch: false, issueNumber, stage: 'pr-remediate' },
         async (wtPath) => {
-          return await withGitTransport(
-            { wtPath, repoRoot, baseBranch, pushMode: 'force-with-lease' },
-            async (conflictContext, pushError) =>
-              await runPrompt('pr_remediate', {
+          const gitOpts = { wtPath, repoRoot, baseBranch, pushMode: 'force-with-lease' as const };
+
+          for (let pass = 1; pass <= MAX_REMEDIATION_PASSES; pass++) {
+            await syncWorktree(gitOpts, async (conflictContext) => {
+              return await runPrompt('pr_remediate', {
                 repo,
                 issueRef: issueNumber,
                 prRef,
@@ -228,11 +330,77 @@ export async function prRemediateCommand(
                 mode,
                 agent,
                 model,
-                userInput: conflictContext
-                  ? formatConflictContext(conflictContext)
-                  : (pushError ?? undefined),
-              })
-          );
+                userInput: formatConflictContext(conflictContext),
+              });
+            });
+
+            await preflight(wtPath, repo, prRef, pass, MAX_REMEDIATION_PASSES);
+            await scrubOutputDir(wtPath);
+
+            const agentCode = await runPrompt('pr_remediate', {
+              repo,
+              issueRef: issueNumber,
+              prRef,
+              cwd: wtPath,
+              mode,
+              agent,
+              model,
+            });
+
+            if (agentCode !== 0) {
+              await handleAgentCrash(
+                repo,
+                issueNumber,
+                'pr_remediate',
+                `Agent exited with code ${agentCode}`
+              );
+              return agentCode;
+            }
+
+            let result: Awaited<ReturnType<typeof readResultFile>>;
+            try {
+              result = await readResultFile(path.resolve(wtPath, PROTOCOL_OUTPUT_DIR));
+            } catch (error) {
+              const detail = error instanceof Error ? error.message : String(error);
+              await handleAgentCrash(repo, issueNumber, 'pr_remediate', detail);
+              return 1;
+            }
+
+            const commentPath = path.resolve(wtPath, result.comment);
+            if (result.verdict === 'reject' || result.verdict === 'fail') {
+              await postComment(repo, issueNumber, commentPath);
+              await executeTransition(repo, issueNumber, {
+                add: [FAILED_LABEL],
+                remove: [PR_REVIEWED_LABEL],
+              });
+              return 0;
+            }
+
+            await pushWorktree(gitOpts);
+            await postReplies(repo, prRef, wtPath, result.replies);
+            await postComment(repo, issueNumber, commentPath);
+
+            await waitForChecks(repo, prRef, CI_WAIT_TIMEOUT_MINUTES);
+            const checks = await fetchChecks(repo, prRef);
+            const { failed, pending } = classifyChecks(checks);
+
+            if (failed.length === 0 && pending.length === 0) {
+              await executeTransition(
+                repo,
+                issueNumber,
+                resolveTransition('pr_remediate', 'accept')
+              );
+              return 0;
+            }
+
+            console.error(
+              `Pass ${pass}/${MAX_REMEDIATION_PASSES}: CI not green yet ` +
+                `(${failed.length} failing, ${pending.length} pending).`
+            );
+          }
+
+          console.error(`Remediation exhausted ${MAX_REMEDIATION_PASSES} passes without green CI.`);
+          return 0;
         }
       );
     });

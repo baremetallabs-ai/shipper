@@ -67,3 +67,26 @@ describe('pr_review prompts', () => {
     }
   );
 });
+
+describe('pr_remediate prompts', () => {
+  it.each(['claude', 'codex'])(
+    'read remediation pass context and avoid direct platform commands for %s',
+    (agent) => {
+      const prompt = readFileSync(
+        new URL(`../../src/prompts/${agent}/pr_remediate.md`, import.meta.url),
+        'utf-8'
+      );
+
+      expect(prompt).toContain('.shipper/input/review-threads.json');
+      expect(prompt).toContain('.shipper/input/ci-status.json');
+      expect(prompt).toContain('.shipper/input/pr-diff.patch');
+      expect(prompt).toContain('.shipper/input/pass-info.json');
+      expect(prompt).toContain('.shipper/output/replies/<comment-id>.md');
+      expect(prompt).toContain('.shipper/output/result.json');
+      expect(prompt).not.toContain('gh ');
+      expect(prompt).not.toContain('gh\n');
+      expect(prompt).not.toContain('`gh`');
+      expect(prompt).not.toContain('gh-api-');
+    }
+  );
+});
