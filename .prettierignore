@@ -4,3 +4,5 @@ coverage/
 package-lock.json
 src/prompts/
 .shipper/prompts/
+.shipper/output/
+.shipper/input/
