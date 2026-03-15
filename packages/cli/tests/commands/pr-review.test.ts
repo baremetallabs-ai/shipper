@@ -50,7 +50,7 @@ describe('prReviewCommand', () => {
     process.exitCode = undefined;
     ghMock
       .mockResolvedValueOnce({ stdout: 'diff --git a/file b/file', stderr: '' })
-      .mockResolvedValueOnce({ stdout: '[{"filename":"src/file.ts"}]', stderr: '' })
+      .mockResolvedValueOnce({ stdout: '[[{"filename":"src/file.ts"}]]', stderr: '' })
       .mockResolvedValueOnce({
         stdout:
           '{"headRefOid":"abc123","author":{"login":"author"},"title":"PR","headRefName":"branch"}',
@@ -95,8 +95,6 @@ describe('prReviewCommand', () => {
       `repos/${repo}/pulls/42/files`,
       '--paginate',
       '--slurp',
-      '--jq',
-      'add',
     ]);
     expect(ghMock).toHaveBeenNthCalledWith(3, [
       'pr',

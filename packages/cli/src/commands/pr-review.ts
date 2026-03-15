@@ -55,14 +55,13 @@ export async function prReviewCommand(
           const { stdout: diff } = await gh(['pr', 'diff', pr, '-R', repo]);
           await writeContextFile(wtPath, 'pr-diff.patch', diff);
 
-          const { stdout: prFiles } = await gh([
+          const { stdout: prFilesRaw } = await gh([
             'api',
             `repos/${repo}/pulls/${pr}/files`,
             '--paginate',
             '--slurp',
-            '--jq',
-            'add',
           ]);
+          const prFiles = JSON.stringify((JSON.parse(prFilesRaw) as unknown[]).flat());
           await writeContextFile(wtPath, 'pr-files.json', prFiles);
 
           const { stdout: prMetadata } = await gh([
