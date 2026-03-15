@@ -23,8 +23,8 @@ function runScript(cwd: string): { stdout: string; stderr: string; exitCode: num
     env: { ...process.env },
   });
   return {
-    stdout: result.stdout?.toString() ?? '',
-    stderr: result.stderr?.toString() ?? '',
+    stdout: result.stdout.toString(),
+    stderr: result.stderr.toString(),
     exitCode: result.status ?? 1,
   };
 }

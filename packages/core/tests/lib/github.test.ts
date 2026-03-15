@@ -2,24 +2,33 @@ import { promisify } from 'node:util';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 
 const execFileMock = vi.fn();
-const execFile = Object.assign((...args: unknown[]) => execFileMock(...args), {
-  [promisify.custom]: (...args: unknown[]) =>
-    new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-      execFileMock(
-        ...args,
-        (err: unknown, stdout: string | Buffer = '', stderr: string | Buffer = '') => {
-          if (err) {
-            reject(err);
-            return;
-          }
-          resolve({ stdout: String(stdout), stderr: String(stderr) });
-        }
-      );
-    }),
-});
+function normalizeError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
+}
 
-vi.mock('node:child_process', async (importOriginal) => {
-  const actual = (await importOriginal()) as Record<string, unknown>;
+const execFile = Object.assign(
+  (...args: unknown[]) => {
+    execFileMock(...args);
+  },
+  {
+    [promisify.custom]: (...args: unknown[]) =>
+      new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+        execFileMock(
+          ...args,
+          (err: unknown, stdout: string | Buffer = '', stderr: string | Buffer = '') => {
+            if (err) {
+              reject(normalizeError(err));
+              return;
+            }
+            resolve({ stdout: String(stdout), stderr: String(stderr) });
+          }
+        );
+      }),
+  }
+);
+
+vi.mock('node:child_process', async () => {
+  const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
   return {
     ...actual,
     execFile,
@@ -27,8 +36,8 @@ vi.mock('node:child_process', async (importOriginal) => {
 });
 
 vi.mock('../../src/lib/lock.js', () => ({
-  isLockStale: vi.fn(async () => false),
-  releaseIssueLock: vi.fn(async () => {}),
+  isLockStale: vi.fn(() => Promise.resolve(false)),
+  releaseIssueLock: vi.fn(() => Promise.resolve()),
 }));
 
 function queueExecFileResult(stdout: string): void {
@@ -55,6 +64,7 @@ beforeEach(() => {
 
 const {
   autoSelectIssue,
+  fetchPR,
   formatIssue,
   formatPR,
   listIssues,
@@ -244,6 +254,62 @@ describe('formatPR', () => {
     expect(result).toContain('labels="P0 &amp; critical, &quot;urgent&quot;"');
     expect(result).toContain('head="fix/login&amp;session"');
     expect(result).toContain('<body>\nBody with <html> & "quotes".\n</body>');
+  });
+
+  it('renders pending reviews with an empty date attribute', () => {
+    const result = formatPR({
+      number: 6,
+      title: 'Pending review',
+      state: 'OPEN',
+      labels: [],
+      body: 'Waiting on review.',
+      comments: [],
+      author: { login: 'dev' },
+      createdAt: '2025-01-01T00:00:00Z',
+      headRefName: 'feature/pending-review',
+      baseRefName: 'main',
+      reviews: [
+        {
+          author: { login: 'reviewer' },
+          body: '',
+          state: 'PENDING',
+          submittedAt: null,
+        },
+      ],
+    } as unknown as FormatPRInput);
+
+    expect(result).toContain('<review author="reviewer" state="PENDING" date=""></review>');
+  });
+});
+
+describe('fetchPR', () => {
+  it('accepts pending reviews with a null submittedAt timestamp', async () => {
+    queueExecFileResult(
+      JSON.stringify({
+        number: 10,
+        title: 'Fix the thing',
+        state: 'OPEN',
+        labels: [{ name: 'shipper:pr-open' }],
+        body: 'This fixes the thing.',
+        comments: [],
+        author: { login: 'dev' },
+        createdAt: '2025-01-30T09:00:00Z',
+        headRefName: 'fix/thing',
+        baseRefName: 'main',
+        reviews: [
+          {
+            author: { login: 'reviewer' },
+            body: '',
+            state: 'PENDING',
+            submittedAt: null,
+          },
+        ],
+      })
+    );
+
+    await expect(fetchPR(repo, '10')).resolves.toContain(
+      '<review author="reviewer" state="PENDING" date=""></review>'
+    );
   });
 });
 

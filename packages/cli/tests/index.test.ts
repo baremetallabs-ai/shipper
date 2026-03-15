@@ -6,7 +6,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   loadSettings: vi.fn(),
   CLI_VERSION: '0.1.0-test',
   checkVersionFreshness: vi.fn(),
-  getRepoNwo: vi.fn(async () => 'owner/repo'),
+  getRepoNwo: vi.fn(() => Promise.resolve('owner/repo')),
 }));
 
 vi.mock('../src/commands/init.js', () => ({ initCommand: vi.fn() }));
@@ -20,7 +20,7 @@ vi.mock('../src/commands/groom.js', () => ({ groomCommand: vi.fn() }));
 vi.mock('../src/commands/design.js', () => ({ designCommand: vi.fn() }));
 vi.mock('../src/commands/plan.js', () => ({ planCommand: vi.fn() }));
 vi.mock('../src/commands/next.js', () => ({ nextCommand: vi.fn() }));
-vi.mock('../src/commands/ship.js', () => ({ shipCommand: vi.fn(async () => {}) }));
+vi.mock('../src/commands/ship.js', () => ({ shipCommand: vi.fn(() => Promise.resolve()) }));
 vi.mock('../src/commands/implement.js', () => ({ implementCommand: vi.fn() }));
 vi.mock('../src/commands/eject.js', () => ({ ejectCommand: vi.fn() }));
 vi.mock('../src/commands/pr-review.js', () => ({ prReviewCommand: vi.fn() }));
@@ -42,6 +42,10 @@ import { prReviewCommand } from '../src/commands/pr-review.js';
 import { setupCommand } from '../src/commands/setup.js';
 import { unlockCommand } from '../src/commands/unlock.js';
 import { runPreflight, loadSettings, getRepoNwo } from '@dnsquared/shipper-core';
+
+interface ExecFileSyncError extends Error {
+  stderr?: string | Buffer;
+}
 
 const mockShipCommand = vi.mocked(shipCommand);
 const mockEjectCommand = vi.mocked(ejectCommand);
@@ -365,10 +369,19 @@ describe('shipper-cli', () => {
           stdio: ['ignore', 'pipe', 'pipe'],
         });
         expect.fail('Expected the built CLI to reject a missing --parallel value');
-      } catch (error) {
-        expect(error).toMatchObject({
-          stderr: expect.stringContaining('Error: --parallel requires a number'),
-        });
+      } catch (error: unknown) {
+        if (!(error instanceof Error)) {
+          throw error;
+        }
+
+        const execError = error as ExecFileSyncError;
+        const stderr =
+          typeof execError.stderr === 'string'
+            ? execError.stderr
+            : Buffer.isBuffer(execError.stderr)
+              ? execError.stderr.toString('utf-8')
+              : '';
+        expect(stderr).toContain('Error: --parallel requires a number');
       }
     });
 

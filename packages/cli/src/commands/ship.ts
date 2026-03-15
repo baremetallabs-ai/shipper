@@ -245,7 +245,7 @@ async function resolvePrForIssue(issueNumber: number, nwo: string): Promise<Queu
     );
   }
 
-  const prs = (allPrs ?? []).filter(
+  const prs = allPrs.filter(
     (pr) =>
       pr.headRefName === `shipper/${issueNumber}` ||
       pr.headRefName.startsWith(`shipper/${issueNumber}-`)
@@ -692,7 +692,9 @@ async function shipOneIssue(
         await withStageHooks(
           'merge',
           { issueNumber: issueStr, branchName: pr.headRefName },
-          async () => await mergePr(pr, issueNumber, nwo)
+          async () => {
+            await mergePr(pr, issueNumber, nwo);
+          }
         );
         results.push({ stage: 'merge', status: 'pass' });
       } catch (err) {
@@ -1255,6 +1257,7 @@ async function shipAutoParallel(
   const logFiles = new Map<number, string>();
 
   let shuttingDown = false;
+  const isShuttingDown = (): boolean => shuttingDown;
 
   mkdirSync(logsDir, { recursive: true, mode: 0o700 });
 
@@ -1264,7 +1267,7 @@ async function shipAutoParallel(
     });
 
   const onSignal = (signal: ShipSignal) => {
-    if (shuttingDown) return;
+    if (isShuttingDown()) return;
     shuttingDown = true;
 
     void (async () => {
@@ -1298,9 +1301,9 @@ async function shipAutoParallel(
 
   try {
     for (;;) {
-      if (shuttingDown) break;
+      if (isShuttingDown()) break;
 
-      while (!shuttingDown && activeRuns.size < parallel) {
+      while (!isShuttingDown() && activeRuns.size < parallel) {
         const candidate = await selectNextCandidate(
           repo,
           skippedIssues,
@@ -1321,7 +1324,7 @@ async function shipAutoParallel(
         });
       }
 
-      if (shuttingDown) break;
+      if (isShuttingDown()) break;
 
       if (activeRuns.size === 0) {
         const blocked = await selectBlockedIssues(repo);

@@ -9,7 +9,7 @@ const {
   failedLabel,
   lockedLabel,
 } = vi.hoisted(() => ({
-  mockGh: vi.fn(),
+  mockGh: vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>(),
   stageLabels: [
     'shipper:new',
     'shipper:groomed',
@@ -37,7 +37,7 @@ const {
 }));
 
 vi.mock('@dnsquared/shipper-core', () => ({
-  gh: (...args: unknown[]) => mockGh(...args),
+  gh: (args: string[]) => mockGh(args),
   STAGE_LABEL_NAMES: stageLabels,
   DISPLAY_NAME_MAP: displayNameMap,
   CONTROL_LABEL_NAMES: controlLabelNames,
@@ -64,6 +64,10 @@ function mockGhIssueList(issues: { number: number; title: string; labels: { name
   mockGh.mockResolvedValue({ stdout: JSON.stringify(issues), stderr: '' });
 }
 
+function loggedLines(): string[] {
+  return mockConsoleLog.mock.calls.map(([message]) => String(message));
+}
+
 describe('issueListCommand', () => {
   it('groups issues by pipeline stage in order with counts', async () => {
     mockGhIssueList([
@@ -75,7 +79,7 @@ describe('issueListCommand', () => {
 
     await issueListCommand({});
 
-    const calls = mockConsoleLog.mock.calls.map((c) => c[0]);
+    const calls = loggedLines();
     expect(calls).toEqual([
       '\nNew (2)',
       '  #3 Feature B',
@@ -98,7 +102,7 @@ describe('issueListCommand', () => {
 
     await issueListCommand({});
 
-    const calls = mockConsoleLog.mock.calls.map((c) => c[0]);
+    const calls = loggedLines();
     expect(calls).toEqual(['\nPlanned (1)', '  #42 Multi-label issue']);
   });
 
@@ -113,7 +117,7 @@ describe('issueListCommand', () => {
 
     await issueListCommand({});
 
-    const calls = mockConsoleLog.mock.calls.map((c) => c[0]);
+    const calls = loggedLines();
     expect(calls).toEqual(['\nBlocked (1)', '  #15 Blocked issue [designed]']);
   });
 
@@ -128,7 +132,7 @@ describe('issueListCommand', () => {
 
     await issueListCommand({});
 
-    const calls = mockConsoleLog.mock.calls.map((c) => c[0]);
+    const calls = loggedLines();
     expect(calls).toEqual(['\nFailed (1)', '  #16 Failed issue [planned]']);
   });
 
@@ -149,7 +153,7 @@ describe('issueListCommand', () => {
 
     await issueListCommand({});
 
-    const calls = mockConsoleLog.mock.calls.map((c) => c[0]);
+    const calls = loggedLines();
     expect(calls).toEqual([
       '\nNew (1)',
       '  #1 New issue',
@@ -171,7 +175,7 @@ describe('issueListCommand', () => {
 
     await issueListCommand({});
 
-    const calls = mockConsoleLog.mock.calls.map((c) => c[0]);
+    const calls = loggedLines();
     expect(calls).toEqual(['\nFailed (1)', '  #17 Dual-control issue [planned]']);
   });
 
@@ -186,7 +190,7 @@ describe('issueListCommand', () => {
 
     await issueListCommand({});
 
-    const calls = mockConsoleLog.mock.calls.map((c) => c[0]);
+    const calls = loggedLines();
     expect(calls).toContain('  #20 Locked issue [locked]');
   });
 
@@ -201,7 +205,7 @@ describe('issueListCommand', () => {
 
     await issueListCommand({});
 
-    const calls = mockConsoleLog.mock.calls.map((c) => c[0]);
+    const calls = loggedLines();
     expect(calls).toEqual(['\nBlocked (1)', '  #25 Both labels [new] [locked]']);
   });
 
@@ -230,7 +234,7 @@ describe('issueListCommand', () => {
 
     await issueListCommand({ status: 'blocked' });
 
-    const calls = mockConsoleLog.mock.calls.map((c) => c[0]);
+    const calls = loggedLines();
     expect(calls).toEqual(['\nBlocked (1)', '  #2 Blocked issue [designed]']);
   });
 
@@ -251,7 +255,7 @@ describe('issueListCommand', () => {
 
     await issueListCommand({ status: 'failed' });
 
-    const calls = mockConsoleLog.mock.calls.map((c) => c[0]);
+    const calls = loggedLines();
     expect(calls).toEqual(['\nFailed (1)', '  #3 Failed issue [planned]']);
   });
 
@@ -277,7 +281,7 @@ describe('issueListCommand', () => {
 
     await issueListCommand({ status: 'designed' });
 
-    const calls = mockConsoleLog.mock.calls.map((c) => c[0]);
+    const calls = loggedLines();
     expect(calls).toEqual([
       '\nDesigned (1)',
       '  #1 Issue A',
@@ -311,7 +315,7 @@ describe('issueListCommand', () => {
 
     await issueListCommand({});
 
-    const calls = mockConsoleLog.mock.calls.map((c) => c[0]);
+    const calls = loggedLines();
     // Only New and Ready headings should appear — no Groomed, Designed, etc.
     expect(calls).toEqual(['\nNew (1)', '  #1 Issue A', '\nReady (1)', '  #2 Issue B']);
   });
@@ -321,7 +325,7 @@ describe('issueListCommand', () => {
 
     await issueListCommand({});
 
-    const calls = mockConsoleLog.mock.calls.map((c) => c[0]);
+    const calls = loggedLines();
     expect(calls).toEqual(['\nNew (1)', '  #1 Issue A']);
   });
 
@@ -342,7 +346,7 @@ describe('issueListCommand', () => {
 
     await issueListCommand({});
 
-    const calls = mockConsoleLog.mock.calls.map((c) => c[0]);
+    const calls = loggedLines();
     expect(calls).toEqual([
       '\nDesigned (1)',
       '  #1 Normal designed issue',
@@ -362,7 +366,7 @@ describe('issueListCommand', () => {
 
     await issueListCommand({});
 
-    const calls = mockConsoleLog.mock.calls.map((c) => c[0]);
+    const calls = loggedLines();
     expect(calls).toEqual(['\nNew (3)', '  #10 A', '  #30 M', '  #50 Z']);
   });
 
@@ -392,7 +396,7 @@ describe('issueListCommand', () => {
 
     await issueListCommand({});
 
-    const calls = mockConsoleLog.mock.calls.map((c) => c[0]);
+    const calls = loggedLines();
     expect(calls).toEqual([
       '\nBlocked (2)',
       '  #10 Blocked A [new]',

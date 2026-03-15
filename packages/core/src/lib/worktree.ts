@@ -35,6 +35,22 @@ interface ErrnoError extends Error {
   code?: string;
 }
 
+function toError(error: unknown): Error {
+  if (error instanceof Error) {
+    return error;
+  }
+
+  if (typeof error === 'string') {
+    return new Error(error);
+  }
+
+  if (typeof error === 'undefined') {
+    return new Error('Unknown child process error');
+  }
+
+  return new Error(JSON.stringify(error));
+}
+
 export interface WorktreeGitOpts {
   wtPath: string;
   repoRoot: string;
@@ -100,7 +116,7 @@ async function execAsync(
           return;
         }
 
-        reject(error);
+        reject(toError(error));
       }
     );
   });
@@ -239,7 +255,7 @@ async function pushWithRetry(
   const pushArgs = getPushArgs(opts);
   let retries = 0;
 
-  while (true) {
+  for (;;) {
     const pushResult = await pushWorktreeBranch(opts);
     if (pushResult.code === 0) {
       return 0;

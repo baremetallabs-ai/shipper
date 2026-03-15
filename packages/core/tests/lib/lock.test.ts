@@ -2,21 +2,30 @@ import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const execFileMock = vi.fn();
-const execFile = Object.assign((...args: unknown[]) => execFileMock(...args), {
-  [promisify.custom]: (...args: unknown[]) =>
-    new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-      execFileMock(
-        ...args,
-        (err: unknown, stdout: string | Buffer = '', stderr: string | Buffer = '') => {
-          if (err) {
-            reject(err);
-            return;
+function normalizeError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+const execFile = Object.assign(
+  (...args: unknown[]) => {
+    execFileMock(...args);
+  },
+  {
+    [promisify.custom]: (...args: unknown[]) =>
+      new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+        execFileMock(
+          ...args,
+          (err: unknown, stdout: string | Buffer = '', stderr: string | Buffer = '') => {
+            if (err) {
+              reject(normalizeError(err));
+              return;
+            }
+            resolve({ stdout: String(stdout), stderr: String(stderr) });
           }
-          resolve({ stdout: String(stdout), stderr: String(stderr) });
-        }
-      );
-    }),
-});
+        );
+      }),
+  }
+);
 const mockGetSettings = vi.fn(() => ({
   lockTimeoutMinutes: 30,
 }));
@@ -143,7 +152,7 @@ describe('releaseIssueLock', () => {
 describe('withIssueLock', () => {
   it('passes through when SHIPPER_LOCK_HELD already matches', async () => {
     process.env.SHIPPER_LOCK_HELD = '42';
-    const fn = vi.fn(async () => 'result');
+    const fn = vi.fn(() => Promise.resolve('result'));
 
     await expect(withIssueLock(repo, '42', fn)).resolves.toBe('result');
     expect(execFileMock).not.toHaveBeenCalled();
@@ -155,9 +164,9 @@ describe('withIssueLock', () => {
     queueExecFileResult('');
 
     let envDuringFn: string | undefined;
-    const result = await withIssueLock(repo, '42', async () => {
+    const result = await withIssueLock(repo, '42', () => {
       envDuringFn = process.env.SHIPPER_LOCK_HELD;
-      return 'ok';
+      return Promise.resolve('ok');
     });
 
     expect(result).toBe('ok');
@@ -171,7 +180,7 @@ describe('withIssueLock', () => {
     queueExecFileResult('');
 
     await expect(
-      withIssueLock(repo, '42', async () => {
+      withIssueLock(repo, '42', () => {
         throw new Error('boom');
       })
     ).rejects.toThrow('boom');
@@ -272,7 +281,7 @@ describe('withIssueLock', () => {
       // release: remove-label
       queueExecFileResult('');
 
-      await withIssueLock(repo, '42', async () => 'done');
+      await withIssueLock(repo, '42', () => Promise.resolve('done'));
 
       expect(clearIntervalSpy).toHaveBeenCalled();
     } finally {
@@ -290,7 +299,7 @@ describe('withIssueLock', () => {
       queueExecFileResult('');
 
       await expect(
-        withIssueLock(repo, '42', async () => {
+        withIssueLock(repo, '42', () => {
           throw new Error('boom');
         })
       ).rejects.toThrow('boom');
@@ -340,7 +349,7 @@ describe('withIssueLock', () => {
     try {
       process.env.SHIPPER_LOCK_HELD = '42';
 
-      await withIssueLock(repo, '42', async () => 'result');
+      await withIssueLock(repo, '42', () => Promise.resolve('result'));
 
       expect(setIntervalSpy).not.toHaveBeenCalled();
     } finally {

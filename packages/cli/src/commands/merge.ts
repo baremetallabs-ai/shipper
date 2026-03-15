@@ -53,6 +53,90 @@ interface PRViewData {
   mergeStateStatus: string;
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parseGraphQLResponse(json: string): GraphQLResponse {
+  const parsed: unknown = JSON.parse(json);
+  if (!isPlainObject(parsed)) {
+    throw new Error('GitHub GraphQL response was not an object.');
+  }
+
+  const data = parsed.data;
+  if (!isPlainObject(data)) {
+    throw new Error('GitHub GraphQL response was missing data.');
+  }
+
+  const search = data.search;
+  if (!isPlainObject(search) || !Array.isArray(search.nodes) || !isPlainObject(search.pageInfo)) {
+    throw new Error('GitHub GraphQL response was missing search results.');
+  }
+
+  const nodes = search.nodes.map((node): SearchNode => {
+    if (!isPlainObject(node) || !isPlainObject(node.timelineItems)) {
+      throw new Error('GitHub GraphQL response contained an invalid node.');
+    }
+
+    const timelineNodes = node.timelineItems.nodes;
+    if (
+      typeof node.number !== 'number' ||
+      typeof node.title !== 'string' ||
+      typeof node.headRefName !== 'string' ||
+      typeof node.baseRefName !== 'string' ||
+      !Array.isArray(timelineNodes)
+    ) {
+      throw new Error('GitHub GraphQL response contained an invalid pull request node.');
+    }
+
+    return {
+      number: node.number,
+      title: node.title,
+      headRefName: node.headRefName,
+      baseRefName: node.baseRefName,
+      timelineItems: {
+        nodes: timelineNodes.map((timelineNode) => {
+          if (!isPlainObject(timelineNode) || typeof timelineNode.createdAt !== 'string') {
+            throw new Error('GitHub GraphQL response contained an invalid timeline node.');
+          }
+
+          const label = isPlainObject(timelineNode.label) ? timelineNode.label : undefined;
+          return {
+            createdAt: timelineNode.createdAt,
+            label: label && typeof label.name === 'string' ? { name: label.name } : undefined,
+          };
+        }),
+      },
+    };
+  });
+
+  const pageInfo = search.pageInfo;
+  if (typeof pageInfo.hasNextPage !== 'boolean') {
+    throw new Error('GitHub GraphQL response contained an invalid pageInfo object.');
+  }
+
+  return {
+    data: {
+      search: {
+        nodes,
+        pageInfo: {
+          hasNextPage: pageInfo.hasNextPage,
+          endCursor: typeof pageInfo.endCursor === 'string' ? pageInfo.endCursor : null,
+        },
+      },
+    },
+  };
+}
+
+function parsePRViewData(json: string): PRViewData {
+  const parsed: unknown = JSON.parse(json);
+  if (!isPlainObject(parsed) || typeof parsed.mergeStateStatus !== 'string') {
+    throw new Error('GitHub CLI returned an invalid pull request view payload.');
+  }
+
+  return { mergeStateStatus: parsed.mergeStateStatus };
+}
+
 async function resolveRepo(override?: string): Promise<string> {
   if (override) return override;
   return await getRepoNwo();
@@ -145,7 +229,8 @@ function acquireLock(lockPath: string): void {
     } catch {
       // Another process may have removed it
     }
-    return acquireLock(lockPath);
+    acquireLock(lockPath);
+    return;
   }
 
   if (isNaN(pid)) {
@@ -155,7 +240,8 @@ function acquireLock(lockPath: string): void {
     } catch {
       // Another process may have removed it
     }
-    return acquireLock(lockPath);
+    acquireLock(lockPath);
+    return;
   }
 
   // Check if the process is still running
@@ -171,7 +257,8 @@ function acquireLock(lockPath: string): void {
     } catch {
       // Another process may have removed it
     }
-    return acquireLock(lockPath);
+    acquireLock(lockPath);
+    return;
   }
 }
 
@@ -230,7 +317,7 @@ async function getQueue(nwo: string): Promise<QueuedPR[]> {
       return [];
     }
 
-    const response: GraphQLResponse = JSON.parse(output);
+    const response = parseGraphQLResponse(output);
     allNodes.push(...response.data.search.nodes);
 
     if (response.data.search.pageInfo.hasNextPage) {
@@ -376,7 +463,7 @@ async function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): Promise<bo
       '--json',
       'mergeStateStatus',
     ]);
-    const data: PRViewData = JSON.parse(json);
+    const data = parsePRViewData(json);
     mergeState = data.mergeStateStatus;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -601,7 +688,7 @@ export async function mergeCommand(options: MergeOptions): Promise<void> {
       await processQueue(nwo, options.dryRun);
     } else {
       console.log(`Polling every ${intervalSeconds}s. Press Ctrl+C to stop.`);
-      while (true) {
+      for (;;) {
         await processQueue(nwo, options.dryRun);
         await sleep(intervalSeconds * 1000);
       }

@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { mockGh } = vi.hoisted(() => ({
-  mockGh: vi.fn(),
+  mockGh: vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>(),
 }));
 
 vi.mock('@dnsquared/shipper-core', () => ({
-  gh: (...args: unknown[]) => mockGh(...args),
+  gh: (args: string[]) => mockGh(args),
   PRIORITY_HIGH_LABEL: 'shipper:priority-high',
   PRIORITY_LOW_LABEL: 'shipper:priority-low',
   STAGE_LABEL_NAMES: [
@@ -30,23 +30,23 @@ const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
 function mockOpenIssue(labels: string[], state = 'OPEN'): void {
-  mockGh.mockImplementation(async (args: string[]) => {
+  mockGh.mockImplementation((args: string[]) => {
     if (args[0] === 'issue' && args[1] === 'view') {
-      return {
+      return Promise.resolve({
         stdout: JSON.stringify({
           number: 42,
           state,
           labels: labels.map((name) => ({ name })),
         }),
         stderr: '',
-      };
+      });
     }
 
     if (args[0] === 'pr' && args[1] === 'view') {
       throw new Error('not a PR');
     }
 
-    return { stdout: '', stderr: '' };
+    return Promise.resolve({ stdout: '', stderr: '' });
   });
 }
 
@@ -119,7 +119,7 @@ describe('priorityCommand', () => {
 
     expect(logSpy).toHaveBeenCalledWith('Issue #42 is already at normal priority.');
     const editCalls = mockGh.mock.calls.filter(
-      ([args]) => (args as string[])[0] === 'issue' && (args as string[])[1] === 'edit'
+      ([args]) => args[0] === 'issue' && args[1] === 'edit'
     );
     expect(editCalls).toHaveLength(0);
   });
@@ -141,26 +141,26 @@ describe('priorityCommand', () => {
   });
 
   it('rejects pull requests', async () => {
-    mockGh.mockImplementation(async (args: string[]) => {
+    mockGh.mockImplementation((args: string[]) => {
       if (args[0] === 'issue' && args[1] === 'view') {
-        return {
+        return Promise.resolve({
           stdout: JSON.stringify({
             number: 42,
             state: 'OPEN',
             labels: [{ name: 'shipper:planned' }],
           }),
           stderr: '',
-        };
+        });
       }
 
       if (args[0] === 'pr' && args[1] === 'view') {
-        return {
+        return Promise.resolve({
           stdout: JSON.stringify({ number: 42, url: 'https://example.test/pr/42' }),
           stderr: '',
-        };
+        });
       }
 
-      return { stdout: '', stderr: '' };
+      return Promise.resolve({ stdout: '', stderr: '' });
     });
 
     await expect(priorityCommand(repo, '42', 'high')).rejects.toThrow('process.exit');

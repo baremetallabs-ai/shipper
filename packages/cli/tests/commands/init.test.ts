@@ -1,8 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
 import path from 'node:path';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const { mockGh } = vi.hoisted(() => ({
-  mockGh: vi.fn(),
+  mockGh: vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>(),
 }));
 
 const { canonicalLabels } = vi.hoisted(() => ({
@@ -47,26 +47,33 @@ const { canonicalLabels } = vi.hoisted(() => ({
   ],
 }));
 
-const mkdirSyncMock = vi.fn();
-const writeFileSyncMock = vi.fn();
-const readFileSyncMock = vi.fn();
-const existsSyncMock = vi.fn();
-const chmodSyncMock = vi.fn();
+const mkdirSyncMock =
+  vi.fn<(path: string, options?: import('node:fs').MakeDirectoryOptions) => void>();
+const writeFileSyncMock = vi.fn<(target: string | number, data: string | Buffer) => void>();
+const readFileSyncMock = vi.fn<(path: string, encoding?: string) => string>();
+const existsSyncMock = vi.fn<(path: string) => boolean>();
+const chmodSyncMock = vi.fn<(path: string, mode: number) => void>();
 
 vi.mock('node:fs', async () => {
   const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
   return {
     ...actual,
-    mkdirSync: (...args: unknown[]) => mkdirSyncMock(...args),
-    writeFileSync: (...args: unknown[]) => writeFileSyncMock(...args),
-    readFileSync: (...args: unknown[]) => readFileSyncMock(...args),
-    existsSync: (...args: unknown[]) => existsSyncMock(...args),
-    chmodSync: (...args: unknown[]) => chmodSyncMock(...args),
+    mkdirSync: (path: string, options?: import('node:fs').MakeDirectoryOptions) => {
+      mkdirSyncMock(path, options);
+    },
+    writeFileSync: (target: string | number, data: string | Buffer) => {
+      writeFileSyncMock(target, data);
+    },
+    readFileSync: (path: string, encoding?: string) => readFileSyncMock(path, encoding),
+    existsSync: (path: string) => existsSyncMock(path),
+    chmodSync: (path: string, mode: number) => {
+      chmodSyncMock(path, mode);
+    },
   };
 });
 
 vi.mock('@dnsquared/shipper-core', () => ({
-  gh: (...args: unknown[]) => mockGh(...args),
+  gh: (args: string[]) => mockGh(args),
   scripts: {},
   LABELS: canonicalLabels,
   DEFAULTS: {
@@ -98,6 +105,49 @@ const settingsPath = path.resolve('.shipper', 'settings.json');
 const gitignorePath = path.resolve('.shipper', '.gitignore');
 const promptsDirPath = path.resolve('.shipper', 'prompts');
 const expectedLabels = canonicalLabels;
+
+type JsonObject = Record<string, unknown>;
+type WriteFileCall = [target: string | number, data: string | Buffer];
+
+function isPlainObject(value: unknown): value is JsonObject {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function findWriteCall(targetPath: string): WriteFileCall | undefined {
+  return writeFileSyncMock.mock.calls.find(([target]) => target === targetPath);
+}
+
+function parseJsonObject(value: string | Buffer): JsonObject {
+  const parsed: unknown = JSON.parse(value.toString());
+  if (!isPlainObject(parsed)) {
+    throw new Error('Expected JSON object');
+  }
+  return parsed;
+}
+
+function parseWrittenSettings(): JsonObject {
+  const settingsCall = findWriteCall(settingsPath);
+  if (!settingsCall) {
+    throw new Error('expected settings.json write');
+  }
+
+  return parseJsonObject(settingsCall[1]);
+}
+
+function getCommands(settings: JsonObject): JsonObject {
+  if (!isPlainObject(settings.commands)) {
+    throw new Error('Expected commands object');
+  }
+  return settings.commands;
+}
+
+function getCommandConfig(settings: JsonObject, key: string): JsonObject {
+  const commands = getCommands(settings);
+  if (!isPlainObject(commands[key])) {
+    throw new Error(`Expected commands.${key} object`);
+  }
+  return commands[key];
+}
 
 beforeEach(() => {
   mkdirSyncMock.mockReset();
@@ -177,8 +227,7 @@ describe('initCommand directories', () => {
     const promptDirCall = mkdirSyncMock.mock.calls.find(
       (call: unknown[]) =>
         typeof call[0] === 'string' &&
-        ((call[0] as string) === promptsDirPath ||
-          (call[0] as string).startsWith(`${promptsDirPath}${path.sep}`))
+        (call[0] === promptsDirPath || call[0].startsWith(`${promptsDirPath}${path.sep}`))
     );
     expect(promptDirCall).toBeUndefined();
   });
@@ -187,12 +236,7 @@ describe('initCommand directories', () => {
 describe('initCommand settings', () => {
   it('writes defaults with commands on fresh init', async () => {
     await initCommand({ agent: 'claude' });
-    const settingsCall = writeFileSyncMock.mock.calls.find(
-      (call: unknown[]) => call[0] === settingsPath
-    );
-    expect(settingsCall).toBeDefined();
-    if (!settingsCall) throw new Error('expected settings.json write');
-    const written = JSON.parse(settingsCall[1] as string);
+    const written = parseWrittenSettings();
     expect(written.commands).toEqual({ default: { agent: 'claude' } });
     expect(written.agent).toBeUndefined();
     expect(written.hooks).toBeUndefined();
@@ -207,12 +251,7 @@ describe('initCommand settings', () => {
       return '';
     });
     await initCommand({ agent: 'claude' });
-    const settingsCall = writeFileSyncMock.mock.calls.find(
-      (call: unknown[]) => call[0] === settingsPath
-    );
-    expect(settingsCall).toBeDefined();
-    if (!settingsCall) throw new Error('expected settings.json write');
-    const written = JSON.parse(settingsCall[1] as string);
+    const written = parseWrittenSettings();
     expect(written.commands).toEqual({
       default: { agent: 'claude' },
       groom: { mode: 'headless' },
@@ -242,11 +281,7 @@ describe('initCommand settings', () => {
 
     await initCommand({ agent: 'claude' });
 
-    const settingsCall = writeFileSyncMock.mock.calls.find(
-      (call: unknown[]) => call[0] === settingsPath
-    );
-    expect(settingsCall).toBeDefined();
-    const written = JSON.parse(settingsCall?.[1] as string);
+    const written = parseWrittenSettings();
     expect(written.commands).toEqual({
       default: { agent: 'claude' },
       groom: { agent: 'codex', mode: 'interactive' },
@@ -266,11 +301,7 @@ describe('initCommand settings', () => {
 
     await initCommand({ agent: 'claude' });
 
-    const settingsCall = writeFileSyncMock.mock.calls.find(
-      (call: unknown[]) => call[0] === settingsPath
-    );
-    expect(settingsCall).toBeDefined();
-    const written = JSON.parse(settingsCall?.[1] as string);
+    const written = parseWrittenSettings();
     expect(written.commands).toEqual({ default: { agent: 'claude' } });
     expect((Object.prototype as Record<string, unknown>).mode).toBeUndefined();
   });
@@ -286,11 +317,7 @@ describe('initCommand settings', () => {
 
     await initCommand({ agent: 'claude' });
 
-    const settingsCall = writeFileSyncMock.mock.calls.find(
-      (call: unknown[]) => call[0] === settingsPath
-    );
-    expect(settingsCall).toBeDefined();
-    const written = JSON.parse(settingsCall?.[1] as string);
+    const written = parseWrittenSettings();
     expect(written.hooks).toBeUndefined();
   });
 
@@ -308,11 +335,7 @@ describe('initCommand settings', () => {
 
   it('writes cliVersion to settings.json', async () => {
     await initCommand({ agent: 'claude' });
-    const settingsCall = writeFileSyncMock.mock.calls.find(
-      (call: unknown[]) => call[0] === settingsPath
-    );
-    expect(settingsCall).toBeDefined();
-    const written = JSON.parse(settingsCall?.[1] as string);
+    const written = parseWrittenSettings();
     expect(written.cliVersion).toBe('1.2.3');
   });
 
@@ -361,11 +384,7 @@ describe('initCommand stored agent', () => {
     await initCommand({});
     expect(questionMock).not.toHaveBeenCalled();
     expect(console.log).toHaveBeenCalledWith('Using agent: codex (from settings)');
-    const settingsCall = writeFileSyncMock.mock.calls.find(
-      (call: unknown[]) => call[0] === settingsPath
-    );
-    expect(settingsCall).toBeDefined();
-    const written = JSON.parse(settingsCall?.[1] as string);
+    const written = parseWrittenSettings();
     expect(written.commands).toEqual({ default: { agent: 'codex' } });
   });
 
@@ -386,12 +405,8 @@ describe('initCommand stored agent', () => {
     });
     existsSyncMock.mockImplementation((p: string) => p === settingsPath);
     await initCommand({ agent: 'claude' });
-    const settingsCall = writeFileSyncMock.mock.calls.find(
-      (call: unknown[]) => call[0] === settingsPath
-    );
-    expect(settingsCall).toBeDefined();
-    const written = JSON.parse(settingsCall?.[1] as string);
-    expect(written.commands.default.agent).toBe('claude');
+    const written = parseWrittenSettings();
+    expect(getCommandConfig(written, 'default').agent).toBe('claude');
     expect(console.log).not.toHaveBeenCalledWith(expect.stringContaining('from settings'));
   });
 });
@@ -399,30 +414,21 @@ describe('initCommand stored agent', () => {
 describe('initCommand agent selection', () => {
   it('--agent claude writes commands to settings but does not write prompt files', async () => {
     await initCommand({ agent: 'claude' });
-    const settingsCall = writeFileSyncMock.mock.calls.find(
-      (call: unknown[]) => call[0] === settingsPath
-    );
-    expect(settingsCall).toBeDefined();
-    const written = JSON.parse(settingsCall?.[1] as string);
+    const written = parseWrittenSettings();
     expect(written.commands).toEqual({ default: { agent: 'claude' } });
     expect(written.agent).toBeUndefined();
 
     const promptCall = writeFileSyncMock.mock.calls.find(
       (call: unknown[]) =>
         typeof call[0] === 'string' &&
-        ((call[0] as string) === promptsDirPath ||
-          (call[0] as string).startsWith(`${promptsDirPath}${path.sep}`))
+        (call[0] === promptsDirPath || call[0].startsWith(`${promptsDirPath}${path.sep}`))
     );
     expect(promptCall).toBeUndefined();
   });
 
   it('--agent codex writes codex agent to settings', async () => {
     await initCommand({ agent: 'codex' });
-    const settingsCall = writeFileSyncMock.mock.calls.find(
-      (call: unknown[]) => call[0] === settingsPath
-    );
-    expect(settingsCall).toBeDefined();
-    const written = JSON.parse(settingsCall?.[1] as string);
+    const written = parseWrittenSettings();
     expect(written.commands).toEqual({ default: { agent: 'codex' } });
     expect(exitMock).not.toHaveBeenCalledWith(1);
   });
@@ -450,11 +456,7 @@ describe('initCommand agent selection', () => {
       return '';
     });
     await initCommand({ agent: 'claude' });
-    const settingsCall = writeFileSyncMock.mock.calls.find(
-      (call: unknown[]) => call[0] === settingsPath
-    );
-    expect(settingsCall).toBeDefined();
-    const written = JSON.parse(settingsCall?.[1] as string);
+    const written = parseWrittenSettings();
     expect(written.commands).toEqual({ default: { agent: 'claude' } });
     expect(written.agent).toBeUndefined();
   });
@@ -462,11 +464,7 @@ describe('initCommand agent selection', () => {
   it('interactive prompt defaults to claude on empty input', async () => {
     questionMock.mockResolvedValueOnce('');
     await initCommand({});
-    const settingsCall = writeFileSyncMock.mock.calls.find(
-      (call: unknown[]) => call[0] === settingsPath
-    );
-    expect(settingsCall).toBeDefined();
-    const written = JSON.parse(settingsCall?.[1] as string);
+    const written = parseWrittenSettings();
     expect(written.commands).toEqual({ default: { agent: 'claude' } });
     expect(closeMock).toHaveBeenCalled();
   });
@@ -474,22 +472,14 @@ describe('initCommand agent selection', () => {
   it('interactive prompt accepts "Claude Code"', async () => {
     questionMock.mockResolvedValueOnce('Claude Code');
     await initCommand({});
-    const settingsCall = writeFileSyncMock.mock.calls.find(
-      (call: unknown[]) => call[0] === settingsPath
-    );
-    expect(settingsCall).toBeDefined();
-    const written = JSON.parse(settingsCall?.[1] as string);
+    const written = parseWrittenSettings();
     expect(written.commands).toEqual({ default: { agent: 'claude' } });
   });
 
   it('interactive prompt accepts "Codex CLI" and writes codex agent to settings', async () => {
     questionMock.mockResolvedValueOnce('Codex CLI');
     await initCommand({});
-    const settingsCall = writeFileSyncMock.mock.calls.find(
-      (call: unknown[]) => call[0] === settingsPath
-    );
-    expect(settingsCall).toBeDefined();
-    const written = JSON.parse(settingsCall?.[1] as string);
+    const written = parseWrittenSettings();
     expect(written.commands).toEqual({ default: { agent: 'codex' } });
     expect(exitMock).not.toHaveBeenCalledWith(1);
   });

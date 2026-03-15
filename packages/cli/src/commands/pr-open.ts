@@ -37,44 +37,42 @@ export async function prOpenCommand(
     const repoRoot = await getRepoRoot();
     const branch = await findBranchForIssue(issue);
 
-    return await withStageHooks(
-      'pr-open',
-      { issueNumber: issue, branchName: branch },
-      async () =>
-        await withWorktree(
-          { repoRoot, branch, createBranch: false, issueNumber: issue, stage: 'pr-open' },
-          async (wtPath) => {
-            await scrubOutputDir(wtPath);
-            const transportCode = await withGitTransport(
-              { wtPath, repoRoot, baseBranch, pushMode: 'force-with-lease' },
-              async (conflictContext, pushError) =>
-                await runPrompt('pr_open', {
-                  repo,
-                  issueRef: issue,
-                  cwd: wtPath,
-                  baseBranch,
-                  mode,
-                  agent,
-                  model,
-                  userInput: conflictContext
-                    ? formatConflictContext(conflictContext)
-                    : (pushError ?? undefined),
-                })
-            );
-            if (transportCode !== 0) {
-              process.exitCode = transportCode;
-              return;
+    await withStageHooks('pr-open', { issueNumber: issue, branchName: branch }, async () => {
+      await withWorktree(
+        { repoRoot, branch, createBranch: false, issueNumber: issue, stage: 'pr-open' },
+        async (wtPath) => {
+          await scrubOutputDir(wtPath);
+          const transportCode = await withGitTransport(
+            { wtPath, repoRoot, baseBranch, pushMode: 'force-with-lease' },
+            (conflictContext, pushError) => {
+              return runPrompt('pr_open', {
+                repo,
+                issueRef: issue,
+                cwd: wtPath,
+                baseBranch,
+                mode,
+                agent,
+                model,
+                userInput: conflictContext
+                  ? formatConflictContext(conflictContext)
+                  : (pushError ?? undefined),
+              });
             }
-            try {
-              await processResult({ repo, issueNumber: issue, stage: 'pr_open', cwd: wtPath });
-            } catch (error) {
-              const detail = error instanceof Error ? error.message : String(error);
-              await handleAgentCrash(repo, issue, 'pr_open', detail);
-              process.exitCode = 1;
-              return;
-            }
+          );
+          if (transportCode !== 0) {
+            process.exitCode = transportCode;
+            return;
           }
-        )
-    );
+          try {
+            await processResult({ repo, issueNumber: issue, stage: 'pr_open', cwd: wtPath });
+          } catch (error) {
+            const detail = error instanceof Error ? error.message : String(error);
+            await handleAgentCrash(repo, issue, 'pr_open', detail);
+            process.exitCode = 1;
+            return;
+          }
+        }
+      );
+    });
   });
 }

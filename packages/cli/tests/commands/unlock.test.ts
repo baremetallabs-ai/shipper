@@ -1,14 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const mockListIssues = vi.fn();
-const mockIsLockStale = vi.fn();
-const mockReleaseIssueLock = vi.fn();
+const mockListIssues =
+  vi.fn<(repo: string, options: { label: string }) => Promise<Array<{ number: number }>>>();
+const mockIsLockStale = vi.fn<(repo: string, issue: string) => Promise<boolean>>();
+const mockReleaseIssueLock = vi.fn<(repo: string, issue: string) => Promise<void>>();
 const repo = 'owner/repo';
 
 vi.mock('@dnsquared/shipper-core', () => ({
-  listIssues: (...args: unknown[]) => mockListIssues(...args),
-  isLockStale: (...args: unknown[]) => mockIsLockStale(...args),
-  releaseIssueLock: (...args: unknown[]) => mockReleaseIssueLock(...args),
+  listIssues: (repo: string, options: { label: string }) => mockListIssues(repo, options),
+  isLockStale: (repo: string, issue: string) => mockIsLockStale(repo, issue),
+  releaseIssueLock: (repo: string, issue: string) => mockReleaseIssueLock(repo, issue),
 }));
 
 const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => {

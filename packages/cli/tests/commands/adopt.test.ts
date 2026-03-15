@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const { mockGh } = vi.hoisted(() => ({
-  mockGh: vi.fn(),
+  mockGh: vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>(),
 }));
 
 vi.mock('@dnsquared/shipper-core', () => ({
-  gh: (...args: unknown[]) => mockGh(...args),
+  gh: (args: string[]) => mockGh(args),
 }));
 
 import { adoptCommand, adoptAllCommand } from '../../src/commands/adopt.js';
@@ -62,7 +62,7 @@ describe('adoptCommand', () => {
     );
     // Should not call gh issue edit
     const editCalls = mockGh.mock.calls.filter(
-      ([args]) => (args as string[])[0] === 'issue' && (args as string[])[1] === 'edit'
+      ([args]) => args[0] === 'issue' && args[1] === 'edit'
     );
     expect(editCalls).toHaveLength(0);
   });
@@ -135,7 +135,7 @@ describe('adoptAllCommand', () => {
     await adoptAllCommand();
 
     const editCalls = mockGh.mock.calls.filter(
-      ([args]) => (args as string[])[0] === 'issue' && (args as string[])[1] === 'edit'
+      ([args]) => args[0] === 'issue' && args[1] === 'edit'
     );
     expect(editCalls).toHaveLength(3);
     expect(editCalls[0]?.[0]).toEqual(['issue', 'edit', '10', '--add-label', 'shipper:new']);
@@ -159,7 +159,7 @@ describe('adoptAllCommand', () => {
 
     expect(mockConsoleLog).toHaveBeenCalledWith('No eligible issues found.');
     const editCalls = mockGh.mock.calls.filter(
-      ([args]) => (args as string[])[0] === 'issue' && (args as string[])[1] === 'edit'
+      ([args]) => args[0] === 'issue' && args[1] === 'edit'
     );
     expect(editCalls).toHaveLength(0);
   });
@@ -187,7 +187,7 @@ describe('adoptAllCommand', () => {
       if (args[0] === 'issue' && args[1] === 'list') {
         return Promise.resolve({ stdout: JSON.stringify(issues), stderr: '' });
       }
-      if (args[0] === 'issue' && args[1] === 'edit' && (args as string[])[2] === '12') {
+      if (args[0] === 'issue' && args[1] === 'edit' && args[2] === '12') {
         return Promise.reject(new Error('API error'));
       }
       return Promise.resolve({ stdout: '', stderr: '' });
@@ -212,7 +212,7 @@ describe('adoptAllCommand', () => {
 
     expect(mockConsoleLog).toHaveBeenCalledWith('No eligible issues found.');
     const editCalls = mockGh.mock.calls.filter(
-      ([args]) => (args as string[])[0] === 'issue' && (args as string[])[1] === 'edit'
+      ([args]) => args[0] === 'issue' && args[1] === 'edit'
     );
     expect(editCalls).toHaveLength(0);
   });

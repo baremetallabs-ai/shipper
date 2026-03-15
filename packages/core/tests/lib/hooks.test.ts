@@ -2,9 +2,12 @@ import { EventEmitter } from 'node:events';
 import path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const spawnMock = vi.fn();
-const statMock = vi.fn();
-const accessMock = vi.fn();
+type HookChild = EventEmitter & { stderr: EventEmitter };
+
+const spawnMock =
+  vi.fn<(command: string, args?: string[], options?: Record<string, unknown>) => HookChild>();
+const statMock = vi.fn<(path: string) => Promise<unknown>>();
+const accessMock = vi.fn<(path: string, mode?: number) => Promise<void>>();
 
 vi.mock('node:child_process', async () => {
   const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
@@ -64,12 +67,15 @@ describe('runAdvisoryHook', () => {
 
     await runAdvisoryHook('Test', 'echo hello', { FOO: 'bar' }, '/tmp/worktree');
 
-    expect(spawnMock).toHaveBeenCalledWith('echo hello', [], {
-      stdio: ['inherit', 'inherit', 'pipe'],
-      env: expect.objectContaining({ FOO: 'bar' }),
-      cwd: '/tmp/worktree',
-      shell: true,
-    });
+    const spawnOptions = spawnMock.mock.calls[0]?.[2];
+    expect(spawnOptions).toEqual(
+      expect.objectContaining({
+        stdio: ['inherit', 'inherit', 'pipe'],
+        cwd: '/tmp/worktree',
+        shell: true,
+      })
+    );
+    expect(spawnOptions?.env).toEqual(expect.objectContaining({ FOO: 'bar' }));
     expect(logMock).toHaveBeenCalledWith('  Test hook completed.');
   });
 
@@ -158,12 +164,12 @@ describe('withStageHooks', () => {
   it('runs pre hook before fn and post hook after fn', async () => {
     const callOrder: string[] = [];
     spawnMock.mockImplementation((command: string) => {
-      const child = new EventEmitter() as EventEmitter & { stderr: EventEmitter };
+      const child = new EventEmitter() as HookChild;
       child.stderr = new EventEmitter();
       globalThis.queueMicrotask(() => {
-        if (String(command).includes('pre-groom')) {
+        if (command.includes('pre-groom')) {
           callOrder.push('pre');
-        } else if (String(command).includes('post-groom')) {
+        } else if (command.includes('post-groom')) {
           callOrder.push('post');
         }
         child.emit('close', 0);
@@ -171,9 +177,9 @@ describe('withStageHooks', () => {
       return child;
     });
 
-    const result = await withStageHooks('groom', { issueNumber: '10' }, async () => {
+    const result = await withStageHooks('groom', { issueNumber: '10' }, () => {
       callOrder.push('fn');
-      return 42;
+      return Promise.resolve(42);
     });
 
     expect(result).toBe(42);
@@ -184,22 +190,22 @@ describe('withStageHooks', () => {
     mockSpawnResult();
     mockSpawnResult();
 
-    await withStageHooks(
-      'implement',
-      { issueNumber: '42', branchName: 'shipper/42-feature' },
-      async () => 0
+    await withStageHooks('implement', { issueNumber: '42', branchName: 'shipper/42-feature' }, () =>
+      Promise.resolve(0)
     );
 
+    const spawnOptions = spawnMock.mock.calls[0]?.[2];
     expect(spawnMock).toHaveBeenNthCalledWith(
       1,
       expect.stringContaining('pre-implement'),
       [],
+      expect.any(Object)
+    );
+    expect(spawnOptions?.env).toEqual(
       expect.objectContaining({
-        env: expect.objectContaining({
-          SHIPPER_STAGE: 'implement',
-          SHIPPER_ISSUE_NUMBER: '42',
-          SHIPPER_BRANCH_NAME: 'shipper/42-feature',
-        }),
+        SHIPPER_STAGE: 'implement',
+        SHIPPER_ISSUE_NUMBER: '42',
+        SHIPPER_BRANCH_NAME: 'shipper/42-feature',
       })
     );
   });

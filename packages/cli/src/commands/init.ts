@@ -23,6 +23,29 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function getNestedValue(source: Record<string, unknown>, dottedKey: string): unknown {
+  let current: unknown = source;
+  for (const part of dottedKey.split('.')) {
+    if (!isPlainObject(current)) {
+      return undefined;
+    }
+    current = current[part];
+  }
+  return current;
+}
+
+function formatSettingValue(value: unknown): string {
+  if (value === null) {
+    return 'null';
+  }
+
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+
+  return JSON.stringify(value);
+}
+
 function isSafeCommandKey(key: string): boolean {
   return !UNSAFE_COMMAND_KEYS.has(key);
 }
@@ -201,19 +224,9 @@ export async function initCommand(options: { agent?: string }) {
   }
   for (const [key, desc] of Object.entries(SETTING_DESCRIPTIONS)) {
     if (key in DEFAULTS) continue;
-    let value: unknown;
-    if (key.includes('.')) {
-      const parts = key.split('.');
-      let obj: unknown = merged;
-      for (const part of parts) {
-        obj = (obj as Record<string, unknown>)?.[part];
-      }
-      value = obj;
-    } else {
-      value = (merged as Record<string, unknown>)[key];
-    }
+    const value = key.includes('.') ? getNestedValue(merged, key) : merged[key];
     if (value !== undefined) {
-      console.log(`  ${key}: ${value}  — ${desc}`);
+      console.log(`  ${key}: ${formatSettingValue(value)}  — ${desc}`);
     } else {
       console.log(`  ${key}: (not set)  — ${desc}`);
     }

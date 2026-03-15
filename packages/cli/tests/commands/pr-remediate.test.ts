@@ -1,35 +1,42 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const getSettingsMock = vi.fn();
-const fetchChecksMock = vi.fn();
+const getSettingsMock =
+  vi.fn<() => { prReviewWait: { mode: 'timer' | 'checks'; timeoutMinutes: number } }>();
+interface MockCheck {
+  name: string;
+  state: string;
+  bucket: string;
+}
+
+const fetchChecksMock = vi.fn<(repo: string, pr: string) => Promise<MockCheck[]>>();
 const classifyChecksMock = vi.fn();
 const resolveRefMock = vi.fn();
 const autoSelectPrForStageMock = vi.fn();
 const formatConflictContextMock = vi.fn(() => 'formatted conflict context');
 const runPromptMock = vi.fn();
-const syncWorktreeMock = vi.fn(async () => {});
-const pushWorktreeMock = vi.fn(async () => {});
-const withStageHooksMock = vi.fn(
-  async (_stage: unknown, _env: unknown, fn: () => Promise<unknown>) => await fn()
+const syncWorktreeMock = vi.fn(() => Promise.resolve());
+const pushWorktreeMock = vi.fn(() => Promise.resolve());
+const withStageHooksMock = vi.fn((_stage: unknown, _env: unknown, fn: () => Promise<unknown>) =>
+  fn()
 );
-const withIssueLockMock = vi.fn(
-  async (_repo: unknown, _issue: unknown, fn: () => Promise<unknown>) => await fn()
+const withIssueLockMock = vi.fn((_repo: unknown, _issue: unknown, fn: () => Promise<unknown>) =>
+  fn()
 );
-const withWorktreeMock = vi.fn(
-  async (_opts: unknown, fn: (wtPath: string) => Promise<unknown>) => await fn('/tmp/fake-wt')
+const withWorktreeMock = vi.fn((_opts: unknown, fn: (wtPath: string) => Promise<unknown>) =>
+  fn('/tmp/fake-wt')
 );
-const getBranchForPRMock = vi.fn(async () => 'shipper/10-feature');
-const getRepoRootMock = vi.fn(async () => '/tmp/fake-repo');
-const ghMock = vi.fn();
-const sleepMsMock = vi.fn(async () => {});
-const setupProtocolDirsMock = vi.fn(async () => {});
-const writeContextFileMock = vi.fn(async () => {});
-const scrubOutputDirMock = vi.fn(async () => {});
+const getBranchForPRMock = vi.fn(() => Promise.resolve('shipper/10-feature'));
+const getRepoRootMock = vi.fn(() => Promise.resolve('/tmp/fake-repo'));
+const ghMock = vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>();
+const sleepMsMock = vi.fn(() => Promise.resolve());
+const setupProtocolDirsMock = vi.fn(() => Promise.resolve());
+const writeContextFileMock = vi.fn(() => Promise.resolve());
+const scrubOutputDirMock = vi.fn(() => Promise.resolve());
 const readResultFileMock = vi.fn();
-const postRepliesMock = vi.fn(async () => {});
-const postCommentMock = vi.fn(async () => {});
-const executeTransitionMock = vi.fn(async () => {});
-const handleAgentCrashMock = vi.fn(async () => {});
+const postRepliesMock = vi.fn(() => Promise.resolve());
+const postCommentMock = vi.fn(() => Promise.resolve());
+const executeTransitionMock = vi.fn(() => Promise.resolve());
+const handleAgentCrashMock = vi.fn(() => Promise.resolve());
 const resolveTransitionMock = vi.fn(() => ({
   add: ['shipper:ready'],
   remove: ['shipper:pr-reviewed'],
@@ -54,8 +61,8 @@ vi.mock('@dnsquared/shipper-core', () => ({
   gh: ghMock,
   sleepMs: sleepMsMock,
   getSettings: () => getSettingsMock(),
-  fetchChecks: (...args: unknown[]) => fetchChecksMock(...args),
-  classifyChecks: (...args: unknown[]) => classifyChecksMock(...args),
+  fetchChecks: (currentRepo: string, pr: string) => fetchChecksMock(currentRepo, pr),
+  classifyChecks: (checks: MockCheck[]) => classifyChecksMock(checks),
   setupProtocolDirs: setupProtocolDirsMock,
   writeContextFile: writeContextFileMock,
   scrubOutputDir: scrubOutputDirMock,
@@ -103,30 +110,30 @@ describe('prRemediateCommand', () => {
       remove: ['shipper:pr-reviewed'],
     });
     classifyChecksMock.mockImplementation(classifyChecksImpl);
-    ghMock.mockImplementation(async (args: string[]) => {
+    ghMock.mockImplementation((args: string[]) => {
       if (args[0] === 'pr' && args[1] === 'view' && args.includes('baseRefName')) {
-        return {
+        return Promise.resolve({
           stdout: JSON.stringify({ baseRefName: 'release/2026' }),
           stderr: '',
-        };
+        });
       }
 
       if (args[0] === 'pr' && args[1] === 'view' && args.includes('createdAt')) {
-        return {
+        return Promise.resolve({
           stdout: JSON.stringify({ createdAt: new Date().toISOString() }),
           stderr: '',
-        };
+        });
       }
 
       if (args[0] === 'pr' && args[1] === 'diff') {
-        return { stdout: 'diff --git a/file b/file\n', stderr: '' };
+        return Promise.resolve({ stdout: 'diff --git a/file b/file\n', stderr: '' });
       }
 
       if (args[0] === 'api' && args[1] === 'graphql') {
-        return { stdout: '[]', stderr: '' };
+        return Promise.resolve({ stdout: '[]', stderr: '' });
       }
 
-      return { stdout: '', stderr: '' };
+      return Promise.resolve({ stdout: '', stderr: '' });
     });
     getSettingsMock.mockReturnValue({
       prReviewWait: { mode: 'timer', timeoutMinutes: 0 },

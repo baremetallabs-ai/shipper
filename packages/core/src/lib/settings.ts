@@ -88,8 +88,8 @@ export async function loadSettings(): Promise<void> {
   base = await readSettingsFile(basePath);
   local = await readSettingsFile(localPath);
 
-  const baseCommands: Record<string, unknown> = isPlainObject(base?.commands) ? base.commands : {};
-  const localCommands: Record<string, unknown> = isPlainObject(local?.commands)
+  const baseCommands: Record<string, unknown> = isPlainObject(base.commands) ? base.commands : {};
+  const localCommands: Record<string, unknown> = isPlainObject(local.commands)
     ? local.commands
     : {};
   const allCommandSteps = new Set([
@@ -123,7 +123,7 @@ export async function loadSettings(): Promise<void> {
     ...DEFAULTS,
     ...base,
     ...local,
-    merge: { ...DEFAULTS.merge, ...base?.merge, ...local?.merge },
+    merge: { ...DEFAULTS.merge, ...base.merge, ...local.merge },
     commands: mergedCommands,
   };
 
@@ -159,11 +159,13 @@ export function resolveAgent(step: string, override?: AgentName): AgentName {
     return override;
   }
   const s = getSettings();
-  const agent = s.commands[step]?.agent ?? s.commands.default.agent;
-  if (agent !== 'claude' && agent !== 'codex') {
-    throw new Error(`Invalid agent "${agent}" for step "${step}". Must be "claude" or "codex".`);
+  const configuredAgent: unknown = s.commands[step]?.agent ?? s.commands.default.agent;
+  if (configuredAgent !== 'claude' && configuredAgent !== 'codex') {
+    throw new Error(
+      `Invalid agent "${String(configuredAgent)}" for step "${step}". Must be "claude" or "codex".`
+    );
   }
-  return agent;
+  return configuredAgent;
 }
 
 export function resolveMode(step: string, override?: CommandMode): CommandMode {

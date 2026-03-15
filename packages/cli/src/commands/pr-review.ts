@@ -47,60 +47,60 @@ export async function prReviewCommand(
     const repoRoot = await getRepoRoot();
     const branch = await getBranchForPR(repo, pr);
 
-    return await withStageHooks(
-      'pr-review',
-      { issueNumber, branchName: branch },
-      async () =>
-        await withWorktree(
-          { repoRoot, branch, createBranch: false, issueNumber, stage: 'pr-review' },
-          async (wtPath) => {
-            await scrubOutputDir(wtPath);
-            const { stdout: diff } = await gh(['pr', 'diff', pr, '-R', repo]);
-            await writeContextFile(wtPath, 'pr-diff.patch', diff);
+    await withStageHooks('pr-review', { issueNumber, branchName: branch }, async () => {
+      await withWorktree(
+        { repoRoot, branch, createBranch: false, issueNumber, stage: 'pr-review' },
+        async (wtPath) => {
+          await scrubOutputDir(wtPath);
+          const { stdout: diff } = await gh(['pr', 'diff', pr, '-R', repo]);
+          await writeContextFile(wtPath, 'pr-diff.patch', diff);
 
-            const { stdout: prFiles } = await gh([
-              'api',
-              `repos/${repo}/pulls/${pr}/files`,
-              '--paginate',
-            ]);
-            await writeContextFile(wtPath, 'pr-files.json', prFiles);
+          const { stdout: prFiles } = await gh([
+            'api',
+            `repos/${repo}/pulls/${pr}/files`,
+            '--paginate',
+            '--slurp',
+            '--jq',
+            'add',
+          ]);
+          await writeContextFile(wtPath, 'pr-files.json', prFiles);
 
-            const { stdout: prMetadata } = await gh([
-              'pr',
-              'view',
-              pr,
-              '-R',
+          const { stdout: prMetadata } = await gh([
+            'pr',
+            'view',
+            pr,
+            '-R',
+            repo,
+            '--json',
+            'headRefOid,author,title,headRefName',
+          ]);
+          await writeContextFile(wtPath, 'pr-metadata.json', prMetadata);
+
+          await runPrompt('pr_review', {
+            repo,
+            issueRef: issueNumber,
+            prRef: pr,
+            cwd: wtPath,
+            mode,
+            agent,
+            model,
+          });
+
+          try {
+            await processResult({
               repo,
-              '--json',
-              'headRefOid,author,title,headRefName',
-            ]);
-            await writeContextFile(wtPath, 'pr-metadata.json', prMetadata);
-
-            await runPrompt('pr_review', {
-              repo,
-              issueRef: issueNumber,
-              prRef: pr,
+              issueNumber,
+              stage: 'pr_review',
               cwd: wtPath,
-              mode,
-              agent,
-              model,
+              prNumber: pr,
             });
-
-            try {
-              await processResult({
-                repo,
-                issueNumber,
-                stage: 'pr_review',
-                cwd: wtPath,
-                prNumber: pr,
-              });
-            } catch (error) {
-              const detail = error instanceof Error ? error.message : String(error);
-              await handleAgentCrash(repo, issueNumber, 'pr_review', detail);
-              process.exitCode = 1;
-            }
+          } catch (error) {
+            const detail = error instanceof Error ? error.message : String(error);
+            await handleAgentCrash(repo, issueNumber, 'pr_review', detail);
+            process.exitCode = 1;
           }
-        )
-    );
+        }
+      );
+    });
   });
 }

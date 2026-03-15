@@ -27,7 +27,7 @@ interface ReviewComment {
   author: { login: string };
   body: string;
   state: string;
-  submittedAt: string;
+  submittedAt: string | null;
 }
 
 interface PRData {
@@ -80,6 +80,133 @@ interface StageIssueListItem {
   number: number;
   title: string;
   labels: { name: string }[];
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parseAuthor(value: unknown, context: string): { login: string } {
+  if (!isPlainObject(value) || typeof value.login !== 'string') {
+    throw new Error(`Invalid ${context} author payload.`);
+  }
+
+  return { login: value.login };
+}
+
+function parseLabels(value: unknown, context: string): { name: string }[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`Invalid ${context} labels payload.`);
+  }
+
+  return value.map((label) => {
+    if (!isPlainObject(label) || typeof label.name !== 'string') {
+      throw new Error(`Invalid ${context} label payload.`);
+    }
+
+    return { name: label.name };
+  });
+}
+
+function parseComments(value: unknown, context: string): IssueComment[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`Invalid ${context} comments payload.`);
+  }
+
+  return value.map((comment) => {
+    if (
+      !isPlainObject(comment) ||
+      typeof comment.body !== 'string' ||
+      typeof comment.createdAt !== 'string'
+    ) {
+      throw new Error(`Invalid ${context} comment payload.`);
+    }
+
+    return {
+      author: parseAuthor(comment.author, `${context} comment`),
+      body: comment.body,
+      createdAt: comment.createdAt,
+    };
+  });
+}
+
+function parseReviews(value: unknown): ReviewComment[] {
+  if (!Array.isArray(value)) {
+    throw new Error('Invalid PR reviews payload.');
+  }
+
+  return value.map((review) => {
+    if (
+      !isPlainObject(review) ||
+      typeof review.body !== 'string' ||
+      typeof review.state !== 'string' ||
+      (review.submittedAt !== null && typeof review.submittedAt !== 'string')
+    ) {
+      throw new Error('Invalid PR review payload.');
+    }
+
+    return {
+      author: parseAuthor(review.author, 'PR review'),
+      body: review.body,
+      state: review.state,
+      submittedAt: review.submittedAt,
+    };
+  });
+}
+
+function parseIssueData(json: string): IssueData {
+  const parsed: unknown = JSON.parse(json);
+  if (
+    !isPlainObject(parsed) ||
+    typeof parsed.number !== 'number' ||
+    typeof parsed.title !== 'string' ||
+    typeof parsed.state !== 'string' ||
+    typeof parsed.body !== 'string' ||
+    typeof parsed.createdAt !== 'string'
+  ) {
+    throw new Error('Invalid issue payload.');
+  }
+
+  return {
+    number: parsed.number,
+    title: parsed.title,
+    state: parsed.state,
+    labels: parseLabels(parsed.labels, 'issue'),
+    body: parsed.body,
+    comments: parseComments(parsed.comments, 'issue'),
+    author: parseAuthor(parsed.author, 'issue'),
+    createdAt: parsed.createdAt,
+  };
+}
+
+function parsePRData(json: string): PRData {
+  const parsed: unknown = JSON.parse(json);
+  if (
+    !isPlainObject(parsed) ||
+    typeof parsed.number !== 'number' ||
+    typeof parsed.title !== 'string' ||
+    typeof parsed.state !== 'string' ||
+    typeof parsed.body !== 'string' ||
+    typeof parsed.createdAt !== 'string' ||
+    typeof parsed.headRefName !== 'string' ||
+    typeof parsed.baseRefName !== 'string'
+  ) {
+    throw new Error('Invalid pull request payload.');
+  }
+
+  return {
+    number: parsed.number,
+    title: parsed.title,
+    state: parsed.state,
+    labels: parseLabels(parsed.labels, 'PR'),
+    body: parsed.body,
+    comments: parseComments(parsed.comments, 'PR'),
+    author: parseAuthor(parsed.author, 'PR'),
+    createdAt: parsed.createdAt,
+    headRefName: parsed.headRefName,
+    baseRefName: parsed.baseRefName,
+    reviews: parseReviews(parsed.reviews),
+  };
 }
 
 export interface StageIssueCandidate {
@@ -152,7 +279,7 @@ export async function fetchIssue(repo: string, ref: string): Promise<string> {
     throw new Error(`Failed to fetch issue ${ref}: ${msg}`);
   }
 
-  const data: IssueData = JSON.parse(json);
+  const data = parseIssueData(json);
   return formatIssue(data);
 }
 
@@ -174,7 +301,7 @@ export async function fetchPR(repo: string, ref: string): Promise<string> {
     throw new Error(`Failed to fetch PR ${ref}: ${msg}`);
   }
 
-  const data: PRData = JSON.parse(json);
+  const data = parsePRData(json);
   return formatPR(data);
 }
 
@@ -304,10 +431,11 @@ export function formatPR(data: PRData): string {
   if (data.reviews.length > 0) {
     parts.push('<reviews>');
     for (const r of data.reviews) {
+      const submittedAt = r.submittedAt ?? '';
       parts.push(
         r.body
-          ? `<review author="${r.author.login}" state="${r.state}" date="${r.submittedAt}">\n${r.body}\n</review>`
-          : `<review author="${r.author.login}" state="${r.state}" date="${r.submittedAt}"></review>`
+          ? `<review author="${r.author.login}" state="${r.state}" date="${submittedAt}">\n${r.body}\n</review>`
+          : `<review author="${r.author.login}" state="${r.state}" date="${submittedAt}"></review>`
       );
     }
     parts.push('</reviews>');
@@ -409,7 +537,8 @@ export async function selectIssuesForStage(
       'open',
       '--limit',
       '1000',
-      ...(lockedSearchFilter ? ['--search', lockedSearchFilter] : []),
+      '--search',
+      lockedSearchFilter,
       '--json',
       'number,title,labels',
     ]);

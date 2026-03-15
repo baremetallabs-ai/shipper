@@ -1,20 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const autoSelectIssueMock = vi.fn();
-const generateBranchNameMock = vi.fn(async (_repo: string, issueRef: string) => {
-  return `shipper/${issueRef}-branch`;
-});
-const getRepoRootMock = vi.fn(async () => '/tmp/fake-repo');
+const generateBranchNameMock = vi.fn((_repo: string, issueRef: string) =>
+  Promise.resolve(`shipper/${issueRef}-branch`)
+);
+const getRepoRootMock = vi.fn(() => Promise.resolve('/tmp/fake-repo'));
 const printAutoSummaryMock = vi.fn();
-const runPromptMock = vi.fn(async () => 0);
-const withIssueLockMock = vi.fn(
-  async (_repo: unknown, _issue: unknown, fn: () => Promise<unknown>) => await fn()
+const runPromptMock = vi.fn(() => Promise.resolve(0));
+const withIssueLockMock = vi.fn((_repo: unknown, _issue: unknown, fn: () => Promise<unknown>) =>
+  fn()
 );
-const withStageHooksMock = vi.fn(
-  async (_stage: unknown, _env: unknown, fn: () => Promise<unknown>) => await fn()
+const withStageHooksMock = vi.fn((_stage: unknown, _env: unknown, fn: () => Promise<unknown>) =>
+  fn()
 );
-const withWorktreeMock = vi.fn(
-  async (_opts: unknown, fn: (wtPath: string) => Promise<unknown>) => await fn('/tmp/fake-wt')
+const withWorktreeMock = vi.fn((_opts: unknown, fn: (wtPath: string) => Promise<unknown>) =>
+  fn('/tmp/fake-wt')
 );
 
 vi.mock('@dnsquared/shipper-core', () => ({

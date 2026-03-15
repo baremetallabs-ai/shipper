@@ -79,10 +79,11 @@ export function resolveTransition(stage: StageName, verdict: Verdict): LabelTran
     return { add: [FAILED_LABEL], remove: [] };
   }
 
-  const entry = STAGE_TRANSITIONS[stage];
-  if (!entry) {
+  if (!(stage in STAGE_TRANSITIONS)) {
     throw new Error(`Unknown stage: ${stage}`);
   }
+
+  const entry = STAGE_TRANSITIONS[stage];
 
   if (verdict === 'accept') {
     return { add: [entry.accept], remove: [entry.runningAt] };

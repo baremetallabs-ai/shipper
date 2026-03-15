@@ -4,10 +4,12 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const ghMock = vi.fn();
+const ghMock = vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>();
 
 vi.mock('../../src/lib/gh.js', () => ({
-  gh: (...args: unknown[]) => ghMock(...args),
+  gh: (...args: unknown[]) => {
+    return ghMock(...(args as [string[]]));
+  },
 }));
 
 const {
@@ -42,12 +44,11 @@ describe('output protocol helpers', () => {
     await setupProtocolDirs(tempDir);
     await setupProtocolDirs(tempDir);
 
-    await expect(stat(path.join(tempDir, PROTOCOL_INPUT_DIR))).resolves.toMatchObject({
-      isDirectory: expect.any(Function),
-    });
-    await expect(stat(path.join(tempDir, PROTOCOL_OUTPUT_DIR))).resolves.toMatchObject({
-      isDirectory: expect.any(Function),
-    });
+    const inputDirStat = await stat(path.join(tempDir, PROTOCOL_INPUT_DIR));
+    const outputDirStat = await stat(path.join(tempDir, PROTOCOL_OUTPUT_DIR));
+
+    expect(inputDirStat.isDirectory()).toBe(true);
+    expect(outputDirStat.isDirectory()).toBe(true);
   });
 
   it('scrubs output files while preserving .gitkeep', async () => {

@@ -33,39 +33,41 @@ export async function implementCommand(
     const settings = getSettings();
     const baseBranch = await resolveBaseBranch(repo, settings.defaultBaseBranch);
 
-    return await withStageHooks(
-      'implement',
-      { issueNumber: issue, branchName: branch },
-      async () =>
-        await withWorktree(
-          { repoRoot, branch, createBranch: true, issueNumber: issue, stage: 'implement' },
-          async (wtPath) => {
-            await scrubOutputDir(wtPath);
-            await withGitTransport(
-              { wtPath, repoRoot, baseBranch, pushMode: 'new-branch' },
-              async (conflictContext, pushError) =>
-                await runPrompt('implement', {
-                  repo,
-                  issueRef: issue,
-                  cwd: wtPath,
-                  mode,
-                  agent,
-                  model,
-                  userInput: conflictContext
-                    ? formatConflictContext(conflictContext)
-                    : (pushError ?? undefined),
-                })
-            );
-            try {
-              await processResult({ repo, issueNumber: issue, stage: 'implement', cwd: wtPath });
-            } catch (error) {
-              const detail = error instanceof Error ? error.message : String(error);
-              await handleAgentCrash(repo, issue, 'implement', detail);
-              process.exitCode = 1;
-              return;
+    await withStageHooks('implement', { issueNumber: issue, branchName: branch }, async () => {
+      await withWorktree(
+        { repoRoot, branch, createBranch: true, issueNumber: issue, stage: 'implement' },
+        async (wtPath) => {
+          await scrubOutputDir(wtPath);
+          const transportCode = await withGitTransport(
+            { wtPath, repoRoot, baseBranch, pushMode: 'new-branch' },
+            (conflictContext, pushError) => {
+              return runPrompt('implement', {
+                repo,
+                issueRef: issue,
+                cwd: wtPath,
+                mode,
+                agent,
+                model,
+                userInput: conflictContext
+                  ? formatConflictContext(conflictContext)
+                  : (pushError ?? undefined),
+              });
             }
+          );
+          if (transportCode !== 0) {
+            process.exitCode = transportCode;
+            return;
           }
-        )
-    );
+          try {
+            await processResult({ repo, issueNumber: issue, stage: 'implement', cwd: wtPath });
+          } catch (error) {
+            const detail = error instanceof Error ? error.message : String(error);
+            await handleAgentCrash(repo, issue, 'implement', detail);
+            process.exitCode = 1;
+            return;
+          }
+        }
+      );
+    });
   });
 }

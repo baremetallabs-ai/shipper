@@ -36,10 +36,11 @@ const {
   };
 
   return {
-    existsSyncMock: vi.fn(),
-    mkdirSyncMock: vi.fn(),
-    writeFileSyncMock: vi.fn(),
-    getSettingsMock: vi.fn(),
+    existsSyncMock: vi.fn<(path: string) => boolean>(),
+    mkdirSyncMock:
+      vi.fn<(path: string, options?: import('node:fs').MakeDirectoryOptions) => void>(),
+    writeFileSyncMock: vi.fn<(path: string, data: string) => void>(),
+    getSettingsMock: vi.fn<() => { commands: Record<string, { agent?: 'claude' | 'codex' }> }>(),
     claudePrompts: claudeRegistry,
     codexPrompts: codexRegistry,
   };
@@ -49,14 +50,18 @@ vi.mock('node:fs', async () => {
   const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
   return {
     ...actual,
-    existsSync: (...args: unknown[]) => existsSyncMock(...args),
-    mkdirSync: (...args: unknown[]) => mkdirSyncMock(...args),
-    writeFileSync: (...args: unknown[]) => writeFileSyncMock(...args),
+    existsSync: (path: string) => existsSyncMock(path),
+    mkdirSync: (path: string, options?: import('node:fs').MakeDirectoryOptions) => {
+      mkdirSyncMock(path, options);
+    },
+    writeFileSync: (path: string, data: string) => {
+      writeFileSyncMock(path, data);
+    },
   };
 });
 
 vi.mock('@dnsquared/shipper-core', () => ({
-  getSettings: (...args: unknown[]) => getSettingsMock(...args),
+  getSettings: () => getSettingsMock(),
   agentPrompts: {
     claude: claudePrompts,
     codex: codexPrompts,
@@ -143,14 +148,14 @@ describe('ejectCommand', () => {
       path.resolve('.shipper', 'prompts', 'claude', 'pr_remediate.md'),
       path.resolve('.shipper', 'prompts', 'claude', 'unblock.md'),
     ]);
-    expect(writtenPaths.some((writtenPath) => String(writtenPath).endsWith('setup.md'))).toBe(
-      false
-    );
+    expect(writtenPaths.some((writtenPath) => writtenPath.endsWith('setup.md'))).toBe(false);
     expect(logSpy).toHaveBeenCalledWith('Summary: wrote 9, skipped 0');
   });
 
   it('prints a helpful error and exits 1 for invalid prompt names', () => {
-    expect(() => ejectCommand('not-a-prompt')).toThrow('process.exit:1');
+    expect(() => {
+      ejectCommand('not-a-prompt');
+    }).toThrow('process.exit:1');
 
     expect(errorSpy).toHaveBeenCalledWith(
       'Error: Invalid prompt name "not-a-prompt". Valid prompt names: new, groom, design, plan, implement, pr-open, pr-review, pr-remediate, unblock'

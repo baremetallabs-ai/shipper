@@ -1,19 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fetchIssueMock = vi.fn();
-const ghMock = vi.fn();
-const handleAgentCrashMock = vi.fn(async () => {});
-const processResultMock = vi.fn(async () => ({
-  verdict: 'accept',
-  comment: '.shipper/output/comment-250.md',
-}));
-const runPromptMock = vi.fn(async () => 0);
-const scrubOutputDirMock = vi.fn(async () => {});
-const setupProtocolDirsMock = vi.fn(async () => {});
-const withIssueLockMock = vi.fn(
-  async (_repo: unknown, _issue: unknown, fn: () => Promise<unknown>) => await fn()
+const ghMock = vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>();
+const handleAgentCrashMock = vi.fn(() => Promise.resolve());
+const processResultMock = vi.fn(() =>
+  Promise.resolve({
+    verdict: 'accept',
+    comment: '.shipper/output/comment-250.md',
+  })
 );
-const writeContextFileMock = vi.fn(async () => {});
+const runPromptMock = vi.fn(() => Promise.resolve(0));
+const scrubOutputDirMock = vi.fn(() => Promise.resolve());
+const setupProtocolDirsMock = vi.fn(() => Promise.resolve());
+const withIssueLockMock = vi.fn((_repo: unknown, _issue: unknown, fn: () => Promise<unknown>) =>
+  fn()
+);
+const writeContextFileMock = vi.fn(() => Promise.resolve());
 
 vi.mock('@dnsquared/shipper-core', () => ({
   fetchIssue: fetchIssueMock,
@@ -39,19 +41,19 @@ describe('prepareUnblockContext', () => {
     <comment>Blocked by #248, #248, and #249. Ignore #250.</comment>
   </comments>
 </issue>`);
-    ghMock.mockImplementation(async (args: string[]) => {
+    ghMock.mockImplementation((args: string[]) => {
       if (args[0] === 'issue' && args[1] === 'view' && args[2] === '248') {
-        return {
+        return Promise.resolve({
           stdout: JSON.stringify({ title: 'Core protocol infra', state: 'CLOSED' }),
           stderr: '',
-        };
+        });
       }
 
       if (args[0] === 'issue' && args[1] === 'view' && args[2] === '249') {
-        return {
+        return Promise.resolve({
           stdout: JSON.stringify({ title: 'Protocol PR', state: 'CLOSED' }),
           stderr: '',
-        };
+        });
       }
 
       if (args[0] === 'pr' && args[1] === 'view' && args[2] === '248') {
@@ -59,14 +61,14 @@ describe('prepareUnblockContext', () => {
       }
 
       if (args[0] === 'pr' && args[1] === 'view' && args[2] === '249') {
-        return {
+        return Promise.resolve({
           stdout: JSON.stringify({
             title: 'Protocol PR',
             state: 'MERGED',
             mergedAt: '2026-03-14T03:00:00Z',
           }),
           stderr: '',
-        };
+        });
       }
 
       throw new Error(`Unexpected gh args: ${args.join(' ')}`);
@@ -122,12 +124,12 @@ describe('prepareUnblockContext', () => {
     <comment>Blocked by #250 and #251.</comment>
   </comments>
 </issue>`);
-    ghMock.mockImplementation(async (args: string[]) => {
+    ghMock.mockImplementation((args: string[]) => {
       if (args[0] === 'issue' && args[1] === 'view' && args[2] === '251') {
-        return {
+        return Promise.resolve({
           stdout: JSON.stringify({ title: 'Follow-up issue', state: 'OPEN' }),
           stderr: '',
-        };
+        });
       }
 
       if (args[0] === 'pr' && args[1] === 'view' && args[2] === '251') {
@@ -152,12 +154,12 @@ describe('prepareUnblockContext', () => {
     <comment>Blocked by #248 and #9999.</comment>
   </comments>
 </issue>`);
-    ghMock.mockImplementation(async (args: string[]) => {
+    ghMock.mockImplementation((args: string[]) => {
       if (args[0] === 'issue' && args[1] === 'view' && args[2] === '248') {
-        return {
+        return Promise.resolve({
           stdout: JSON.stringify({ title: 'Core protocol infra', state: 'CLOSED' }),
           stderr: '',
-        };
+        });
       }
 
       if (args[0] === 'issue' && args[1] === 'view' && args[2] === '9999') {
@@ -208,12 +210,12 @@ describe('unblockCommand', () => {
     <comment>Blocked by #248.</comment>
   </comments>
 </issue>`);
-    ghMock.mockImplementation(async (args: string[]) => {
+    ghMock.mockImplementation((args: string[]) => {
       if (args[0] === 'issue' && args[1] === 'view' && args[2] === '248') {
-        return {
+        return Promise.resolve({
           stdout: JSON.stringify({ title: 'Core protocol infra', state: 'CLOSED' }),
           stderr: '',
-        };
+        });
       }
 
       if (args[0] === 'pr' && args[1] === 'view' && args[2] === '248') {

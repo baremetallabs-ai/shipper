@@ -37,7 +37,9 @@ export function RepoTabBar({
             <button
               type="button"
               className="min-w-0 px-3 py-2 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring"
-              onClick={() => onSelectRepo(repo)}
+              onClick={() => {
+                onSelectRepo(repo);
+              }}
             >
               <span className="block max-w-52 truncate">{repo}</span>
             </button>

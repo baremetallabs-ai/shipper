@@ -2,16 +2,30 @@ import { EventEmitter } from 'node:events';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const spawnMock = vi.fn();
-const readFileMock = vi.fn();
-const statSyncMock = vi.fn();
-const readFileSyncMock = vi.fn();
-const fetchIssueMock = vi.fn();
-const fetchPRMock = vi.fn();
-const resolveAgentMock = vi.fn().mockReturnValue('claude');
-const resolveModelMock = vi.fn().mockReturnValue(undefined);
-const resolveModeMock = vi.fn().mockReturnValue('default');
-const getSettingsMock = vi.fn().mockReturnValue({ agentTimeoutMinutes: 60 });
+type PromptChild = EventEmitter & {
+  stderr?: EventEmitter;
+  stdout?: EventEmitter;
+};
+
+const spawnMock =
+  vi.fn<(command: string, args?: string[], options?: Record<string, unknown>) => PromptChild>();
+const readFileMock = vi.fn<(path: string, encoding: string) => Promise<string>>();
+const statSyncMock = vi.fn<(path: string) => unknown>();
+const readFileSyncMock = vi.fn<(path: string, encoding: string) => string>();
+const fetchIssueMock = vi.fn<(repo: string, issueRef: string) => Promise<string>>();
+const fetchPRMock = vi.fn<(repo: string, prRef: string) => Promise<string>>();
+const resolveAgentMock = vi
+  .fn<(promptName: string, agent?: string) => 'claude' | 'codex'>()
+  .mockReturnValue('claude');
+const resolveModelMock = vi
+  .fn<(promptName: string, model?: string) => string | undefined>()
+  .mockReturnValue(undefined);
+const resolveModeMock = vi
+  .fn<(promptName: string, mode?: string) => string>()
+  .mockReturnValue('default');
+const getSettingsMock = vi.fn<() => { agentTimeoutMinutes: number }>().mockReturnValue({
+  agentTimeoutMinutes: 60,
+});
 
 vi.mock('node:child_process', async () => {
   const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
@@ -85,7 +99,7 @@ function makePrompt(cmd: 'claude' | 'codex', args: string[] = [], body = 'prompt
 }
 
 function spawnedArgs(): string[] {
-  return spawnMock.mock.calls[0][1] as string[];
+  return spawnMock.mock.calls[0]?.[1] ?? [];
 }
 
 afterEach(() => {

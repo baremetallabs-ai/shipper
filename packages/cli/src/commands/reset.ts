@@ -60,6 +60,53 @@ interface CurrentStage {
   hasPrLabels: boolean;
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parsePrEntries(json: string): PREntry[] {
+  const parsed: unknown = JSON.parse(json);
+  if (!Array.isArray(parsed)) {
+    throw new Error('GitHub CLI returned an invalid PR list payload.');
+  }
+
+  return parsed.map((entry) => {
+    if (
+      !isPlainObject(entry) ||
+      typeof entry.number !== 'number' ||
+      typeof entry.headRefName !== 'string'
+    ) {
+      throw new Error('GitHub CLI returned an invalid PR entry.');
+    }
+
+    return { number: entry.number, headRefName: entry.headRefName };
+  });
+}
+
+function parseIssueViewData(json: string): IssueViewData {
+  const parsed: unknown = JSON.parse(json);
+  if (
+    !isPlainObject(parsed) ||
+    typeof parsed.number !== 'number' ||
+    typeof parsed.state !== 'string' ||
+    !Array.isArray(parsed.labels)
+  ) {
+    throw new Error('GitHub CLI returned an invalid issue payload.');
+  }
+
+  return {
+    number: parsed.number,
+    state: parsed.state,
+    labels: parsed.labels.map((label) => {
+      if (!isPlainObject(label) || typeof label.name !== 'string') {
+        throw new Error('GitHub CLI returned an invalid issue label.');
+      }
+
+      return { name: label.name };
+    }),
+  };
+}
+
 function getStageLabel(stage: WorkflowStage): string {
   return `shipper:${stage}`;
 }
@@ -271,7 +318,7 @@ async function scanArtifacts(
       '--json',
       'number,headRefName',
     ]);
-    const allPrs: PREntry[] = JSON.parse(prJson);
+    const allPrs = parsePrEntries(prJson);
     prs = allPrs.filter(
       (pr) =>
         pr.headRefName === `shipper/${issueNum}` ||
@@ -573,7 +620,7 @@ export async function resetCommand(
     process.exit(1);
   }
 
-  const issueData: IssueViewData = JSON.parse(issueJson);
+  const issueData = parseIssueViewData(issueJson);
 
   if (issueData.state !== 'OPEN') {
     console.error(`Issue #${issueNum} is closed. Reset only works on open issues.`);
