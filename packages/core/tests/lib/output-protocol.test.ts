@@ -18,6 +18,7 @@ const {
   formatCorrectionMessage,
   handleAgentCrash,
   postComment,
+  postReplies,
   processResult,
   scrubOutputDir,
   submitReviewPayload,
@@ -112,6 +113,41 @@ describe('output protocol helpers', () => {
       '--body-file',
       '/tmp/comment.md',
     ]);
+  });
+
+  it('posts one review-thread reply per markdown file', async () => {
+    const repliesDir = path.join(tempDir, PROTOCOL_OUTPUT_DIR, 'replies');
+    await mkdir(repliesDir, { recursive: true });
+    await writeFile(path.join(repliesDir, '101.md'), 'First reply', 'utf-8');
+    await writeFile(path.join(repliesDir, '102.md'), 'Second reply', 'utf-8');
+    await writeFile(path.join(repliesDir, 'notes.txt'), 'ignore me', 'utf-8');
+    await mkdir(path.join(repliesDir, 'nested'));
+
+    await postReplies('owner/repo', '248', tempDir, '.shipper/output/replies');
+
+    expect(ghMock).toHaveBeenNthCalledWith(1, [
+      'api',
+      'repos/owner/repo/pulls/248/comments/101/replies',
+      '--method',
+      'POST',
+      '-f',
+      'body=First reply',
+    ]);
+    expect(ghMock).toHaveBeenNthCalledWith(2, [
+      'api',
+      'repos/owner/repo/pulls/248/comments/102/replies',
+      '--method',
+      'POST',
+      '-f',
+      'body=Second reply',
+    ]);
+    expect(ghMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('treats an absent replies directory as a no-op', async () => {
+    await postReplies('owner/repo', '248', tempDir, '.shipper/output/replies');
+
+    expect(ghMock).not.toHaveBeenCalled();
   });
 
   it('creates a PR from a spec file and body file', async () => {

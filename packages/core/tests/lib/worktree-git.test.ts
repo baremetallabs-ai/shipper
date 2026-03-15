@@ -31,7 +31,8 @@ vi.mock('../../src/lib/settings.js', () => ({
   getSettings: vi.fn(() => ({})),
 }));
 
-const { formatConflictContext, withGitTransport } = await import('../../src/lib/worktree.js');
+const { formatConflictContext, pushWorktree, syncWorktree, withGitTransport } =
+  await import('../../src/lib/worktree.js');
 
 function queueSpawnExit(code = 0): void {
   spawnMock.mockImplementationOnce(() => {
@@ -80,6 +81,143 @@ function gitArgsFromSpawnCalls(): string[][] {
 function gitArgsFromExecCalls(): string[][] {
   return execFileMock.mock.calls.map(([, args]) => args as string[]);
 }
+
+describe('syncWorktree', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('fetches and rebases without invoking conflict resolution on a clean rebase', async () => {
+    queueSpawnExit();
+    queueExecResult();
+    const resolveConflicts = vi.fn();
+
+    await expect(
+      syncWorktree(
+        {
+          wtPath: '/tmp/wt',
+          repoRoot: '/tmp/repo',
+          baseBranch: 'main',
+          pushMode: 'force-with-lease',
+        },
+        resolveConflicts
+      )
+    ).resolves.toBeUndefined();
+
+    expect(resolveConflicts).not.toHaveBeenCalled();
+    expect(gitArgsFromSpawnCalls()).toEqual([['fetch', 'origin']]);
+    expect(gitArgsFromExecCalls()).toEqual([['rebase', 'origin/main']]);
+  });
+
+  it('passes conflict context through the conflict-resolution path and stops before push', async () => {
+    queueSpawnExit();
+    queueExecResult({ code: 1, stderr: 'conflict' });
+    queueExecResult({ stdout: 'src/conflict.ts\nREADME.md\n' });
+    readFileMock
+      .mockResolvedValueOnce(
+        ['start', '<<<<<<< HEAD', 'ours', '=======', 'theirs', '>>>>>>> origin/main', 'end'].join(
+          '\n'
+        )
+      )
+      .mockResolvedValueOnce(
+        ['<<<<<<< HEAD', 'left', '=======', 'right', '>>>>>>> origin/main'].join('\n')
+      );
+    queueExecResult();
+    const resolveConflicts = vi.fn().mockResolvedValue(0);
+
+    await expect(
+      syncWorktree(
+        {
+          wtPath: '/tmp/wt',
+          repoRoot: '/tmp/repo',
+          baseBranch: 'main',
+          pushMode: 'force-with-lease',
+        },
+        resolveConflicts
+      )
+    ).resolves.toBeUndefined();
+
+    expect(resolveConflicts).toHaveBeenCalledTimes(1);
+    expect(resolveConflicts).toHaveBeenCalledWith({
+      files: ['src/conflict.ts', 'README.md'],
+      conflicts: [
+        {
+          path: 'src/conflict.ts',
+          markers: ['<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> origin/main'],
+        },
+        {
+          path: 'README.md',
+          markers: ['<<<<<<< HEAD\nleft\n=======\nright\n>>>>>>> origin/main'],
+        },
+      ],
+      continueError: undefined,
+    });
+    expect(gitArgsFromSpawnCalls()).toEqual([['fetch', 'origin']]);
+    expect(gitArgsFromExecCalls()).toEqual([
+      ['rebase', 'origin/main'],
+      ['diff', '--name-only', '--diff-filter=U'],
+      ['rebase', '--continue'],
+    ]);
+  });
+});
+
+describe('pushWorktree', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('pushes a new branch without invoking any agent callback', async () => {
+    queueExecResult();
+
+    await expect(
+      pushWorktree({
+        wtPath: '/tmp/wt',
+        repoRoot: '/tmp/repo',
+        baseBranch: 'main',
+        pushMode: 'new-branch',
+      })
+    ).resolves.toBeUndefined();
+
+    expect(gitArgsFromExecCalls()).toEqual([['push', '-u', 'origin', 'HEAD']]);
+    expect(execFileMock.mock.calls[0]?.[2]).toMatchObject({
+      cwd: '/tmp/wt',
+      maxBuffer: 10 * 1024 * 1024,
+    });
+  });
+
+  it('retries failed force pushes and throws the terminal push error', async () => {
+    queueExecResult({ code: 1, stderr: 'pre-push hook failed', stdout: 'attempt 1' });
+    queueExecResult({ code: 1, stderr: 'pre-push hook failed', stdout: 'attempt 2' });
+    queueExecResult({ code: 1, stderr: 'pre-push hook failed', stdout: 'attempt 3' });
+    queueExecResult({ code: 1, stderr: 'pre-push hook failed', stdout: 'attempt 4' });
+
+    await expect(
+      pushWorktree({
+        wtPath: '/tmp/wt',
+        repoRoot: '/tmp/repo',
+        baseBranch: 'main',
+        pushMode: 'force-with-lease',
+      })
+    ).rejects.toThrow(
+      'git push --force-with-lease exited with code 1:\npre-push hook failed\nattempt 4'
+    );
+
+    expect(gitArgsFromExecCalls()).toEqual([
+      ['push', '--force-with-lease'],
+      ['push', '--force-with-lease'],
+      ['push', '--force-with-lease'],
+      ['push', '--force-with-lease'],
+    ]);
+  });
+});
 
 describe('withGitTransport', () => {
   beforeEach(() => {

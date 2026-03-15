@@ -346,6 +346,45 @@ export async function postComment(
   await gh(['issue', 'comment', issueNumber, '-R', repo, '--body-file', commentFilePath]);
 }
 
+export async function postReplies(
+  repo: string,
+  prNumber: string,
+  cwd: string,
+  repliesPath?: string
+): Promise<void> {
+  if (!repliesPath) {
+    return;
+  }
+
+  const repliesDir = resolveOutputPath(cwd, repliesPath, 'replies path');
+  let entries;
+  try {
+    entries = await readdir(repliesDir, { withFileTypes: true, encoding: 'utf8' });
+  } catch (error) {
+    if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') {
+      return;
+    }
+    throw error;
+  }
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.md')) {
+      continue;
+    }
+
+    const commentId = entry.name.slice(0, -'.md'.length);
+    const body = await readFile(path.join(repliesDir, entry.name), 'utf-8');
+    await gh([
+      'api',
+      `repos/${repo}/pulls/${prNumber}/comments/${commentId}/replies`,
+      '--method',
+      'POST',
+      '-f',
+      `body=${body}`,
+    ]);
+  }
+}
+
 export async function createPrFromSpec(
   repo: string,
   cwd: string,

@@ -263,6 +263,88 @@ async function pushWithRetry(
   }
 }
 
+export async function syncWorktree(
+  opts: WorktreeGitOpts,
+  resolveConflicts: (conflictContext: ConflictContext) => Promise<number>
+): Promise<void> {
+  await spawnAsync('git', ['fetch', 'origin'], { cwd: opts.wtPath });
+
+  const initialRebase = await execAsync('git', ['rebase', `origin/${opts.baseBranch}`], {
+    cwd: opts.wtPath,
+  });
+  if (initialRebase.code === 0) {
+    return;
+  }
+
+  let conflictContext = await getConflictContextOrThrow(opts, initialRebase);
+
+  for (let attempt = 1; attempt <= MAX_REBASE_ATTEMPTS; attempt++) {
+    const agentCode = await resolveConflicts(conflictContext);
+    if (agentCode !== 0) {
+      const abortFailure = await abortRebase(opts.wtPath);
+      throw formatTransportError(
+        opts,
+        appendAbortFailure(`Conflict resolution exited with code ${agentCode}`, abortFailure)
+      );
+    }
+
+    const continueResult = await execAsync('git', ['rebase', '--continue'], {
+      cwd: opts.wtPath,
+      env: { GIT_EDITOR: 'true' },
+    });
+    if (continueResult.code === 0) {
+      return;
+    }
+
+    const continueError = getRetryFailureText(continueResult);
+    if (attempt === MAX_REBASE_ATTEMPTS) {
+      const abortFailure = await abortRebase(opts.wtPath);
+      throw formatTransportError(
+        opts,
+        appendAbortFailure(
+          `Could not complete rebase onto origin/${opts.baseBranch} after ${MAX_REBASE_ATTEMPTS} conflict resolution attempts.\n${continueError}`,
+          abortFailure
+        )
+      );
+    }
+
+    const nextConflictContext = await buildConflictContext(opts.wtPath, continueError);
+    if (!nextConflictContext) {
+      const abortFailure = await abortRebase(opts.wtPath);
+      throw formatTransportError(
+        opts,
+        appendAbortFailure(
+          `git rebase --continue failed without unresolved files.\n${formatCommandFailure(
+            'git',
+            ['rebase', '--continue'],
+            continueResult
+          )}`,
+          abortFailure
+        )
+      );
+    }
+    conflictContext = nextConflictContext;
+  }
+
+  throw formatTransportError(
+    opts,
+    `Could not complete rebase onto origin/${opts.baseBranch} after ${MAX_REBASE_ATTEMPTS} conflict resolution attempts.`
+  );
+}
+
+export async function pushWorktree(opts: WorktreeGitOpts): Promise<void> {
+  for (let attempt = 0; attempt <= MAX_PUSH_ATTEMPTS; attempt++) {
+    const pushResult = await pushWorktreeBranch(opts);
+    if (pushResult.code === 0) {
+      return;
+    }
+
+    if (attempt === MAX_PUSH_ATTEMPTS) {
+      throw formatTransportError(opts, formatCommandFailure('git', getPushArgs(opts), pushResult));
+    }
+  }
+}
+
 export function formatConflictContext(conflictContext: ConflictContext): string {
   const lines = [
     '## Merge Conflict Resolution Required',
@@ -316,67 +398,62 @@ export async function withGitTransport(
     cwd: opts.wtPath,
   });
 
-  if (initialRebase.code === 0) {
-    const agentCode = await runAgent();
-    if (agentCode !== 0) {
-      console.error(`Agent exited with code ${agentCode} — skipping push.`);
-      return agentCode;
-    }
+  if (initialRebase.code !== 0) {
+    let conflictContext = await getConflictContextOrThrow(opts, initialRebase);
 
-    return await pushWithRetry(opts, runAgent);
+    for (let attempt = 1; attempt <= MAX_REBASE_ATTEMPTS; attempt++) {
+      const agentCode = await runAgent(conflictContext);
+      if (agentCode !== 0) {
+        console.error(`Agent exited with code ${agentCode} — skipping push.`);
+        return agentCode;
+      }
+
+      const continueResult = await execAsync('git', ['rebase', '--continue'], {
+        cwd: opts.wtPath,
+        env: { GIT_EDITOR: 'true' },
+      });
+      if (continueResult.code === 0) {
+        return await pushWithRetry(opts, runAgent);
+      }
+
+      const continueError = getRetryFailureText(continueResult);
+      if (attempt === MAX_REBASE_ATTEMPTS) {
+        const abortFailure = await abortRebase(opts.wtPath);
+        throw formatTransportError(
+          opts,
+          appendAbortFailure(
+            `Could not complete rebase onto origin/${opts.baseBranch} after ${MAX_REBASE_ATTEMPTS} conflict resolution attempts.\n${continueError}`,
+            abortFailure
+          )
+        );
+      }
+
+      const nextConflictContext = await buildConflictContext(opts.wtPath, continueError);
+      if (!nextConflictContext) {
+        const abortFailure = await abortRebase(opts.wtPath);
+        throw formatTransportError(
+          opts,
+          appendAbortFailure(
+            `git rebase --continue failed without unresolved files.\n${formatCommandFailure(
+              'git',
+              ['rebase', '--continue'],
+              continueResult
+            )}`,
+            abortFailure
+          )
+        );
+      }
+      conflictContext = nextConflictContext;
+    }
   }
 
-  let conflictContext = await getConflictContextOrThrow(opts, initialRebase);
-
-  for (let attempt = 1; attempt <= MAX_REBASE_ATTEMPTS; attempt++) {
-    const agentCode = await runAgent(conflictContext);
-    if (agentCode !== 0) {
-      console.error(`Agent exited with code ${agentCode} — skipping push.`);
-      return agentCode;
-    }
-
-    const continueResult = await execAsync('git', ['rebase', '--continue'], {
-      cwd: opts.wtPath,
-      env: { GIT_EDITOR: 'true' },
-    });
-    if (continueResult.code === 0) {
-      return await pushWithRetry(opts, runAgent);
-    }
-
-    const continueError = getRetryFailureText(continueResult);
-    if (attempt === MAX_REBASE_ATTEMPTS) {
-      const abortFailure = await abortRebase(opts.wtPath);
-      throw formatTransportError(
-        opts,
-        appendAbortFailure(
-          `Could not complete rebase onto origin/${opts.baseBranch} after ${MAX_REBASE_ATTEMPTS} conflict resolution attempts.\n${continueError}`,
-          abortFailure
-        )
-      );
-    }
-
-    const nextConflictContext = await buildConflictContext(opts.wtPath, continueError);
-    if (!nextConflictContext) {
-      const abortFailure = await abortRebase(opts.wtPath);
-      throw formatTransportError(
-        opts,
-        appendAbortFailure(
-          `git rebase --continue failed without unresolved files.\n${formatCommandFailure(
-            'git',
-            ['rebase', '--continue'],
-            continueResult
-          )}`,
-          abortFailure
-        )
-      );
-    }
-    conflictContext = nextConflictContext;
+  const agentCode = await runAgent();
+  if (agentCode !== 0) {
+    console.error(`Agent exited with code ${agentCode} — skipping push.`);
+    return agentCode;
   }
 
-  throw formatTransportError(
-    opts,
-    `Could not complete rebase onto origin/${opts.baseBranch} after ${MAX_REBASE_ATTEMPTS} conflict resolution attempts.`
-  );
+  return await pushWithRetry(opts, runAgent);
 }
 
 export function getWorktreePath(repoRoot: string, branch: string): string {
