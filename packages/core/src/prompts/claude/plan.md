@@ -187,6 +187,8 @@ Verdict mapping:
 
 Do not mutate GitHub directly. The orchestrator handles comments and label transitions after you exit.
 
+The `.shipper/output/` directory is gitignored by design — the orchestrator reads output files directly from the filesystem, not from git. Do not modify `.shipper/.gitignore`.
+
 ---
 
 ## Environment failure escape hatch
