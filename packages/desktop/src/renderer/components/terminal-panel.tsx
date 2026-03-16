@@ -9,6 +9,7 @@ interface TerminalPanelProps {
   activeSessionId: string | null;
   onSelectSession: (sessionId: string) => void;
   onCloseSession: (sessionId: string) => void;
+  onSessionInput: (sessionId: string) => void;
 }
 
 export function TerminalPanel({
@@ -16,6 +17,7 @@ export function TerminalPanel({
   activeSessionId,
   onSelectSession,
   onCloseSession,
+  onSessionInput,
 }: TerminalPanelProps): JSX.Element {
   return (
     <div className="flex h-full flex-col border-l border-white/10">
@@ -32,6 +34,9 @@ export function TerminalPanel({
             sessionId={session.id}
             status={session.status}
             visible={session.id === activeSessionId}
+            onInput={() => {
+              onSessionInput(session.id);
+            }}
           />
         ))}
       </div>

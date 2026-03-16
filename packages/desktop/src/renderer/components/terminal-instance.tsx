@@ -8,14 +8,16 @@ interface TerminalInstanceProps {
   sessionId: string;
   status: TerminalSessionStatus;
   visible: boolean;
+  onInput: () => void;
 }
 
 export function TerminalInstance({
   sessionId,
   status,
   visible,
+  onInput,
 }: TerminalInstanceProps): JSX.Element {
-  const { containerRef } = useTerminalRuntime({ sessionId, status, visible });
+  const { containerRef } = useTerminalRuntime({ sessionId, status, visible, onInput });
 
   return (
     <div className={cn('h-full min-h-0 flex-1 bg-[#0b1020]', visible ? 'block' : 'hidden')}>
