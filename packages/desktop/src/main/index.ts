@@ -1,9 +1,19 @@
+import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { app, BrowserWindow, ipcMain } from 'electron';
-import { checkGhAuth, checkGhInstalled, gh, listIssues } from '@dnsquared/shipper-core';
+import {
+  buildPromptCommand,
+  checkGhAuth,
+  checkGhInstalled,
+  ensureRepoClone,
+  gh,
+  listIssues,
+} from '@dnsquared/shipper-core';
+
+import { PtyManager } from './pty-manager.js';
 
 interface AppConfig {
   repos: string[];
@@ -26,6 +36,7 @@ interface ListIssuesFailure {
 }
 
 const defaultConfig: AppConfig = { repos: [], activeRepo: '' };
+const ptyManager = new PtyManager();
 const repoPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const preloadPath = fileURLToPath(new URL('../preload/index.cjs', import.meta.url));
 const rendererPath = fileURLToPath(new URL('../renderer/index.html', import.meta.url));
@@ -184,6 +195,12 @@ function createWindow(): BrowserWindow {
     },
   });
 
+  ptyManager.setWindow(window);
+
+  window.on('close', () => {
+    ptyManager.destroyAll();
+  });
+
   window.once('ready-to-show', () => {
     window.show();
   });
@@ -243,6 +260,85 @@ function registerIpcHandlers(): void {
     }
 
     writeConfig(parsedConfig.config);
+  });
+
+  ipcMain.handle('pty-spawn-shipper-new', async (_event, payload: unknown) => {
+    if (
+      typeof payload !== 'object' ||
+      payload === null ||
+      !('request' in payload) ||
+      typeof payload.request !== 'string' ||
+      !('repo' in payload) ||
+      typeof payload.repo !== 'string' ||
+      !('cols' in payload) ||
+      typeof payload.cols !== 'number' ||
+      !('rows' in payload) ||
+      typeof payload.rows !== 'number'
+    ) {
+      throw new Error('Invalid pty-spawn-shipper-new payload.');
+    }
+
+    const repoPath = await ensureRepoClone(payload.repo);
+
+    const cmd = await buildPromptCommand('new', {
+      userInput: payload.request,
+      repo: payload.repo,
+      mode: 'interactive',
+    });
+
+    const sessionId = randomUUID();
+    ptyManager.spawn(sessionId, cmd.command, cmd.args, {
+      cols: payload.cols,
+      rows: payload.rows,
+      cwd: cmd.cwd ?? repoPath,
+    });
+
+    return { sessionId };
+  });
+
+  ipcMain.handle('pty-write', (_event, payload: unknown) => {
+    if (
+      typeof payload !== 'object' ||
+      payload === null ||
+      !('sessionId' in payload) ||
+      typeof payload.sessionId !== 'string' ||
+      !('data' in payload) ||
+      typeof payload.data !== 'string'
+    ) {
+      throw new Error('Invalid pty-write payload.');
+    }
+
+    ptyManager.write(payload.sessionId, payload.data);
+  });
+
+  ipcMain.handle('pty-resize', (_event, payload: unknown) => {
+    if (
+      typeof payload !== 'object' ||
+      payload === null ||
+      !('sessionId' in payload) ||
+      typeof payload.sessionId !== 'string' ||
+      !('cols' in payload) ||
+      typeof payload.cols !== 'number' ||
+      !('rows' in payload) ||
+      typeof payload.rows !== 'number'
+    ) {
+      throw new Error('Invalid pty-resize payload.');
+    }
+
+    ptyManager.resize(payload.sessionId, payload.cols, payload.rows);
+  });
+
+  ipcMain.handle('pty-kill', (_event, payload: unknown) => {
+    if (
+      typeof payload !== 'object' ||
+      payload === null ||
+      !('sessionId' in payload) ||
+      typeof payload.sessionId !== 'string'
+    ) {
+      throw new Error('Invalid pty-kill payload.');
+    }
+
+    ptyManager.kill(payload.sessionId);
   });
 }
 

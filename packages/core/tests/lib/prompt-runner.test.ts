@@ -306,7 +306,7 @@ describe('runPrompt', () => {
     expect(args).toContain('prompt body\n\n---\n\nresolve the merge conflict');
   });
 
-  it('throws when appended issue or PR context is requested without a repo', async () => {
+  it('returns 1 when appended issue or PR context is requested without a repo', async () => {
     readFileMock.mockResolvedValueOnce(
       [
         '---',
@@ -319,9 +319,7 @@ describe('runPrompt', () => {
       ].join('\n')
     );
 
-    await expect(runPrompt('test', { issueRef: '42', prRef: '5' })).rejects.toThrow(
-      'Prompt "test" requires opts.repo when append-issue is enabled.'
-    );
+    await expect(runPrompt('test', { issueRef: '42', prRef: '5' })).resolves.toBe(1);
   });
 
   it('returns 1 when the resolved agent does not match frontmatter', async () => {

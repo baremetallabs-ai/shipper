@@ -27,6 +27,12 @@ export interface RunPromptOpts {
   model?: string;
 }
 
+export interface PromptCommand {
+  command: string;
+  args: string[];
+  cwd?: string;
+}
+
 const CODEX_HEADLESS_CONFIG = 'sandbox_workspace_write.network_access=true';
 const CODEX_HEADLESS_ARGS = ['exec', '--full-auto', '-c', CODEX_HEADLESS_CONFIG] as const;
 const GH_MUTATION_PATTERNS = [
@@ -188,7 +194,11 @@ function asError(err: unknown): Error {
   return err instanceof Error ? err : new Error(String(err));
 }
 
-export async function runPrompt(name: string, opts: RunPromptOpts): Promise<number> {
+async function resolvePromptCommand(
+  name: string,
+  opts: RunPromptOpts,
+  effectiveMode: CommandMode
+): Promise<{ agent: AgentName; args: string[]; promptBody: string }> {
   const agent = resolveAgent(name, opts.agent);
   const model = resolveModel(name, opts.model);
   const promptPath = path.resolve('.shipper', 'prompts', agent, `${name}.md`);
@@ -201,9 +211,9 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
   } catch {
     const bundled = agentPrompts[agent]?.[`${name}.md`];
     if (!bundled) {
-      console.error(`Error: No prompt found for step "${name}" (agent: ${agent}).`);
-      console.error(`No local file at ${promptPath} and no bundled default available.`);
-      return 1;
+      throw new Error(
+        `No prompt found for step "${name}" (agent: ${agent}).\nNo local file at ${promptPath} and no bundled default available.`
+      );
     }
     raw = bundled;
   }
@@ -222,13 +232,9 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
   }
 
   if (frontmatter.cmd !== agent) {
-    console.error(
-      `Error: Agent mismatch for step "${name}". Settings resolve to "${agent}", but prompt frontmatter specifies "cmd: ${frontmatter.cmd}" in ${promptPath}.`
+    throw new Error(
+      `Agent mismatch for step "${name}". Settings resolve to "${agent}", but prompt frontmatter specifies "cmd: ${frontmatter.cmd}" in ${promptPath}.\nUpdate the prompt file's frontmatter to "cmd: ${agent}", or change commands.${name}.agent in settings.`
     );
-    console.error(
-      `Update the prompt file's frontmatter to "cmd: ${agent}", or change commands.${name}.agent in settings.`
-    );
-    return 1;
   }
 
   let promptBody = body;
@@ -237,34 +243,6 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
   }
 
   const args = [...frontmatter.args];
-  const effectiveMode = resolveMode(name, opts.mode);
-  const timeoutMinutes = getSettings().agentTimeoutMinutes;
-  const timeoutMs =
-    effectiveMode === 'headless' && timeoutMinutes > 0 ? timeoutMinutes * 60_000 : undefined;
-  let sessionRepo: Awaited<ReturnType<typeof resolveSessionRepo>> | undefined;
-  let logFile: string | undefined;
-  let metaFile: string | undefined;
-  let sessionTimestamp: Date | undefined;
-
-  if (effectiveMode === 'headless') {
-    try {
-      sessionRepo = await resolveSessionRepo({ repo: opts.repo, cwd: opts.cwd });
-      sessionTimestamp = new Date();
-      const sessionPaths = getSessionPaths(
-        sessionRepo.repoSlug,
-        opts.issueRef,
-        name,
-        sessionTimestamp
-      );
-      await mkdir(path.dirname(sessionPaths.logFile), { recursive: true });
-      logFile = sessionPaths.logFile;
-      metaFile = sessionPaths.metaFile;
-    } catch (err) {
-      sessionRepo = undefined;
-      sessionTimestamp = undefined;
-      console.warn(`Warning: Failed to initialize session logging: ${asError(err).message}`);
-    }
-  }
 
   if (agent === 'claude') {
     if (effectiveMode === 'headless' && !args.includes('-p')) {
@@ -344,14 +322,63 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
   const userMessage = messageParts.join('\n\n---\n\n');
   if (userMessage) {
     if (agent === 'codex') {
-      // Codex exec accepts only one positional [PROMPT] arg — no separate user
-      // message mechanism. Replace the prompt arg with prompt + user message combined.
       const promptIdx = args.indexOf(promptBody);
       if (promptIdx !== -1) {
         args[promptIdx] = promptBody + '\n\n---\n\n' + userMessage;
       }
     } else {
       args.push(userMessage);
+    }
+  }
+
+  return { agent, args, promptBody };
+}
+
+export async function buildPromptCommand(
+  name: string,
+  opts: RunPromptOpts
+): Promise<PromptCommand> {
+  const { agent, args } = await resolvePromptCommand(name, opts, 'interactive');
+  return { command: agent, args, cwd: opts.cwd };
+}
+
+export async function runPrompt(name: string, opts: RunPromptOpts): Promise<number> {
+  const effectiveMode = resolveMode(name, opts.mode);
+
+  let resolved: Awaited<ReturnType<typeof resolvePromptCommand>>;
+  try {
+    resolved = await resolvePromptCommand(name, opts, effectiveMode);
+  } catch (err) {
+    console.error(`Error: ${asError(err).message}`);
+    return 1;
+  }
+
+  const { agent, args } = resolved;
+  const timeoutMinutes = getSettings().agentTimeoutMinutes;
+  const timeoutMs =
+    effectiveMode === 'headless' && timeoutMinutes > 0 ? timeoutMinutes * 60_000 : undefined;
+  let sessionRepo: Awaited<ReturnType<typeof resolveSessionRepo>> | undefined;
+  let logFile: string | undefined;
+  let metaFile: string | undefined;
+  let sessionTimestamp: Date | undefined;
+
+  if (effectiveMode === 'headless') {
+    try {
+      sessionRepo = await resolveSessionRepo({ repo: opts.repo, cwd: opts.cwd });
+      sessionTimestamp = new Date();
+      const sessionPaths = getSessionPaths(
+        sessionRepo.repoSlug,
+        opts.issueRef,
+        name,
+        sessionTimestamp
+      );
+      await mkdir(path.dirname(sessionPaths.logFile), { recursive: true });
+      logFile = sessionPaths.logFile;
+      metaFile = sessionPaths.metaFile;
+    } catch (err) {
+      sessionRepo = undefined;
+      sessionTimestamp = undefined;
+      console.warn(`Warning: Failed to initialize session logging: ${asError(err).message}`);
     }
   }
 
