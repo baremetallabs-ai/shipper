@@ -112,6 +112,7 @@ describe('nextCommand', () => {
     expect(mockWithIssueLock).toHaveBeenCalledWith(repo, '159', expect.any(Function));
     expect(mockGroomCommand).toHaveBeenCalledWith(repo, '159', {
       auto: false,
+      mode: undefined,
       agent: undefined,
       model: undefined,
     });
@@ -125,7 +126,26 @@ describe('nextCommand', () => {
     expect(mockPrRemediateCommand).not.toHaveBeenCalled();
   });
 
-  it('forwards model overrides to downstream workflow commands', async () => {
+  it('forwards mode, agent, and model overrides to the groom command', async () => {
+    mockGh.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        number: 159,
+        labels: [{ name: 'shipper:new' }],
+      }),
+      stderr: '',
+    });
+
+    await nextCommand(repo, '159', 'interactive', 'codex', 'gpt-5');
+
+    expect(mockGroomCommand).toHaveBeenCalledWith(repo, '159', {
+      auto: false,
+      mode: 'interactive',
+      agent: 'codex',
+      model: 'gpt-5',
+    });
+  });
+
+  it('forwards mode, agent, and model overrides to downstream workflow commands', async () => {
     mockGh.mockResolvedValueOnce({
       stdout: JSON.stringify({
         number: 159,
@@ -134,9 +154,9 @@ describe('nextCommand', () => {
       stderr: '',
     });
 
-    await nextCommand(repo, '159', 'codex', 'gpt-5');
+    await nextCommand(repo, '159', 'interactive', 'codex', 'gpt-5');
 
-    expect(mockImplementCommand).toHaveBeenCalledWith(repo, '159', undefined, 'codex', 'gpt-5');
+    expect(mockImplementCommand).toHaveBeenCalledWith(repo, '159', 'interactive', 'codex', 'gpt-5');
   });
 
   it('dispatches using the stage label when a priority label is also present', async () => {
@@ -154,6 +174,30 @@ describe('nextCommand', () => {
     expect(errorSpy).not.toHaveBeenCalled();
     expect(exitSpy).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ['shipper:groomed', mockDesignCommand, '159'],
+    ['shipper:designed', mockPlanCommand, '159'],
+    ['shipper:planned', mockImplementCommand, '159'],
+    ['shipper:implemented', mockPrOpenCommand, '159'],
+    ['shipper:pr-open', mockPrReviewCommand, '200'],
+    ['shipper:pr-reviewed', mockPrRemediateCommand, '200'],
+  ])(
+    'forwards explicit mode to the %s stage dispatch',
+    async (stageLabel, commandMock, expectedRef) => {
+      mockGh.mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          number: 159,
+          labels: [{ name: stageLabel }],
+        }),
+        stderr: '',
+      });
+
+      await nextCommand(repo, '159', 'headless', 'codex', 'sonnet');
+
+      expect(commandMock).toHaveBeenCalledWith(repo, expectedRef, 'headless', 'codex', 'sonnet');
+    }
+  );
 
   it.each([
     'shipper:groomed',

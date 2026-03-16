@@ -1052,10 +1052,16 @@ describe('shipCommand single-issue path', () => {
     errorSpy.mockRestore();
   });
 
-  it('forwards an explicit model override to shipper next', async () => {
+  it('forwards explicit mode, agent, and model overrides to shipper next', async () => {
     mockIssueViewSequence(['shipper:planned', 'shipper:ready']);
 
-    await shipCommand(repo, '42', { auto: false, merge: false, model: 'sonnet' });
+    await shipCommand(repo, '42', {
+      auto: false,
+      merge: false,
+      mode: 'headless',
+      agent: 'codex',
+      model: 'sonnet',
+    });
 
     const cliEntrypoint = process.argv[1];
     expect(cliEntrypoint).toBeDefined();
@@ -1063,11 +1069,89 @@ describe('shipCommand single-issue path', () => {
       (call) =>
         call[0] === process.execPath &&
         JSON.stringify(call[1]) ===
-          JSON.stringify([cliEntrypoint, 'next', '42', '--model', 'sonnet'])
+          JSON.stringify([
+            cliEntrypoint,
+            'next',
+            '42',
+            '--mode',
+            'headless',
+            '--agent',
+            'codex',
+            '--model',
+            'sonnet',
+          ])
     );
     expect(expectedCall).toBeDefined();
     expect(getCallEnv(expectedCall)).toEqual(expect.objectContaining({ SHIPPER_LOCK_HELD: '42' }));
     expect(exitSpy).toHaveBeenCalledWith(0);
+  });
+
+  it('does not forward --mode when the explicit mode is default', async () => {
+    mockIssueViewSequence(['shipper:planned', 'shipper:ready']);
+
+    await shipCommand(repo, '42', { auto: false, merge: false, mode: 'default' });
+
+    const cliEntrypoint = process.argv[1];
+    expect(cliEntrypoint).toBeDefined();
+    expect(mockSpawnSync).toHaveBeenCalledWith(
+      process.execPath,
+      [cliEntrypoint, 'next', '42'],
+      expect.objectContaining({ stdio: 'inherit' })
+    );
+    expect(exitSpy).toHaveBeenCalledWith(0);
+  });
+
+  it('stops when a non-interactive run resets an issue to shipper:new', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    mockIssueViewSequence(['shipper:planned', 'shipper:new']);
+
+    await shipCommand(repo, '42', { auto: false, merge: false, mode: 'default' });
+
+    expect(mockSpawnSync).toHaveBeenCalledTimes(1);
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(errorSpy).toHaveBeenCalledWith(
+      'Issue #42 was reset to shipper:new by stage "implement" - stopping to avoid interactive groom stage.'
+    );
+
+    errorSpy.mockRestore();
+  });
+
+  it('continues into groom when an interactive run resets an issue to shipper:new', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    mockIssueViewSequence(['shipper:planned', 'shipper:new', 'shipper:groomed', 'shipper:ready']);
+
+    await shipCommand(repo, '42', { auto: false, merge: false, mode: 'interactive' });
+
+    const cliEntrypoint = process.argv[1];
+    expect(cliEntrypoint).toBeDefined();
+    expect(mockSpawnSync).toHaveBeenCalledTimes(3);
+    expect(mockSpawnSync.mock.calls[0]?.[1]).toEqual([
+      cliEntrypoint,
+      'next',
+      '42',
+      '--mode',
+      'interactive',
+    ]);
+    expect(mockSpawnSync.mock.calls[1]?.[1]).toEqual([
+      cliEntrypoint,
+      'next',
+      '42',
+      '--mode',
+      'interactive',
+    ]);
+    expect(mockSpawnSync.mock.calls[2]?.[1]).toEqual([
+      cliEntrypoint,
+      'next',
+      '42',
+      '--mode',
+      'interactive',
+    ]);
+    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining('was reset to shipper:new'));
+
+    errorSpy.mockRestore();
   });
 
   it('fails fast with a terminal-state message for shipper:failed issues', async () => {

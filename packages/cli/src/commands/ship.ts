@@ -27,7 +27,7 @@ import {
   LOCKED_LABEL,
   FAILED_LABEL,
 } from '@dnsquared/shipper-core';
-import type { AgentName } from '@dnsquared/shipper-core';
+import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
 import { postMerge } from './merge.js';
 import type { QueuedPR } from './merge.js';
 import { buildReadyCheck, SKIP_PR_REMEDIATE_WAIT_ENV_VAR } from './pr-remediate.js';
@@ -65,6 +65,7 @@ export interface ShipOptions {
   merge: boolean;
   auto: boolean;
   parallel?: number;
+  mode?: CommandMode;
   agent?: AgentName;
   model?: string;
 }
@@ -489,6 +490,7 @@ async function shipOneIssue(
   repo: string,
   issue: string,
   merge: boolean,
+  mode?: CommandMode,
   agent?: AgentName,
   model?: string,
   parkHooks?: ParkHooks
@@ -579,6 +581,9 @@ async function shipOneIssue(
         console.log(`Running stage: ${stageName}`);
 
         const nextArgs = [cliEntrypoint, 'next', issueStr];
+        if (mode && mode !== 'default') {
+          nextArgs.push('--mode', mode);
+        }
         if (agent) {
           nextArgs.push('--agent', agent);
         }
@@ -620,7 +625,7 @@ async function shipOneIssue(
           return { success: false, error: `unexpected label after stage "${stageName}"` };
         }
 
-        if (label === NEW_LABEL && previousLabel !== NEW_LABEL) {
+        if (label === NEW_LABEL && previousLabel !== NEW_LABEL && mode !== 'interactive') {
           const msg = `Issue #${issueStr} was reset to ${NEW_LABEL} by stage "${stageName}" - stopping to avoid interactive groom stage.`;
           console.error(msg);
           printSummary(results);
@@ -1049,6 +1054,7 @@ function startSequentialIssueRun(
     repo,
     String(issue.number),
     true,
+    undefined,
     agent,
     model,
     parkObserver.hooks
@@ -1418,6 +1424,13 @@ export async function shipCommand(
     console.error('Error: an issue number is required unless --auto is used.');
     process.exit(1);
   }
-  const result = await shipOneIssue(repo, issue, options.merge, options.agent, options.model);
+  const result = await shipOneIssue(
+    repo,
+    issue,
+    options.merge,
+    options.mode,
+    options.agent,
+    options.model
+  );
   process.exit(result.success ? 0 : 1);
 }
