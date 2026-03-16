@@ -62,15 +62,21 @@ export async function implementCommand(
           await retryOnInvalidOutput({
             cwd: wtPath,
             retry: (userInput) =>
-              runPrompt('implement', {
-                repo,
-                issueRef: issue,
-                cwd: wtPath,
-                mode,
-                agent,
-                model,
-                userInput,
-              }),
+              withGitTransport(
+                { wtPath, repoRoot, baseBranch, pushMode: 'new-branch' },
+                (conflictContext, pushError) =>
+                  runPrompt('implement', {
+                    repo,
+                    issueRef: issue,
+                    cwd: wtPath,
+                    mode,
+                    agent,
+                    model,
+                    userInput: conflictContext
+                      ? formatConflictContext(conflictContext)
+                      : (pushError ?? userInput),
+                  })
+              ),
           });
           try {
             await processResult({ repo, issueNumber: issue, stage: 'implement', cwd: wtPath });

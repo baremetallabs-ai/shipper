@@ -67,16 +67,22 @@ export async function prOpenCommand(
           await retryOnInvalidOutput({
             cwd: wtPath,
             retry: (userInput) =>
-              runPrompt('pr_open', {
-                repo,
-                issueRef: issue,
-                cwd: wtPath,
-                baseBranch,
-                mode,
-                agent,
-                model,
-                userInput,
-              }),
+              withGitTransport(
+                { wtPath, repoRoot, baseBranch, pushMode: 'force-with-lease' },
+                (conflictContext, pushError) =>
+                  runPrompt('pr_open', {
+                    repo,
+                    issueRef: issue,
+                    cwd: wtPath,
+                    baseBranch,
+                    mode,
+                    agent,
+                    model,
+                    userInput: conflictContext
+                      ? formatConflictContext(conflictContext)
+                      : (pushError ?? userInput),
+                  })
+              ),
           });
           try {
             await processResult({ repo, issueNumber: issue, stage: 'pr_open', cwd: wtPath });

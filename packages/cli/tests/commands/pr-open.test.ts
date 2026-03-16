@@ -119,7 +119,21 @@ describe('prOpenCommand', () => {
     });
     expect(handleAgentCrashMock).not.toHaveBeenCalled();
 
+    withGitTransportMock.mockImplementationOnce(
+      (_opts: unknown, fn: (conflictContext?: unknown, pushError?: string) => Promise<unknown>) =>
+        fn()
+    );
+
     await expect(retryCall?.retry('Fix result')).resolves.toBe(0);
+    expect(withGitTransportMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        wtPath: '/tmp/fake-wt',
+        repoRoot: '/tmp/fake-repo',
+        baseBranch: 'release/2026',
+        pushMode: 'force-with-lease',
+      }),
+      expect.any(Function)
+    );
     expect(runPromptMock).toHaveBeenLastCalledWith('pr_open', {
       repo: 'owner/repo',
       issueRef: '239',

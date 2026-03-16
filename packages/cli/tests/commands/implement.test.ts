@@ -123,7 +123,21 @@ describe('implementCommand', () => {
     });
     expect(handleAgentCrashMock).not.toHaveBeenCalled();
 
+    withGitTransportMock.mockImplementationOnce(
+      (_opts: unknown, fn: (conflictContext?: unknown, pushError?: string) => Promise<unknown>) =>
+        fn()
+    );
+
     await expect(retryCall?.retry('Fix result')).resolves.toBe(0);
+    expect(withGitTransportMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        wtPath: '/tmp/fake-wt',
+        repoRoot: '/tmp/fake-repo',
+        baseBranch: 'main',
+        pushMode: 'new-branch',
+      }),
+      expect.any(Function)
+    );
     expect(runPromptMock).toHaveBeenLastCalledWith('implement', {
       repo: 'owner/repo',
       issueRef: '239',
