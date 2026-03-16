@@ -50,9 +50,7 @@ interface AppConfig {
   activeRepo: string;
 }
 
-interface TerminalSession extends TerminalSessionTab {
-  lastOutputAt: number;
-}
+type TerminalSession = TerminalSessionTab;
 
 const repoPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
@@ -93,11 +91,11 @@ function getNextActiveSessionId(
   }
 
   const removedIndex = sessions.findIndex((session) => session.id === removedSessionId);
+  const remainingSessions = sessions.filter((session) => session.id !== removedSessionId);
   if (removedIndex < 0) {
-    return activeSessionId;
+    return remainingSessions[0]?.id ?? null;
   }
 
-  const remainingSessions = sessions.filter((session) => session.id !== removedSessionId);
   return remainingSessions[removedIndex - 1]?.id ?? remainingSessions[removedIndex]?.id ?? null;
 }
 
@@ -159,6 +157,7 @@ export default function App(): JSX.Element {
   const drawerPanelRef = useRef<HTMLDivElement | null>(null);
   const sessionsRef = useRef<TerminalSession[]>([]);
   const activeSessionIdRef = useRef<string | null>(null);
+  const lastOutputAtBySessionRef = useRef<Map<string, number>>(new Map());
 
   const prerequisiteMessage = getPrerequisiteMessage(prerequisites);
   const canFetch = prerequisites !== null && prerequisiteMessage === null;
@@ -391,26 +390,32 @@ export default function App(): JSX.Element {
   useEffect(() => {
     const unsubscribe = window.shipperAPI.onPtyOutput((event) => {
       const outputAt = Date.now();
+      lastOutputAtBySessionRef.current.set(event.sessionId, outputAt);
+
+      const session = sessionsRef.current.find(
+        (currentSession) =>
+          currentSession.id === event.sessionId && currentSession.status !== 'exited'
+      );
+      if (!session || session.status !== 'waiting') {
+        return;
+      }
 
       setSessions((currentSessions) => {
         const sessionIndex = currentSessions.findIndex(
-          (session) => session.id === event.sessionId && session.status !== 'exited'
+          (currentSession) =>
+            currentSession.id === event.sessionId && currentSession.status === 'waiting'
         );
         if (sessionIndex < 0) {
           return currentSessions;
         }
 
-        const session = currentSessions[sessionIndex];
-        if (!session) {
+        const currentSession = currentSessions[sessionIndex];
+        if (!currentSession) {
           return currentSessions;
         }
 
         const nextSessions = [...currentSessions];
-        nextSessions[sessionIndex] = {
-          ...session,
-          lastOutputAt: outputAt,
-          status: session.status === 'waiting' ? 'running' : session.status,
-        };
+        nextSessions[sessionIndex] = { ...currentSession, status: 'running' };
         return nextSessions;
       });
     });
@@ -454,7 +459,12 @@ export default function App(): JSX.Element {
         let nextSessions: TerminalSession[] | null = null;
 
         for (const [index, session] of currentSessions.entries()) {
-          if (session.status !== 'running' || now - session.lastOutputAt <= 5_000) {
+          const lastOutputAt = lastOutputAtBySessionRef.current.get(session.id);
+          if (
+            session.status !== 'running' ||
+            lastOutputAt === undefined ||
+            now - lastOutputAt <= 5_000
+          ) {
             continue;
           }
 
@@ -481,9 +491,9 @@ export default function App(): JSX.Element {
         id: result.sessionId,
         label: buildNewSessionLabel(request),
         status: 'running',
-        lastOutputAt: Date.now(),
       };
 
+      lastOutputAtBySessionRef.current.set(session.id, Date.now());
       setSessions((currentSessions) => [...currentSessions, session]);
       setActiveSessionId(session.id);
       setDrawerOpen(true);
@@ -523,6 +533,7 @@ export default function App(): JSX.Element {
 
     sessionsRef.current = remainingSessions;
     activeSessionIdRef.current = nextActiveSessionId;
+    lastOutputAtBySessionRef.current.delete(sessionId);
     setSessions(remainingSessions);
     setActiveSessionId(nextActiveSessionId);
     setPendingCloseSessionId((current) => (current === sessionId ? null : current));
@@ -551,18 +562,60 @@ export default function App(): JSX.Element {
     setPendingCloseSessionId(sessionId);
   }
 
-  function handleConfirmCloseSession(): void {
-    const sessionId = pendingCloseSessionId;
-    if (!sessionId) {
+  function handleSessionInput(sessionId: string): void {
+    lastOutputAtBySessionRef.current.set(sessionId, Date.now());
+
+    const session = sessionsRef.current.find(
+      (currentSession) => currentSession.id === sessionId && currentSession.status !== 'exited'
+    );
+    if (!session || session.status !== 'waiting') {
       return;
     }
 
-    setPendingCloseSessionId(null);
-    void window.shipperAPI.ptyKill(sessionId).catch((error: unknown) => {
+    setSessions((currentSessions) => {
+      const sessionIndex = currentSessions.findIndex(
+        (currentSession) => currentSession.id === sessionId && currentSession.status === 'waiting'
+      );
+      if (sessionIndex < 0) {
+        return currentSessions;
+      }
+
+      const currentSession = currentSessions[sessionIndex];
+      if (!currentSession) {
+        return currentSessions;
+      }
+
+      const nextSessions = [...currentSessions];
+      nextSessions[sessionIndex] = { ...currentSession, status: 'running' };
+      return nextSessions;
+    });
+  }
+
+  async function handleConfirmCloseSession(): Promise<void> {
+    const session = pendingCloseSessionId
+      ? (sessionsRef.current.find(
+          (currentSession) => currentSession.id === pendingCloseSessionId
+        ) ?? null)
+      : null;
+    if (!session) {
+      setPendingCloseSessionId(null);
+      return;
+    }
+
+    if (session.status === 'exited') {
+      setPendingCloseSessionId(null);
+      removeSession(session.id);
+      return;
+    }
+
+    try {
+      await window.shipperAPI.ptyKill(session.id);
+      setPendingCloseSessionId(null);
+      removeSession(session.id);
+    } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setFetchError(`Failed to close terminal session: ${message}`);
-    });
-    removeSession(sessionId);
+    }
   }
 
   async function handleCloseRepo(repo: string): Promise<void> {
@@ -618,11 +671,17 @@ export default function App(): JSX.Element {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Close live terminal session?</DialogTitle>
+            <DialogTitle>
+              {pendingCloseSession?.status === 'exited'
+                ? 'Close terminal tab?'
+                : 'Close live terminal session?'}
+            </DialogTitle>
             <DialogDescription>
               {pendingCloseSession
-                ? `Closing "${pendingCloseSession.label}" will kill the running process and remove its tab.`
-                : 'Closing this session will kill the running process and remove its tab.'}
+                ? pendingCloseSession.status === 'exited'
+                  ? `"${pendingCloseSession.label}" has already exited. Closing will remove its tab.`
+                  : `Closing "${pendingCloseSession.label}" will kill the live process and remove its tab.`
+                : 'Closing this session will remove its tab.'}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -635,8 +694,14 @@ export default function App(): JSX.Element {
             >
               Cancel
             </Button>
-            <Button type="button" variant="destructive" onClick={handleConfirmCloseSession}>
-              Kill session
+            <Button
+              type="button"
+              variant={pendingCloseSession?.status === 'exited' ? 'default' : 'destructive'}
+              onClick={() => {
+                void handleConfirmCloseSession();
+              }}
+            >
+              {pendingCloseSession?.status === 'exited' ? 'Close tab' : 'Kill session'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -862,6 +927,7 @@ export default function App(): JSX.Element {
                   activeSessionId={activeSessionId}
                   onSelectSession={handleSelectSession}
                   onCloseSession={handleCloseSession}
+                  onSessionInput={handleSessionInput}
                 />
               </div>
             </div>

@@ -10,6 +10,7 @@ interface UseTerminalRuntimeOptions {
   sessionId: string;
   status: TerminalStatus;
   visible: boolean;
+  onInput?: () => void;
 }
 
 const WRITE_BATCH_THRESHOLD = 8192;
@@ -18,12 +19,18 @@ const RESIZE_DEBOUNCE_MS = 50;
 const MAX_BUFFER_SIZE = 200_000;
 const CHUNK_MERGE_THRESHOLD = 2048;
 
-export function useTerminalRuntime({ sessionId, status, visible }: UseTerminalRuntimeOptions) {
+export function useTerminalRuntime({
+  sessionId,
+  status,
+  visible,
+  onInput,
+}: UseTerminalRuntimeOptions) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const sessionIdRef = useRef(sessionId);
   const statusRef = useRef<TerminalStatus>(status);
+  const onInputRef = useRef(onInput);
   const previousVisibleRef = useRef(visible);
   const visibleFitFrameRef = useRef<number | null>(null);
 
@@ -115,6 +122,10 @@ export function useTerminalRuntime({ sessionId, status, visible }: UseTerminalRu
     statusRef.current = status;
   }, [status]);
 
+  useEffect(() => {
+    onInputRef.current = onInput;
+  }, [onInput]);
+
   // Initialize xterm on mount.
   useEffect(() => {
     if (!containerRef.current || terminalRef.current) return;
@@ -143,6 +154,7 @@ export function useTerminalRuntime({ sessionId, status, visible }: UseTerminalRu
     // Forward keyboard input to the PTY.
     const dataDisposable = terminal.onData((data) => {
       if (statusRef.current === 'exited') return;
+      onInputRef.current?.();
       void window.shipperAPI.ptyWrite(sessionIdRef.current, data);
     });
 
