@@ -111,6 +111,7 @@ addModelOption(
     addModeOption(
       program
         .command('setup [words...]')
+        .alias('agent')
         .description('Configure repository settings with an agent')
         .action(
           wrapAction(
