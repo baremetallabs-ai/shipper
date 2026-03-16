@@ -104,6 +104,10 @@ vi.spyOn(console, 'error').mockImplementation(() => {});
 const settingsPath = path.resolve('.shipper', 'settings.json');
 const gitignorePath = path.resolve('.shipper', '.gitignore');
 const promptsDirPath = path.resolve('.shipper', 'prompts');
+const inputDirPath = path.resolve('.shipper', 'input');
+const outputDirPath = path.resolve('.shipper', 'output');
+const inputGitkeepPath = path.resolve(inputDirPath, '.gitkeep');
+const outputGitkeepPath = path.resolve(outputDirPath, '.gitkeep');
 const expectedLabels = canonicalLabels;
 
 type JsonObject = Record<string, unknown>;
@@ -222,6 +226,18 @@ describe('initCommand directories', () => {
     expect(scriptsDirCall).toBeDefined();
   });
 
+  it('creates .shipper/input and .shipper/output directories', async () => {
+    await initCommand({ agent: 'claude' });
+    const inputDirCall = mkdirSyncMock.mock.calls.find(
+      (call: unknown[]) => call[0] === inputDirPath
+    );
+    const outputDirCall = mkdirSyncMock.mock.calls.find(
+      (call: unknown[]) => call[0] === outputDirPath
+    );
+    expect(inputDirCall).toBeDefined();
+    expect(outputDirCall).toBeDefined();
+  });
+
   it('does not create .shipper/prompts directory', async () => {
     await initCommand({ agent: 'claude' });
     const promptDirCall = mkdirSyncMock.mock.calls.find(
@@ -327,10 +343,15 @@ describe('initCommand settings', () => {
       (call: unknown[]) => call[0] === gitignorePath
     );
     expect(gitignoreCall).toBeDefined();
-    expect(gitignoreCall?.[1]).toContain('settings.local.json');
-    expect(gitignoreCall?.[1]).toContain('tmp/');
-    expect(gitignoreCall?.[1]).toContain('README.md');
-    expect(gitignoreCall?.[1]).not.toContain('scripts/');
+    expect(gitignoreCall?.[1]).toBe(
+      'tmp/\nsettings.local.json\nREADME.md\ninput/*\n!input/.gitkeep\noutput/*\n!output/.gitkeep\n'
+    );
+  });
+
+  it('writes .gitkeep files to input and output directories', async () => {
+    await initCommand({ agent: 'claude' });
+    expect(findWriteCall(inputGitkeepPath)?.[1]).toBe('');
+    expect(findWriteCall(outputGitkeepPath)?.[1]).toBe('');
   });
 
   it('writes cliVersion to settings.json', async () => {
