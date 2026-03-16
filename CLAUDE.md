@@ -46,4 +46,9 @@ npx vitest run packages/cli/tests/lib/branch.test.ts   # Run a single test file
 - **Conventional commits** enforced via Husky and Commitlint: `type(scope): subject`
 - **Prettier:** single quotes, trailing commas (es5), 100 char width, semicolons
 - **File naming:** kebab-case for files, camelCase for functions, PascalCase for interfaces
+- **Type imports:** `import type { Foo } from ...` enforced by `consistent-type-imports` rule
+- **No floating promises:** all promises must be `await`ed or explicitly `void`ed
 - **Unused variables:** prefix with `_` to satisfy lint
+- **Core barrel export:** new public APIs in `packages/core/src/lib/` must be re-exported from `packages/core/src/index.ts`
+- **Vitest globals:** `describe`, `it`, `expect`, `vi` etc. are available globally in tests (no imports needed)
+- **Build order:** core must build before cli (`npm run build` handles this automatically)
