@@ -1,7 +1,7 @@
 import path from 'node:path';
 
 import { getBranchForPR, getRepoRoot } from '@dnsquared/shipper-core';
-import { fetchChecks, classifyChecks } from '@dnsquared/shipper-core';
+import { fetchChecks, classifyChecks, enrichFailedChecks } from '@dnsquared/shipper-core';
 import { autoSelectPrForStage, resolveRef } from '@dnsquared/shipper-core';
 import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
 import { formatConflictContext } from '@dnsquared/shipper-core';
@@ -207,7 +207,12 @@ async function preflight(
   await writeContextFile(wtPath, 'review-threads.json', reviewThreads);
 
   const checks = await fetchChecks(repo, prNumber);
-  await writeContextFile(wtPath, 'ci-status.json', JSON.stringify(classifyChecks(checks), null, 2));
+  const classified = classifyChecks(checks);
+  const logDumps = await enrichFailedChecks(repo, classified.failed);
+  await writeContextFile(wtPath, 'ci-status.json', JSON.stringify(classified, null, 2));
+  for (const [name, content] of logDumps) {
+    await writeContextFile(wtPath, `ci-log-${name}.txt`, content);
+  }
 
   const { stdout: diff } = await gh(['pr', 'diff', prNumber, '-R', repo]);
   await writeContextFile(wtPath, 'pr-diff.patch', diff);
