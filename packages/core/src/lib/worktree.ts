@@ -283,17 +283,20 @@ async function fetchOriginOrThrow(opts: WorktreeGitOpts): Promise<void> {
   }
 }
 
-function getPushArgs(pushMode: WorktreeGitOpts['pushMode']): string[] {
+function getPushArgs(pushMode: WorktreeGitOpts['pushMode'], forcePushBranch?: string): string[] {
   return pushMode === 'new-branch'
     ? ['push', '-u', 'origin', 'HEAD']
-    : ['push', '--force-with-lease'];
+    : forcePushBranch
+      ? ['push', '--force-with-lease', 'origin', `HEAD:refs/heads/${forcePushBranch}`]
+      : ['push', '--force-with-lease'];
 }
 
 async function pushWorktreeBranch(
   opts: WorktreeGitOpts,
-  pushMode: WorktreeGitOpts['pushMode']
+  pushMode: WorktreeGitOpts['pushMode'],
+  forcePushBranch?: string
 ): Promise<CommandResult> {
-  return await execAsync('git', getPushArgs(pushMode), {
+  return await execAsync('git', getPushArgs(pushMode, forcePushBranch), {
     cwd: opts.wtPath,
     maxBuffer: PUSH_OUTPUT_MAX_BUFFER,
   });
@@ -305,10 +308,11 @@ async function pushWithRetry(
 ): Promise<number> {
   let retries = 0;
   let pushMode = opts.pushMode;
+  let forcePushBranch: string | undefined;
 
   for (;;) {
-    const pushArgs = getPushArgs(pushMode);
-    const pushResult = await pushWorktreeBranch(opts, pushMode);
+    const pushArgs = getPushArgs(pushMode, forcePushBranch);
+    const pushResult = await pushWorktreeBranch(opts, pushMode, forcePushBranch);
     if (pushResult.code === 0) {
       return 0;
     }
@@ -385,6 +389,7 @@ async function pushWithRetry(
 
       if (pushMode === 'new-branch') {
         pushMode = 'force-with-lease';
+        forcePushBranch = currentBranch;
       }
     }
 
@@ -473,15 +478,17 @@ export async function syncWorktree(
 
 export async function pushWorktree(opts: WorktreeGitOpts): Promise<void> {
   let pushMode = opts.pushMode;
+  let forcePushBranch: string | undefined;
+  let retries = 0;
 
-  for (let attempt = 0; attempt <= MAX_PUSH_ATTEMPTS; attempt++) {
-    const pushArgs = getPushArgs(pushMode);
-    const pushResult = await pushWorktreeBranch(opts, pushMode);
+  for (;;) {
+    const pushArgs = getPushArgs(pushMode, forcePushBranch);
+    const pushResult = await pushWorktreeBranch(opts, pushMode, forcePushBranch);
     if (pushResult.code === 0) {
       return;
     }
 
-    if (attempt === MAX_PUSH_ATTEMPTS) {
+    if (retries >= MAX_PUSH_ATTEMPTS) {
       throw formatTransportError(opts, formatCommandFailure('git', pushArgs, pushResult));
     }
 
@@ -490,6 +497,7 @@ export async function pushWorktree(opts: WorktreeGitOpts): Promise<void> {
     const currentBranch = await getCurrentBranch(opts);
     const targetRef = `origin/${currentBranch}`;
     if (!(await remoteRefExists(opts, targetRef))) {
+      retries += 1;
       continue;
     }
 
@@ -513,7 +521,10 @@ export async function pushWorktree(opts: WorktreeGitOpts): Promise<void> {
 
     if (pushMode === 'new-branch') {
       pushMode = 'force-with-lease';
+      forcePushBranch = currentBranch;
     }
+
+    retries += 1;
   }
 }
 
