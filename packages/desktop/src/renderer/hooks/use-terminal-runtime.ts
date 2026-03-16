@@ -4,11 +4,12 @@ import { Terminal } from '@xterm/xterm';
 
 import '@xterm/xterm/css/xterm.css';
 
-type TerminalStatus = 'idle' | 'running' | 'exited';
+type TerminalStatus = 'running' | 'waiting' | 'exited';
 
 interface UseTerminalRuntimeOptions {
-  sessionId: string | null;
+  sessionId: string;
   status: TerminalStatus;
+  visible: boolean;
 }
 
 const WRITE_BATCH_THRESHOLD = 8192;
@@ -17,12 +18,14 @@ const RESIZE_DEBOUNCE_MS = 50;
 const MAX_BUFFER_SIZE = 200_000;
 const CHUNK_MERGE_THRESHOLD = 2048;
 
-export function useTerminalRuntime({ sessionId, status }: UseTerminalRuntimeOptions) {
+export function useTerminalRuntime({ sessionId, status, visible }: UseTerminalRuntimeOptions) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
-  const sessionIdRef = useRef<string | null>(sessionId);
+  const sessionIdRef = useRef(sessionId);
   const statusRef = useRef<TerminalStatus>(status);
+  const previousVisibleRef = useRef(visible);
+  const visibleFitFrameRef = useRef<number | null>(null);
 
   // Output buffer state
   const chunksRef = useRef<string[]>([]);
@@ -38,6 +41,19 @@ export function useTerminalRuntime({ sessionId, status }: UseTerminalRuntimeOpti
   // Resize debounce
   const resizeTimerRef = useRef<number | null>(null);
   const lastSentSizeRef = useRef<{ cols: number; rows: number }>({ cols: 0, rows: 0 });
+
+  const fitAndResize = useCallback(() => {
+    if (!terminalRef.current || !fitAddonRef.current) return;
+    if (!containerRef.current || containerRef.current.offsetWidth === 0) return;
+
+    fitAddonRef.current.fit();
+    const { cols, rows } = terminalRef.current;
+    const prev = lastSentSizeRef.current;
+    if (prev.cols === cols && prev.rows === rows) return;
+
+    lastSentSizeRef.current = { cols, rows };
+    void window.shipperAPI.ptyResize(sessionIdRef.current, cols, rows);
+  }, []);
 
   const clearQueuedWrites = useCallback(() => {
     queuedWritesRef.current = [];
@@ -122,31 +138,12 @@ export function useTerminalRuntime({ sessionId, status }: UseTerminalRuntimeOpti
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
 
-    const fitAndResize = () => {
-      if (!terminalRef.current || !fitAddonRef.current) return;
-      if (!containerRef.current || containerRef.current.offsetWidth === 0) return;
-
-      fitAddonRef.current.fit();
-      const { cols, rows } = terminalRef.current;
-      const prev = lastSentSizeRef.current;
-      if (prev.cols === cols && prev.rows === rows) return;
-
-      lastSentSizeRef.current = { cols, rows };
-      const sid = sessionIdRef.current;
-      if (sid) {
-        void window.shipperAPI.ptyResize(sid, cols, rows);
-      }
-    };
-
     fitAndResize();
 
     // Forward keyboard input to the PTY.
     const dataDisposable = terminal.onData((data) => {
-      if (statusRef.current !== 'running') return;
-      const sid = sessionIdRef.current;
-      if (sid) {
-        void window.shipperAPI.ptyWrite(sid, data);
-      }
+      if (statusRef.current === 'exited') return;
+      void window.shipperAPI.ptyWrite(sessionIdRef.current, data);
     });
 
     // Debounced resize on container changes.
@@ -168,6 +165,10 @@ export function useTerminalRuntime({ sessionId, status }: UseTerminalRuntimeOpti
         window.clearTimeout(resizeTimerRef.current);
         resizeTimerRef.current = null;
       }
+      if (visibleFitFrameRef.current !== null) {
+        window.cancelAnimationFrame(visibleFitFrameRef.current);
+        visibleFitFrameRef.current = null;
+      }
       clearQueuedWrites();
       dataDisposable.dispose();
       terminal.dispose();
@@ -176,28 +177,20 @@ export function useTerminalRuntime({ sessionId, status }: UseTerminalRuntimeOpti
       lastSentSizeRef.current = { cols: 0, rows: 0 };
       renderedCharsRef.current = 0;
     };
-  }, [clearQueuedWrites]);
+  }, [clearQueuedWrites, fitAndResize]);
 
-  // Reset terminal when session changes.
   useEffect(() => {
-    const terminal = terminalRef.current;
-    if (!terminal) return;
-
-    clearQueuedWrites();
-    terminal.reset();
-
-    // Replay buffered output for the new session.
-    const output = chunksRef.current.join('');
-    if (output.length > 0) {
-      terminal.write(output);
+    const becameVisible = !previousVisibleRef.current && visible;
+    previousVisibleRef.current = visible;
+    if (!becameVisible) {
+      return;
     }
-    renderedCharsRef.current = output.length;
-    lastSentSizeRef.current = { cols: 0, rows: 0 };
 
-    if (sessionId) {
-      void window.shipperAPI.ptyResize(sessionId, terminal.cols, terminal.rows);
-    }
-  }, [sessionId, clearQueuedWrites]);
+    visibleFitFrameRef.current = window.requestAnimationFrame(() => {
+      visibleFitFrameRef.current = null;
+      fitAndResize();
+    });
+  }, [fitAndResize, visible]);
 
   // Subscribe to PTY output events.
   useEffect(() => {
