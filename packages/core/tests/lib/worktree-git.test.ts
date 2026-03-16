@@ -227,7 +227,7 @@ describe('pushWorktree', () => {
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
       ['rebase', '--autostash', 'origin/feature/retry'],
-      ['push', '--force-with-lease'],
+      ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
     ]);
     expect(gitArgsFromSpawnCalls()).toEqual([['fetch', 'origin']]);
   });
@@ -500,7 +500,7 @@ describe('withGitTransport', () => {
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
       ['rebase', '--autostash', 'origin/feature/retry'],
-      ['push', '--force-with-lease'],
+      ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
     ]);
   });
 
