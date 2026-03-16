@@ -9,6 +9,7 @@ import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
 import {
   handleAgentCrash,
   processResult,
+  retryOnInvalidOutput,
   scrubOutputDir,
   writeContextFile,
 } from '@dnsquared/shipper-core';
@@ -83,6 +84,20 @@ export async function prReviewCommand(
             mode,
             agent,
             model,
+          });
+          await retryOnInvalidOutput({
+            cwd: wtPath,
+            retry: (userInput) =>
+              runPrompt('pr_review', {
+                repo,
+                issueRef: issueNumber,
+                prRef: pr,
+                cwd: wtPath,
+                mode,
+                agent,
+                model,
+                userInput,
+              }),
           });
 
           try {

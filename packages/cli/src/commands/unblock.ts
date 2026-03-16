@@ -4,6 +4,7 @@ import {
   gh,
   handleAgentCrash,
   processResult,
+  retryOnInvalidOutput,
   runPrompt,
   scrubOutputDir,
   setupProtocolDirs,
@@ -114,7 +115,12 @@ export async function unblockCommand(
     const cwd = process.cwd();
     await scrubOutputDir(cwd);
     await prepareUnblockContext(repo, issue, cwd);
-    await runPrompt('unblock', { repo, issueRef: issue, mode, agent, model });
+    await runPrompt('unblock', { repo, issueRef: issue, cwd, mode, agent, model });
+    await retryOnInvalidOutput({
+      cwd,
+      retry: (userInput) =>
+        runPrompt('unblock', { repo, issueRef: issue, cwd, mode, agent, model, userInput }),
+    });
     try {
       await processResult({ repo, issueNumber: issue, stage: 'unblock', cwd });
     } catch (error) {

@@ -11,6 +11,9 @@ const processResultMock = vi.fn(() =>
     comment: '.shipper/output/comment-10.md',
   })
 );
+const retryOnInvalidOutputMock = vi.fn<
+  (opts: { cwd: string; retry: (message: string) => Promise<number> }) => Promise<void>
+>(() => Promise.resolve());
 const resolveRefMock = vi.fn(() => Promise.resolve({ prNumber: '42', issueNumber: '10' }));
 const runPromptMock = vi.fn(() => Promise.resolve(0));
 const scrubOutputDirMock = vi.fn(() => Promise.resolve());
@@ -33,6 +36,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   gh: ghMock,
   handleAgentCrash: handleAgentCrashMock,
   processResult: processResultMock,
+  retryOnInvalidOutput: retryOnInvalidOutputMock,
   resolveRef: resolveRefMock,
   runPrompt: runPromptMock,
   scrubOutputDir: scrubOutputDirMock,
@@ -132,6 +136,11 @@ describe('prReviewCommand', () => {
       agent: undefined,
       model: undefined,
     });
+    const retryCall = retryOnInvalidOutputMock.mock.calls[0]?.[0] as
+      | { cwd: string; retry: (message: string) => Promise<number> }
+      | undefined;
+    expect(retryCall?.cwd).toBe('/tmp/fake-wt');
+    expect(retryCall?.retry).toEqual(expect.any(Function));
     expect(processResultMock).toHaveBeenCalledWith({
       repo,
       issueNumber: '10',
@@ -142,6 +151,18 @@ describe('prReviewCommand', () => {
     expect(handleAgentCrashMock).not.toHaveBeenCalled();
     expect(process.exitCode).toBeUndefined();
     expect(exitSpy).not.toHaveBeenCalled();
+
+    await expect(retryCall?.retry('Fix result')).resolves.toBe(0);
+    expect(runPromptMock).toHaveBeenLastCalledWith('pr_review', {
+      repo,
+      issueRef: '10',
+      prRef: '42',
+      cwd: '/tmp/fake-wt',
+      mode: undefined,
+      agent: undefined,
+      model: undefined,
+      userInput: 'Fix result',
+    });
   });
 
   it('reports protocol crashes and exits with code 1', async () => {

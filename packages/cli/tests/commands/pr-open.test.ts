@@ -12,6 +12,9 @@ const processResultMock = vi.fn(() =>
     comment: '.shipper/output/comment-239.md',
   })
 );
+const retryOnInvalidOutputMock = vi.fn<
+  (opts: { cwd: string; retry: (message: string) => Promise<number> }) => Promise<void>
+>(() => Promise.resolve());
 const resolveBaseBranchMock = vi.fn(() => Promise.resolve('release/2026'));
 const resolveRefMock = vi.fn(() => Promise.resolve({ issueNumber: '239' }));
 const runPromptMock = vi.fn(() => Promise.resolve(0));
@@ -46,6 +49,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   getSettings: getSettingsMock,
   handleAgentCrash: handleAgentCrashMock,
   processResult: processResultMock,
+  retryOnInvalidOutput: retryOnInvalidOutputMock,
   resolveBaseBranch: resolveBaseBranchMock,
   resolveRef: resolveRefMock,
   runPrompt: runPromptMock,
@@ -102,6 +106,11 @@ describe('prOpenCommand', () => {
         userInput: 'formatted conflict context',
       })
     );
+    const retryCall = retryOnInvalidOutputMock.mock.calls[0]?.[0] as
+      | { cwd: string; retry: (message: string) => Promise<number> }
+      | undefined;
+    expect(retryCall?.cwd).toBe('/tmp/fake-wt');
+    expect(retryCall?.retry).toEqual(expect.any(Function));
     expect(processResultMock).toHaveBeenCalledWith({
       repo: 'owner/repo',
       issueNumber: '239',
@@ -109,6 +118,18 @@ describe('prOpenCommand', () => {
       cwd: '/tmp/fake-wt',
     });
     expect(handleAgentCrashMock).not.toHaveBeenCalled();
+
+    await expect(retryCall?.retry('Fix result')).resolves.toBe(0);
+    expect(runPromptMock).toHaveBeenLastCalledWith('pr_open', {
+      repo: 'owner/repo',
+      issueRef: '239',
+      cwd: '/tmp/fake-wt',
+      baseBranch: 'release/2026',
+      mode: undefined,
+      agent: undefined,
+      model: undefined,
+      userInput: 'Fix result',
+    });
   });
 
   it('forwards raw push failure text without conflict formatting', async () => {
@@ -155,6 +176,7 @@ describe('prOpenCommand', () => {
 
     await expect(prOpenCommand('owner/repo', '239')).resolves.toBeUndefined();
 
+    expect(retryOnInvalidOutputMock).not.toHaveBeenCalled();
     expect(processResultMock).not.toHaveBeenCalled();
     expect(handleAgentCrashMock).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(1);

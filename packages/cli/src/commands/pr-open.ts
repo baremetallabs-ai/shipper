@@ -3,6 +3,7 @@ import { autoSelectIssue, resolveBaseBranch, resolveRef } from '@dnsquared/shipp
 import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
 import { formatConflictContext } from '@dnsquared/shipper-core';
 import { handleAgentCrash, processResult, scrubOutputDir } from '@dnsquared/shipper-core';
+import { retryOnInvalidOutput } from '@dnsquared/shipper-core';
 import { withStageHooks } from '@dnsquared/shipper-core';
 import { getSettings } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
@@ -63,6 +64,20 @@ export async function prOpenCommand(
             process.exitCode = transportCode;
             return;
           }
+          await retryOnInvalidOutput({
+            cwd: wtPath,
+            retry: (userInput) =>
+              runPrompt('pr_open', {
+                repo,
+                issueRef: issue,
+                cwd: wtPath,
+                baseBranch,
+                mode,
+                agent,
+                model,
+                userInput,
+              }),
+          });
           try {
             await processResult({ repo, issueNumber: issue, stage: 'pr_open', cwd: wtPath });
           } catch (error) {
