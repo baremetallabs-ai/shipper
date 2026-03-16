@@ -135,10 +135,16 @@ export async function initCommand(options: { agent?: string }) {
 
   // Write .gitignore
   const gitignorePath = path.resolve('.shipper', '.gitignore');
-  writeFileSync(
-    gitignorePath,
-    'tmp/\nsettings.local.json\nREADME.md\ninput/*\n!input/.gitkeep\noutput/*\n!output/.gitkeep\n'
-  );
+  const gitignoreEntries = [
+    'tmp/',
+    'settings.local.json',
+    'README.md',
+    'input/*',
+    '!input/.gitkeep',
+    'output/*',
+    '!output/.gitkeep',
+  ];
+  writeFileSync(gitignorePath, `${gitignoreEntries.join('\n')}\n`);
 
   // Write settings.json (merge with existing if present)
   const settingsPath = path.resolve('.shipper', 'settings.json');
