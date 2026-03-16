@@ -47,6 +47,12 @@ interface ShipperAPI {
     cols: number,
     rows: number
   ) => Promise<{ sessionId: string }>;
+  spawnShipperGroom: (
+    issueNumber: number,
+    repo: string,
+    cols: number,
+    rows: number
+  ) => Promise<{ sessionId: string }>;
   ptyWrite: (sessionId: string, data: string) => Promise<void>;
   ptyResize: (sessionId: string, cols: number, rows: number) => Promise<void>;
   ptyKill: (sessionId: string) => Promise<void>;

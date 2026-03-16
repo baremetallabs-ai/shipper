@@ -296,6 +296,40 @@ function registerIpcHandlers(): void {
     return { sessionId };
   });
 
+  ipcMain.handle('pty-spawn-shipper-groom', async (_event, payload: unknown) => {
+    if (
+      typeof payload !== 'object' ||
+      payload === null ||
+      !('issueNumber' in payload) ||
+      typeof payload.issueNumber !== 'number' ||
+      !('repo' in payload) ||
+      typeof payload.repo !== 'string' ||
+      !('cols' in payload) ||
+      typeof payload.cols !== 'number' ||
+      !('rows' in payload) ||
+      typeof payload.rows !== 'number'
+    ) {
+      throw new Error('Invalid pty-spawn-shipper-groom payload.');
+    }
+
+    const repoPath = await ensureRepoClone(payload.repo);
+
+    const cmd = await buildPromptCommand('groom', {
+      issueRef: String(payload.issueNumber),
+      repo: payload.repo,
+      mode: 'interactive',
+    });
+
+    const sessionId = randomUUID();
+    ptyManager.spawn(sessionId, cmd.command, cmd.args, {
+      cols: payload.cols,
+      rows: payload.rows,
+      cwd: cmd.cwd ?? repoPath,
+    });
+
+    return { sessionId };
+  });
+
   ipcMain.handle('pty-write', (_event, payload: unknown) => {
     if (
       typeof payload !== 'object' ||

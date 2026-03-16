@@ -25,6 +25,8 @@ const shipperAPI = {
 
   spawnShipperNew: (request: string, repo: string, cols: number, rows: number) =>
     ipcRenderer.invoke('pty-spawn-shipper-new', { request, repo, cols, rows }),
+  spawnShipperGroom: (issueNumber: number, repo: string, cols: number, rows: number) =>
+    ipcRenderer.invoke('pty-spawn-shipper-groom', { issueNumber, repo, cols, rows }),
   ptyWrite: (sessionId: string, data: string) =>
     ipcRenderer.invoke('pty-write', { sessionId, data }),
   ptyResize: (sessionId: string, cols: number, rows: number) =>
