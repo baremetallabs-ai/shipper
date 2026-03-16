@@ -117,11 +117,14 @@ function getPrerequisiteMessage(prerequisites: Prerequisites | null): string | n
 
 interface IssueCardProps {
   issue: ListIssueItem;
+  onGroom?: (issueNumber: number) => void;
+  groomDisabled?: boolean;
 }
 
-function IssueCard({ issue }: IssueCardProps): JSX.Element {
+function IssueCard({ issue, onGroom, groomDisabled = false }: IssueCardProps): JSX.Element {
   const isBlocked = issue.labels.includes(BLOCKED_LABEL);
   const isLocked = issue.labels.includes(LOCKED_LABEL);
+  const isGroomDisabled = groomDisabled || isBlocked || isLocked;
 
   return (
     <article className="space-y-3 rounded-sm border border-border bg-background px-4 py-4">
@@ -132,6 +135,19 @@ function IssueCard({ issue }: IssueCardProps): JSX.Element {
           {isBlocked ? <Badge variant="outline">Blocked</Badge> : null}
           {isLocked ? <Badge variant="outline">Locked</Badge> : null}
         </div>
+      ) : null}
+      {onGroom ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            onGroom(issue.number);
+          }}
+          disabled={isGroomDisabled}
+        >
+          Groom
+        </Button>
       ) : null}
     </article>
   );
@@ -503,6 +519,25 @@ export default function App(): JSX.Element {
     }
   }
 
+  async function handleShipperGroom(issueNumber: number): Promise<void> {
+    try {
+      const result = await window.shipperAPI.spawnShipperGroom(issueNumber, activeRepo, 120, 30);
+      const session: TerminalSession = {
+        id: result.sessionId,
+        label: `groom — #${issueNumber}`,
+        status: 'running',
+      };
+
+      lastOutputAtBySessionRef.current.set(session.id, Date.now());
+      setSessions((currentSessions) => [...currentSessions, session]);
+      setActiveSessionId(session.id);
+      setDrawerOpen(true);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setFetchError(`Failed to launch shipper groom: ${message}`);
+    }
+  }
+
   function handleToggleDrawer(): void {
     setDrawerOpen((current) => !current);
   }
@@ -848,7 +883,13 @@ export default function App(): JSX.Element {
                         <div className="flex flex-wrap gap-3">
                           {attentionIssues.map((issue) => (
                             <div key={issue.number} className="min-w-[240px] flex-1 basis-[240px]">
-                              <IssueCard issue={issue} />
+                              <IssueCard
+                                issue={issue}
+                                onGroom={(issueNumber) => {
+                                  void handleShipperGroom(issueNumber);
+                                }}
+                                groomDisabled={!canFetch || !hasActiveRepo}
+                              />
                             </div>
                           ))}
                         </div>
