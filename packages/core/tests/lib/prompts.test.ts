@@ -20,6 +20,26 @@ describe('groom prompts', () => {
       expect(prompt).toContain('--remove-label "shipper:priority-high"');
     }
   );
+
+  it.each(['claude', 'codex'])(
+    'documents duplicate detection and short-circuit handling for %s',
+    (agent) => {
+      const prompt = readFileSync(
+        new URL(`../../src/prompts/${agent}/groom.md`, import.meta.url),
+        'utf-8'
+      );
+
+      expect(prompt).toContain('Duplicate');
+      expect(prompt).toContain('### Duplicate-detection gate');
+      expect(prompt).toContain(
+        'Present the finding to the product owner using the interactive question-asking tool'
+      );
+      expect(prompt).toContain('.shipper/tmp/duplicate_close-<ISSUE>.md');
+      expect(prompt).toContain('gh issue close <ISSUE> --reason "not planned"');
+      expect(prompt).toContain('--remove-label "shipper:new"');
+      expect(prompt).toContain('Reclassify the relationship as **Overlap**');
+    }
+  );
 });
 
 describe('pr_open prompts', () => {

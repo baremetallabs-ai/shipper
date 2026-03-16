@@ -37,7 +37,7 @@ The **next user message** contains the full GitHub issue including title, labels
 
 ### Phase 2: Cross-issue scan
 
-Scan all other open issues in the repo for relevance to the current issue. This surfaces dependencies, overlaps, conflicts, and scope impacts before product questioning begins, but the scan itself must be delegated so the main context window stays focused on the grooming conversation.
+Scan all other open issues in the repo for relevance to the current issue. This surfaces dependencies, overlaps, conflicts, duplicates, and scope impacts before product questioning begins, but the scan itself must be delegated so the main context window stays focused on the grooming conversation.
 
 1. Spawn exactly one Task tool subagent to perform the entire cross-issue scan. Do not execute the scan inline in the main context window.
 2. Pass the subagent an inline prompt with the current issue number, title, body, and any comments that materially clarify scope, requirements, or constraints, plus instructions equivalent to:
@@ -60,6 +60,7 @@ Scan all other open issues in the repo for relevance to the current issue. This 
       - Dependency
       - Overlap
       - Conflict
+      - Duplicate — same user-facing outcome with substantially the same scope; implementing either would make the other unnecessary
       - Scope impact
 
    Return only a structured text summary with these sections:
@@ -80,6 +81,25 @@ Scan all other open issues in the repo for relevance to the current issue. This 
 3. The main agent should receive and retain only the subagent's structured summary, not raw issue bodies/comments, unless it intentionally performs a spot-check.
 4. After the subagent returns, parse that structured summary and use it as the Phase 2 input for later phases. The relevant-issues list and hard dependency/conflict flag should feed the existing Phase 4 Related Issues section, grooming summary, and blocking logic without changing those downstream output formats.
 5. If a finding seems surprising or critical, the main agent MAY fetch a specific issue with `gh issue view` to spot-check it, but this is optional rather than required.
+
+### Duplicate-detection gate
+
+Before proceeding to Phase 3, check whether any issue from the Phase 2 scan was classified as **Duplicate**.
+
+**If no duplicate was detected:** proceed to Phase 3.
+
+**If a duplicate was detected:**
+
+1. Present the finding to the product owner using the interactive question-asking tool. Identify the original issue by number and title, explain why the current issue appears to be a duplicate, and ask for explicit confirmation before taking action.
+2. **If the product owner confirms the duplicate:**
+   - Create `.shipper/tmp/duplicate_close-<ISSUE>.md` at runtime with this exact content: `Closing as duplicate of #<N> — <original issue title>.`
+   - Post the closing comment: `gh issue comment <ISSUE> --body-file ./.shipper/tmp/duplicate_close-<ISSUE>.md`
+   - Close the issue: `gh issue close <ISSUE> --reason "not planned"`
+   - Remove `shipper:new` if present: `gh issue edit <ISSUE> --remove-label "shipper:new"`
+   - **Stop.** Do not proceed to Phase 3 or Phase 4. No grooming questions are asked, no grooming summary comment is posted, and no `shipper:groomed` label is added.
+3. **If the product owner rejects the duplicate finding:**
+   - Reclassify the relationship as **Overlap** in the Phase 2 results.
+   - Proceed to Phase 3 as normal.
 
 ### Phase 3: Groom
 
