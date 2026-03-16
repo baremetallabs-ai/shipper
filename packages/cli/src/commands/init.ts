@@ -123,14 +123,22 @@ export async function initCommand(options: { agent?: string }) {
     path.resolve('.shipper', 'scripts'),
     path.resolve('.shipper', 'tmp'),
     path.resolve('.shipper', 'hooks'),
+    path.resolve('.shipper', 'input'),
+    path.resolve('.shipper', 'output'),
   ];
   for (const dir of dirs) {
     mkdirSync(dir, { recursive: true });
   }
+  for (const name of ['input', 'output']) {
+    writeFileSync(path.resolve('.shipper', name, '.gitkeep'), '');
+  }
 
   // Write .gitignore
   const gitignorePath = path.resolve('.shipper', '.gitignore');
-  writeFileSync(gitignorePath, 'tmp/\nsettings.local.json\nREADME.md\n');
+  writeFileSync(
+    gitignorePath,
+    'tmp/\nsettings.local.json\nREADME.md\ninput/*\n!input/.gitkeep\noutput/*\n!output/.gitkeep\n'
+  );
 
   // Write settings.json (merge with existing if present)
   const settingsPath = path.resolve('.shipper', 'settings.json');
