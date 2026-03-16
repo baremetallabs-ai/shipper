@@ -10,6 +10,8 @@ const getSettingsMock =
   vi.fn<() => { prReviewWait: { mode: 'timer' | 'checks'; timeoutMinutes: number } }>();
 const fetchChecksMock = vi.fn<(repo: string, pr: string) => Promise<PRChecksLine[]>>();
 const classifyChecksMock = vi.fn<(checks: PRChecksLine[]) => CheckClassification>();
+const enrichFailedChecksMock =
+  vi.fn<(repo: string, failedChecks: PRChecksLine[]) => Promise<Map<string, string>>>();
 const resolveRefMock = vi.fn();
 const autoSelectPrForStageMock = vi.fn();
 const formatConflictContextMock = vi.fn(() => 'formatted conflict context');
@@ -48,6 +50,7 @@ const resolveTransitionMock = vi.fn<() => LabelTransition>(() => ({
 const repo = 'owner/repo';
 const PASS_CHECKS = [{ name: 'build', state: 'COMPLETED', bucket: 'pass' }];
 const FAIL_CHECKS = [{ name: 'build', state: 'COMPLETED', bucket: 'fail' }];
+type WriteContextFileCall = [string, string, string];
 
 vi.mock('@dnsquared/shipper-core', () => ({
   resolveRef: resolveRefMock,
@@ -66,6 +69,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   getSettings: getSettingsMock,
   fetchChecks: fetchChecksMock,
   classifyChecks: classifyChecksMock,
+  enrichFailedChecks: enrichFailedChecksMock,
   setupProtocolDirs: setupProtocolDirsMock,
   writeContextFile: writeContextFileMock,
   scrubOutputDir: scrubOutputDirMock,
@@ -88,6 +92,10 @@ function classifyChecksImpl(checks: PRChecksLine[]): CheckClassification {
     passed: checks.filter((check) => check.bucket === 'pass'),
     total: checks.length,
   };
+}
+
+function getWriteContextFileCalls(): WriteContextFileCall[] {
+  return writeContextFileMock.mock.calls as WriteContextFileCall[];
 }
 
 describe('prRemediateCommand', () => {
@@ -114,6 +122,7 @@ describe('prRemediateCommand', () => {
       remove: ['shipper:pr-reviewed'],
     });
     classifyChecksMock.mockImplementation(classifyChecksImpl);
+    enrichFailedChecksMock.mockResolvedValue(new Map());
     ghMock.mockImplementation((args: string[]) => {
       if (args[0] === 'pr' && args[1] === 'view' && args.includes('baseRefName')) {
         return Promise.resolve({
@@ -278,12 +287,15 @@ describe('prRemediateCommand', () => {
     );
     expect(syncWorktreeMock).toHaveBeenCalledTimes(1);
     expect(setupProtocolDirsMock).toHaveBeenCalledWith('/tmp/fake-wt');
-    expect(writeContextFileMock.mock.calls).toEqual([
+    expect(enrichFailedChecksMock).toHaveBeenCalledWith(repo, []);
+    const writeCalls = getWriteContextFileCalls();
+    expect(writeCalls).toEqual([
       ['/tmp/fake-wt', 'review-threads.json', '[]'],
       ['/tmp/fake-wt', 'ci-status.json', JSON.stringify(classifyChecksImpl(PASS_CHECKS), null, 2)],
       ['/tmp/fake-wt', 'pr-diff.patch', 'diff --git a/file b/file\n'],
       ['/tmp/fake-wt', 'pass-info.json', JSON.stringify({ pass: 1, maxPasses: 5 }, null, 2)],
     ]);
+    expect(writeCalls.some(([, name]) => name.startsWith('ci-log-'))).toBe(false);
     expect(writeContextFileMock.mock.invocationCallOrder[3]).toBeLessThan(
       syncWorktreeMock.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY
     );
@@ -343,6 +355,12 @@ describe('prRemediateCommand', () => {
     expect(pushWorktreeMock).toHaveBeenCalledTimes(2);
     expect(postCommentMock).toHaveBeenCalledTimes(2);
     expect(postRepliesMock).toHaveBeenCalledTimes(2);
+    expect(enrichFailedChecksMock).toHaveBeenNthCalledWith(
+      1,
+      repo,
+      classifyChecksImpl(FAIL_CHECKS).failed
+    );
+    expect(enrichFailedChecksMock).toHaveBeenNthCalledWith(2, repo, []);
     expect(writeContextFileMock.mock.calls).toEqual([
       ['/tmp/fake-wt', 'review-threads.json', '[]'],
       ['/tmp/fake-wt', 'ci-status.json', JSON.stringify(classifyChecksImpl(FAIL_CHECKS), null, 2)],
@@ -358,6 +376,90 @@ describe('prRemediateCommand', () => {
       add: ['shipper:ready'],
       remove: ['shipper:pr-reviewed'],
     });
+  });
+
+  it('writes enriched ci-status.json and ci-log artifacts before diff and pass metadata', async () => {
+    const checksWithFailure: PRChecksLine[] = [
+      {
+        name: 'Build / lint (ubuntu)',
+        state: 'COMPLETED',
+        bucket: 'fail',
+      },
+    ];
+    const classified: CheckClassification = {
+      pending: [],
+      failed: [
+        {
+          name: 'Build / lint (ubuntu)',
+          state: 'COMPLETED',
+          bucket: 'fail',
+        },
+      ],
+      passed: [],
+      total: 1,
+    };
+
+    fetchChecksMock.mockResolvedValueOnce(checksWithFailure).mockResolvedValue(PASS_CHECKS);
+    classifyChecksMock.mockReturnValueOnce(classified).mockImplementation(classifyChecksImpl);
+    enrichFailedChecksMock.mockImplementation((_repo, failedChecks) => {
+      const [firstFailedCheck] = failedChecks;
+      if (!firstFailedCheck) {
+        throw new Error('Expected a failed check to enrich.');
+      }
+
+      firstFailedCheck.link = 'https://github.com/owner/repo/actions/runs/123456789/job/444555666';
+      firstFailedCheck.failedSteps = [
+        {
+          name: 'lint',
+          logSnippet: 'line 1\nline 2',
+        },
+      ];
+      return Promise.resolve(new Map([['build-lint-ubuntu', 'full failed log']]));
+    });
+    readResultFileMock.mockResolvedValue({
+      verdict: 'accept',
+      comment: '.shipper/output/comment-10.md',
+    });
+
+    const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
+
+    await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
+
+    expect(enrichFailedChecksMock).toHaveBeenCalledWith(repo, classified.failed);
+    expect(writeContextFileMock).toHaveBeenCalledWith(
+      '/tmp/fake-wt',
+      'ci-status.json',
+      JSON.stringify(classified, null, 2)
+    );
+    expect(writeContextFileMock).toHaveBeenCalledWith(
+      '/tmp/fake-wt',
+      'ci-log-build-lint-ubuntu.txt',
+      'full failed log'
+    );
+    const writeCalls = getWriteContextFileCalls();
+    const ciStatusCall = writeCalls.find(([, name]) => name === 'ci-status.json');
+    const ciLogCall = writeCalls.find(([, name]) => name === 'ci-log-build-lint-ubuntu.txt');
+    const diffCall = writeCalls.find(([, name]) => name === 'pr-diff.patch');
+    const passInfoCall = writeCalls.find(([, name]) => name === 'pass-info.json');
+    const ciLogCallIndex = writeCalls.findIndex(
+      ([, name]) => name === 'ci-log-build-lint-ubuntu.txt'
+    );
+    const diffCallIndex = writeCalls.findIndex(([, name]) => name === 'pr-diff.patch');
+    const passInfoCallIndex = writeCalls.findIndex(([, name]) => name === 'pass-info.json');
+
+    expect(ciStatusCall).toBeDefined();
+    expect(ciLogCall).toBeDefined();
+    expect(diffCall).toBeDefined();
+    expect(passInfoCall).toBeDefined();
+    expect(ciLogCallIndex).toBeGreaterThanOrEqual(0);
+    expect(diffCallIndex).toBeGreaterThanOrEqual(0);
+    expect(passInfoCallIndex).toBeGreaterThanOrEqual(0);
+    expect(writeContextFileMock.mock.invocationCallOrder[ciLogCallIndex] ?? -1).toBeLessThan(
+      writeContextFileMock.mock.invocationCallOrder[diffCallIndex] ?? Number.POSITIVE_INFINITY
+    );
+    expect(writeContextFileMock.mock.invocationCallOrder[ciLogCallIndex] ?? -1).toBeLessThan(
+      writeContextFileMock.mock.invocationCallOrder[passInfoCallIndex] ?? Number.POSITIVE_INFINITY
+    );
   });
 
   it('posts the reject comment, marks the issue failed, and never pushes', async () => {
