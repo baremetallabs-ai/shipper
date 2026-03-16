@@ -12,6 +12,9 @@ const processResultMock = vi.fn(() =>
     comment: '.shipper/output/comment-239.md',
   })
 );
+const retryOnInvalidOutputMock = vi.fn<
+  (opts: { cwd: string; retry: (message: string) => Promise<number> }) => Promise<void>
+>(() => Promise.resolve());
 const resolveBaseBranchMock = vi.fn(() => Promise.resolve('main'));
 const runPromptMock = vi.fn(() => Promise.resolve(0));
 const scrubOutputDirMock = vi.fn(() => Promise.resolve());
@@ -45,6 +48,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   getSettings: getSettingsMock,
   handleAgentCrash: handleAgentCrashMock,
   processResult: processResultMock,
+  retryOnInvalidOutput: retryOnInvalidOutputMock,
   resolveBaseBranch: resolveBaseBranchMock,
   runPrompt: runPromptMock,
   scrubOutputDir: scrubOutputDirMock,
@@ -106,6 +110,11 @@ describe('implementCommand', () => {
         userInput: 'formatted conflict context',
       })
     );
+    const retryCall = retryOnInvalidOutputMock.mock.calls[0]?.[0] as
+      | { cwd: string; retry: (message: string) => Promise<number> }
+      | undefined;
+    expect(retryCall?.cwd).toBe('/tmp/fake-wt');
+    expect(retryCall?.retry).toEqual(expect.any(Function));
     expect(processResultMock).toHaveBeenCalledWith({
       repo: 'owner/repo',
       issueNumber: '239',
@@ -113,6 +122,17 @@ describe('implementCommand', () => {
       cwd: '/tmp/fake-wt',
     });
     expect(handleAgentCrashMock).not.toHaveBeenCalled();
+
+    await expect(retryCall?.retry('Fix result')).resolves.toBe(0);
+    expect(runPromptMock).toHaveBeenLastCalledWith('implement', {
+      repo: 'owner/repo',
+      issueRef: '239',
+      cwd: '/tmp/fake-wt',
+      mode: undefined,
+      agent: undefined,
+      model: undefined,
+      userInput: 'Fix result',
+    });
   });
 
   it('forwards raw push failure text through transport without conflict formatting', async () => {
@@ -150,6 +170,18 @@ describe('implementCommand', () => {
       'implement',
       'Missing result.json'
     );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('skips retry and result processing when transport returns a non-zero exit code', async () => {
+    withGitTransportMock.mockResolvedValueOnce(1);
+    const { implementCommand } = await import('../../src/commands/implement.js');
+
+    await expect(implementCommand('owner/repo', '239')).resolves.toBeUndefined();
+
+    expect(retryOnInvalidOutputMock).not.toHaveBeenCalled();
+    expect(processResultMock).not.toHaveBeenCalled();
+    expect(handleAgentCrashMock).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
   });
 });

@@ -271,6 +271,33 @@ describe('withGitTransport', () => {
     });
   });
 
+  it('still pushes after a clean rebase when the initial agent exit code is non-zero', async () => {
+    queueSpawnExit();
+    queueExecResult();
+    queueExecResult();
+    const runAgent = vi.fn().mockResolvedValue(2);
+
+    await expect(
+      withGitTransport(
+        {
+          wtPath: '/tmp/wt',
+          repoRoot: '/tmp/repo',
+          baseBranch: 'main',
+          pushMode: 'new-branch',
+        },
+        runAgent
+      )
+    ).resolves.toBe(0);
+
+    expect(runAgent).toHaveBeenCalledTimes(1);
+    expect(runAgent).toHaveBeenCalledWith();
+    expect(gitArgsFromSpawnCalls()).toEqual([['fetch', 'origin']]);
+    expect(gitArgsFromExecCalls()).toEqual([
+      ['rebase', '--autostash', 'origin/main'],
+      ['push', '-u', 'origin', 'HEAD'],
+    ]);
+  });
+
   it('passes grouped conflict markers to the agent and force-pushes after rebase continuation succeeds', async () => {
     queueSpawnExit();
     queueExecResult({ code: 1, stderr: 'conflict' });

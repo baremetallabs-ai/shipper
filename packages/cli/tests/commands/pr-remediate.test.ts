@@ -33,6 +33,9 @@ const setupProtocolDirsMock = vi.fn(() => Promise.resolve());
 const writeContextFileMock = vi.fn(() => Promise.resolve());
 const scrubOutputDirMock = vi.fn(() => Promise.resolve());
 const readResultFileMock = vi.fn<() => Promise<ResultJson>>();
+const retryOnInvalidOutputMock = vi.fn<
+  (opts: { cwd: string; retry: (message: string) => Promise<number> }) => Promise<void>
+>(() => Promise.resolve());
 const postRepliesMock = vi.fn(() => Promise.resolve());
 const postCommentMock = vi.fn(() => Promise.resolve());
 const executeTransitionMock = vi.fn(() => Promise.resolve());
@@ -67,6 +70,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   writeContextFile: writeContextFileMock,
   scrubOutputDir: scrubOutputDirMock,
   readResultFile: readResultFileMock,
+  retryOnInvalidOutput: retryOnInvalidOutputMock,
   postReplies: postRepliesMock,
   postComment: postCommentMock,
   executeTransition: executeTransitionMock,
@@ -264,6 +268,14 @@ describe('prRemediateCommand', () => {
         cwd: '/tmp/fake-wt',
       })
     );
+    const retryCall = retryOnInvalidOutputMock.mock.calls[0]?.[0] as
+      | { cwd: string; retry: (message: string) => Promise<number> }
+      | undefined;
+    expect(retryCall?.cwd).toBe('/tmp/fake-wt');
+    expect(retryCall?.retry).toEqual(expect.any(Function));
+    expect(runPromptMock.mock.invocationCallOrder[0]).toBeLessThan(
+      retryOnInvalidOutputMock.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY
+    );
     expect(syncWorktreeMock).toHaveBeenCalledTimes(1);
     expect(setupProtocolDirsMock).toHaveBeenCalledWith('/tmp/fake-wt');
     expect(writeContextFileMock.mock.calls).toEqual([
@@ -327,6 +339,7 @@ describe('prRemediateCommand', () => {
     expect(syncWorktreeMock).toHaveBeenCalledTimes(2);
     expect(scrubOutputDirMock).toHaveBeenCalledTimes(2);
     expect(runPromptMock).toHaveBeenCalledTimes(2);
+    expect(retryOnInvalidOutputMock).toHaveBeenCalledTimes(2);
     expect(pushWorktreeMock).toHaveBeenCalledTimes(2);
     expect(postCommentMock).toHaveBeenCalledTimes(2);
     expect(postRepliesMock).toHaveBeenCalledTimes(2);
@@ -372,6 +385,25 @@ describe('prRemediateCommand', () => {
     expect(resolveTransitionMock).not.toHaveBeenCalled();
   });
 
+  it('continues the pass when the initial prompt exits non-zero but readResultFile is valid', async () => {
+    fetchChecksMock.mockResolvedValue(PASS_CHECKS);
+    runPromptMock.mockResolvedValueOnce(17);
+    readResultFileMock.mockResolvedValue({
+      verdict: 'accept',
+      comment: '.shipper/output/comment-10.md',
+    });
+
+    const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
+
+    await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
+
+    expect(retryOnInvalidOutputMock).toHaveBeenCalledTimes(1);
+    expect(handleAgentCrashMock).not.toHaveBeenCalled();
+    expect(pushWorktreeMock).toHaveBeenCalledTimes(1);
+    expect(postCommentMock).toHaveBeenCalledTimes(1);
+    expect(process.exitCode).toBe(0);
+  });
+
   it('exits after five red-CI passes without changing labels', async () => {
     fetchChecksMock.mockResolvedValue(FAIL_CHECKS);
     readResultFileMock.mockResolvedValue({
@@ -391,6 +423,35 @@ describe('prRemediateCommand', () => {
     expect(errorSpy).toHaveBeenCalledWith('Remediation exhausted 5 passes without green CI.');
 
     errorSpy.mockRestore();
+  });
+
+  it('reuses the same output directory when retrying within a pass', async () => {
+    fetchChecksMock.mockResolvedValue(PASS_CHECKS);
+    readResultFileMock.mockResolvedValue({
+      verdict: 'accept',
+      comment: '.shipper/output/comment-10.md',
+    });
+
+    const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
+
+    await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
+
+    const retryCall = retryOnInvalidOutputMock.mock.calls[0]?.[0] as
+      | { cwd: string; retry: (message: string) => Promise<number> }
+      | undefined;
+    await expect(retryCall?.retry('Fix result')).resolves.toBe(0);
+
+    expect(runPromptMock).toHaveBeenLastCalledWith('pr_remediate', {
+      repo,
+      issueRef: '10',
+      prRef: '42',
+      cwd: '/tmp/fake-wt',
+      mode: undefined,
+      agent: undefined,
+      model: undefined,
+      userInput: 'Fix result',
+    });
+    expect(scrubOutputDirMock).toHaveBeenCalledTimes(1);
   });
 
   it('handles invalid or missing result files as agent crashes', async () => {

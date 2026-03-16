@@ -497,8 +497,7 @@ export async function withGitTransport(
 
   const agentCode = await runAgent();
   if (agentCode !== 0) {
-    console.error(`Agent exited with code ${agentCode} — skipping push.`);
-    return agentCode;
+    console.error(`Agent exited with code ${agentCode} — proceeding to push.`);
   }
 
   return await pushWithRetry(opts, runAgent);

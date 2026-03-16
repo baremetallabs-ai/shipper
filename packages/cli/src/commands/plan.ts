@@ -1,6 +1,7 @@
 import { autoSelectIssue, generateBranchName, getRepoRoot } from '@dnsquared/shipper-core';
 import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
 import { handleAgentCrash, processResult, scrubOutputDir } from '@dnsquared/shipper-core';
+import { retryOnInvalidOutput } from '@dnsquared/shipper-core';
 import { withStageHooks } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
 import { withWorktree } from '@dnsquared/shipper-core';
@@ -33,6 +34,19 @@ export async function planCommand(
         async (wtPath) => {
           await scrubOutputDir(wtPath);
           await runPrompt('plan', { repo, issueRef: issue, cwd: wtPath, mode, agent, model });
+          await retryOnInvalidOutput({
+            cwd: wtPath,
+            retry: (userInput) =>
+              runPrompt('plan', {
+                repo,
+                issueRef: issue,
+                cwd: wtPath,
+                mode,
+                agent,
+                model,
+                userInput,
+              }),
+          });
           try {
             await processResult({ repo, issueNumber: issue, stage: 'plan', cwd: wtPath });
           } catch (error) {

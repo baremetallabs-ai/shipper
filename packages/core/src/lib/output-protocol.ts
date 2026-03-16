@@ -2,7 +2,7 @@ import { mkdir, readFile, readdir, rm, unlink, writeFile } from 'node:fs/promise
 import path from 'node:path';
 
 import { gh } from './gh.js';
-import { readResultFile, type ResultJson } from './result-schema.js';
+import { readResultFile, ResultValidationError, type ResultJson } from './result-schema.js';
 import { resolveTransition, type LabelTransition, type StageName } from './stage-transitions.js';
 
 export const PROTOCOL_INPUT_DIR = path.join('.shipper', 'input');
@@ -503,6 +503,23 @@ export async function processResult(opts: {
   );
 
   return result;
+}
+
+export async function retryOnInvalidOutput(opts: {
+  cwd: string;
+  retry: (correctionMessage: string) => Promise<number>;
+}): Promise<void> {
+  const outputDir = path.resolve(opts.cwd, PROTOCOL_OUTPUT_DIR);
+
+  try {
+    await readResultFile(outputDir);
+  } catch (error) {
+    const errors =
+      error instanceof ResultValidationError
+        ? error.errors
+        : [error instanceof Error ? error.message : String(error)];
+    await opts.retry(formatCorrectionMessage(errors));
+  }
 }
 
 export function formatCorrectionMessage(errors: string[]): string {

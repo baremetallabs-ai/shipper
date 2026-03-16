@@ -9,6 +9,9 @@ const processResultMock = vi.fn(() =>
     comment: '.shipper/output/comment-250.md',
   })
 );
+const retryOnInvalidOutputMock = vi.fn<
+  (opts: { cwd: string; retry: (message: string) => Promise<number> }) => Promise<void>
+>(() => Promise.resolve());
 const runPromptMock = vi.fn(() => Promise.resolve(0));
 const scrubOutputDirMock = vi.fn(() => Promise.resolve());
 const setupProtocolDirsMock = vi.fn(() => Promise.resolve());
@@ -22,6 +25,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   gh: ghMock,
   handleAgentCrash: handleAgentCrashMock,
   processResult: processResultMock,
+  retryOnInvalidOutput: retryOnInvalidOutputMock,
   runPrompt: runPromptMock,
   scrubOutputDir: scrubOutputDirMock,
   setupProtocolDirs: setupProtocolDirsMock,
@@ -237,10 +241,16 @@ describe('unblockCommand', () => {
     expect(runPromptMock).toHaveBeenCalledWith('unblock', {
       repo: 'owner/repo',
       issueRef: '250',
+      cwd,
       mode: undefined,
       agent: undefined,
       model: undefined,
     });
+    const retryCall = retryOnInvalidOutputMock.mock.calls[0]?.[0] as
+      | { cwd: string; retry: (message: string) => Promise<number> }
+      | undefined;
+    expect(retryCall?.cwd).toBe(cwd);
+    expect(retryCall?.retry).toEqual(expect.any(Function));
     expect(processResultMock).toHaveBeenCalledWith({
       repo: 'owner/repo',
       issueNumber: '250',
@@ -249,6 +259,17 @@ describe('unblockCommand', () => {
     });
     expect(handleAgentCrashMock).not.toHaveBeenCalled();
     expect(process.exitCode).toBeUndefined();
+
+    await expect(retryCall?.retry('Fix result')).resolves.toBe(0);
+    expect(runPromptMock).toHaveBeenLastCalledWith('unblock', {
+      repo: 'owner/repo',
+      issueRef: '250',
+      cwd,
+      mode: undefined,
+      agent: undefined,
+      model: undefined,
+      userInput: 'Fix result',
+    });
   });
 
   it('reports protocol crashes and exits with code 1', async () => {

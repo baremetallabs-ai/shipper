@@ -20,6 +20,7 @@ import {
   postReplies,
   PROTOCOL_OUTPUT_DIR,
   readResultFile,
+  retryOnInvalidOutput,
   resolveTransition,
   scrubOutputDir,
   setupProtocolDirs,
@@ -360,7 +361,7 @@ export async function prRemediateCommand(
 
             await scrubOutputDir(wtPath);
 
-            const agentCode = await runPrompt('pr_remediate', {
+            await runPrompt('pr_remediate', {
               repo,
               issueRef: issueNumber,
               prRef,
@@ -369,16 +370,20 @@ export async function prRemediateCommand(
               agent,
               model,
             });
-
-            if (agentCode !== 0) {
-              await handleAgentCrash(
-                repo,
-                issueNumber,
-                'pr_remediate',
-                `Agent exited with code ${agentCode}`
-              );
-              return agentCode;
-            }
+            await retryOnInvalidOutput({
+              cwd: wtPath,
+              retry: (userInput) =>
+                runPrompt('pr_remediate', {
+                  repo,
+                  issueRef: issueNumber,
+                  prRef,
+                  cwd: wtPath,
+                  mode,
+                  agent,
+                  model,
+                  userInput,
+                }),
+            });
 
             let result: Awaited<ReturnType<typeof readResultFile>>;
             try {

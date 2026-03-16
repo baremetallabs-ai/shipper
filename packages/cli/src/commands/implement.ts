@@ -4,6 +4,7 @@ import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
 import { formatConflictContext } from '@dnsquared/shipper-core';
 import { getSettings, resolveBaseBranch } from '@dnsquared/shipper-core';
 import { handleAgentCrash, processResult, scrubOutputDir } from '@dnsquared/shipper-core';
+import { retryOnInvalidOutput } from '@dnsquared/shipper-core';
 import { withStageHooks } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
 import { withGitTransport } from '@dnsquared/shipper-core';
@@ -58,6 +59,19 @@ export async function implementCommand(
             process.exitCode = transportCode;
             return;
           }
+          await retryOnInvalidOutput({
+            cwd: wtPath,
+            retry: (userInput) =>
+              runPrompt('implement', {
+                repo,
+                issueRef: issue,
+                cwd: wtPath,
+                mode,
+                agent,
+                model,
+                userInput,
+              }),
+          });
           try {
             await processResult({ repo, issueNumber: issue, stage: 'implement', cwd: wtPath });
           } catch (error) {

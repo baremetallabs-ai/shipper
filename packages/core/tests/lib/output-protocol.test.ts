@@ -22,6 +22,7 @@ const {
   postComment,
   postReplies,
   processResult,
+  retryOnInvalidOutput,
   scrubOutputDir,
   submitReviewPayload,
   setupProtocolDirs,
@@ -655,6 +656,103 @@ describe('output protocol helpers', () => {
     );
 
     expect(ghMock).not.toHaveBeenCalled();
+  });
+
+  it('does not retry when result.json is valid with a non-accept verdict', async () => {
+    const outputDir = path.join(tempDir, PROTOCOL_OUTPUT_DIR);
+    const retryMock = vi.fn<(message: string) => Promise<number>>().mockResolvedValue(1);
+    await mkdir(outputDir, { recursive: true });
+    await writeFile(
+      path.join(outputDir, 'result.json'),
+      JSON.stringify({
+        verdict: 'reject',
+        comment: '.shipper/output/comment-248.md',
+      }),
+      'utf-8'
+    );
+
+    await expect(
+      retryOnInvalidOutput({
+        cwd: tempDir,
+        retry: retryMock,
+      })
+    ).resolves.toBeUndefined();
+
+    expect(retryMock).not.toHaveBeenCalled();
+  });
+
+  it('retries when result.json is missing', async () => {
+    const retryMock = vi.fn<(message: string) => Promise<number>>().mockResolvedValue(0);
+
+    await retryOnInvalidOutput({
+      cwd: tempDir,
+      retry: retryMock,
+    });
+
+    expect(retryMock).toHaveBeenCalledTimes(1);
+    expect(retryMock).toHaveBeenCalledWith(
+      expect.stringContaining(
+        `Missing result.json at ${path.join(tempDir, PROTOCOL_OUTPUT_DIR, 'result.json')}`
+      )
+    );
+  });
+
+  it('retries when result.json contains malformed JSON', async () => {
+    const outputDir = path.join(tempDir, PROTOCOL_OUTPUT_DIR);
+    const retryMock = vi.fn<(message: string) => Promise<number>>().mockResolvedValue(0);
+    await mkdir(outputDir, { recursive: true });
+    await writeFile(path.join(outputDir, 'result.json'), '{invalid', 'utf-8');
+
+    await retryOnInvalidOutput({
+      cwd: tempDir,
+      retry: retryMock,
+    });
+
+    expect(retryMock).toHaveBeenCalledTimes(1);
+    expect(retryMock).toHaveBeenCalledWith(
+      expect.stringContaining(`Failed to parse ${path.join(outputDir, 'result.json')}`)
+    );
+  });
+
+  it('retries with all validation errors when result.json fails schema validation', async () => {
+    const outputDir = path.join(tempDir, PROTOCOL_OUTPUT_DIR);
+    const retryMock = vi.fn<(message: string) => Promise<number>>().mockResolvedValue(0);
+    await mkdir(outputDir, { recursive: true });
+    await writeFile(
+      path.join(outputDir, 'result.json'),
+      JSON.stringify({
+        verdict: 'approved',
+        comment: '../comment-248.md',
+      }),
+      'utf-8'
+    );
+
+    await retryOnInvalidOutput({
+      cwd: tempDir,
+      retry: retryMock,
+    });
+
+    expect(retryMock).toHaveBeenCalledTimes(1);
+    expect(retryMock).toHaveBeenCalledWith(
+      [
+        'Your previous output was invalid. Fix the following and produce a valid .shipper/output/result.json:',
+        "- 'verdict' must be one of: accept, reject, fail (got 'approved')",
+        "- 'comment' must be a relative path under .shipper/output",
+      ].join('\n')
+    );
+  });
+
+  it('ignores the retry callback exit code', async () => {
+    const retryMock = vi.fn<(message: string) => Promise<number>>().mockResolvedValue(17);
+
+    await expect(
+      retryOnInvalidOutput({
+        cwd: tempDir,
+        retry: retryMock,
+      })
+    ).resolves.toBeUndefined();
+
+    expect(retryMock).toHaveBeenCalledTimes(1);
   });
 
   it('formats correction messages with every validation error', () => {
