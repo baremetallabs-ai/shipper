@@ -13,7 +13,7 @@ export function TerminalPanel({ sessionId, status, onKill, onClose }: TerminalPa
   const { containerRef } = useTerminalRuntime({ sessionId, status });
 
   return (
-    <div className="flex h-full flex-col border-t border-white/10">
+    <div className="flex h-full flex-col border-l border-white/10">
       <div className="flex items-center gap-3 bg-zinc-900/80 px-3 py-1.5">
         <span className="text-xs text-zinc-400">Terminal</span>
         {status === 'running' ? (
