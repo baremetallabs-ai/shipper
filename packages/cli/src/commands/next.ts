@@ -15,7 +15,7 @@ import {
   PR_REVIEWED_LABEL,
   READY_LABEL,
 } from '@dnsquared/shipper-core';
-import type { AgentName } from '@dnsquared/shipper-core';
+import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
 import { groomCommand } from './groom.js';
 import { designCommand } from './design.js';
@@ -48,6 +48,7 @@ async function resolvePrForIssue(repo: string, issueNumber: number): Promise<str
 export async function nextCommand(
   repo: string,
   ref: string,
+  mode?: CommandMode,
   agent?: AgentName,
   model?: string
 ): Promise<void> {
@@ -124,34 +125,34 @@ export async function nextCommand(
     switch (label) {
       case NEW_LABEL:
         console.log(`Running: shipper groom ${issueStr}`);
-        await groomCommand(repo, issueStr, { auto: false, agent, model });
+        await groomCommand(repo, issueStr, { auto: false, mode, agent, model });
         break;
       case GROOMED_LABEL:
         console.log(`Running: shipper design ${issueStr}`);
-        await designCommand(repo, issueStr, undefined, agent, model);
+        await designCommand(repo, issueStr, mode, agent, model);
         break;
       case DESIGNED_LABEL:
         console.log(`Running: shipper plan ${issueStr}`);
-        await planCommand(repo, issueStr, undefined, agent, model);
+        await planCommand(repo, issueStr, mode, agent, model);
         break;
       case PLANNED_LABEL:
         console.log(`Running: shipper implement ${issueStr}`);
-        await implementCommand(repo, issueStr, undefined, agent, model);
+        await implementCommand(repo, issueStr, mode, agent, model);
         break;
       case IMPLEMENTED_LABEL:
         console.log(`Running: shipper pr open ${issueStr}`);
-        await prOpenCommand(repo, issueStr, undefined, agent, model);
+        await prOpenCommand(repo, issueStr, mode, agent, model);
         break;
       case PR_OPEN_LABEL: {
         const prNum = await resolvePrForIssue(repo, issueNumber);
         console.log(`Running: shipper pr review ${prNum}`);
-        await prReviewCommand(repo, prNum, undefined, agent, model);
+        await prReviewCommand(repo, prNum, mode, agent, model);
         break;
       }
       case PR_REVIEWED_LABEL: {
         const prNum = await resolvePrForIssue(repo, issueNumber);
         console.log(`Running: shipper pr remediate ${prNum}`);
-        await prRemediateCommand(repo, prNum, undefined, agent, model);
+        await prRemediateCommand(repo, prNum, mode, agent, model);
         break;
       }
       case READY_LABEL:

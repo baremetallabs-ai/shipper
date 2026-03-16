@@ -190,80 +190,93 @@ program
 
 addModelOption(
   addAgentOption(
-    program
-      .command('next')
-      .description('Advance an issue to the next workflow step')
-      .argument('<ref>', 'issue or PR number/URL')
-      .action(
-        wrapAction(async (ref: string, options: { agent?: string; model?: string }) => {
-          await nextCommand(
-            requireResolvedRepo(),
-            ref,
-            options.agent as AgentName | undefined,
-            options.model
-          );
-        })
-      )
+    addModeOption(
+      program
+        .command('next')
+        .description('Advance an issue to the next workflow step')
+        .argument('<ref>', 'issue or PR number/URL')
+        .action(
+          wrapAction(
+            async (ref: string, options: { mode: string; agent?: string; model?: string }) => {
+              await nextCommand(
+                requireResolvedRepo(),
+                ref,
+                options.mode as CommandMode,
+                options.agent as AgentName | undefined,
+                options.model
+              );
+            }
+          )
+        )
+    )
   )
 );
 
 addModelOption(
   addAgentOption(
-    program
-      .command('ship')
-      .description('Run the full workflow end-to-end')
-      .argument('[issue]', 'issue number')
-      .option('--merge', 'auto-merge the PR after reaching shipper:ready', false)
-      .option('--auto', 'run autonomous continuous shipping loop', false)
-      .option('--parallel <n>', 'number of parallel slots (requires --auto)')
-      .action(
-        wrapAction(
-          async (
-            issue: string | undefined,
-            options: {
-              merge: boolean;
-              auto: boolean;
-              parallel?: string;
-              agent?: string;
-              model?: string;
-            }
-          ) => {
-            if (options.auto && issue) {
-              console.error('Error: --auto and an explicit issue number are mutually exclusive.');
-              process.exit(1);
-            }
-            if (!options.auto && !issue) {
-              console.error('Error: an issue number is required unless --auto is used.');
-              process.exit(1);
-            }
-
-            if (options.parallel !== undefined && !options.auto) {
-              console.error('Error: --parallel requires --auto');
-              process.exit(1);
-            }
-
-            let parallel: number | undefined;
-            if (options.parallel !== undefined) {
-              parallel = Number(options.parallel);
-              if (!Number.isInteger(parallel) || parallel < 1) {
-                console.error('Error: --parallel requires a number');
+    addModeOption(
+      program
+        .command('ship')
+        .description('Run the full workflow end-to-end')
+        .argument('[issue]', 'issue number')
+        .option('--merge', 'auto-merge the PR after reaching shipper:ready', false)
+        .option('--auto', 'run autonomous continuous shipping loop', false)
+        .option('--parallel <n>', 'number of parallel slots (requires --auto)')
+        .action(
+          wrapAction(
+            async (
+              issue: string | undefined,
+              options: {
+                merge: boolean;
+                auto: boolean;
+                parallel?: string;
+                mode: string;
+                agent?: string;
+                model?: string;
+              }
+            ) => {
+              if (options.auto && issue) {
+                console.error('Error: --auto and an explicit issue number are mutually exclusive.');
                 process.exit(1);
               }
-              if (parallel === 1) {
-                parallel = undefined;
+              if (!options.auto && !issue) {
+                console.error('Error: an issue number is required unless --auto is used.');
+                process.exit(1);
               }
-            }
+              if (options.auto && options.mode !== 'default') {
+                console.error('Error: --auto and --mode are mutually exclusive.');
+                process.exit(1);
+              }
 
-            await shipCommand(requireResolvedRepo(), issue, {
-              merge: options.merge,
-              auto: options.auto,
-              parallel,
-              agent: options.agent as AgentName | undefined,
-              model: options.model,
-            });
-          }
+              if (options.parallel !== undefined && !options.auto) {
+                console.error('Error: --parallel requires --auto');
+                process.exit(1);
+              }
+
+              let parallel: number | undefined;
+              if (options.parallel !== undefined) {
+                parallel = Number(options.parallel);
+                if (!Number.isInteger(parallel) || parallel < 1) {
+                  console.error('Error: --parallel requires a number');
+                  process.exit(1);
+                }
+                if (parallel === 1) {
+                  parallel = undefined;
+                }
+              }
+
+              await shipCommand(requireResolvedRepo(), issue, {
+                merge: options.merge,
+                auto: options.auto,
+                parallel,
+                mode: options.mode as CommandMode,
+                agent: options.agent as AgentName | undefined,
+                model: options.model,
+              });
+            }
+          )
         )
-      )
+    )
   )
 );
 

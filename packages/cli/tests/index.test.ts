@@ -34,6 +34,7 @@ vi.mock('../src/commands/issue-list.js', () => ({ issueListCommand: vi.fn() }));
 vi.mock('../src/commands/setup.js', () => ({ setupCommand: vi.fn() }));
 
 import { shipCommand } from '../src/commands/ship.js';
+import { nextCommand } from '../src/commands/next.js';
 import { ejectCommand } from '../src/commands/eject.js';
 import { newCommand } from '../src/commands/new.js';
 import { priorityCommand } from '../src/commands/priority.js';
@@ -48,6 +49,7 @@ interface ExecFileSyncError extends Error {
 }
 
 const mockShipCommand = vi.mocked(shipCommand);
+const mockNextCommand = vi.mocked(nextCommand);
 const mockEjectCommand = vi.mocked(ejectCommand);
 const mockNewCommand = vi.mocked(newCommand);
 const mockPriorityCommand = vi.mocked(priorityCommand);
@@ -336,6 +338,7 @@ describe('shipper-cli', () => {
       vi.resetModules();
       mockShipCommand.mockReset();
       mockShipCommand.mockResolvedValue(undefined);
+      mockNextCommand.mockReset();
       errorSpy.mockClear();
       mockGetRepoNwo.mockClear();
       exitSpy.mockClear();
@@ -394,6 +397,7 @@ describe('shipper-cli', () => {
         merge: false,
         auto: true,
         parallel: undefined,
+        mode: 'default',
         agent: undefined,
         model: undefined,
       });
@@ -408,10 +412,72 @@ describe('shipper-cli', () => {
         merge: false,
         auto: true,
         parallel: 3,
+        mode: 'default',
         agent: undefined,
         model: undefined,
       });
     });
+
+    it('passes mode, agent, and model through next', async () => {
+      process.argv = [
+        'node',
+        'src/index.ts',
+        'next',
+        '42',
+        '--mode',
+        'interactive',
+        '--agent',
+        'codex',
+        '--model',
+        'gpt-5',
+      ];
+
+      await importEntrypoint();
+
+      expect(mockNextCommand).toHaveBeenCalledWith(
+        'owner/repo',
+        '42',
+        'interactive',
+        'codex',
+        'gpt-5'
+      );
+    });
+
+    it('passes mode, agent, and model through ship', async () => {
+      process.argv = [
+        'node',
+        'src/index.ts',
+        'ship',
+        '42',
+        '--mode',
+        'headless',
+        '--agent',
+        'codex',
+        '--model',
+        'sonnet',
+      ];
+
+      await importEntrypoint();
+
+      expect(mockShipCommand).toHaveBeenCalledWith('owner/repo', '42', {
+        merge: false,
+        auto: false,
+        parallel: undefined,
+        mode: 'headless',
+        agent: 'codex',
+        model: 'sonnet',
+      });
+    });
+
+    it.each(['interactive', 'headless'])(
+      'errors when --mode %s is used with --auto',
+      async (mode) => {
+        process.argv = ['node', 'src/index.ts', 'ship', '--auto', '--mode', mode];
+
+        await expect(importEntrypoint()).rejects.toThrow('process.exit:1');
+        expect(mockShipCommand).not.toHaveBeenCalled();
+      }
+    );
 
     it('keeps non-ship commands on normal unknown-option handling', async () => {
       process.argv = ['node', 'src/index.ts', 'groom', '--parallel'];
