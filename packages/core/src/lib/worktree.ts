@@ -230,6 +230,7 @@ function appendAbortFailure(detail: string, abortFailure?: string): string {
 
 async function getConflictContextOrThrow(
   opts: WorktreeGitOpts,
+  targetRef: string,
   result: CommandResult,
   continueError?: string
 ): Promise<ConflictContext> {
@@ -242,9 +243,9 @@ async function getConflictContextOrThrow(
   throw formatTransportError(
     opts,
     appendAbortFailure(
-      `git rebase origin/${opts.baseBranch} failed without unresolved files.\n${formatCommandFailure(
+      `git rebase --autostash ${targetRef} failed without unresolved files.\n${formatCommandFailure(
         'git',
-        ['rebase', `origin/${opts.baseBranch}`],
+        ['rebase', '--autostash', targetRef],
         result
       )}`,
       abortFailure
@@ -252,14 +253,47 @@ async function getConflictContextOrThrow(
   );
 }
 
-function getPushArgs(opts: WorktreeGitOpts): string[] {
-  return opts.pushMode === 'new-branch'
+async function getCurrentBranch(opts: WorktreeGitOpts): Promise<string> {
+  const result = await execAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+    cwd: opts.wtPath,
+  });
+  if (result.code !== 0) {
+    throw formatTransportError(
+      opts,
+      formatCommandFailure('git', ['rev-parse', '--abbrev-ref', 'HEAD'], result)
+    );
+  }
+
+  return result.stdout.trim();
+}
+
+async function remoteRefExists(opts: WorktreeGitOpts, targetRef: string): Promise<boolean> {
+  const result = await execAsync('git', ['rev-parse', '--verify', targetRef], { cwd: opts.wtPath });
+  return result.code === 0;
+}
+
+async function fetchOriginOrThrow(opts: WorktreeGitOpts): Promise<void> {
+  try {
+    await spawnAsync('git', ['fetch', 'origin'], { cwd: opts.wtPath });
+  } catch (error) {
+    throw formatTransportError(
+      opts,
+      `git fetch origin failed: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
+function getPushArgs(pushMode: WorktreeGitOpts['pushMode']): string[] {
+  return pushMode === 'new-branch'
     ? ['push', '-u', 'origin', 'HEAD']
     : ['push', '--force-with-lease'];
 }
 
-async function pushWorktreeBranch(opts: WorktreeGitOpts): Promise<CommandResult> {
-  return await execAsync('git', getPushArgs(opts), {
+async function pushWorktreeBranch(
+  opts: WorktreeGitOpts,
+  pushMode: WorktreeGitOpts['pushMode']
+): Promise<CommandResult> {
+  return await execAsync('git', getPushArgs(pushMode), {
     cwd: opts.wtPath,
     maxBuffer: PUSH_OUTPUT_MAX_BUFFER,
   });
@@ -269,11 +303,12 @@ async function pushWithRetry(
   opts: WorktreeGitOpts,
   runAgent: (conflictContext?: ConflictContext, pushError?: string) => Promise<number>
 ): Promise<number> {
-  const pushArgs = getPushArgs(opts);
   let retries = 0;
+  let pushMode = opts.pushMode;
 
   for (;;) {
-    const pushResult = await pushWorktreeBranch(opts);
+    const pushArgs = getPushArgs(pushMode);
+    const pushResult = await pushWorktreeBranch(opts, pushMode);
     if (pushResult.code === 0) {
       return 0;
     }
@@ -286,10 +321,71 @@ async function pushWithRetry(
       );
     }
 
-    const agentCode = await runAgent(undefined, pushError);
-    if (agentCode !== 0) {
-      console.error(`Agent exited with code ${agentCode} — skipping push.`);
-      return agentCode;
+    await fetchOriginOrThrow(opts);
+
+    const currentBranch = await getCurrentBranch(opts);
+    const targetRef = `origin/${currentBranch}`;
+    if (await remoteRefExists(opts, targetRef)) {
+      const rebaseResult = await execAsync('git', ['rebase', '--autostash', targetRef], {
+        cwd: opts.wtPath,
+      });
+
+      if (rebaseResult.code !== 0) {
+        let conflictContext = await getConflictContextOrThrow(opts, targetRef, rebaseResult);
+
+        for (let attempt = 1; attempt <= MAX_REBASE_ATTEMPTS; attempt++) {
+          const agentCode = await runAgent(conflictContext);
+          if (agentCode !== 0) {
+            console.error(`Agent exited with code ${agentCode} — skipping push.`);
+            return agentCode;
+          }
+
+          const continueResult = await execAsync('git', ['rebase', '--continue'], {
+            cwd: opts.wtPath,
+            env: { GIT_EDITOR: 'true' },
+          });
+          if (continueResult.code === 0) {
+            break;
+          }
+
+          const continueError = getRetryFailureText(continueResult);
+          if (attempt === MAX_REBASE_ATTEMPTS) {
+            const abortFailure = await abortRebase(opts.wtPath);
+            throw formatTransportError(
+              opts,
+              appendAbortFailure(
+                `Could not complete rebase onto ${targetRef} after ${MAX_REBASE_ATTEMPTS} conflict resolution attempts.\n${continueError}`,
+                abortFailure
+              )
+            );
+          }
+
+          const nextConflictContext = await buildConflictContext(opts.wtPath, continueError);
+          if (!nextConflictContext) {
+            if (await isRebaseComplete(opts.wtPath)) {
+              break;
+            }
+
+            const abortFailure = await abortRebase(opts.wtPath);
+            throw formatTransportError(
+              opts,
+              appendAbortFailure(
+                `git rebase --continue failed without unresolved files.\n${formatCommandFailure(
+                  'git',
+                  ['rebase', '--continue'],
+                  continueResult
+                )}`,
+                abortFailure
+              )
+            );
+          }
+          conflictContext = nextConflictContext;
+        }
+      }
+
+      if (pushMode === 'new-branch') {
+        pushMode = 'force-with-lease';
+      }
     }
 
     retries += 1;
@@ -311,7 +407,11 @@ export async function syncWorktree(
     return;
   }
 
-  let conflictContext = await getConflictContextOrThrow(opts, initialRebase);
+  let conflictContext = await getConflictContextOrThrow(
+    opts,
+    `origin/${opts.baseBranch}`,
+    initialRebase
+  );
 
   for (let attempt = 1; attempt <= MAX_REBASE_ATTEMPTS; attempt++) {
     const agentCode = await resolveConflicts(conflictContext);
@@ -372,14 +472,47 @@ export async function syncWorktree(
 }
 
 export async function pushWorktree(opts: WorktreeGitOpts): Promise<void> {
+  let pushMode = opts.pushMode;
+
   for (let attempt = 0; attempt <= MAX_PUSH_ATTEMPTS; attempt++) {
-    const pushResult = await pushWorktreeBranch(opts);
+    const pushArgs = getPushArgs(pushMode);
+    const pushResult = await pushWorktreeBranch(opts, pushMode);
     if (pushResult.code === 0) {
       return;
     }
 
     if (attempt === MAX_PUSH_ATTEMPTS) {
-      throw formatTransportError(opts, formatCommandFailure('git', getPushArgs(opts), pushResult));
+      throw formatTransportError(opts, formatCommandFailure('git', pushArgs, pushResult));
+    }
+
+    await fetchOriginOrThrow(opts);
+
+    const currentBranch = await getCurrentBranch(opts);
+    const targetRef = `origin/${currentBranch}`;
+    if (!(await remoteRefExists(opts, targetRef))) {
+      continue;
+    }
+
+    const rebaseResult = await execAsync('git', ['rebase', '--autostash', targetRef], {
+      cwd: opts.wtPath,
+    });
+    if (rebaseResult.code !== 0) {
+      const abortFailure = await abortRebase(opts.wtPath);
+      throw formatTransportError(
+        opts,
+        appendAbortFailure(
+          `git rebase --autostash ${targetRef} failed.\n${formatCommandFailure(
+            'git',
+            ['rebase', '--autostash', targetRef],
+            rebaseResult
+          )}`,
+          abortFailure
+        )
+      );
+    }
+
+    if (pushMode === 'new-branch') {
+      pushMode = 'force-with-lease';
     }
   }
 }
@@ -440,7 +573,11 @@ export async function withGitTransport(
   );
 
   if (initialRebase.code !== 0) {
-    let conflictContext = await getConflictContextOrThrow(opts, initialRebase);
+    let conflictContext = await getConflictContextOrThrow(
+      opts,
+      `origin/${opts.baseBranch}`,
+      initialRebase
+    );
 
     for (let attempt = 1; attempt <= MAX_REBASE_ATTEMPTS; attempt++) {
       const agentCode = await runAgent(conflictContext);
