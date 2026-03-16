@@ -143,4 +143,70 @@ describe('findBranchForIssue', () => {
     const result = await findBranchForIssue('42');
     expect(result).toBe('shipper/42-add-login-flow');
   });
+
+  it('picks the most recently committed remote branch when multiple match', async () => {
+    execFileMock.mockReset();
+    execFileMock.mockImplementation((_cmd: string, args: string[], ...rest: unknown[]) => {
+      const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
+      if (args.includes('--prune')) {
+        cb(null, '', '');
+        return;
+      }
+      if (args.includes('-r')) {
+        cb(
+          null,
+          '  origin/shipper/84-fix-make-late-filing-reason-conditional-with-three\n' +
+            '  origin/shipper/84-only-require-reason-for-late-filing-when-filing-af\n',
+          ''
+        );
+        return;
+      }
+      // git log -1 --format=%ct for each branch
+      if (args.includes('--format=%ct')) {
+        const branch = args[args.length - 1] as string;
+        if (branch.includes('only-require')) {
+          cb(null, '1700000200\n', '');
+        } else {
+          cb(null, '1700000100\n', '');
+        }
+        return;
+      }
+      cb(null, '', '');
+    });
+
+    const result = await findBranchForIssue('84');
+    expect(result).toBe('shipper/84-only-require-reason-for-late-filing-when-filing-af');
+  });
+
+  it('picks the most recently committed local branch when multiple match', async () => {
+    execFileMock.mockReset();
+    execFileMock.mockImplementation((_cmd: string, args: string[], ...rest: unknown[]) => {
+      const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
+      if (args.includes('--prune')) {
+        cb(null, '', '');
+        return;
+      }
+      if (args.includes('-r')) {
+        cb(null, '', '');
+        return;
+      }
+      if (args.includes('--list')) {
+        cb(null, '  shipper/84-fix-make-late-filing\n  shipper/84-only-require-reason\n', '');
+        return;
+      }
+      if (args.includes('--format=%ct')) {
+        const branch = args[args.length - 1] as string;
+        if (branch.includes('fix-make')) {
+          cb(null, '1700000300\n', '');
+        } else {
+          cb(null, '1700000100\n', '');
+        }
+        return;
+      }
+      cb(null, '', '');
+    });
+
+    const result = await findBranchForIssue('84');
+    expect(result).toBe('shipper/84-fix-make-late-filing');
+  });
 });

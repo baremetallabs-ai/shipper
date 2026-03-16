@@ -59,6 +59,32 @@ export async function generateBranchName(repo: string, issueRef: string): Promis
   return `shipper/${num}-implement`;
 }
 
+async function pickMostRecent(branches: string[]): Promise<string> {
+  const first = branches[0];
+  if (!first) {
+    throw new Error('pickMostRecent called with empty branch list');
+  }
+  let best = first;
+  let bestTime = -1;
+
+  for (const branch of branches) {
+    try {
+      const { stdout } = await execFileAsync('git', ['log', '-1', '--format=%ct', branch], {
+        encoding: 'utf-8',
+      });
+      const time = parseInt(stdout.trim(), 10);
+      if (time > bestTime) {
+        bestTime = time;
+        best = branch;
+      }
+    } catch {
+      // If we can't read commit time, skip this branch
+    }
+  }
+
+  return best;
+}
+
 export async function findBranchForIssue(issueRef: string): Promise<string> {
   const num = issueRef.replace(/^#/, '');
 
@@ -86,11 +112,13 @@ export async function findBranchForIssue(issueRef: string): Promise<string> {
       .filter(Boolean);
 
     if (branches.length > 1) {
-      throw new Error(
+      const picked = await pickMostRecent(branches);
+      console.error(
         `Multiple branches found for issue ${issueRef}:\n` +
           branches.map((b) => `  ${b}`).join('\n') +
-          '\nPlease specify the branch directly.'
+          `\nUsing most recent: ${picked}`
       );
+      return picked.replace(/^origin\//, '');
     }
 
     const branch = branches[0];
@@ -121,11 +149,13 @@ export async function findBranchForIssue(issueRef: string): Promise<string> {
   }
 
   if (localBranches.length > 1) {
-    throw new Error(
+    const picked = await pickMostRecent(localBranches);
+    console.error(
       `Multiple local branches found for issue ${issueRef}:\n` +
         localBranches.map((b) => `  ${b}`).join('\n') +
-        '\nPlease specify the branch directly.'
+        `\nUsing most recent: ${picked}`
     );
+    return picked;
   }
 
   const localBranch = localBranches[0];
