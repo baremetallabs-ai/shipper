@@ -31,7 +31,7 @@ The **next user message** contains the full GitHub issue including title, labels
 
 ### Phase 2: Cross-issue scan
 
-Scan all other open issues in the repo for relevance to the current issue. This surfaces dependencies, overlaps, conflicts, and scope impacts before product questioning begins.
+Scan all other open issues in the repo for relevance to the current issue. This surfaces dependencies, overlaps, conflicts, duplicates, and scope impacts before product questioning begins.
 
 1. Fetch all open issue titles: `gh issue list --state open --limit 500 --json number,title`. Exclude the current issue number from consideration.
 2. From the title list, identify candidate issues that might relate to the current issue. Look for:
@@ -45,11 +45,31 @@ Scan all other open issues in the repo for relevance to the current issue. This 
    - **Dependency** — must be done first
    - **Overlap** — partially covers same ground
    - **Conflict** — incompatible approach
+   - **Duplicate** — same user-facing outcome with substantially the same scope; implementing either would make the other unnecessary
    - **Scope impact** — changes assumptions this issue relies on
 6. If no issues are relevant, note "No relevant issues found" and proceed.
 7. If a **hard dependency or conflict** is found (the current issue cannot proceed without the other being resolved), flag it internally for the blocking logic in Phase 4.
 
 **Start broad and narrow progressively.** Do not fetch full bodies for obviously unrelated issues. This manages token usage on repos with many open issues.
+
+### Duplicate-detection gate
+
+Before proceeding to Phase 3, check whether any issue from the Phase 2 scan was classified as **Duplicate**.
+
+**If no duplicate was detected:** proceed to Phase 3.
+
+**If a duplicate was detected:**
+
+1. Present the finding to the product owner using the interactive question-asking tool. Identify the original issue by number and title, explain why the current issue appears to be a duplicate, and ask for explicit confirmation before taking action.
+2. **If the product owner confirms the duplicate:**
+   - Create `.shipper/tmp/duplicate_close-<ISSUE>.md` at runtime with this exact content: `Closing as duplicate of #<N> — <original issue title>.`
+   - Post the closing comment: `gh issue comment <ISSUE> --body-file ./.shipper/tmp/duplicate_close-<ISSUE>.md`
+   - Close the issue: `gh issue close <ISSUE> --reason "not planned"`
+   - Remove `shipper:new` if present: `gh issue edit <ISSUE> --remove-label "shipper:new"`
+   - **Stop.** Do not proceed to Phase 3 or Phase 4. No grooming questions are asked, no grooming summary comment is posted, and no `shipper:groomed` label is added.
+3. **If the product owner rejects the duplicate finding:**
+   - Reclassify the relationship as **Overlap** in the Phase 2 results.
+   - Proceed to Phase 3 as normal.
 
 ### Phase 3: Groom
 
