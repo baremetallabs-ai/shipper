@@ -21,10 +21,13 @@ npm run type-check     # tsc --noEmit
 npm run lint           # eslint .
 npm run lint:fix       # eslint . --fix
 npm run format         # prettier --write .
-npm run test           # vitest run
+npm run test           # vitest run (per-workspace)
+npm run test:coverage  # vitest run --coverage (per-workspace)
 npm run test:watch     # vitest (watch mode)
 npx vitest run packages/cli/tests/lib/branch.test.ts   # Run a single test file
 ```
+
+**Important:** Always run tests via `npm run test` (workspace scripts), never `npx vitest run` from the repo root. The root has no vitest config — running there picks up all test files without per-package alias resolution and will produce false failures.
 
 ## Architecture
 
