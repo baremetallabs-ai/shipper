@@ -15,6 +15,11 @@ const scriptsDir = path.join(repoRoot, '.claude/skills/session-debugger/scripts'
 const rawCaptureWarning =
   'Raw capture file - structured extraction requires native Codex transcripts under ~/.codex/sessions/';
 
+// Strip GIT_DIR and GIT_WORK_TREE so that git commands target the temp repo, not
+// the parent repo.  When tests run inside a pre-push hook, git injects these vars
+// and they override the cwd option, silently corrupting the real repo's config.
+const { GIT_DIR: _gd, GIT_WORK_TREE: _gwt, ...cleanEnv } = process.env;
+
 let tempDir: string;
 let homeDir: string;
 let repoDir: string;
@@ -131,16 +136,18 @@ beforeAll(() => {
     )}\n`
   );
 
-  execFileSync('git', ['init'], { cwd: repoDir, stdio: 'pipe' });
+  execFileSync('git', ['init'], { cwd: repoDir, stdio: 'pipe', env: cleanEnv });
   try {
     execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:owner/repo.git'], {
       cwd: repoDir,
       stdio: 'pipe',
+      env: cleanEnv,
     });
   } catch {
     execFileSync('git', ['remote', 'set-url', 'origin', 'git@github.com:owner/repo.git'], {
       cwd: repoDir,
       stdio: 'pipe',
+      env: cleanEnv,
     });
   }
 });
@@ -157,7 +164,7 @@ function runScript(
 ): { stdout: string; stderr: string; status: number | null } {
   const result = spawnSync('bash', [path.join(scriptsDir, scriptName), ...args], {
     cwd: repoDir,
-    env: { ...process.env, HOME: homeDir },
+    env: { ...cleanEnv, HOME: homeDir },
     stdio: 'pipe',
     encoding: 'utf8',
   });
