@@ -371,6 +371,79 @@ describe('enrichFailedChecks', () => {
     ]);
     expect(logDumps).toEqual(new Map([['build', fullLog]]));
   });
+
+  it('writes unique log dump keys when multiple checks sanitize to the same name', async () => {
+    const failedChecks: PRChecksLine[] = [
+      {
+        name: 'Build / lint',
+        state: 'COMPLETED',
+        bucket: 'fail',
+        link: 'https://github.com/owner/repo/actions/runs/123456789/job/444555666',
+      },
+      {
+        name: 'Build - lint',
+        state: 'COMPLETED',
+        bucket: 'fail',
+        link: 'https://github.com/owner/repo/actions/runs/123456790/job/444555667',
+      },
+    ];
+    const firstLog = makeStepLog('Build / lint', 'lint', 2);
+    const secondLog = makeStepLog('Build - lint', 'lint', 2);
+
+    mockGhCalls([
+      {
+        match: (args) => args.join(' ') === `run view 123456789 -R ${repo} --json jobs`,
+        result: {
+          stdout: JSON.stringify({
+            jobs: [
+              {
+                name: 'Build / lint',
+                conclusion: 'failure',
+                databaseId: 444555666,
+                steps: [{ name: 'lint', conclusion: 'failure', number: 1, status: 'completed' }],
+              },
+            ],
+          }),
+        },
+      },
+      {
+        match: (args) => args.join(' ') === `run view -R ${repo} --job 444555666 --log-failed`,
+        result: {
+          stdout: firstLog,
+        },
+      },
+      {
+        match: (args) => args.join(' ') === `run view 123456790 -R ${repo} --json jobs`,
+        result: {
+          stdout: JSON.stringify({
+            jobs: [
+              {
+                name: 'Build - lint',
+                conclusion: 'failure',
+                databaseId: 444555667,
+                steps: [{ name: 'lint', conclusion: 'failure', number: 1, status: 'completed' }],
+              },
+            ],
+          }),
+        },
+      },
+      {
+        match: (args) => args.join(' ') === `run view -R ${repo} --job 444555667 --log-failed`,
+        result: {
+          stdout: secondLog,
+        },
+      },
+    ]);
+
+    const logDumps = await enrichFailedChecks(repo, failedChecks);
+
+    expect(logDumps).toEqual(
+      new Map([
+        ['build-lint', firstLog],
+        ['build-lint-444555667', secondLog],
+      ])
+    );
+  });
 });
 
 describe('classifyChecks', () => {

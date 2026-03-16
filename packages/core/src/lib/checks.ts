@@ -47,6 +47,10 @@ export async function fetchChecks(repo: string, prNumber: string): Promise<PRChe
   return JSON.parse(stdout) as PRChecksLine[];
 }
 
+/**
+ * Enriches failed checks in place with step-level failure details and returns full log dumps
+ * keyed by unique, sanitized check names for artifact writing.
+ */
 export async function enrichFailedChecks(
   repo: string,
   failedChecks: PRChecksLine[]
@@ -92,7 +96,8 @@ export async function enrichFailedChecks(
         name: step.name,
         logSnippet: lastNLines(stepLogs.get(step.name) ?? fallbackSnippet, 50),
       }));
-      logDumps.set(sanitizeCheckName(check.name), logOutput);
+      const logDumpName = createLogDumpName(check.name, job.databaseId, logDumps);
+      logDumps.set(logDumpName, logOutput);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn(`Warning: Failed to enrich CI check "${check.name}": ${message}`);
@@ -131,6 +136,29 @@ function sanitizeCheckName(name: string): string {
     .replace(/[^a-z0-9-]/g, '-')
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '');
+}
+
+function createLogDumpName(
+  name: string,
+  databaseId: number,
+  existingLogDumps: Map<string, string>
+): string {
+  const sanitizedName = sanitizeCheckName(name) || 'check';
+  if (!existingLogDumps.has(sanitizedName)) {
+    return sanitizedName;
+  }
+
+  const databaseIdName = `${sanitizedName}-${databaseId}`;
+  if (!existingLogDumps.has(databaseIdName)) {
+    return databaseIdName;
+  }
+
+  let suffix = 2;
+  while (existingLogDumps.has(`${databaseIdName}-${suffix}`)) {
+    suffix += 1;
+  }
+
+  return `${databaseIdName}-${suffix}`;
 }
 
 function parseStepLogs(logOutput: string): Map<string, string> {
