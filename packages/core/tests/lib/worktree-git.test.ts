@@ -13,6 +13,7 @@ const execFileMock =
     ) => object
   >();
 const readFileMock = vi.fn<(path: string, encoding: string) => Promise<string>>();
+const accessMock = vi.fn<(path: string) => Promise<void>>();
 
 vi.mock('node:child_process', async () => {
   const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
@@ -28,6 +29,7 @@ vi.mock('node:fs/promises', async () => {
   return {
     ...actual,
     readFile: (...args: unknown[]) => readFileMock(...args),
+    access: (...args: unknown[]) => accessMock(...args),
   };
 });
 
@@ -94,6 +96,7 @@ function gitArgsFromExecCalls(): string[][] {
 describe('syncWorktree', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    accessMock.mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
   });
 
   afterEach(() => {
@@ -231,6 +234,7 @@ describe('pushWorktree', () => {
 describe('withGitTransport', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    accessMock.mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
   });
 
   afterEach(() => {
@@ -631,7 +635,7 @@ describe('withGitTransport', () => {
     ]);
   });
 
-  it('aborts the rebase before throwing when rebase --continue fails without unresolved files', async () => {
+  it('aborts the rebase before throwing when rebase --continue fails without unresolved files and rebase is still in progress', async () => {
     queueSpawnExit();
     queueExecResult({ code: 1, stderr: 'merge conflict' });
     queueExecResult({ stdout: 'src/conflict.ts\n' });
@@ -640,6 +644,10 @@ describe('withGitTransport', () => {
     );
     queueExecResult({ code: 1, stderr: 'No changes - did you forget to use git add?' });
     queueExecResult({ stdout: '' });
+    // git rev-parse --git-dir for isRebaseComplete
+    queueExecResult({ stdout: '.git\n' });
+    // rebase-merge dir exists → rebase still in progress
+    accessMock.mockResolvedValueOnce(undefined);
     queueSpawnExit();
     const runAgent = vi.fn().mockResolvedValue(0);
 
@@ -658,6 +666,47 @@ describe('withGitTransport', () => {
     expect(gitArgsFromSpawnCalls()).toEqual([
       ['fetch', 'origin'],
       ['rebase', '--abort'],
+    ]);
+  });
+
+  it('recovers and pushes when agent commits during rebase and completes it', async () => {
+    queueSpawnExit();
+    queueExecResult({ code: 1, stderr: 'merge conflict' });
+    queueExecResult({ stdout: 'src/conflict.ts\n' });
+    readFileMock.mockResolvedValueOnce(
+      ['<<<<<<< HEAD', 'old', '=======', 'new', '>>>>>>> origin/main'].join('\n')
+    );
+    // rebase --continue fails (agent already committed)
+    queueExecResult({ code: 1, stderr: 'No changes - did you forget to use git add?' });
+    // listConflictedFiles returns empty
+    queueExecResult({ stdout: '' });
+    // git rev-parse --git-dir for isRebaseComplete
+    queueExecResult({ stdout: '.git\n' });
+    // accessMock rejects by default (ENOENT) → no rebase dirs → rebase complete
+    // push (via execAsync, not spawnAsync)
+    queueExecResult();
+    const runAgent = vi.fn().mockResolvedValue(0);
+
+    const code = await withGitTransport(
+      {
+        wtPath: '/tmp/wt',
+        repoRoot: '/tmp/repo',
+        baseBranch: 'main',
+        pushMode: 'force-with-lease',
+      },
+      runAgent
+    );
+
+    expect(code).toBe(0);
+    expect(runAgent).toHaveBeenCalledTimes(1);
+    expect(gitArgsFromSpawnCalls()).toEqual([['fetch', 'origin']]);
+    expect(gitArgsFromExecCalls()).toEqual([
+      ['rebase', '--autostash', 'origin/main'],
+      ['diff', '--name-only', '--diff-filter=U'],
+      ['rebase', '--continue'],
+      ['diff', '--name-only', '--diff-filter=U'],
+      ['rev-parse', '--git-dir'],
+      ['push', '--force-with-lease'],
     ]);
   });
 
@@ -744,7 +793,7 @@ describe('formatConflictContext', () => {
         '>>>>>>> origin/main',
         '```',
         '',
-        'Resolve all conflicts, then use `git add` to stage the resolved files and `git commit` if Git asks for it. Do not run `git rebase --continue`, `git rebase --abort`, or `git push` yourself.',
+        'Resolve all conflicts, then stage the resolved files with `git add`. Do not run `git commit`, `git rebase --continue`, `git rebase --abort`, or `git push` yourself.',
       ].join('\n')
     );
   });

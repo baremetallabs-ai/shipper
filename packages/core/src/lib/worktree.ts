@@ -191,6 +191,23 @@ function getRetryFailureText(result: CommandResult): string {
   return output || `git rebase --continue exited with code ${result.code}`;
 }
 
+async function isRebaseComplete(wtPath: string): Promise<boolean> {
+  const result = await execAsync('git', ['rev-parse', '--git-dir'], { cwd: wtPath });
+  if (result.code !== 0) {
+    return false;
+  }
+  const gitDir = path.resolve(wtPath, result.stdout.trim());
+  for (const dir of ['rebase-merge', 'rebase-apply']) {
+    try {
+      await access(path.join(gitDir, dir));
+      return false;
+    } catch {
+      // directory doesn't exist — expected when rebase is done
+    }
+  }
+  return true;
+}
+
 async function abortRebase(wtPath: string): Promise<string | undefined> {
   try {
     await spawnAsync('git', ['rebase', '--abort'], { cwd: wtPath });
@@ -328,6 +345,10 @@ export async function syncWorktree(
 
     const nextConflictContext = await buildConflictContext(opts.wtPath, continueError);
     if (!nextConflictContext) {
+      if (await isRebaseComplete(opts.wtPath)) {
+        return;
+      }
+
       const abortFailure = await abortRebase(opts.wtPath);
       throw formatTransportError(
         opts,
@@ -400,7 +421,7 @@ export function formatConflictContext(conflictContext: ConflictContext): string 
 
   lines.push(
     '',
-    'Resolve all conflicts, then use `git add` to stage the resolved files and `git commit` if Git asks for it. Do not run `git rebase --continue`, `git rebase --abort`, or `git push` yourself.'
+    'Resolve all conflicts, then stage the resolved files with `git add`. Do not run `git commit`, `git rebase --continue`, `git rebase --abort`, or `git push` yourself.'
   );
 
   return lines.join('\n');
@@ -450,6 +471,13 @@ export async function withGitTransport(
 
       const nextConflictContext = await buildConflictContext(opts.wtPath, continueError);
       if (!nextConflictContext) {
+        // The agent may have run `git commit` itself, which completes the rebase
+        // step and (if it was the last step) finishes the rebase entirely. Detect
+        // this by checking whether the rebase state directories still exist.
+        if (await isRebaseComplete(opts.wtPath)) {
+          return await pushWithRetry(opts, runAgent);
+        }
+
         const abortFailure = await abortRebase(opts.wtPath);
         throw formatTransportError(
           opts,
