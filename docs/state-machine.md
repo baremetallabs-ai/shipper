@@ -19,18 +19,18 @@ Shipper uses GitHub issue labels as the sole representation of workflow state. E
 
 ### Control labels
 
-| Label             | Description                                                                                   |
-| ----------------- | --------------------------------------------------------------------------------------------- |
-| `shipper:blocked` | Issue has unmet dependencies. Prevents advancement (except `new` -> `groomed`).               |
-| `shipper:locked`  | Active shipper instance is working on this issue. Prevents concurrent access.                 |
-| `shipper:failed`  | Automated processing failed. Blocks `next`, excluded from auto-selection, cleared by `reset`. |
+| Label             | Description                                                                                |
+| ----------------- | ------------------------------------------------------------------------------------------ |
+| `shipper:blocked` | Issue has unmet dependencies. Prevents advancement (except `new` -> `groomed`).            |
+| `shipper:locked`  | Active shipper instance is working on this issue. Prevents concurrent access.              |
+| `shipper:failed`  | Automated processing failed. Blocks `next` and auto-selection. Cleared by `shipper reset`. |
 
 ### Priority labels
 
-| Label                   | Description                                                          |
-| ----------------------- | -------------------------------------------------------------------- |
-| `shipper:priority-high` | High-priority issue. Processed first within each stage in auto-ship. |
-| `shipper:priority-low`  | Low-priority issue. Processed last within each stage in auto-ship.   |
+| Label                   | Description                                        |
+| ----------------------- | -------------------------------------------------- |
+| `shipper:priority-high` | High-priority issue. Processed first by auto-ship. |
+| `shipper:priority-low`  | Low-priority issue. Processed last by auto-ship.   |
 
 Normal priority is the default when neither label is present.
 
@@ -92,7 +92,7 @@ Auto-advances an issue by reading its current label and dispatching to the corre
 
 ## The `ship --auto` command
 
-Processes issues in priority order, advancing the most-complete issues first:
+Processes issues in priority order. Auto-ship chooses the highest-priority available issue first, then prefers the most-complete stage within the same priority tier:
 
 ```
 shipper:ready > shipper:pr-reviewed > shipper:pr-open > shipper:implemented
@@ -101,7 +101,7 @@ shipper:ready > shipper:pr-reviewed > shipper:pr-open > shipper:implemented
 
 `shipper:new` is excluded from auto-ship because grooming is interactive by default.
 
-Within each stage, issues are ordered by priority: `shipper:priority-high` first, then normal priority, then `shipper:priority-low`. Within the same priority tier, issues are processed FIFO by label-application timestamp queried via the GitHub timeline API.
+Issues are ordered by priority first: `shipper:priority-high`, then normal priority, then `shipper:priority-low`. Within the same priority tier, auto-ship prefers the most-complete stage using the ordering above. Within the same stage and priority tier, issues are processed FIFO by label-application timestamp queried via the GitHub timeline API.
 
 After exhausting available issues, auto-ship attempts to unblock `shipper:blocked` issues. If any are unblocked, it loops back to process the newly available issues.
 
