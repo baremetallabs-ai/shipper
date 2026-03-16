@@ -118,6 +118,9 @@ export default function App(): JSX.Element {
   const [terminalStatus, setTerminalStatus] = useState<'idle' | 'running' | 'exited'>('idle');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const requestVersionRef = useRef(0);
+  const contentPaneRef = useRef<HTMLDivElement | null>(null);
+  const toggleButtonRef = useRef<HTMLButtonElement | null>(null);
+  const drawerPanelRef = useRef<HTMLDivElement | null>(null);
 
   const prerequisiteMessage = getPrerequisiteMessage(prerequisites);
   const canFetch = prerequisites !== null && prerequisiteMessage === null;
@@ -262,6 +265,20 @@ export default function App(): JSX.Element {
     };
   }, [activeRepo, canFetch, hasActiveRepo]);
 
+  useEffect(() => {
+    const drawerPanel = drawerPanelRef.current;
+    if (!drawerPanel) {
+      return;
+    }
+
+    if (drawerOpen) {
+      drawerPanel.removeAttribute('inert');
+      return;
+    }
+
+    drawerPanel.setAttribute('inert', '');
+  }, [drawerOpen]);
+
   async function handleRefresh(): Promise<void> {
     if (!canFetch || !hasActiveRepo || isLoading) {
       return;
@@ -349,10 +366,24 @@ export default function App(): JSX.Element {
     }
   }
 
+  function focusVisibleShell(preferToggle: boolean): void {
+    window.requestAnimationFrame(() => {
+      if (preferToggle && toggleButtonRef.current) {
+        toggleButtonRef.current.focus();
+        return;
+      }
+
+      contentPaneRef.current?.focus();
+    });
+  }
+
   function handleCloseTerminal(): void {
     if (terminalStatus === 'exited') {
+      focusVisibleShell(false);
       setTerminalSessionId(null);
       setTerminalStatus('idle');
+    } else {
+      focusVisibleShell(true);
     }
 
     setDrawerOpen(false);
@@ -403,7 +434,7 @@ export default function App(): JSX.Element {
       />
 
       <div className="flex min-h-0 flex-1">
-        <div className="min-w-0 flex-1 overflow-y-auto">
+        <div ref={contentPaneRef} tabIndex={-1} className="min-w-0 flex-1 overflow-y-auto">
           <header className="sticky top-0 z-10 border-b border-border bg-background">
             <div className="mx-auto flex max-w-7xl flex-col gap-4 px-6 py-5">
               <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
@@ -594,36 +625,38 @@ export default function App(): JSX.Element {
         </div>
 
         {hasSession ? (
-          <button
-            type="button"
-            onClick={handleToggleDrawer}
-            className="flex w-5 flex-shrink-0 items-center justify-center border-l border-border bg-background text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            aria-label={drawerOpen ? 'Close terminal drawer' : 'Open terminal drawer'}
-          >
-            {drawerOpen ? (
-              <ChevronRight className="h-4 w-4" />
-            ) : (
-              <ChevronLeft className="h-4 w-4" />
-            )}
-          </button>
-        ) : null}
-
-        {hasSession ? (
-          <div
-            className={cn(
-              'flex-shrink-0 overflow-hidden transition-[width] duration-200',
-              drawerOpen ? 'w-[40%]' : 'w-0'
-            )}
-          >
-            <div className="h-full min-w-[40vw]">
-              <TerminalPanel
-                sessionId={terminalSessionId}
-                status={terminalStatus}
-                onKill={handleKillSession}
-                onClose={handleCloseTerminal}
-              />
+          <>
+            <button
+              ref={toggleButtonRef}
+              type="button"
+              onClick={handleToggleDrawer}
+              className="flex w-5 flex-shrink-0 items-center justify-center border-l border-border bg-background text-muted-foreground outline-none transition-[color,box-shadow] hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              aria-label={drawerOpen ? 'Close terminal drawer' : 'Open terminal drawer'}
+            >
+              {drawerOpen ? (
+                <ChevronRight className="h-4 w-4" />
+              ) : (
+                <ChevronLeft className="h-4 w-4" />
+              )}
+            </button>
+            <div
+              ref={drawerPanelRef}
+              aria-hidden={!drawerOpen}
+              className={cn(
+                'flex-shrink-0 overflow-hidden transition-[width] duration-200',
+                drawerOpen ? 'w-[40%]' : 'pointer-events-none w-0'
+              )}
+            >
+              <div className="h-full min-w-[40vw]">
+                <TerminalPanel
+                  sessionId={terminalSessionId}
+                  status={terminalStatus}
+                  onKill={handleKillSession}
+                  onClose={handleCloseTerminal}
+                />
+              </div>
             </div>
-          </div>
+          </>
         ) : null}
       </div>
     </div>
