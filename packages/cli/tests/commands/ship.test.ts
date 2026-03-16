@@ -1482,6 +1482,49 @@ describe('shipCommand sequential auto runner parking', () => {
     expect(exitSpy).toHaveBeenCalledWith(0);
   });
 
+  it('keeps a successfully merged issue skipped when it reappears mid-run', async () => {
+    setMockIssues([
+      {
+        number: 1,
+        title: 'Reopened issue',
+        labels: ['shipper:ready'],
+        nextLabels: [],
+        prNumber: 601,
+      },
+      {
+        number: 2,
+        title: 'Next issue',
+        labels: ['shipper:ready'],
+        nextLabels: [],
+        prNumber: 602,
+      },
+    ]);
+
+    let reopened = false;
+    postMergeMock.mockImplementation((_pr: unknown, issueNumber: number | string) => {
+      const issue = mockIssues.get(Number(issueNumber));
+      if (!issue) {
+        return Promise.resolve();
+      }
+
+      if (Number(issueNumber) === 1 && !reopened) {
+        issue.labels = ['shipper:ready'];
+        reopened = true;
+        return Promise.resolve();
+      }
+
+      mockIssues.delete(Number(issueNumber));
+      return Promise.resolve();
+    });
+
+    await shipCommand(repo, undefined, { auto: true, merge: false });
+
+    expect(postMergeMock.mock.calls.map(([, issueNumber]) => Number(issueNumber))).toEqual([1, 2]);
+    expect(mockIssues.get(1)?.labels).toEqual(['shipper:ready']);
+    expect(mockIssues.has(2)).toBe(false);
+    expect(exitSpy).toHaveBeenCalledWith(0);
+  });
+
   it('runs the unblock pass before waiting for parked work when the normal queue is empty', async () => {
     setMockIssues([
       {
@@ -1812,6 +1855,48 @@ describe('shipCommand parallel auto runner', () => {
     child3.finish(0);
     await runPromise;
 
+    expect(exitSpy).toHaveBeenCalledWith(0);
+  });
+
+  it('skips a successful completion when the same issue is still returned on refill', async () => {
+    const plannedIssues = [
+      { number: 1, title: 'Issue one' },
+      { number: 2, title: 'Issue two' },
+      { number: 3, title: 'Issue three' },
+    ];
+    mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
+      if (label === 'shipper:planned') return plannedIssues;
+      return [];
+    });
+
+    const child1 = new FakeChildProcess();
+    const child2 = new FakeChildProcess();
+    const child3 = new FakeChildProcess();
+    mockSpawn
+      .mockReturnValueOnce(child1 as never)
+      .mockReturnValueOnce(child2 as never)
+      .mockReturnValueOnce(child3 as never);
+
+    const runPromise = shipCommand(repo, undefined, { auto: true, merge: false, parallel: 2 });
+
+    await flushMicrotasks();
+    child1.finish(0);
+    await flushMicrotasks();
+    await new Promise<void>((resolve) => {
+      process.nextTick(resolve);
+    });
+
+    const cliEntrypoint = process.argv[1];
+    expect(cliEntrypoint).toBeDefined();
+    expect(mockSpawn).toHaveBeenCalledTimes(3);
+    expect(mockSpawn.mock.calls[2]?.[1]).toEqual([cliEntrypoint, 'ship', '3', '--merge']);
+
+    child2.finish(0);
+    await flushMicrotasks();
+    child3.finish(0);
+    await runPromise;
+
+    expect(getIssuedCalls(mockSpawn.mock.calls)).toEqual(['1', '2', '3']);
     expect(exitSpy).toHaveBeenCalledWith(0);
   });
 

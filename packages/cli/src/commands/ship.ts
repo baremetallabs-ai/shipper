@@ -1113,6 +1113,7 @@ function recordAutoResult(
   result: ShipIssueResult
 ): void {
   if (result.success) {
+    skippedIssues.add(issue.number);
     results.push({ issue: issue.number, title: issue.title, outcome: 'pass' });
     return;
   }
@@ -1355,6 +1356,7 @@ async function shipAutoParallel(
       console.log(`[#${completed.issue.number}] ${completed.result.success ? '✓ pass' : '✗ fail'}`);
 
       if (completed.result.success) {
+        skippedIssues.add(completed.issue.number);
         results.push({
           issue: completed.issue.number,
           title: completed.issue.title,
