@@ -124,6 +124,7 @@ export function useTerminalRuntime({ sessionId, status }: UseTerminalRuntimeOpti
 
     const fitAndResize = () => {
       if (!terminalRef.current || !fitAddonRef.current) return;
+      if (!containerRef.current || containerRef.current.offsetWidth === 0) return;
 
       fitAddonRef.current.fit();
       const { cols, rows } = terminalRef.current;

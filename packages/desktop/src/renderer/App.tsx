@@ -1,5 +1,6 @@
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import type { JSX } from 'react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 import {
   BLOCKED_LABEL,
@@ -23,6 +24,7 @@ import { TerminalPanel } from './components/terminal-panel.js';
 import { Alert, AlertDescription, AlertTitle } from './components/ui/alert.js';
 import { Badge } from './components/ui/badge.js';
 import { Button } from './components/ui/button.js';
+import { cn } from './lib/utils.js';
 
 interface CheckResult {
   ok: boolean;
@@ -114,12 +116,13 @@ export default function App(): JSX.Element {
   const [isNewIssueOpen, setIsNewIssueOpen] = useState(false);
   const [terminalSessionId, setTerminalSessionId] = useState<string | null>(null);
   const [terminalStatus, setTerminalStatus] = useState<'idle' | 'running' | 'exited'>('idle');
-  const [showTerminal, setShowTerminal] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const requestVersionRef = useRef(0);
 
   const prerequisiteMessage = getPrerequisiteMessage(prerequisites);
   const canFetch = prerequisites !== null && prerequisiteMessage === null;
   const hasActiveRepo = activeRepo.length > 0 && isValidRepo(activeRepo);
+  const hasSession = terminalSessionId !== null;
   const { attentionIssues, columnMap } = useMemo(() => {
     const nextColumnMap = new Map<PipelineColumnLabel, ListIssueItem[]>(
       PIPELINE_COLUMNS.map((label) => [label, []])
@@ -329,11 +332,15 @@ export default function App(): JSX.Element {
       const result = await window.shipperAPI.spawnShipperNew(request, activeRepo, 120, 30);
       setTerminalSessionId(result.sessionId);
       setTerminalStatus('running');
-      setShowTerminal(true);
+      setDrawerOpen(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setFetchError(`Failed to launch shipper new: ${message}`);
     }
+  }
+
+  function handleToggleDrawer(): void {
+    setDrawerOpen((current) => !current);
   }
 
   function handleKillSession(): void {
@@ -343,12 +350,12 @@ export default function App(): JSX.Element {
   }
 
   function handleCloseTerminal(): void {
-    if (terminalStatus === 'running') {
-      handleKillSession();
+    if (terminalStatus === 'exited') {
+      setTerminalSessionId(null);
+      setTerminalStatus('idle');
     }
-    setShowTerminal(false);
-    setTerminalSessionId(null);
-    setTerminalStatus('idle');
+
+    setDrawerOpen(false);
   }
 
   async function handleCloseRepo(repo: string): Promise<void> {
@@ -395,206 +402,230 @@ export default function App(): JSX.Element {
         }}
       />
 
-      <div className={showTerminal ? 'min-h-0 flex-1 overflow-y-auto' : 'flex-1 overflow-y-auto'}>
-        <header className="sticky top-0 z-10 border-b border-border bg-background">
-          <div className="mx-auto flex max-w-7xl flex-col gap-4 px-6 py-5">
-            <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">
-                  Shipper Desktop
-                </p>
-                <h1 className="text-2xl font-semibold tracking-tight">Pipeline</h1>
-              </div>
-              <div className="flex items-center gap-3">
-                {lastUpdated ? (
-                  <p className="text-sm text-muted-foreground">
-                    Last updated {dateFormatter.format(lastUpdated)}
+      <div className="flex min-h-0 flex-1">
+        <div className="min-w-0 flex-1 overflow-y-auto">
+          <header className="sticky top-0 z-10 border-b border-border bg-background">
+            <div className="mx-auto flex max-w-7xl flex-col gap-4 px-6 py-5">
+              <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">
+                    Shipper Desktop
                   </p>
-                ) : null}
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setIsNewIssueOpen(true);
-                  }}
-                  disabled={!canFetch || !hasActiveRepo || terminalStatus === 'running'}
-                >
-                  New Issue
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    void handleRefresh();
-                  }}
-                  disabled={!canFetch || !hasActiveRepo || isLoading}
-                >
-                  {isLoading ? 'Refreshing...' : 'Refresh'}
-                </Button>
+                  <h1 className="text-2xl font-semibold tracking-tight">Pipeline</h1>
+                </div>
+                <div className="flex items-center gap-3">
+                  {lastUpdated ? (
+                    <p className="text-sm text-muted-foreground">
+                      Last updated {dateFormatter.format(lastUpdated)}
+                    </p>
+                  ) : null}
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setIsNewIssueOpen(true);
+                    }}
+                    disabled={!canFetch || !hasActiveRepo || terminalStatus === 'running'}
+                  >
+                    New Issue
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      void handleRefresh();
+                    }}
+                    disabled={!canFetch || !hasActiveRepo || isLoading}
+                  >
+                    {isLoading ? 'Refreshing...' : 'Refresh'}
+                  </Button>
+                </div>
               </div>
-            </div>
 
-            {repos.length > 0 ? (
-              <RepoTabBar
-                repos={repos}
-                activeRepo={activeRepo}
-                onSelectRepo={(repo) => {
-                  void handleSwitchRepo(repo);
-                }}
-                onCloseRepo={(repo) => {
-                  void handleCloseRepo(repo);
-                }}
-                onAddRepo={() => {
-                  setIsPickerOpen(true);
-                }}
-              />
-            ) : null}
-          </div>
-        </header>
-
-        <main className="mx-auto flex max-w-7xl flex-col gap-4 px-6 py-6">
-          {prerequisiteMessage ? (
-            <Alert variant="destructive">
-              <AlertTitle>GitHub CLI required</AlertTitle>
-              <AlertDescription>{prerequisiteMessage}</AlertDescription>
-            </Alert>
-          ) : null}
-
-          {fetchError ? (
-            <Alert variant="destructive" className="pr-24">
-              <AlertTitle>Issue fetch failed</AlertTitle>
-              <AlertDescription>{fetchError}</AlertDescription>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="absolute top-2 right-2"
-                onClick={() => {
-                  setFetchError(null);
-                }}
-              >
-                Dismiss
-              </Button>
-            </Alert>
-          ) : null}
-
-          {repos.length === 0 ? (
-            <section className="flex min-h-[24rem] flex-col items-center justify-center rounded-sm border border-dashed border-border bg-card px-6 py-10 text-center">
-              <div className="max-w-md space-y-3">
-                <h2 className="text-xl font-semibold tracking-tight">
-                  Add a repository to get started
-                </h2>
-                <p className="text-sm text-muted-foreground">
-                  Choose a GitHub repository to load its shipper-labeled issues into the desktop
-                  inbox.
-                </p>
-                <Button
-                  onClick={() => {
+              {repos.length > 0 ? (
+                <RepoTabBar
+                  repos={repos}
+                  activeRepo={activeRepo}
+                  onSelectRepo={(repo) => {
+                    void handleSwitchRepo(repo);
+                  }}
+                  onCloseRepo={(repo) => {
+                    void handleCloseRepo(repo);
+                  }}
+                  onAddRepo={() => {
                     setIsPickerOpen(true);
                   }}
+                />
+              ) : null}
+            </div>
+          </header>
+
+          <main className="mx-auto flex max-w-7xl flex-col gap-4 px-6 py-6">
+            {prerequisiteMessage ? (
+              <Alert variant="destructive">
+                <AlertTitle>GitHub CLI required</AlertTitle>
+                <AlertDescription>{prerequisiteMessage}</AlertDescription>
+              </Alert>
+            ) : null}
+
+            {fetchError ? (
+              <Alert variant="destructive" className="pr-24">
+                <AlertTitle>Issue fetch failed</AlertTitle>
+                <AlertDescription>{fetchError}</AlertDescription>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="absolute top-2 right-2"
+                  onClick={() => {
+                    setFetchError(null);
+                  }}
                 >
-                  Add repository
+                  Dismiss
                 </Button>
-              </div>
-            </section>
-          ) : (
-            <section className="overflow-hidden rounded-sm border border-border bg-card">
-              <div className="border-b border-border px-6 py-4">
-                <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <h2 className="text-lg font-semibold">Issues by workflow stage</h2>
-                    <p className="text-sm text-muted-foreground">
-                      Review the current repository as a pipeline organized by shipper stage.
-                    </p>
-                  </div>
-                  {activeRepo ? (
-                    <Badge variant="outline" className="w-fit">
-                      {activeRepo}
-                    </Badge>
-                  ) : null}
-                </div>
-              </div>
+              </Alert>
+            ) : null}
 
-              {!hasActiveRepo ? (
-                <div className="px-6 py-10 text-sm text-muted-foreground">
-                  Select a repository tab to begin.
+            {repos.length === 0 ? (
+              <section className="flex min-h-[24rem] flex-col items-center justify-center rounded-sm border border-dashed border-border bg-card px-6 py-10 text-center">
+                <div className="max-w-md space-y-3">
+                  <h2 className="text-xl font-semibold tracking-tight">
+                    Add a repository to get started
+                  </h2>
+                  <p className="text-sm text-muted-foreground">
+                    Choose a GitHub repository to load its shipper-labeled issues into the desktop
+                    inbox.
+                  </p>
+                  <Button
+                    onClick={() => {
+                      setIsPickerOpen(true);
+                    }}
+                  >
+                    Add repository
+                  </Button>
                 </div>
-              ) : issues.length === 0 && !isLoading ? (
-                <div className="px-6 py-10 text-sm text-muted-foreground">
-                  No shipper-labeled issues found for this repository.
-                </div>
-              ) : (
-                <div className="space-y-6 px-6 py-6">
-                  {attentionIssues.length > 0 ? (
-                    <div className="space-y-3 border-b border-border pb-6">
-                      <div>
-                        <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                          Needs attention
-                        </h3>
-                        <p className="text-sm text-muted-foreground">
-                          New issues stay here until they are groomed into the pipeline.
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap gap-3">
-                        {attentionIssues.map((issue) => (
-                          <div key={issue.number} className="min-w-[240px] flex-1 basis-[240px]">
-                            <IssueCard issue={issue} />
-                          </div>
-                        ))}
-                      </div>
+              </section>
+            ) : (
+              <section className="overflow-hidden rounded-sm border border-border bg-card">
+                <div className="border-b border-border px-6 py-4">
+                  <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <h2 className="text-lg font-semibold">Issues by workflow stage</h2>
+                      <p className="text-sm text-muted-foreground">
+                        Review the current repository as a pipeline organized by shipper stage.
+                      </p>
                     </div>
-                  ) : null}
-
-                  <div className="overflow-x-auto pb-1">
-                    <div className="flex min-w-max items-start gap-4">
-                      {PIPELINE_COLUMNS.map((label) => {
-                        const stageIssues = columnMap.get(label) ?? [];
-                        const isReadyColumn = label === READY_LABEL;
-
-                        return (
-                          <section
-                            key={label}
-                            className={[
-                              'flex min-w-[240px] flex-1 basis-[240px] flex-col gap-4 rounded-sm border px-4 py-4',
-                              isReadyColumn
-                                ? 'border-success/30 bg-success/10'
-                                : 'border-border bg-background/40',
-                            ].join(' ')}
-                          >
-                            <div>
-                              <h3 className="text-sm font-semibold">{DISPLAY_NAME_MAP[label]}</h3>
-                            </div>
-
-                            <div className="space-y-3">
-                              {stageIssues.length > 0 ? (
-                                stageIssues.map((issue) => (
-                                  <IssueCard key={issue.number} issue={issue} />
-                                ))
-                              ) : (
-                                <p className="rounded-sm border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
-                                  No issues
-                                </p>
-                              )}
-                            </div>
-                          </section>
-                        );
-                      })}
-                    </div>
+                    {activeRepo ? (
+                      <Badge variant="outline" className="w-fit">
+                        {activeRepo}
+                      </Badge>
+                    ) : null}
                   </div>
                 </div>
-              )}
-            </section>
-          )}
-        </main>
-      </div>
 
-      {showTerminal ? (
-        <div className="h-[40%] min-h-[200px]">
-          <TerminalPanel
-            sessionId={terminalSessionId}
-            status={terminalStatus}
-            onKill={handleKillSession}
-            onClose={handleCloseTerminal}
-          />
+                {!hasActiveRepo ? (
+                  <div className="px-6 py-10 text-sm text-muted-foreground">
+                    Select a repository tab to begin.
+                  </div>
+                ) : issues.length === 0 && !isLoading ? (
+                  <div className="px-6 py-10 text-sm text-muted-foreground">
+                    No shipper-labeled issues found for this repository.
+                  </div>
+                ) : (
+                  <div className="space-y-6 px-6 py-6">
+                    {attentionIssues.length > 0 ? (
+                      <div className="space-y-3 border-b border-border pb-6">
+                        <div>
+                          <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                            Needs attention
+                          </h3>
+                          <p className="text-sm text-muted-foreground">
+                            New issues stay here until they are groomed into the pipeline.
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-3">
+                          {attentionIssues.map((issue) => (
+                            <div key={issue.number} className="min-w-[240px] flex-1 basis-[240px]">
+                              <IssueCard issue={issue} />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    <div className="overflow-x-auto pb-1">
+                      <div className="flex min-w-max items-start gap-4">
+                        {PIPELINE_COLUMNS.map((label) => {
+                          const stageIssues = columnMap.get(label) ?? [];
+                          const isReadyColumn = label === READY_LABEL;
+
+                          return (
+                            <section
+                              key={label}
+                              className={[
+                                'flex min-w-[240px] flex-1 basis-[240px] flex-col gap-4 rounded-sm border px-4 py-4',
+                                isReadyColumn
+                                  ? 'border-success/30 bg-success/10'
+                                  : 'border-border bg-background/40',
+                              ].join(' ')}
+                            >
+                              <div>
+                                <h3 className="text-sm font-semibold">{DISPLAY_NAME_MAP[label]}</h3>
+                              </div>
+
+                              <div className="space-y-3">
+                                {stageIssues.length > 0 ? (
+                                  stageIssues.map((issue) => (
+                                    <IssueCard key={issue.number} issue={issue} />
+                                  ))
+                                ) : (
+                                  <p className="rounded-sm border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
+                                    No issues
+                                  </p>
+                                )}
+                              </div>
+                            </section>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </section>
+            )}
+          </main>
         </div>
-      ) : null}
+
+        {hasSession ? (
+          <button
+            type="button"
+            onClick={handleToggleDrawer}
+            className="flex w-5 flex-shrink-0 items-center justify-center border-l border-border bg-background text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            aria-label={drawerOpen ? 'Close terminal drawer' : 'Open terminal drawer'}
+          >
+            {drawerOpen ? (
+              <ChevronRight className="h-4 w-4" />
+            ) : (
+              <ChevronLeft className="h-4 w-4" />
+            )}
+          </button>
+        ) : null}
+
+        {hasSession ? (
+          <div
+            className={cn(
+              'flex-shrink-0 overflow-hidden transition-[width] duration-200',
+              drawerOpen ? 'w-[40%]' : 'w-0'
+            )}
+          >
+            <div className="h-full min-w-[40vw]">
+              <TerminalPanel
+                sessionId={terminalSessionId}
+                status={terminalStatus}
+                onKill={handleKillSession}
+                onClose={handleCloseTerminal}
+              />
+            </div>
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
