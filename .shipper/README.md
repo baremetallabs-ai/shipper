@@ -20,14 +20,14 @@ This folder is managed by [Shipper CLI](https://github.com/anthropics/shipper-cl
 
 ## Folder Contents
 
-| Path                  | Description                                                         |
-| --------------------- | ------------------------------------------------------------------- |
-| `prompts/`            | Markdown prompt files used by each stage command (committed to VCS) |
-| `hooks/`              | Executable hook scripts that run at stage boundaries and worktrees  |
-| `tmp/`                | Temporary working files (gitignored)                                |
-| `settings.json`       | Team-wide settings (committed to VCS)                               |
-| `settings.local.json` | Local overrides — not committed (gitignored)                        |
-| `README.md`           | This file                                                           |
+| Path                  | Description                                                        |
+| --------------------- | ------------------------------------------------------------------ |
+| `prompts/`            | Prompt overrides created by `shipper eject` (committed to VCS)     |
+| `hooks/`              | Executable hook scripts that run at stage boundaries and worktrees |
+| `tmp/`                | Temporary working files (gitignored)                               |
+| `settings.json`       | Team-wide settings (committed to VCS)                              |
+| `settings.local.json` | Local overrides — not committed (gitignored)                       |
+| `README.md`           | This file                                                          |
 
 ## Workflow Stages
 
@@ -47,14 +47,16 @@ shipper:implemented → shipper:pr-open → shipper:pr-reviewed → shipper:read
 - **shipper:pr-reviewed** — PR reviewed, pending remediation
 - **shipper:ready** — Ready for final review and merge
 - **shipper:blocked** — Blocked by a dependency (run `shipper unblock`)
+- **shipper:locked** — Active shipper instance is working on this issue
+- **shipper:failed** — Automated processing failed, requires investigation (run `shipper reset`)
+- **shipper:priority-high** — Processed first in `ship --auto`
+- **shipper:priority-low** — Processed last in `ship --auto`
 
 Use `shipper next <issue>` to advance through stages, or run individual stage commands directly (e.g., `shipper groom <issue>`, `shipper design <issue>`).
 
 ## Customizing Prompts
 
-Each stage command uses a Markdown prompt file from `prompts/`. To customize a stage's behavior, edit the corresponding `.md` file directly. Changes take effect the next time that stage runs.
-
-Running `shipper init` again will overwrite prompt files with the latest defaults. To preserve customizations, consider committing your changes before re-initializing.
+Run `shipper eject` to scaffold editable prompt overrides. Existing overrides are left in place. `shipper init` does not modify prompt files.
 
 ## Settings
 

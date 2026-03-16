@@ -19,10 +19,20 @@ Shipper uses GitHub issue labels as the sole representation of workflow state. E
 
 ### Control labels
 
-| Label             | Description                                                                     |
-| ----------------- | ------------------------------------------------------------------------------- |
-| `shipper:blocked` | Issue has unmet dependencies. Prevents advancement (except `new` -> `groomed`). |
-| `shipper:locked`  | Active shipper instance is working on this issue. Prevents concurrent access.   |
+| Label             | Description                                                                                   |
+| ----------------- | --------------------------------------------------------------------------------------------- |
+| `shipper:blocked` | Issue has unmet dependencies. Prevents advancement (except `new` -> `groomed`).               |
+| `shipper:locked`  | Active shipper instance is working on this issue. Prevents concurrent access.                 |
+| `shipper:failed`  | Automated processing failed. Blocks `next`, excluded from auto-selection, cleared by `reset`. |
+
+### Priority labels
+
+| Label                   | Description                                                          |
+| ----------------------- | -------------------------------------------------------------------- |
+| `shipper:priority-high` | High-priority issue. Processed first within each stage in auto-ship. |
+| `shipper:priority-low`  | Low-priority issue. Processed last within each stage in auto-ship.   |
+
+Normal priority is the default when neither label is present.
 
 ## State transitions
 
@@ -78,7 +88,7 @@ Agents can roll back to an earlier stage if the work is insufficient:
 
 ## The `next` command
 
-Auto-advances an issue by reading its current label and dispatching to the corresponding command. Validates that exactly one workflow label is present and that the issue is not blocked, except `shipper:new`, which can always be groomed.
+Auto-advances an issue by reading its current label and dispatching to the corresponding command. Validates that exactly one workflow label is present, rejects issues marked `shipper:failed`, and refuses blocked issues except `shipper:new`, which can always be groomed.
 
 ## The `ship --auto` command
 
@@ -91,7 +101,7 @@ shipper:ready > shipper:pr-reviewed > shipper:pr-open > shipper:implemented
 
 `shipper:new` is excluded from auto-ship because grooming is interactive by default.
 
-Within a stage, issues are processed FIFO by label-application timestamp queried via the GitHub timeline API.
+Within each stage, issues are ordered by priority: `shipper:priority-high` first, then normal priority, then `shipper:priority-low`. Within the same priority tier, issues are processed FIFO by label-application timestamp queried via the GitHub timeline API.
 
 After exhausting available issues, auto-ship attempts to unblock `shipper:blocked` issues. If any are unblocked, it loops back to process the newly available issues.
 
@@ -105,6 +115,8 @@ A review cycle cap (`MAX_REVIEW_CYCLES = 3`) prevents infinite tight `pr-reviewe
 - With `--to <stage>`, it resets directly to the specified earlier stage.
 - Valid reset targets are `new`, `groomed`, `designed`, `planned`, and `implemented`, as long as the target is behind the current stage.
 - Reset removes later shipper labels, closes matching open PRs, and for any closed PR whose head ref starts with `shipper/` attempts to delete that remote branch; it also removes matching local branches and local worktrees, deletes later-stage issue comments, and posts a reset notice comment after re-applying the target label.
+- Reset always removes `shipper:failed`.
+- Reset preserves `shipper:priority-high` and `shipper:priority-low`.
 
 ## Locking
 
