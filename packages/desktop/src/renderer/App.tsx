@@ -500,19 +500,23 @@ export default function App(): JSX.Element {
     };
   }, [sessions.length]);
 
+  function openRunningSession(sessionId: string, label: string): void {
+    const session: TerminalSession = {
+      id: sessionId,
+      label,
+      status: 'running',
+    };
+
+    lastOutputAtBySessionRef.current.set(session.id, Date.now());
+    setSessions((currentSessions) => [...currentSessions, session]);
+    setActiveSessionId(session.id);
+    setDrawerOpen(true);
+  }
+
   async function handleShipperNew(request: string): Promise<void> {
     try {
       const result = await window.shipperAPI.spawnShipperNew(request, activeRepo, 120, 30);
-      const session: TerminalSession = {
-        id: result.sessionId,
-        label: buildNewSessionLabel(request),
-        status: 'running',
-      };
-
-      lastOutputAtBySessionRef.current.set(session.id, Date.now());
-      setSessions((currentSessions) => [...currentSessions, session]);
-      setActiveSessionId(session.id);
-      setDrawerOpen(true);
+      openRunningSession(result.sessionId, buildNewSessionLabel(request));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setFetchError(`Failed to launch shipper new: ${message}`);
@@ -522,16 +526,7 @@ export default function App(): JSX.Element {
   async function handleShipperGroom(issueNumber: number): Promise<void> {
     try {
       const result = await window.shipperAPI.spawnShipperGroom(issueNumber, activeRepo, 120, 30);
-      const session: TerminalSession = {
-        id: result.sessionId,
-        label: `groom — #${issueNumber}`,
-        status: 'running',
-      };
-
-      lastOutputAtBySessionRef.current.set(session.id, Date.now());
-      setSessions((currentSessions) => [...currentSessions, session]);
-      setActiveSessionId(session.id);
-      setDrawerOpen(true);
+      openRunningSession(result.sessionId, `groom — #${issueNumber}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setFetchError(`Failed to launch shipper groom: ${message}`);

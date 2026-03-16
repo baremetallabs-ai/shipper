@@ -35,6 +35,20 @@ interface ListIssuesFailure {
   error: string;
 }
 
+interface SpawnPtyPayload {
+  repo: string;
+  cols: number;
+  rows: number;
+}
+
+interface SpawnShipperNewPayload extends SpawnPtyPayload {
+  request: string;
+}
+
+interface SpawnShipperGroomPayload extends SpawnPtyPayload {
+  issueNumber: number;
+}
+
 const defaultConfig: AppConfig = { repos: [], activeRepo: '' };
 const ptyManager = new PtyManager();
 const repoPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
@@ -99,6 +113,65 @@ function parseRepo(value: unknown): string | null {
 
   const repo = value.trim();
   return repoPattern.test(repo) ? repo : null;
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0;
+}
+
+function parseSpawnPtyPayload(value: unknown): SpawnPtyPayload | null {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('repo' in value) ||
+    !('cols' in value) ||
+    !('rows' in value)
+  ) {
+    return null;
+  }
+
+  const repo = parseRepo(value.repo);
+  if (repo === null || !isPositiveInteger(value.cols) || !isPositiveInteger(value.rows)) {
+    return null;
+  }
+
+  return {
+    repo,
+    cols: value.cols,
+    rows: value.rows,
+  };
+}
+
+function parseSpawnShipperNewPayload(value: unknown): SpawnShipperNewPayload | null {
+  if (typeof value !== 'object' || value === null || !('request' in value)) {
+    return null;
+  }
+
+  const payload = parseSpawnPtyPayload(value);
+  if (payload === null || typeof value.request !== 'string') {
+    return null;
+  }
+
+  return {
+    ...payload,
+    request: value.request,
+  };
+}
+
+function parseSpawnShipperGroomPayload(value: unknown): SpawnShipperGroomPayload | null {
+  if (typeof value !== 'object' || value === null || !('issueNumber' in value)) {
+    return null;
+  }
+
+  const payload = parseSpawnPtyPayload(value);
+  if (payload === null || !isPositiveInteger(value.issueNumber)) {
+    return null;
+  }
+
+  return {
+    ...payload,
+    issueNumber: value.issueNumber,
+  };
 }
 
 function toRepoKey(repo: string): string {
@@ -263,33 +336,23 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('pty-spawn-shipper-new', async (_event, payload: unknown) => {
-    if (
-      typeof payload !== 'object' ||
-      payload === null ||
-      !('request' in payload) ||
-      typeof payload.request !== 'string' ||
-      !('repo' in payload) ||
-      typeof payload.repo !== 'string' ||
-      !('cols' in payload) ||
-      typeof payload.cols !== 'number' ||
-      !('rows' in payload) ||
-      typeof payload.rows !== 'number'
-    ) {
+    const parsedPayload = parseSpawnShipperNewPayload(payload);
+    if (parsedPayload === null) {
       throw new Error('Invalid pty-spawn-shipper-new payload.');
     }
 
-    const repoPath = await ensureRepoClone(payload.repo);
+    const repoPath = await ensureRepoClone(parsedPayload.repo);
 
     const cmd = await buildPromptCommand('new', {
-      userInput: payload.request,
-      repo: payload.repo,
+      userInput: parsedPayload.request,
+      repo: parsedPayload.repo,
       mode: 'interactive',
     });
 
     const sessionId = randomUUID();
     ptyManager.spawn(sessionId, cmd.command, cmd.args, {
-      cols: payload.cols,
-      rows: payload.rows,
+      cols: parsedPayload.cols,
+      rows: parsedPayload.rows,
       cwd: cmd.cwd ?? repoPath,
     });
 
@@ -297,33 +360,23 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('pty-spawn-shipper-groom', async (_event, payload: unknown) => {
-    if (
-      typeof payload !== 'object' ||
-      payload === null ||
-      !('issueNumber' in payload) ||
-      typeof payload.issueNumber !== 'number' ||
-      !('repo' in payload) ||
-      typeof payload.repo !== 'string' ||
-      !('cols' in payload) ||
-      typeof payload.cols !== 'number' ||
-      !('rows' in payload) ||
-      typeof payload.rows !== 'number'
-    ) {
+    const parsedPayload = parseSpawnShipperGroomPayload(payload);
+    if (parsedPayload === null) {
       throw new Error('Invalid pty-spawn-shipper-groom payload.');
     }
 
-    const repoPath = await ensureRepoClone(payload.repo);
+    const repoPath = await ensureRepoClone(parsedPayload.repo);
 
     const cmd = await buildPromptCommand('groom', {
-      issueRef: String(payload.issueNumber),
-      repo: payload.repo,
+      issueRef: String(parsedPayload.issueNumber),
+      repo: parsedPayload.repo,
       mode: 'interactive',
     });
 
     const sessionId = randomUUID();
     ptyManager.spawn(sessionId, cmd.command, cmd.args, {
-      cols: payload.cols,
-      rows: payload.rows,
+      cols: parsedPayload.cols,
+      rows: parsedPayload.rows,
       cwd: cmd.cwd ?? repoPath,
     });
 
