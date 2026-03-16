@@ -112,19 +112,34 @@ function spawnAsync(
         return;
       }
 
-      const logStream = createWriteStream(opts.logFile);
-      logCompletion = new Promise((logResolve, logReject) => {
-        logStream.on('finish', () => {
-          logResolve();
+      try {
+        const logStream = createWriteStream(opts.logFile);
+        logCompletion = new Promise((logResolve, logReject) => {
+          let settled = false;
+
+          const resolveLog = (): void => {
+            if (settled) return;
+            settled = true;
+            logResolve();
+          };
+
+          const rejectLog = (err: unknown): void => {
+            if (settled) return;
+            settled = true;
+            stdout.unpipe(logStream);
+            stdout.resume();
+            logReject(asError(err));
+          };
+
+          logStream.on('finish', resolveLog);
+          logStream.on('error', rejectLog);
+          stdout.on('error', rejectLog);
         });
-        logStream.on('error', (err) => {
-          logReject(asError(err));
-        });
-        stdout.on('error', (err) => {
-          logReject(asError(err));
-        });
-      });
-      stdout.pipe(logStream);
+        stdout.pipe(logStream);
+      } catch (err) {
+        stdout.resume();
+        console.warn(`Warning: Session log capture failed: ${asError(err).message}`);
+      }
     }
 
     let killTimer: ReturnType<typeof setTimeout> | undefined;
@@ -153,14 +168,14 @@ function spawnAsync(
     const handleClose = async (code: number | null): Promise<void> => {
       clearTimeout(killTimer);
       clearTimeout(graceTimer);
-      try {
-        if (logCompletion) {
+      if (logCompletion) {
+        try {
           await logCompletion;
+        } catch (err) {
+          console.warn(`Warning: Session log capture failed: ${asError(err).message}`);
         }
-        resolve(timedOut ? code || 1 : (code ?? 1));
-      } catch (err) {
-        reject(asError(err));
       }
+      resolve(timedOut ? code || 1 : (code ?? 1));
     };
 
     child.on('close', (code) => {
@@ -232,17 +247,23 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
   let sessionTimestamp: Date | undefined;
 
   if (effectiveMode === 'headless') {
-    sessionRepo = await resolveSessionRepo({ repo: opts.repo, cwd: opts.cwd });
-    sessionTimestamp = new Date();
-    const sessionPaths = getSessionPaths(
-      sessionRepo.repoSlug,
-      opts.issueRef,
-      name,
-      sessionTimestamp
-    );
-    await mkdir(path.dirname(sessionPaths.logFile), { recursive: true });
-    logFile = sessionPaths.logFile;
-    metaFile = sessionPaths.metaFile;
+    try {
+      sessionRepo = await resolveSessionRepo({ repo: opts.repo, cwd: opts.cwd });
+      sessionTimestamp = new Date();
+      const sessionPaths = getSessionPaths(
+        sessionRepo.repoSlug,
+        opts.issueRef,
+        name,
+        sessionTimestamp
+      );
+      await mkdir(path.dirname(sessionPaths.logFile), { recursive: true });
+      logFile = sessionPaths.logFile;
+      metaFile = sessionPaths.metaFile;
+    } catch (err) {
+      sessionRepo = undefined;
+      sessionTimestamp = undefined;
+      console.warn(`Warning: Failed to initialize session logging: ${asError(err).message}`);
+    }
   }
 
   if (agent === 'claude') {
@@ -334,6 +355,8 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
     }
   }
 
+  const effectiveModel = getEffectiveModel(agent, args);
+
   try {
     const exitCode = await spawnAsync(agent, args, { cwd: opts.cwd, timeoutMs, logFile });
 
@@ -344,7 +367,7 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
           issue: opts.issueRef ?? 'unlinked',
           stage: name,
           agent,
-          model: model ?? 'default',
+          model: effectiveModel ?? 'default',
           timestamp: sessionTimestamp.toISOString(),
           exitCode,
           logFile,
@@ -405,4 +428,16 @@ function findCodexSandboxConfigIndex(args: string[]): number {
     }
   }
   return -1;
+}
+
+function getEffectiveModel(agent: AgentName, args: string[]): string | undefined {
+  const flag = agent === 'claude' ? '--model' : '-m';
+
+  for (let i = args.length - 2; i >= 0; i--) {
+    if (args[i] === flag) {
+      return args[i + 1];
+    }
+  }
+
+  return undefined;
 }

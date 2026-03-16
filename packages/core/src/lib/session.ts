@@ -84,7 +84,7 @@ function getRemoteUrl(cwd?: string): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile('git', ['remote', 'get-url', 'origin'], { cwd }, (error, stdout) => {
       if (error) {
-        reject(error instanceof Error ? error : new Error('Failed to resolve git remote URL'));
+        reject(error instanceof Error ? error : new Error(toErrorMessage(error)));
         return;
       }
       resolve(stdout);
@@ -93,5 +93,19 @@ function getRemoteUrl(cwd?: string): Promise<string> {
 }
 
 function toRepoSlug(repo: string): string {
-  return repo.replace('/', '-');
+  return repo.replaceAll('/', '-');
+}
+
+function toErrorMessage(error: unknown): string {
+  if (typeof error === 'string') return error;
+  if (typeof error === 'number' || typeof error === 'boolean') return String(error);
+  if (
+    (typeof error === 'object' || typeof error === 'function') &&
+    error !== null &&
+    'message' in error &&
+    typeof error.message === 'string'
+  ) {
+    return error.message;
+  }
+  return 'Failed to resolve git remote URL';
 }

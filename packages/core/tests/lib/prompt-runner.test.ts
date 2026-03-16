@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 type PromptStdout = EventEmitter & {
   pipe: (destination: EventEmitter) => EventEmitter;
+  resume: () => void;
+  unpipe: (destination?: EventEmitter) => EventEmitter;
 };
 
 type PromptChild = EventEmitter & {
@@ -105,14 +107,23 @@ vi.mock('../../src/lib/session.js', () => ({
   writeSessionMeta: (...args: unknown[]) => writeSessionMetaMock(...args),
 }));
 
-function mockSpawnResult(opts: { code?: number; error?: Error } = {}): void {
-  const { code = 0, error } = opts;
+function mockSpawnResult(opts: { code?: number; error?: Error; logError?: Error } = {}): void {
+  const { code = 0, error, logError } = opts;
   spawnMock.mockImplementationOnce(() => {
     let pipedStream: EventEmitter | undefined;
     const stdout = Object.assign(new EventEmitter(), {
       pipe(destination: EventEmitter) {
         pipedStream = destination;
         return destination;
+      },
+      resume() {
+        return undefined;
+      },
+      unpipe(destination?: EventEmitter) {
+        if (pipedStream === destination || destination === undefined) {
+          pipedStream = undefined;
+        }
+        return this;
       },
     }) as PromptStdout;
     const child = new EventEmitter() as PromptChild & {
@@ -125,9 +136,14 @@ function mockSpawnResult(opts: { code?: number; error?: Error } = {}): void {
         child.emit('error', error);
         return;
       }
+      if (logError) {
+        pipedStream?.emit('error', logError);
+      }
       child.emit('close', code);
       globalThis.queueMicrotask(() => {
-        pipedStream?.emit('finish');
+        if (!logError) {
+          pipedStream?.emit('finish');
+        }
       });
     });
     return child;
@@ -569,6 +585,54 @@ describe('runPrompt', () => {
 
     expect(warnMock).toHaveBeenCalledWith('Warning: Failed to write session metadata: disk full');
     warnMock.mockRestore();
+  });
+
+  it('warns when session logging setup fails and still runs headless mode', async () => {
+    resolveModeMock.mockReturnValue('headless');
+    readFileMock.mockResolvedValueOnce(makePrompt('claude'));
+    mkdirMock.mockRejectedValueOnce(new Error('EACCES'));
+    const warnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockSpawnResult({ code: 9 });
+
+    await expect(runPrompt('test', { mode: 'headless', repo: 'owner/repo' })).resolves.toBe(9);
+
+    expect(warnMock).toHaveBeenCalledWith('Warning: Failed to initialize session logging: EACCES');
+    expect(createWriteStreamMock).not.toHaveBeenCalled();
+    expect(writeSessionMetaMock).not.toHaveBeenCalled();
+    expect(spawnMock.mock.calls[0]?.[2]).toMatchObject({
+      stdio: 'inherit',
+    });
+    expect(spawnedArgs()).toContain('--output-format');
+    warnMock.mockRestore();
+  });
+
+  it('warns on log capture failure and still returns the agent exit code', async () => {
+    resolveModeMock.mockReturnValue('headless');
+    readFileMock.mockResolvedValueOnce(makePrompt('claude'));
+    const warnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockSpawnResult({ code: 23, logError: new Error('disk full') });
+
+    await expect(runPrompt('test', { mode: 'headless', repo: 'owner/repo' })).resolves.toBe(23);
+
+    expect(warnMock).toHaveBeenCalledWith('Warning: Session log capture failed: disk full');
+    expect(writeSessionMetaMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ exitCode: 23 })
+    );
+    warnMock.mockRestore();
+  });
+
+  it('records the effective model from prompt args in session metadata', async () => {
+    resolveModeMock.mockReturnValue('headless');
+    readFileMock.mockResolvedValueOnce(makePrompt('claude', ['--model', 'opus']));
+    mockSpawnResult();
+
+    await expect(runPrompt('implement', { mode: 'headless', repo: 'owner/repo' })).resolves.toBe(0);
+
+    expect(writeSessionMetaMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ model: 'opus' })
+    );
   });
 
   it('injects codex headless args when absent', async () => {

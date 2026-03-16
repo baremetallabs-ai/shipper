@@ -88,6 +88,13 @@ describe('resolveSessionRepo', () => {
     expect(execFileMock).not.toHaveBeenCalled();
   });
 
+  it('normalizes every slash when building an explicit repo slug', async () => {
+    await expect(resolveSessionRepo({ repo: 'enterprise/team/repo' })).resolves.toEqual({
+      repo: 'enterprise/team/repo',
+      repoSlug: 'enterprise-team-repo',
+    });
+  });
+
   it('falls back to git remote resolution when repo is omitted', async () => {
     execFileMock.mockImplementation((_command, _args, _options, callback) => {
       callback(null, 'git@github.com:owner/repo.git\n', '');
@@ -108,6 +115,17 @@ describe('resolveSessionRepo', () => {
   it('returns the unlinked sentinel when git resolution fails', async () => {
     execFileMock.mockImplementation((_command, _args, _options, callback) => {
       callback(new Error('fatal: not a git repository'), '', '');
+    });
+
+    await expect(resolveSessionRepo({ cwd: '/tmp/no-repo' })).resolves.toEqual({
+      repo: '_unlinked',
+      repoSlug: '_unlinked',
+    });
+  });
+
+  it('preserves non-Error git failures when resolving the remote URL', async () => {
+    execFileMock.mockImplementation((_command, _args, _options, callback) => {
+      callback('fatal: access denied' as unknown as Error, '', '');
     });
 
     await expect(resolveSessionRepo({ cwd: '/tmp/no-repo' })).resolves.toEqual({
