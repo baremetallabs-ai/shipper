@@ -40,6 +40,12 @@ Control labels:
 
 - `shipper:blocked` - dependency block, resolved by `shipper unblock`
 - `shipper:locked` - active instance lock, resolved by `shipper unlock`
+- `shipper:failed` - automated processing failed, requires investigation; resolved by `shipper reset`
+
+Priority labels:
+
+- `shipper:priority-high` - processed first in `ship --auto`
+- `shipper:priority-low` - processed last in `ship --auto`
 
 ---
 
@@ -47,7 +53,7 @@ Control labels:
 
 Stage commands that operate on issues (`groom`, `design`, `plan`, `implement`) accept an optional issue argument and, when omitted, auto-select the first eligible issue. Stage commands that operate on pull requests (`pr open`, `pr review`, `pr remediate`) accept an optional PR argument and, when omitted, auto-select the first eligible PR.
 
-## 1) `shipper setup [words...]`
+## 1) `shipper setup [words...]` (alias: `shipper agent`)
 
 Purpose: configure repository settings with an agent.
 
@@ -56,7 +62,7 @@ Behavior:
 - Runs the setup prompt before the rest of the workflow is used.
 - Accepts optional freeform instructions, for example `shipper setup "change agent to codex"`.
 - If no instructions are provided, seeds the prompt with repo-aware setup text.
-- Shared flags: `--mode <headless|interactive|default>` and `--agent <claude|codex>`.
+- Shared flags: `--mode <headless|interactive|default>`, `--agent <claude|codex>`, and `--model <model>`.
 
 Output:
 
@@ -71,7 +77,7 @@ Behavior:
 - Agent asks a small number of clarifying questions.
 - Agent drafts a concise issue with title, summary, acceptance criteria, out of scope, and notes.
 - Agent creates the issue via `gh issue create --body-file ...` and applies label `shipper:new`.
-- Shared flags: `--mode <headless|interactive|default>` and `--agent <claude|codex>`.
+- Shared flags: `--mode <headless|interactive|default>`, `--agent <claude|codex>`, and `--model <model>`.
 
 Output:
 
@@ -88,7 +94,7 @@ Behavior:
 - Agent interviews the product owner to resolve missing product decisions.
 - Agent updates the issue body, posts a grooming summary comment, and transitions the issue to `shipper:groomed`.
 - `--auto` grooms all eligible `shipper:new` issues in sequence. It is mutually exclusive with an explicit issue number.
-- Shared flags: `--mode <headless|interactive|default>` and `--agent <claude|codex>`.
+- Shared flags: `--mode <headless|interactive|default>`, `--agent <claude|codex>`, and `--model <model>`.
 
 Output:
 
@@ -105,7 +111,7 @@ Behavior:
 - Agent reads the issue plus grooming outputs.
 - Agent explores the codebase to understand architecture and constraints.
 - Agent posts a technical design comment and transitions the issue to `shipper:designed`.
-- Shared flags: `--mode <headless|interactive|default>` and `--agent <claude|codex>`.
+- Shared flags: `--mode <headless|interactive|default>`, `--agent <claude|codex>`, and `--model <model>`.
 
 Output:
 
@@ -121,7 +127,7 @@ Behavior:
 - Agent reads the issue and design.
 - Agent identifies specific files and areas to change.
 - Agent writes an implementation plan comment and transitions the issue to `shipper:planned`.
-- Shared flags: `--mode <headless|interactive|default>` and `--agent <claude|codex>`.
+- Shared flags: `--mode <headless|interactive|default>`, `--agent <claude|codex>`, and `--model <model>`.
 
 Output:
 
@@ -137,7 +143,7 @@ Behavior:
 - Shipper creates an ephemeral git worktree for the issue.
 - Advisory install and worktree hooks may run on worktree creation.
 - Agent implements according to the plan, runs checks, commits, pushes, and posts an implementation summary.
-- Shared flags: `--mode <headless|interactive|default>` and `--agent <claude|codex>`.
+- Shared flags: `--mode <headless|interactive|default>`, `--agent <claude|codex>`, and `--model <model>`.
 
 Output:
 
@@ -153,7 +159,7 @@ Behavior:
 
 - Shipper creates a fresh ephemeral worktree tracking the pushed branch.
 - Agent runs quality checks, validates requirements, remediates if needed, and creates a PR.
-- Shared flags: `--mode <headless|interactive|default>` and `--agent <claude|codex>`.
+- Shared flags: `--mode <headless|interactive|default>`, `--agent <claude|codex>`, and `--model <model>`.
 
 Output:
 
@@ -168,7 +174,7 @@ Behavior:
 
 - Agent reviews the PR diff against acceptance criteria and plan.
 - Agent posts a GitHub review with actionable feedback.
-- Shared flags: `--mode <headless|interactive|default>` and `--agent <claude|codex>`.
+- Shared flags: `--mode <headless|interactive|default>`, `--agent <claude|codex>`, and `--model <model>`.
 
 Output:
 
@@ -182,7 +188,7 @@ Behavior:
 
 - Shipper creates an ephemeral worktree on the PR branch.
 - Agent pulls review feedback, applies accepted changes, runs checks, pushes updates, and replies to reviewers.
-- Shared flags: `--mode <headless|interactive|default>` and `--agent <claude|codex>`.
+- Shared flags: `--mode <headless|interactive|default>`, `--agent <claude|codex>`, and `--model <model>`.
 
 Output:
 
@@ -198,7 +204,7 @@ Behavior:
 
 - Reads the issue to determine what it is blocked on.
 - If the dependency is resolved, removes `shipper:blocked` and instructs the user to continue with `shipper next`.
-- Shared flags: `--mode <headless|interactive|default>` and `--agent <claude|codex>`.
+- Shared flags: `--mode <headless|interactive|default>`, `--agent <claude|codex>`, and `--model <model>`.
 
 Output:
 
@@ -218,6 +224,7 @@ Behavior:
 - Runs the corresponding next-stage command.
 - Works with both issue numbers and PR numbers.
 - `--agent <claude|codex>` overrides the agent used for the dispatched step.
+- `--model <model>` overrides the model used for the dispatched step.
 
 Output:
 
@@ -234,6 +241,7 @@ Behavior:
 - `--auto` runs a continuous loop that auto-selects issues, ships them, and merges their PRs. It is mutually exclusive with an explicit issue number and implies `--merge`.
 - `--parallel <n>` sets the number of parallel slots in auto-ship mode and requires `--auto`.
 - `--agent <claude|codex>` overrides the agent used by dispatched steps.
+- `--model <model>` overrides the model used by dispatched steps.
 
 Output:
 
@@ -289,6 +297,22 @@ Output:
 
 - Local prompt override files ready for editing.
 
+## `shipper priority <issue> <high|normal|low>`
+
+Purpose: set the processing priority for an issue.
+
+Behavior:
+
+- Sets, changes, or clears priority labels on a shipper-managed issue.
+- The issue must be open and already be in the shipper workflow.
+- `high` adds `shipper:priority-high` and removes `shipper:priority-low`.
+- `low` adds `shipper:priority-low` and removes `shipper:priority-high`.
+- `normal` removes both priority labels, restoring default priority.
+
+Output:
+
+- `Issue #<number> priority set to <level>.`
+
 ## `shipper issue list [--status <name>]`
 
 Purpose: list shipper-managed issues by pipeline status.
@@ -296,9 +320,10 @@ Purpose: list shipper-managed issues by pipeline status.
 Behavior:
 
 - Groups open shipper-managed issues by their most advanced workflow label.
-- `--status <name>` filters to a single stage.
-- Valid short status names are `new`, `groomed`, `designed`, `planned`, `implemented`, `pr-open`, `pr-reviewed`, and `ready`.
-- Control labels such as `blocked` and `locked` are shown as suffixes on matching issues.
+- `--status <name>` filters to a single stage or control status.
+- Valid short status names are `new`, `groomed`, `designed`, `planned`, `implemented`, `pr-open`, `pr-reviewed`, `ready`, `blocked`, and `failed`.
+- Blocked and failed issues are grouped into separate sections.
+- Locked issues show a `[locked]` suffix.
 
 Output:
 
@@ -321,13 +346,14 @@ Output:
 
 - Issue reset to the selected earlier stage with later artifacts cleaned up.
 
-## `shipper unlock <issue>`
+## `shipper unlock [issue] [--stale]`
 
-Purpose: force-release the `shipper:locked` label on an issue.
+Purpose: force-release the `shipper:locked` label on an issue, or sweep all stale locks.
 
 Behavior:
 
-- Removes the `shipper:locked` label from the specified issue.
+- `shipper unlock <issue>` removes the `shipper:locked` label from the specified issue.
+- `shipper unlock --stale` releases all stale locks across the repository.
 
 Output:
 
@@ -341,7 +367,7 @@ Implementation and PR-affecting commands run in ephemeral worktrees that are cre
 
 - Executable file hooks can live under `./.shipper/hooks/`.
 - `installCommand` runs as an advisory dependency-install step after worktree creation.
-- `hooks.worktreeSetup` and `hooks.worktreeTeardown` are still supported as settings-based hook commands, though file-based worktree hooks take precedence when both exist.
+- File-based hooks in `.shipper/hooks/` handle worktree lifecycle events (`worktree-setup`, `worktree-teardown`).
 
 ---
 
@@ -349,17 +375,17 @@ Implementation and PR-affecting commands run in ephemeral worktrees that are cre
 
 Settings are stored in `.shipper/settings.json` (created by `shipper init`). Local overrides can be placed in `.shipper/settings.local.json`, which is gitignored.
 
-| Setting                      | Default                                      | Description                                                                                                                                                                                                                                                                                                                                                                    |
-| ---------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `prReviewWait`               | `{ "mode": "checks", "timeoutMinutes": 15 }` | PR review wait strategy. `mode` is `"checks"` or `"timer"`, and `timeoutMinutes` is the maximum wait in minutes.                                                                                                                                                                                                                                                               |
-| `lockTimeoutMinutes`         | `30`                                         | Stale lock timeout in minutes before `shipper:locked` is considered stale.                                                                                                                                                                                                                                                                                                     |
-| `agentTimeoutMinutes`        | `60`                                         | Agent process timeout for headless runs in minutes. Set to `0` to disable the timeout.                                                                                                                                                                                                                                                                                         |
-| `commands`                   | `{ "default": { "agent": "claude" } }`       | Per-command settings map. `default` is required. Optional per-step overrides may set `agent`, `mode`, or both for `new`, `groom`, `design`, `plan`, `implement`, `pr_open`, `pr_review`, `pr_remediate`, `unblock`, and `setup`. CLI names with hyphens use underscores here, so `pr-open`, `pr-review`, and `pr-remediate` become `pr_open`, `pr_review`, and `pr_remediate`. |
-| `defaultBaseBranch`          | auto-detected                                | Target branch for PRs if you do not set one explicitly.                                                                                                                                                                                                                                                                                                                        |
-| `installCommand`             | unset                                        | Shell command used for the advisory dependency-install step in new worktrees.                                                                                                                                                                                                                                                                                                  |
-| `hooks.worktreeSetup`        | unset                                        | Shell command to run after a worktree is created and before the agent starts.                                                                                                                                                                                                                                                                                                  |
-| `hooks.worktreeTeardown`     | unset                                        | Shell command to run before a worktree is removed.                                                                                                                                                                                                                                                                                                                             |
-| `merge.requirePassingChecks` | `true`                                       | Require all CI checks to pass before auto-merging.                                                                                                                                                                                                                                                                                                                             |
+| Setting                      | Default                                      | Description                                                                                                                                                                                                                                                                                                                                                                       |
+| ---------------------------- | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `prReviewWait`               | `{ "mode": "checks", "timeoutMinutes": 15 }` | PR review wait strategy. `mode` is `"checks"` or `"timer"`, and `timeoutMinutes` is the maximum wait in minutes.                                                                                                                                                                                                                                                                  |
+| `lockTimeoutMinutes`         | `30`                                         | Stale lock timeout in minutes before `shipper:locked` is considered stale.                                                                                                                                                                                                                                                                                                        |
+| `agentTimeoutMinutes`        | `60`                                         | Agent process timeout for headless runs in minutes. Set to `0` to disable the timeout.                                                                                                                                                                                                                                                                                            |
+| `commands`                   | `{ "default": { "agent": "claude" } }`       | Per-command settings map. `default` is required. Optional per-step overrides may set `agent`, `mode`, or `model` for `new`, `groom`, `design`, `plan`, `implement`, `pr_open`, `pr_review`, `pr_remediate`, `unblock`, and `setup`. CLI names with hyphens use underscores here, so `pr-open`, `pr-review`, and `pr-remediate` become `pr_open`, `pr_review`, and `pr_remediate`. |
+| `commands.default.model`     | unset                                        | Default model override for all supported prompt-running steps. Per-step overrides may set `commands.<step>.model`.                                                                                                                                                                                                                                                                |
+| `defaultBaseBranch`          | auto-detected                                | Target branch for PRs if you do not set one explicitly.                                                                                                                                                                                                                                                                                                                           |
+| `installCommand`             | unset                                        | Shell command used for the advisory dependency-install step in new worktrees.                                                                                                                                                                                                                                                                                                     |
+| `worktreeEnv`                | unset                                        | Environment variables applied inside worktree execution. Values are merged with built-in cache directory defaults.                                                                                                                                                                                                                                                                |
+| `merge.requirePassingChecks` | `true`                                       | Require all CI checks to pass before auto-merging.                                                                                                                                                                                                                                                                                                                                |
 
 ---
 
