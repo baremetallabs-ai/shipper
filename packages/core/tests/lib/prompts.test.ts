@@ -34,8 +34,9 @@ describe('groom prompts', () => {
       expect(prompt).toContain(
         'Present the finding to the product owner using the interactive question-asking tool'
       );
-      expect(prompt).toContain('.shipper/tmp/duplicate_close-<ISSUE>.md');
-      expect(prompt).toContain('gh issue close <ISSUE> --reason "not planned"');
+      expect(prompt).toContain(
+        'gh issue close <ISSUE> --reason "not planned" --comment "Closing as duplicate of #<N> — <original issue title>."'
+      );
       expect(prompt).toContain('--remove-label "shipper:new"');
       expect(prompt).toContain('Reclassify the relationship as **Overlap**');
     }

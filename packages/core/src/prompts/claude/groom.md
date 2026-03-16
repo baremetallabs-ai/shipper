@@ -92,9 +92,7 @@ Before proceeding to Phase 3, check whether any issue from the Phase 2 scan was 
 
 1. Present the finding to the product owner using the interactive question-asking tool. Identify the original issue by number and title, explain why the current issue appears to be a duplicate, and ask for explicit confirmation before taking action.
 2. **If the product owner confirms the duplicate:**
-   - Create `.shipper/tmp/duplicate_close-<ISSUE>.md` at runtime with this exact content: `Closing as duplicate of #<N> — <original issue title>.`
-   - Post the closing comment: `gh issue comment <ISSUE> --body-file ./.shipper/tmp/duplicate_close-<ISSUE>.md`
-   - Close the issue: `gh issue close <ISSUE> --reason "not planned"`
+   - Close the issue with a comment: `gh issue close <ISSUE> --reason "not planned" --comment "Closing as duplicate of #<N> — <original issue title>."`
    - Remove `shipper:new` if present: `gh issue edit <ISSUE> --remove-label "shipper:new"`
    - **Stop.** Do not proceed to Phase 3 or Phase 4. No grooming questions are asked, no grooming summary comment is posted, and no `shipper:groomed` label is added.
 3. **If the product owner rejects the duplicate finding:**
