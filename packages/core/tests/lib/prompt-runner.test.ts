@@ -573,11 +573,10 @@ describe('runPrompt', () => {
     );
   });
 
-  it('tees non-headless stdout to the terminal while writing session logs and metadata', async () => {
+  it('inherits stdio for non-headless runs to preserve TTY and writes metadata without logFile', async () => {
     resolveModeMock.mockReturnValue('interactive');
     readFileMock.mockResolvedValueOnce(makePrompt('claude'));
-    const stdoutWriteMock = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
-    mockSpawnResult({ stdoutChunks: ['interactive output\n'] });
+    mockSpawnResult();
 
     await expect(runPrompt('test', { mode: 'interactive', repo: 'owner/repo' })).resolves.toBe(0);
 
@@ -591,15 +590,7 @@ describe('runPrompt', () => {
     expect(mkdirMock).toHaveBeenCalledWith('/home/user/.shipper/sessions/owner-repo', {
       recursive: true,
     });
-    expect(createWriteStreamMock).toHaveBeenCalledWith(
-      expect.stringContaining('/home/user/.shipper/sessions/owner-repo/unlinked-test-')
-    );
-    expect(stdoutWriteMock).toHaveBeenCalledWith('interactive output\n');
-    expect(
-      (
-        (createWriteStreamMock.mock.results[0]?.value as MockLogStream | undefined)?.chunks ?? []
-      ).join('')
-    ).toContain('interactive output\n');
+    expect(createWriteStreamMock).not.toHaveBeenCalled();
     expect(writeSessionMetaMock).toHaveBeenCalledWith(
       expect.stringContaining('/home/user/.shipper/sessions/owner-repo/unlinked-test-'),
       expect.objectContaining({
@@ -607,13 +598,12 @@ describe('runPrompt', () => {
         issue: 'unlinked',
         stage: 'test',
         exitCode: 0,
+        logFile: undefined,
       })
     );
     expect(spawnMock.mock.calls[0]?.[2]).toMatchObject({
-      stdio: ['inherit', 'pipe', 'inherit'],
+      stdio: 'inherit',
     });
-
-    stdoutWriteMock.mockRestore();
   });
 
   it('does not echo headless stdout back to the terminal while capturing session logs', async () => {
@@ -657,7 +647,7 @@ describe('runPrompt', () => {
     );
   });
 
-  it('writes interactive session artifacts with piped stdout capture', async () => {
+  it('writes interactive session metadata without stdout capture', async () => {
     resolveModeMock.mockReturnValue('interactive');
     readFileMock.mockResolvedValueOnce(makePrompt('claude'));
     mockSpawnResult();
@@ -674,10 +664,10 @@ describe('runPrompt', () => {
     expect(mkdirMock).toHaveBeenCalledWith('/home/user/.shipper/sessions/owner-repo', {
       recursive: true,
     });
-    expect(createWriteStreamMock).toHaveBeenCalled();
+    expect(createWriteStreamMock).not.toHaveBeenCalled();
     expect(writeSessionMetaMock).toHaveBeenCalled();
     expect(spawnMock.mock.calls[0]?.[2]).toMatchObject({
-      stdio: ['inherit', 'pipe', 'inherit'],
+      stdio: 'inherit',
     });
   });
 

@@ -12,7 +12,7 @@ export interface SessionMeta {
   model: string;
   timestamp: string;
   exitCode: number;
-  logFile: string;
+  logFile?: string;
 }
 
 export interface SessionRepoInfo {
