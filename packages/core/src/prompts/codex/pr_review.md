@@ -15,7 +15,7 @@ The **next user message** contains the full PR content and may also include the 
 
 ## Core review philosophy
 
-Find defects and risky assumptions, not style nits. Focus on correctness, requirements coverage, security, data integrity, error handling, unnecessary complexity, real performance problems, and misleading code. Every finding must trace to a real execution path or a violated requirement.
+Find defects and risky assumptions, not style nits. Trace execution paths end-to-end through the actual code — do not pattern-match against the diff. Every finding must trace to a real execution path or a violated requirement.
 
 ---
 
@@ -55,20 +55,48 @@ Evaluate the diff against:
 
 Note any missing requirement coverage or unjustified deviation from the design/plan.
 
-### Step 2: Defect scan
+### Step 2: Defect scan — mandatory analysis dimensions
 
-Read the changed files carefully and identify only real findings:
+For each dimension below, read the changed files and trace the relevant execution paths
+end-to-end. Answer the example questions (and any others that apply) to verify correctness.
+Do not pattern-match against the diff — follow the data through the actual code.
 
-- **Correctness**
-- **Requirements coverage**
-- **Security**
-- **Data integrity**
-- **Error handling**
-- **Unnecessary complexity**
-- **Performance**, only when there is a concrete problem
-- **Maintainability**, only when the changed code is genuinely misleading or dangerous
+**Data-flow correctness** — Trace each changed code path from entry to exit and verify data
+reaches its intended destination.
 
-If there are no real findings, approve the PR.
+- Does every computed or fetched value actually get used, returned, or persisted?
+- If a path branches (retry, fallback, error), does each branch carry the data forward correctly?
+- Are return values propagated to every caller that needs them?
+
+**Edge-case resilience** — Identify boundary conditions, missing branches, and unhandled states.
+
+- What happens when inputs are empty, undefined, or at their limits?
+- Are there missing upstream conditions (e.g., no remote branch, unset config, first-run state)?
+- Does the code handle concurrent or re-entrant execution if applicable?
+
+**Key-collision and silent-overwrite safety** — Check for map key conflicts, file name collisions,
+and overwrites that silently lose data.
+
+- Can two distinct logical entities produce the same key, path, or identifier?
+- If a write targets a location that may already exist, is the conflict detected or silently lost?
+- Are generated names (file names, branch names, cache keys) guaranteed unique for their scope?
+
+**Accessibility** — Verify focus management, tab order, keyboard navigation, and screen reader
+concerns in any UI code.
+
+- Can all interactive elements be reached and activated via keyboard alone?
+- Is focus moved to the appropriate element after dynamic content changes?
+- Do elements have accessible names, roles, and states for assistive technology?
+
+**Context-specific dimensions:** If the change warrants additional analysis beyond the four core
+dimensions (e.g., security for auth/crypto changes, concurrency safety for async code, backwards
+compatibility for API changes, performance for hot paths), add them and apply the same rigor.
+
+**N/A rule:** When a dimension does not apply, state `N/A — [brief reason]` (e.g.,
+`N/A — no UI changes in this PR`). Do not silently skip any dimension.
+
+Zero findings is a valid outcome, but you must demonstrate the analysis for every applicable
+dimension regardless of whether you find anything.
 
 ### Step 3: Classify findings
 
@@ -109,6 +137,16 @@ Prepare a review summary body in this structure:
 
 [2-4 sentences describing the implementation and the key findings, if any.]
 
+### Analysis
+
+| Dimension                               | Conclusion                                                           |
+| --------------------------------------- | -------------------------------------------------------------------- |
+| Data-flow correctness                   | [1-2 sentences: what you traced and what you found, or N/A — reason] |
+| Edge-case resilience                    | [1-2 sentences]                                                      |
+| Key-collision / silent-overwrite safety | [1-2 sentences]                                                      |
+| Accessibility                           | [1-2 sentences]                                                      |
+| [Any additional dimensions]             | [1-2 sentences]                                                      |
+
 ### Findings ([N] total)
 
 - 🔴 [count] must-fix
@@ -116,7 +154,8 @@ Prepare a review summary body in this structure:
 - 🟢 [count] nit
 ```
 
-If there are no findings, say so explicitly.
+Every dimension from Phase 2 Step 2 must appear in the Analysis table. If there are no
+findings, state so explicitly after the table.
 
 ### Step 3: Write the review payload
 
@@ -184,3 +223,5 @@ If an environment problem prevents you from completing the review:
 3. Stop immediately.
 
 Do not submit the review yourself and do not attempt direct GitHub mutation. Shipper will consume the payload, submit the review, post the issue comment, and transition the stage after you exit.
+
+The `.shipper/output/` directory is gitignored by design — the orchestrator reads output files directly from the filesystem, not from git. Do not modify `.shipper/.gitignore`.
