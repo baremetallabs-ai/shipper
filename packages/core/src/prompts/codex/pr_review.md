@@ -139,13 +139,13 @@ Prepare a review summary body in this structure:
 
 ### Analysis
 
-| Dimension                               | Conclusion                                                           |
-| --------------------------------------- | -------------------------------------------------------------------- |
-| Data-flow correctness                   | [1-2 sentences: what you traced and what you found, or N/A — reason] |
-| Edge-case resilience                    | [1-2 sentences]                                                      |
-| Key-collision / silent-overwrite safety | [1-2 sentences]                                                      |
-| Accessibility                           | [1-2 sentences]                                                      |
-| [Any additional dimensions]             | [1-2 sentences]                                                      |
+| Dimension                                 | Conclusion                                                           |
+| ----------------------------------------- | -------------------------------------------------------------------- |
+| Data-flow correctness                     | [1-2 sentences: what you traced and what you found, or N/A — reason] |
+| Edge-case resilience                      | [1-2 sentences, or N/A — reason]                                     |
+| Key-collision and silent-overwrite safety | [1-2 sentences, or N/A — reason]                                     |
+| Accessibility                             | [1-2 sentences, or N/A — reason]                                     |
+| [Any additional dimensions]               | [1-2 sentences, or N/A — reason]                                     |
 
 ### Findings ([N] total)
 
