@@ -177,7 +177,7 @@ function writeStderrBoth(logStream: WriteStream | undefined, chunk: string | Buf
 }
 
 function closeLogStream(logStream: WriteStream | undefined): Promise<void> {
-  if (!logStream) {
+  if (!logStream || logStream.destroyed || logStream.writableEnded) {
     return Promise.resolve();
   }
 
@@ -197,6 +197,7 @@ function closeLogStream(logStream: WriteStream | undefined): Promise<void> {
     };
 
     logStream.on('finish', resolveClose);
+    logStream.on('close', resolveClose);
     logStream.on('error', rejectClose);
     logStream.end();
   });
@@ -823,7 +824,11 @@ async function shipOneIssue(
       return { success: true };
     });
   } finally {
-    await closeLogStream(logStream);
+    try {
+      await closeLogStream(logStream);
+    } catch {
+      // Log stream close failures should not replace the ship result.
+    }
   }
 }
 
