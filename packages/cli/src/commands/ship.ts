@@ -1,5 +1,6 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
+import type { WriteStream } from 'node:fs';
 import { createWriteStream, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
@@ -151,6 +152,81 @@ function formatLogTimestamp(date = new Date()): string {
   ].join('');
 }
 
+function formatLogDisplayPath(logFile: string, homeDir = homedir()): string {
+  return logFile.startsWith(homeDir) ? `~${logFile.slice(homeDir.length)}` : logFile;
+}
+
+function logBoth(logStream: WriteStream | undefined, message: string): void {
+  console.log(message);
+  logStream?.write(`${message}\n`);
+}
+
+function errorBoth(logStream: WriteStream | undefined, message: string): void {
+  console.error(message);
+  logStream?.write(`${message}\n`);
+}
+
+function writeStdoutBoth(logStream: WriteStream | undefined, chunk: string | Buffer): void {
+  process.stdout.write(chunk);
+  logStream?.write(chunk);
+}
+
+function writeStderrBoth(logStream: WriteStream | undefined, chunk: string | Buffer): void {
+  process.stderr.write(chunk);
+  logStream?.write(chunk);
+}
+
+function closeLogStream(logStream: WriteStream | undefined): Promise<void> {
+  if (!logStream) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+
+    const resolveClose = (): void => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+
+    const rejectClose = (err: unknown): void => {
+      if (settled) return;
+      settled = true;
+      reject(err instanceof Error ? err : new Error(String(err)));
+    };
+
+    logStream.on('finish', resolveClose);
+    logStream.on('error', rejectClose);
+    logStream.end();
+  });
+}
+
+function spawnTee(
+  command: string,
+  args: string[],
+  opts: { env?: typeof process.env; logStream?: WriteStream }
+): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      stdio: opts.logStream ? ['inherit', 'pipe', 'pipe'] : 'inherit',
+      env: opts.env,
+    });
+
+    child.stdout?.on('data', (chunk: Buffer | string) => {
+      writeStdoutBoth(opts.logStream, chunk);
+    });
+    child.stderr?.on('data', (chunk: Buffer | string) => {
+      writeStderrBoth(opts.logStream, chunk);
+    });
+
+    child.on('error', reject);
+    child.on('close', (code) => {
+      resolve(code ?? 1);
+    });
+  });
+}
+
 async function getCurrentLabel(repo: string, issueStr: string): Promise<string | undefined> {
   let output: string;
   try {
@@ -193,12 +269,12 @@ async function getCurrentLabel(repo: string, issueStr: string): Promise<string |
   return stageLabels[0];
 }
 
-function printSummary(results: StageResult[]): void {
-  console.log('\nStage summary:');
+function printSummary(results: StageResult[], logStream?: WriteStream): void {
+  logBoth(logStream, '\nStage summary:');
   for (const r of results) {
     const icon = r.status === 'pass' ? '✓' : '✗';
     const suffix = r.status === 'fail' ? ' — failed' : '';
-    console.log(`  ${icon} ${r.stage}${suffix}`);
+    logBoth(logStream, `  ${icon} ${r.stage}${suffix}`);
   }
 }
 
@@ -381,9 +457,10 @@ async function remediateMergeFailure(
   pr: QueuedPR,
   issueNumber: number,
   nwo: string,
-  reason: string
+  reason: string,
+  logStream?: WriteStream
 ): Promise<void> {
-  console.error(`\n${formatMergeFailureMessage(pr.number, reason)}`);
+  errorBoth(logStream, `\n${formatMergeFailureMessage(pr.number, reason)}`);
 
   try {
     await gh([
@@ -398,7 +475,7 @@ async function remediateMergeFailure(
       PR_REVIEWED_LABEL,
     ]);
   } catch {
-    console.error(`Warning: Failed to update labels on PR #${pr.number}`);
+    errorBoth(logStream, `Warning: Failed to update labels on PR #${pr.number}`);
   }
 
   try {
@@ -414,7 +491,7 @@ async function remediateMergeFailure(
       PR_REVIEWED_LABEL,
     ]);
   } catch {
-    console.error(`Warning: Failed to update labels on issue #${issueNumber}`);
+    errorBoth(logStream, `Warning: Failed to update labels on issue #${issueNumber}`);
   }
 
   const comment = [
@@ -428,17 +505,22 @@ async function remediateMergeFailure(
   try {
     await gh(['pr', 'comment', String(pr.number), '-R', nwo, '--body', comment]);
   } catch {
-    console.error(`Warning: Failed to post failure comment on PR #${pr.number}`);
+    errorBoth(logStream, `Warning: Failed to post failure comment on PR #${pr.number}`);
   }
 }
 
-async function mergePr(pr: QueuedPR, issueNumber: number, nwo: string): Promise<void> {
+async function mergePr(
+  pr: QueuedPR,
+  issueNumber: number,
+  nwo: string,
+  logStream?: WriteStream
+): Promise<void> {
   try {
     let mergeState = await getMergeStateStatus(pr.number, nwo);
     let rebased = false;
 
     if (mergeState === 'BEHIND') {
-      console.log(`PR #${pr.number} is behind its base branch. Rebasing before merge.`);
+      logBoth(logStream, `PR #${pr.number} is behind its base branch. Rebasing before merge.`);
       try {
         const { stdout } = await gh([
           'pr',
@@ -449,7 +531,7 @@ async function mergePr(pr: QueuedPR, issueNumber: number, nwo: string): Promise<
           '--rebase',
         ]);
         if (stdout.trim()) {
-          process.stdout.write(stdout);
+          writeStdoutBoth(logStream, stdout);
         }
       } catch (err) {
         throw new Error(
@@ -475,13 +557,13 @@ async function mergePr(pr: QueuedPR, issueNumber: number, nwo: string): Promise<
       '--delete-branch',
     ]);
     if (stdout.trim()) {
-      process.stdout.write(stdout);
+      writeStdoutBoth(logStream, stdout);
     }
-    console.log(`PR #${pr.number} merged successfully.`);
+    logBoth(logStream, `PR #${pr.number} merged successfully.`);
     await postMerge(pr, issueNumber, nwo, false);
   } catch (err) {
     const reason = normalizeError(err).message;
-    await remediateMergeFailure(pr, issueNumber, nwo, reason);
+    await remediateMergeFailure(pr, issueNumber, nwo, reason, logStream);
     throw new Error(formatMergeFailureMessage(pr.number, reason));
   }
 }
@@ -493,226 +575,256 @@ async function shipOneIssue(
   mode?: CommandMode,
   agent?: AgentName,
   model?: string,
-  parkHooks?: ParkHooks
+  parkHooks?: ParkHooks,
+  logFile?: string
 ): Promise<ShipIssueResult> {
   const issueStr = issue.replace(/^#/, '');
+  const logStream = logFile ? createWriteStream(logFile) : undefined;
+  let logStreamError: string | undefined;
 
-  return await withIssueLock(repo, issueStr, async () => {
-    let label = await getCurrentLabel(repo, issueStr);
-
-    if (label === FAILED_LABEL) {
-      const msg = `Issue #${issueStr} is marked ${FAILED_LABEL} and requires manual intervention before it can re-enter the pipeline.`;
-      console.error(msg);
-      return { success: false, error: msg };
-    }
-
-    if (!label) {
-      const msg = `Issue #${issueStr} has no shipper label. Run \`shipper next\` or add a label first.`;
-      console.error(msg);
-      return { success: false, error: msg };
-    }
-
-    if (label === READY_LABEL) {
-      if (!merge) {
-        console.log(`Issue #${issueStr} is already at ${READY_LABEL}.`);
-        return { success: true };
+  if (logStream && logFile) {
+    logStream.on('error', (error) => {
+      if (logStreamError) {
+        return;
       }
-      // Fall through to merge logic below the loop
-    }
+      logStreamError = `failed to write log file "${logFile}": ${error.message}`;
+    });
+  }
 
-    if (label !== READY_LABEL && !(label in STAGE_NAME)) {
-      const msg = `Unrecognized shipper label "${label}" on issue #${issueStr}.`;
-      console.error(msg);
-      return { success: false, error: msg };
-    }
+  try {
+    return await withIssueLock(repo, issueStr, async () => {
+      let label = await getCurrentLabel(repo, issueStr);
 
-    const results: StageResult[] = [];
-    const transitionHistory: string[] = [label];
-    const failCurrentStage = (stage: string, message: string): ShipIssueResult => {
-      console.error(message);
-      results.push({ stage, status: 'fail' });
-      printSummary(results);
-      return { success: false, error: message };
-    };
-
-    if (label !== READY_LABEL) {
-      let transitions = 0;
-      let skipPrRemediateWaitOnce = false;
-      const cliEntrypoint = process.argv[1];
-      if (!cliEntrypoint) {
-        throw new Error('Missing CLI entrypoint path.');
-      }
-
-      for (;;) {
-        const stageName = STAGE_NAME[label];
-        if (!stageName) {
-          const msg = `Unrecognized shipper label "${label}" on issue #${issueStr}.`;
-          console.error(msg);
-          printSummary(results);
-          return { success: false, error: msg };
-        }
-        const previousLabel: string | undefined = label;
-
-        if (label === PR_REVIEWED_LABEL && parkHooks) {
-          let pr: QueuedPR;
-          try {
-            pr = await resolvePrForIssue(Number(issueStr), repo);
-          } catch (err) {
-            return failCurrentStage(stageName, err instanceof Error ? err.message : String(err));
-          }
-
-          let readyCheck: ReadyCheck;
-          try {
-            readyCheck = await buildReadyCheck(repo, String(pr.number), getSettings().prReviewWait);
-          } catch (err) {
-            return failCurrentStage(stageName, err instanceof Error ? err.message : String(err));
-          }
-
-          const readyNow = await readyCheck();
-          if (!readyNow && (await parkHooks.shouldPark())) {
-            const resumePromise = new Promise<void>((resolve) => {
-              parkHooks.park({ readyCheck, resume: resolve });
-            });
-            await resumePromise;
-            skipPrRemediateWaitOnce = true;
-          }
-        }
-
-        console.log(`Running stage: ${stageName}`);
-
-        const nextArgs = [cliEntrypoint, 'next', issueStr];
-        if (mode && mode !== 'default') {
-          nextArgs.push('--mode', mode);
-        }
-        if (agent) {
-          nextArgs.push('--agent', agent);
-        }
-        if (model) {
-          nextArgs.push('--model', model);
-        }
-        const result = spawnSync(process.execPath, nextArgs, {
-          stdio: 'inherit',
-          env: buildIssueCommandEnv(
-            issueStr,
-            label === PR_REVIEWED_LABEL && skipPrRemediateWaitOnce
-          ),
-        });
-        skipPrRemediateWaitOnce = false;
-
-        if (result.status !== 0) {
-          results.push({ stage: stageName, status: 'fail' });
-          printSummary(results);
-          return { success: false, error: `stage "${stageName}" failed` };
-        }
-
-        results.push({ stage: stageName, status: 'pass' });
-
-        label = await getCurrentLabel(repo, issueStr);
-
-        if (!label || (label !== READY_LABEL && !(label in STAGE_NAME))) {
-          if (!label) {
-            console.error(`Issue #${issueStr} has no shipper label after stage "${stageName}".`);
-          } else if (label === FAILED_LABEL) {
-            console.error(
-              `Issue #${issueStr} entered terminal state ${FAILED_LABEL} after stage "${stageName}".`
-            );
-          } else {
-            console.error(
-              `Unrecognized shipper label "${label}" on issue #${issueStr} after stage "${stageName}".`
-            );
-          }
-          printSummary(results);
-          return { success: false, error: `unexpected label after stage "${stageName}"` };
-        }
-
-        if (label === NEW_LABEL && previousLabel !== NEW_LABEL && mode !== 'interactive') {
-          const msg = `Issue #${issueStr} was reset to ${NEW_LABEL} by stage "${stageName}" - stopping to avoid interactive groom stage.`;
-          console.error(msg);
-          printSummary(results);
-          return { success: false, error: msg };
-        }
-
-        if (label === previousLabel) {
-          const msg = `Label did not advance after stage "${stageName}" (still "${label}"). Aborting to avoid infinite loop.`;
-          console.error(msg);
-          printSummary(results);
-          return { success: false, error: msg };
-        }
-
-        transitions++;
-        transitionHistory.push(label);
-
-        if (transitions >= MAX_TRANSITIONS) {
-          const history = transitionHistory.join(' → ');
-          const msg = `Issue #${issueStr} hit transition cap (${MAX_TRANSITIONS}): ${history}`;
-          console.error(msg);
-
-          try {
-            await gh([
-              'issue',
-              'edit',
-              issueStr,
-              '-R',
-              repo,
-              '--add-label',
-              FAILED_LABEL,
-              '--remove-label',
-              label,
-            ]);
-          } catch (err) {
-            const relabelError = err instanceof Error ? err.message : String(err);
-            console.error(
-              `Warning: Failed to update labels on issue #${issueStr}: ${relabelError}`
-            );
-          }
-
-          results.push({ stage: STAGE_NAME[label] ?? label, status: 'fail' });
-          printSummary(results);
-          return { success: false, error: msg };
-        }
-
-        if (label === READY_LABEL) {
-          break;
-        }
-      }
-    }
-
-    if (merge) {
-      console.log('Running stage: merge');
-      const issueNumber = Number(issueStr);
-      const nwo = repo;
-
-      let pr: QueuedPR;
-      try {
-        pr = await resolvePrForIssue(issueNumber, nwo);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.error(msg);
-        results.push({ stage: 'merge', status: 'fail' });
-        printSummary(results);
+      if (label === FAILED_LABEL) {
+        const msg = `Issue #${issueStr} is marked ${FAILED_LABEL} and requires manual intervention before it can re-enter the pipeline.`;
+        errorBoth(logStream, msg);
         return { success: false, error: msg };
       }
 
-      try {
-        await withStageHooks(
-          'merge',
-          { issueNumber: issueStr, branchName: pr.headRefName },
-          async () => {
-            await mergePr(pr, issueNumber, nwo);
-          }
-        );
-        results.push({ stage: 'merge', status: 'pass' });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        results.push({ stage: 'merge', status: 'fail' });
-        printSummary(results);
-        return { success: false, error: msg, retriable: isRetriableMergeFailure(msg) };
+      if (!label) {
+        const msg = `Issue #${issueStr} has no shipper label. Run \`shipper next\` or add a label first.`;
+        errorBoth(logStream, msg);
+        return { success: false, error: msg };
       }
-    }
 
-    printSummary(results);
-    return { success: true };
-  });
+      if (label === READY_LABEL) {
+        if (!merge) {
+          logBoth(logStream, `Issue #${issueStr} is already at ${READY_LABEL}.`);
+          return { success: true };
+        }
+        // Fall through to merge logic below the loop
+      }
+
+      if (label !== READY_LABEL && !(label in STAGE_NAME)) {
+        const msg = `Unrecognized shipper label "${label}" on issue #${issueStr}.`;
+        errorBoth(logStream, msg);
+        return { success: false, error: msg };
+      }
+
+      const results: StageResult[] = [];
+      const transitionHistory: string[] = [label];
+      const failCurrentStage = (stage: string, message: string): ShipIssueResult => {
+        errorBoth(logStream, message);
+        results.push({ stage, status: 'fail' });
+        printSummary(results, logStream);
+        return { success: false, error: message };
+      };
+
+      if (label !== READY_LABEL) {
+        let transitions = 0;
+        let skipPrRemediateWaitOnce = false;
+        const cliEntrypoint = process.argv[1];
+        if (!cliEntrypoint) {
+          throw new Error('Missing CLI entrypoint path.');
+        }
+
+        for (;;) {
+          const stageName = STAGE_NAME[label];
+          if (!stageName) {
+            const msg = `Unrecognized shipper label "${label}" on issue #${issueStr}.`;
+            errorBoth(logStream, msg);
+            printSummary(results, logStream);
+            return { success: false, error: msg };
+          }
+          const previousLabel: string | undefined = label;
+
+          if (label === PR_REVIEWED_LABEL && parkHooks) {
+            let pr: QueuedPR;
+            try {
+              pr = await resolvePrForIssue(Number(issueStr), repo);
+            } catch (err) {
+              return failCurrentStage(stageName, err instanceof Error ? err.message : String(err));
+            }
+
+            let readyCheck: ReadyCheck;
+            try {
+              readyCheck = await buildReadyCheck(
+                repo,
+                String(pr.number),
+                getSettings().prReviewWait
+              );
+            } catch (err) {
+              return failCurrentStage(stageName, err instanceof Error ? err.message : String(err));
+            }
+
+            const readyNow = await readyCheck();
+            if (!readyNow && (await parkHooks.shouldPark())) {
+              const resumePromise = new Promise<void>((resolve) => {
+                parkHooks.park({ readyCheck, resume: resolve });
+              });
+              await resumePromise;
+              skipPrRemediateWaitOnce = true;
+            }
+          }
+
+          logBoth(logStream, `Running stage: ${stageName}`);
+
+          const nextArgs = [cliEntrypoint, 'next', issueStr];
+          if (mode && mode !== 'default') {
+            nextArgs.push('--mode', mode);
+          }
+          if (agent) {
+            nextArgs.push('--agent', agent);
+          }
+          if (model) {
+            nextArgs.push('--model', model);
+          }
+          const status = await spawnTee(process.execPath, nextArgs, {
+            env: buildIssueCommandEnv(
+              issueStr,
+              label === PR_REVIEWED_LABEL && skipPrRemediateWaitOnce
+            ),
+            logStream,
+          });
+          skipPrRemediateWaitOnce = false;
+
+          if (logStreamError) {
+            return failCurrentStage(stageName, logStreamError);
+          }
+
+          if (status !== 0) {
+            results.push({ stage: stageName, status: 'fail' });
+            printSummary(results, logStream);
+            return { success: false, error: `stage "${stageName}" failed` };
+          }
+
+          results.push({ stage: stageName, status: 'pass' });
+
+          label = await getCurrentLabel(repo, issueStr);
+
+          if (!label || (label !== READY_LABEL && !(label in STAGE_NAME))) {
+            if (!label) {
+              errorBoth(
+                logStream,
+                `Issue #${issueStr} has no shipper label after stage "${stageName}".`
+              );
+            } else if (label === FAILED_LABEL) {
+              errorBoth(
+                logStream,
+                `Issue #${issueStr} entered terminal state ${FAILED_LABEL} after stage "${stageName}".`
+              );
+            } else {
+              errorBoth(
+                logStream,
+                `Unrecognized shipper label "${label}" on issue #${issueStr} after stage "${stageName}".`
+              );
+            }
+            printSummary(results, logStream);
+            return { success: false, error: `unexpected label after stage "${stageName}"` };
+          }
+
+          if (label === NEW_LABEL && previousLabel !== NEW_LABEL && mode !== 'interactive') {
+            const msg = `Issue #${issueStr} was reset to ${NEW_LABEL} by stage "${stageName}" - stopping to avoid interactive groom stage.`;
+            errorBoth(logStream, msg);
+            printSummary(results, logStream);
+            return { success: false, error: msg };
+          }
+
+          if (label === previousLabel) {
+            const msg = `Label did not advance after stage "${stageName}" (still "${label}"). Aborting to avoid infinite loop.`;
+            errorBoth(logStream, msg);
+            printSummary(results, logStream);
+            return { success: false, error: msg };
+          }
+
+          transitions++;
+          transitionHistory.push(label);
+
+          if (transitions >= MAX_TRANSITIONS) {
+            const history = transitionHistory.join(' → ');
+            const msg = `Issue #${issueStr} hit transition cap (${MAX_TRANSITIONS}): ${history}`;
+            errorBoth(logStream, msg);
+
+            try {
+              await gh([
+                'issue',
+                'edit',
+                issueStr,
+                '-R',
+                repo,
+                '--add-label',
+                FAILED_LABEL,
+                '--remove-label',
+                label,
+              ]);
+            } catch (err) {
+              const relabelError = err instanceof Error ? err.message : String(err);
+              errorBoth(
+                logStream,
+                `Warning: Failed to update labels on issue #${issueStr}: ${relabelError}`
+              );
+            }
+
+            results.push({ stage: STAGE_NAME[label] ?? label, status: 'fail' });
+            printSummary(results, logStream);
+            return { success: false, error: msg };
+          }
+
+          if (label === READY_LABEL) {
+            break;
+          }
+        }
+      }
+
+      if (merge) {
+        logBoth(logStream, 'Running stage: merge');
+        const issueNumber = Number(issueStr);
+        const nwo = repo;
+
+        let pr: QueuedPR;
+        try {
+          pr = await resolvePrForIssue(issueNumber, nwo);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          errorBoth(logStream, msg);
+          results.push({ stage: 'merge', status: 'fail' });
+          printSummary(results, logStream);
+          return { success: false, error: msg };
+        }
+
+        try {
+          await withStageHooks(
+            'merge',
+            { issueNumber: issueStr, branchName: pr.headRefName },
+            async () => {
+              await mergePr(pr, issueNumber, nwo, logStream);
+            }
+          );
+          results.push({ stage: 'merge', status: 'pass' });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          results.push({ stage: 'merge', status: 'fail' });
+          printSummary(results, logStream);
+          return { success: false, error: msg, retriable: isRetriableMergeFailure(msg) };
+        }
+      }
+
+      printSummary(results, logStream);
+      return { success: true };
+    });
+  } finally {
+    await closeLogStream(logStream);
+  }
 }
 
 function shipOneIssueAsync(
@@ -1046,6 +1158,7 @@ function startSequentialIssueRun(
   repo: string,
   issue: { number: number; title: string },
   shouldPark: () => Promise<boolean>,
+  logFile?: string,
   agent?: AgentName,
   model?: string
 ): SequentialIssueRun {
@@ -1057,7 +1170,8 @@ function startSequentialIssueRun(
     undefined,
     agent,
     model,
-    parkObserver.hooks
+    parkObserver.hooks,
+    logFile
   ).finally(() => {
     parkObserver.close();
   });
@@ -1174,6 +1288,11 @@ async function shipAutoSequential(repo: string, agent?: AgentName, model?: strin
   const results: AutoResult[] = [];
   const allUnblockAttempts: UnblockAttempt[] = [];
   const parked: ParkedIssue[] = [];
+  const homeDir = homedir();
+  const logsDir = path.join(homeDir, '.shipper', 'logs');
+  const logFiles = new Map<number, string>();
+
+  mkdirSync(logsDir, { recursive: true, mode: 0o700 });
 
   const shouldParkCurrentIssue = async (): Promise<boolean> => {
     if (parked.length > 0) {
@@ -1197,7 +1316,16 @@ async function shipAutoSequential(repo: string, agent?: AgentName, model?: strin
       }
 
       console.log(`\nAuto: advancing issue #${candidate.number} — ${candidate.title}`);
-      const run = startSequentialIssueRun(repo, candidate, shouldParkCurrentIssue, agent, model);
+      const logFile = path.join(logsDir, `ship-${candidate.number}-${formatLogTimestamp()}.log`);
+      logFiles.set(candidate.number, logFile);
+      const run = startSequentialIssueRun(
+        repo,
+        candidate,
+        shouldParkCurrentIssue,
+        logFile,
+        agent,
+        model
+      );
       const outcome = await waitForCompletionOrPark(run);
       if (outcome.type === 'parked') {
         parked.push(outcome.parked);
@@ -1245,6 +1373,14 @@ async function shipAutoSequential(repo: string, agent?: AgentName, model?: strin
   printAutoSummary(results);
   if (allUnblockAttempts.length > 0) {
     printUnblockSummary(allUnblockAttempts);
+  }
+  if (results.length > 0) {
+    console.log('\n  Log files:');
+    for (const result of results) {
+      const logFile = logFiles.get(result.issue);
+      if (!logFile) continue;
+      console.log(`  #${result.issue}   ${formatLogDisplayPath(logFile, homeDir)}`);
+    }
   }
   process.exit(0);
 }
@@ -1394,10 +1530,7 @@ async function shipAutoParallel(
     for (const result of results) {
       const logFile = logFiles.get(result.issue);
       if (!logFile) continue;
-      const displayPath = logFile.startsWith(homeDir)
-        ? `~${logFile.slice(homeDir.length)}`
-        : logFile;
-      console.log(`  #${result.issue}   ${displayPath}`);
+      console.log(`  #${result.issue}   ${formatLogDisplayPath(logFile, homeDir)}`);
     }
   }
   process.exit(0);
@@ -1424,13 +1557,20 @@ export async function shipCommand(
     console.error('Error: an issue number is required unless --auto is used.');
     process.exit(1);
   }
+  const homeDir = homedir();
+  const logsDir = path.join(homeDir, '.shipper', 'logs');
+  mkdirSync(logsDir, { recursive: true, mode: 0o700 });
+  const logFile = path.join(logsDir, `ship-${issue.replace(/^#/, '')}-${formatLogTimestamp()}.log`);
   const result = await shipOneIssue(
     repo,
     issue,
     options.merge,
     options.mode,
     options.agent,
-    options.model
+    options.model,
+    undefined,
+    logFile
   );
+  console.log(`\nLog file: ${formatLogDisplayPath(logFile, homeDir)}`);
   process.exit(result.success ? 0 : 1);
 }
