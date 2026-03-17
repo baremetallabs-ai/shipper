@@ -309,6 +309,9 @@ async function pushWithRetry(
   let retries = 0;
   let pushMode = opts.pushMode;
   let forcePushBranch: string | undefined;
+  if (pushMode === 'force-with-lease') {
+    forcePushBranch = await getCurrentBranch(opts);
+  }
 
   for (;;) {
     const pushArgs = getPushArgs(pushMode, forcePushBranch);
@@ -479,6 +482,9 @@ export async function syncWorktree(
 export async function pushWorktree(opts: WorktreeGitOpts): Promise<void> {
   let pushMode = opts.pushMode;
   let forcePushBranch: string | undefined;
+  if (pushMode === 'force-with-lease') {
+    forcePushBranch = await getCurrentBranch(opts);
+  }
   let retries = 0;
 
   for (;;) {
