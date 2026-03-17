@@ -98,7 +98,7 @@ function resolveWorktreeGitDir(cwd: string): WorktreeDirs | undefined {
 function spawnAsync(
   command: string,
   args: string[],
-  opts: { cwd?: string; timeoutMs?: number; logFile?: string }
+  opts: { cwd?: string; timeoutMs?: number; logFile?: string; teeStdout?: boolean }
 ): Promise<number> {
   return new Promise((resolve, reject) => {
     const stdio: 'inherit' | ['inherit', 'pipe', 'inherit'] = opts.logFile
@@ -120,6 +120,7 @@ function spawnAsync(
 
       try {
         const logStream = createWriteStream(opts.logFile);
+        let logClosed = false;
         logCompletion = new Promise((logResolve, logReject) => {
           let settled = false;
 
@@ -141,7 +142,21 @@ function spawnAsync(
           logStream.on('error', rejectLog);
           stdout.on('error', rejectLog);
         });
-        stdout.pipe(logStream);
+        if (opts.teeStdout) {
+          const closeLog = (): void => {
+            if (logClosed) return;
+            logClosed = true;
+            logStream.end();
+          };
+
+          stdout.on('data', (chunk: Buffer | string) => {
+            process.stdout.write(chunk);
+            logStream.write(chunk);
+          });
+          stdout.on('end', closeLog);
+        } else {
+          stdout.pipe(logStream);
+        }
       } catch (err) {
         stdout.resume();
         console.warn(`Warning: Session log capture failed: ${asError(err).message}`);
@@ -362,30 +377,33 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
   let metaFile: string | undefined;
   let sessionTimestamp: Date | undefined;
 
-  if (effectiveMode === 'headless') {
-    try {
-      sessionRepo = await resolveSessionRepo({ repo: opts.repo, cwd: opts.cwd });
-      sessionTimestamp = new Date();
-      const sessionPaths = getSessionPaths(
-        sessionRepo.repoSlug,
-        opts.issueRef,
-        name,
-        sessionTimestamp
-      );
-      await mkdir(path.dirname(sessionPaths.logFile), { recursive: true });
-      logFile = sessionPaths.logFile;
-      metaFile = sessionPaths.metaFile;
-    } catch (err) {
-      sessionRepo = undefined;
-      sessionTimestamp = undefined;
-      console.warn(`Warning: Failed to initialize session logging: ${asError(err).message}`);
-    }
+  try {
+    sessionRepo = await resolveSessionRepo({ repo: opts.repo, cwd: opts.cwd });
+    sessionTimestamp = new Date();
+    const sessionPaths = getSessionPaths(
+      sessionRepo.repoSlug,
+      opts.issueRef,
+      name,
+      sessionTimestamp
+    );
+    await mkdir(path.dirname(sessionPaths.logFile), { recursive: true });
+    logFile = sessionPaths.logFile;
+    metaFile = sessionPaths.metaFile;
+  } catch (err) {
+    sessionRepo = undefined;
+    sessionTimestamp = undefined;
+    console.warn(`Warning: Failed to initialize session logging: ${asError(err).message}`);
   }
 
   const effectiveModel = getEffectiveModel(agent, args);
 
   try {
-    const exitCode = await spawnAsync(agent, args, { cwd: opts.cwd, timeoutMs, logFile });
+    const exitCode = await spawnAsync(agent, args, {
+      cwd: opts.cwd,
+      timeoutMs,
+      logFile,
+      teeStdout: effectiveMode !== 'headless',
+    });
 
     if (metaFile && logFile && sessionTimestamp) {
       try {

@@ -194,7 +194,7 @@ import {
   releaseIssueLock,
   runPrompt,
 } from '@dnsquared/shipper-core';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 
 const mockSelectIssuesForStage = vi.mocked(selectIssuesForStage);
 const mockClearStaleLockIfNeeded = vi.mocked(clearStaleLockIfNeeded);
@@ -210,7 +210,6 @@ const mockPrepareUnblockContext = prepareUnblockContextMock;
 const mockProcessResult = processResultMock;
 const mockBuildReadyCheck = buildReadyCheckMock;
 const mockSpawn = vi.mocked(spawn);
-const mockSpawnSync = vi.mocked(spawnSync);
 const mockCreateWriteStream = fsMockState.mockCreateWriteStream;
 const mockMkdirSync = fsMockState.mockMkdirSync;
 const mockHomedir = osMockState.mockHomedir;
@@ -460,7 +459,12 @@ function getPriority(issue: MockIssueState): 0 | 1 | 2 {
   return 1;
 }
 
-function installSequentialCliMocks(): void {
+function installSequentialCliMocks(options?: {
+  stageOutput?: (
+    issueNumber: number,
+    args: ReadonlyArray<string>
+  ) => { stdout?: string; stderr?: string; code?: number };
+}): void {
   mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
     return Array.from(mockIssues.values())
       .filter((issue) => getStageLabel(issue) === label)
@@ -532,27 +536,31 @@ function installSequentialCliMocks(): void {
     throw new Error(`Unexpected gh call: ${args.join(' ')}`);
   });
 
-  mockSpawnSync.mockImplementation((_command: string, args: ReadonlyArray<string>, options) => {
+  mockSpawn.mockImplementation((_command: string, args: ReadonlyArray<string>) => {
     const issueNumber = Number(args[2]);
     const issue = mockIssues.get(issueNumber);
+    const child = new FakeChildProcess();
     if (!issue) {
-      return { status: 1, signal: null, output: [], pid: 0, stdout: null, stderr: null };
+      globalThis.queueMicrotask(() => {
+        child.finish(1);
+      });
+      return child as never;
     }
 
     const nextLabel = issue.nextLabels.shift();
-    if (nextLabel) {
-      issue.labels = [nextLabel];
-    }
+    const stageResult = options?.stageOutput?.(issueNumber, args) ?? {};
 
-    return {
-      status: 0,
-      signal: null,
-      output: [],
-      pid: 0,
-      stdout: null,
-      stderr: null,
-      ...(options?.env?.SHIPPER_SKIP_PR_REMEDIATE_WAIT === '1' ? { env: options.env } : {}),
-    } as never;
+    globalThis.queueMicrotask(() => {
+      if (nextLabel) {
+        issue.labels = [nextLabel];
+      }
+      if (stageResult.stdout) {
+        child.stdout.write(stageResult.stdout);
+      }
+      child.finish(stageResult.code ?? 0, null, stageResult.stderr);
+    });
+
+    return child as never;
   });
 }
 
@@ -859,10 +867,21 @@ describe('printUnblockSummary', () => {
 describe('shipCommand single-issue path', () => {
   beforeEach(() => {
     mockGh.mockReset();
-    mockSpawnSync.mockReset();
-    mockSpawnSync.mockReturnValue({ status: 0 } as ReturnType<typeof spawnSync>);
+    mockSpawn.mockReset();
+    mockSpawn.mockImplementation(() => {
+      const child = new FakeChildProcess();
+      globalThis.queueMicrotask(() => {
+        child.finish(0);
+      });
+      return child as never;
+    });
     mockRunPrompt.mockReset();
     mockRunPrompt.mockResolvedValue(0);
+    mockCreateWriteStream.mockClear();
+    mockMkdirSync.mockClear();
+    mockHomedir.mockClear();
+    mockHomedir.mockReturnValue('/mock-home');
+    fsMockState.capturedLogs.clear();
     exitSpy.mockClear();
   });
 
@@ -891,7 +910,7 @@ describe('shipCommand single-issue path', () => {
 
     await shipCommand(repo, '42', { auto: false, merge: false });
 
-    expect(mockSpawnSync).toHaveBeenCalledTimes(15);
+    expect(mockSpawn).toHaveBeenCalledTimes(15);
     expect(mockGh).toHaveBeenCalledWith([
       'issue',
       'edit',
@@ -976,13 +995,13 @@ describe('shipCommand single-issue path', () => {
 
     const cliEntrypoint = process.argv[1];
     expect(cliEntrypoint).toBeDefined();
-    expect(mockSpawnSync).toHaveBeenCalledTimes(4);
-    const firstCall = mockSpawnSync.mock.calls[0];
+    expect(mockSpawn).toHaveBeenCalledTimes(4);
+    const firstCall = mockSpawn.mock.calls[0];
     expect(firstCall).toBeDefined();
     expect(firstCall).toEqual([
       process.execPath,
       [cliEntrypoint, 'next', '42'],
-      expect.objectContaining({ stdio: 'inherit' }),
+      expect.objectContaining({ stdio: ['inherit', 'pipe', 'pipe'] }),
     ]);
     expect(getCallEnv(firstCall)).toEqual(expect.objectContaining({ SHIPPER_LOCK_HELD: '42' }));
     expect(mockGh).not.toHaveBeenCalledWith(
@@ -1005,13 +1024,13 @@ describe('shipCommand single-issue path', () => {
 
     const cliEntrypoint = process.argv[1];
     expect(cliEntrypoint).toBeDefined();
-    expect(mockSpawnSync).toHaveBeenCalledTimes(2);
-    const firstCall = mockSpawnSync.mock.calls[0];
+    expect(mockSpawn).toHaveBeenCalledTimes(2);
+    const firstCall = mockSpawn.mock.calls[0];
     expect(firstCall).toBeDefined();
     expect(firstCall).toEqual([
       process.execPath,
       [cliEntrypoint, 'next', '42'],
-      expect.objectContaining({ stdio: 'inherit' }),
+      expect.objectContaining({ stdio: ['inherit', 'pipe', 'pipe'] }),
     ]);
     expect(getCallEnv(firstCall)).toEqual(expect.objectContaining({ SHIPPER_LOCK_HELD: '42' }));
     expect(exitSpy).toHaveBeenCalledWith(0);
@@ -1019,6 +1038,48 @@ describe('shipCommand single-issue path', () => {
 
     logSpy.mockRestore();
     errorSpy.mockRestore();
+  });
+
+  it('writes a single-issue ship log, tees child output, and prints the final log path', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-06T02:30:00'));
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const stdoutWriteSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const stderrWriteSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+    mockIssueViewSequence(['shipper:planned', 'shipper:ready']);
+    mockSpawn.mockImplementationOnce(() => {
+      const child = new FakeChildProcess();
+      globalThis.queueMicrotask(() => {
+        child.stdout.write('agent output\n');
+        child.finish(0, null, 'agent error\n');
+      });
+      return child as never;
+    });
+
+    await shipCommand(repo, '42', { auto: false, merge: false });
+
+    const logFile = '/mock-home/.shipper/logs/ship-42-20260306T023000.log';
+    expect(mockMkdirSync).toHaveBeenCalledWith('/mock-home/.shipper/logs', {
+      recursive: true,
+      mode: 0o700,
+    });
+    expect(mockCreateWriteStream).toHaveBeenCalledWith(logFile);
+    expect(mockSpawn.mock.calls[0]?.[2]).toMatchObject({ stdio: ['inherit', 'pipe', 'pipe'] });
+    expect(stdoutWriteSpy).toHaveBeenCalledWith(expect.any(Buffer));
+    expect(stderrWriteSpy).toHaveBeenCalledWith(expect.any(Buffer));
+
+    const output = getConsoleOutput(logSpy);
+    expect(output).toContain('Log file: ~/.shipper/logs/ship-42-20260306T023000.log');
+    expect(fsMockState.capturedLogs.get(logFile)).toContain('Running stage: implement');
+    expect(fsMockState.capturedLogs.get(logFile)).toContain('agent output');
+    expect(fsMockState.capturedLogs.get(logFile)).toContain('agent error');
+
+    stdoutWriteSpy.mockRestore();
+    stderrWriteSpy.mockRestore();
+    logSpy.mockRestore();
+    vi.useRealTimers();
   });
 
   it('keeps prioritized issues shippable in the single-issue path', async () => {
@@ -1029,7 +1090,7 @@ describe('shipCommand single-issue path', () => {
 
     await shipCommand(repo, '42', { auto: false, merge: false });
 
-    expect(mockSpawnSync).toHaveBeenCalledTimes(1);
+    expect(mockSpawn).toHaveBeenCalledTimes(1);
     expect(exitSpy).toHaveBeenCalledWith(0);
   });
 
@@ -1041,7 +1102,7 @@ describe('shipCommand single-issue path', () => {
 
     await shipCommand(repo, '42', { auto: false, merge: false });
 
-    expect(mockSpawnSync).toHaveBeenCalledTimes(1);
+    expect(mockSpawn).toHaveBeenCalledTimes(1);
     expect(exitSpy).toHaveBeenCalledWith(1);
     expect(errorSpy).toHaveBeenCalledWith(
       'Label did not advance after stage "groom" (still "shipper:new"). Aborting to avoid infinite loop.'
@@ -1065,7 +1126,7 @@ describe('shipCommand single-issue path', () => {
 
     const cliEntrypoint = process.argv[1];
     expect(cliEntrypoint).toBeDefined();
-    const expectedCall = mockSpawnSync.mock.calls.find(
+    const expectedCall = mockSpawn.mock.calls.find(
       (call) =>
         call[0] === process.execPath &&
         JSON.stringify(call[1]) ===
@@ -1093,10 +1154,10 @@ describe('shipCommand single-issue path', () => {
 
     const cliEntrypoint = process.argv[1];
     expect(cliEntrypoint).toBeDefined();
-    expect(mockSpawnSync).toHaveBeenCalledWith(
+    expect(mockSpawn).toHaveBeenCalledWith(
       process.execPath,
       [cliEntrypoint, 'next', '42'],
-      expect.objectContaining({ stdio: 'inherit' })
+      expect.objectContaining({ stdio: ['inherit', 'pipe', 'pipe'] })
     );
     expect(exitSpy).toHaveBeenCalledWith(0);
   });
@@ -1108,7 +1169,7 @@ describe('shipCommand single-issue path', () => {
 
     await shipCommand(repo, '42', { auto: false, merge: false, mode: 'default' });
 
-    expect(mockSpawnSync).toHaveBeenCalledTimes(1);
+    expect(mockSpawn).toHaveBeenCalledTimes(1);
     expect(exitSpy).toHaveBeenCalledWith(1);
     expect(errorSpy).toHaveBeenCalledWith(
       'Issue #42 was reset to shipper:new by stage "implement" - stopping to avoid interactive groom stage.'
@@ -1126,22 +1187,22 @@ describe('shipCommand single-issue path', () => {
 
     const cliEntrypoint = process.argv[1];
     expect(cliEntrypoint).toBeDefined();
-    expect(mockSpawnSync).toHaveBeenCalledTimes(3);
-    expect(mockSpawnSync.mock.calls[0]?.[1]).toEqual([
+    expect(mockSpawn).toHaveBeenCalledTimes(3);
+    expect(mockSpawn.mock.calls[0]?.[1]).toEqual([
       cliEntrypoint,
       'next',
       '42',
       '--mode',
       'interactive',
     ]);
-    expect(mockSpawnSync.mock.calls[1]?.[1]).toEqual([
+    expect(mockSpawn.mock.calls[1]?.[1]).toEqual([
       cliEntrypoint,
       'next',
       '42',
       '--mode',
       'interactive',
     ]);
-    expect(mockSpawnSync.mock.calls[2]?.[1]).toEqual([
+    expect(mockSpawn.mock.calls[2]?.[1]).toEqual([
       cliEntrypoint,
       'next',
       '42',
@@ -1161,7 +1222,7 @@ describe('shipCommand single-issue path', () => {
 
     await shipCommand(repo, '42', { auto: false, merge: false });
 
-    expect(mockSpawnSync).not.toHaveBeenCalled();
+    expect(mockSpawn).not.toHaveBeenCalled();
     expect(exitSpy).toHaveBeenCalledWith(1);
     expect(errorSpy).toHaveBeenCalledWith(
       'Issue #42 is marked shipper:failed and requires manual intervention before it can re-enter the pipeline.'
@@ -1183,7 +1244,6 @@ describe('shipCommand merge path', () => {
     mockWithIssueLock.mockReset();
     mockWithIssueLock.mockImplementation(defaultWithIssueLock);
     mockSpawn.mockReset();
-    mockSpawnSync.mockReset();
     postMergeMock.mockClear();
     postMergeMock.mockResolvedValue(undefined);
     exitSpy.mockClear();
@@ -1376,7 +1436,7 @@ describe('shipCommand sequential auto runner parking', () => {
       prReviewWait: { mode: 'checks', timeoutMinutes: 15 },
     });
     mockBuildReadyCheck.mockReset();
-    mockSpawnSync.mockReset();
+    mockSpawn.mockReset();
     mockGh.mockReset();
     mockSelectIssuesForStage.mockReset();
     mockWithStageHooks.mockReset();
@@ -1393,6 +1453,11 @@ describe('shipCommand sequential auto runner parking', () => {
       mockIssues.delete(Number(issueNumber));
       return Promise.resolve();
     });
+    mockCreateWriteStream.mockClear();
+    mockMkdirSync.mockClear();
+    mockHomedir.mockClear();
+    mockHomedir.mockReturnValue('/mock-home');
+    fsMockState.capturedLogs.clear();
     exitSpy.mockClear();
     installSequentialCliMocks();
   });
@@ -1441,14 +1506,14 @@ describe('shipCommand sequential auto runner parking', () => {
     await flushMicrotasks();
 
     expect(mockBuildReadyCheck).toHaveBeenCalledWith(repo, '101');
-    expect(getIssuedCalls(mockSpawnSync.mock.calls).includes('1')).toBe(false);
-    expect(getIssuedCalls(mockSpawnSync.mock.calls).includes('2')).toBe(true);
+    expect(getIssuedCalls(mockSpawn.mock.calls).includes('1')).toBe(false);
+    expect(getIssuedCalls(mockSpawn.mock.calls).includes('2')).toBe(true);
 
     timerReady = true;
     await vi.advanceTimersByTimeAsync(20_000);
     await runPromise;
 
-    const resumedCall = findCallForIssue(mockSpawnSync.mock.calls, '1');
+    const resumedCall = findCallForIssue(mockSpawn.mock.calls, '1');
     expect(resumedCall).toBeDefined();
     expect(getCallEnv(resumedCall)).toEqual(
       expect.objectContaining({
@@ -1456,7 +1521,7 @@ describe('shipCommand sequential auto runner parking', () => {
         SHIPPER_SKIP_PR_REMEDIATE_WAIT: '1',
       })
     );
-    const secondIssueCall = findCallForIssue(mockSpawnSync.mock.calls, '2');
+    const secondIssueCall = findCallForIssue(mockSpawn.mock.calls, '2');
     expect(secondIssueCall).toBeDefined();
     expect(getCallEnv(secondIssueCall)).toEqual(
       expect.objectContaining({ SHIPPER_LOCK_HELD: '2' })
@@ -1506,14 +1571,14 @@ describe('shipCommand sequential auto runner parking', () => {
 
     await flushMicrotasks();
     expect(mockBuildReadyCheck).toHaveBeenCalledWith(repo, '201');
-    expect(getIssuedCalls(mockSpawnSync.mock.calls).includes('1')).toBe(false);
-    expect(getIssuedCalls(mockSpawnSync.mock.calls).includes('2')).toBe(true);
+    expect(getIssuedCalls(mockSpawn.mock.calls).includes('1')).toBe(false);
+    expect(getIssuedCalls(mockSpawn.mock.calls).includes('2')).toBe(true);
 
     checksReady = true;
     await vi.advanceTimersByTimeAsync(20_000);
     await runPromise;
 
-    const issueOrder = getIssuedCalls(mockSpawnSync.mock.calls);
+    const issueOrder = getIssuedCalls(mockSpawn.mock.calls);
     expect(issueOrder.indexOf('2')).toBeLessThan(issueOrder.lastIndexOf('1'));
     expect(exitSpy).toHaveBeenCalledWith(0);
   });
@@ -1551,18 +1616,18 @@ describe('shipCommand sequential auto runner parking', () => {
     const runPromise = shipCommand(repo, undefined, { auto: true, merge: false });
 
     await flushMicrotasks();
-    expect(mockSpawnSync).not.toHaveBeenCalled();
+    expect(mockSpawn).not.toHaveBeenCalled();
 
     secondReady = true;
     await vi.advanceTimersByTimeAsync(20_000);
     await flushMicrotasks();
-    expect(getIssuedCalls(mockSpawnSync.mock.calls)).toEqual(['2']);
+    expect(getIssuedCalls(mockSpawn.mock.calls)).toEqual(['2']);
 
     firstReady = true;
     await vi.advanceTimersByTimeAsync(20_000);
     await runPromise;
 
-    expect(getIssuedCalls(mockSpawnSync.mock.calls)).toEqual(['2', '1']);
+    expect(getIssuedCalls(mockSpawn.mock.calls)).toEqual(['2', '1']);
     expect(exitSpy).toHaveBeenCalledWith(0);
   });
 
@@ -1650,8 +1715,8 @@ describe('shipCommand sequential auto runner parking', () => {
     const runPromise = shipCommand(repo, undefined, { auto: true, merge: false });
 
     await flushMicrotasks();
-    expect(getIssuedCalls(mockSpawnSync.mock.calls).includes('1')).toBe(false);
-    expect(getIssuedCalls(mockSpawnSync.mock.calls).includes('2')).toBe(true);
+    expect(getIssuedCalls(mockSpawn.mock.calls).includes('1')).toBe(false);
+    expect(getIssuedCalls(mockSpawn.mock.calls).includes('2')).toBe(true);
 
     parkedReady = true;
     await vi.advanceTimersByTimeAsync(20_000);
@@ -1662,6 +1727,62 @@ describe('shipCommand sequential auto runner parking', () => {
     expect(output).toContain('✓ pass');
     expect(exitSpy).toHaveBeenCalledWith(0);
 
+    logSpy.mockRestore();
+  });
+
+  it('writes one log file per sequential auto issue and prints the log summary block', async () => {
+    vi.setSystemTime(new Date('2026-03-06T02:30:00'));
+    setMockIssues([
+      {
+        number: 1,
+        title: 'First issue',
+        labels: ['shipper:planned'],
+        nextLabels: ['shipper:ready'],
+        prNumber: 101,
+      },
+      {
+        number: 2,
+        title: 'Second issue',
+        labels: ['shipper:planned'],
+        nextLabels: ['shipper:ready'],
+        prNumber: 102,
+      },
+    ]);
+    installSequentialCliMocks({
+      stageOutput: (issueNumber) =>
+        issueNumber === 1
+          ? { stdout: 'first stdout\n', stderr: 'first stderr\n' }
+          : { stdout: 'second stdout\n' },
+    });
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const stdoutWriteSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const stderrWriteSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+    await shipCommand(repo, undefined, { auto: true, merge: false, parallel: 1 });
+
+    const logFile1 = '/mock-home/.shipper/logs/ship-1-20260306T023000.log';
+    const logFile2 = '/mock-home/.shipper/logs/ship-2-20260306T023000.log';
+    expect(mockMkdirSync).toHaveBeenCalledWith('/mock-home/.shipper/logs', {
+      recursive: true,
+      mode: 0o700,
+    });
+    expect(mockCreateWriteStream).toHaveBeenCalledWith(logFile1);
+    expect(mockCreateWriteStream).toHaveBeenCalledWith(logFile2);
+    expect(stdoutWriteSpy).toHaveBeenCalledWith(expect.any(Buffer));
+    expect(stderrWriteSpy).toHaveBeenCalledWith(expect.any(Buffer));
+
+    const output = getConsoleOutput(logSpy);
+    expect(output).toContain('  Log files:');
+    expect(output).toContain('  #1   ~/.shipper/logs/ship-1-20260306T023000.log');
+    expect(output).toContain('  #2   ~/.shipper/logs/ship-2-20260306T023000.log');
+    expect(fsMockState.capturedLogs.get(logFile1)).toContain('Running stage: implement');
+    expect(fsMockState.capturedLogs.get(logFile1)).toContain('first stdout');
+    expect(fsMockState.capturedLogs.get(logFile1)).toContain('first stderr');
+    expect(fsMockState.capturedLogs.get(logFile2)).toContain('second stdout');
+
+    stdoutWriteSpy.mockRestore();
+    stderrWriteSpy.mockRestore();
     logSpy.mockRestore();
   });
 
@@ -1684,7 +1805,7 @@ describe('shipCommand sequential auto runner parking', () => {
     await shipCommand(repo, '1', { auto: false, merge: true });
 
     expect(mockBuildReadyCheck).not.toHaveBeenCalled();
-    expect(getIssuedCalls(mockSpawnSync.mock.calls)).toEqual(['1', '1', '1', '1']);
+    expect(getIssuedCalls(mockSpawn.mock.calls)).toEqual(['1', '1', '1', '1']);
   });
 });
 
@@ -1693,8 +1814,14 @@ describe('shipCommand auto skip handling', () => {
     mockSelectIssuesForStage.mockReset();
     mockClearStaleLockIfNeeded.mockReset();
     mockGh.mockReset();
-    mockSpawnSync.mockReset();
-    mockSpawnSync.mockReturnValue({ status: 0 } as ReturnType<typeof spawnSync>);
+    mockSpawn.mockReset();
+    mockSpawn.mockImplementation(() => {
+      const child = new FakeChildProcess();
+      globalThis.queueMicrotask(() => {
+        child.finish(0);
+      });
+      return child as never;
+    });
     exitSpy.mockClear();
   });
 
@@ -1735,7 +1862,7 @@ describe('shipCommand auto skip handling', () => {
     const logOutput = getConsoleOutput(logSpy);
     const errorOutput = getConsoleOutput(errorSpy);
 
-    expect(mockSpawnSync).toHaveBeenCalledTimes(1);
+    expect(mockSpawn).toHaveBeenCalledTimes(1);
     expect(plannedSelections).toBeGreaterThanOrEqual(2);
     expect(
       getConsoleEntries(logSpy).filter((entry) => entry.includes('Auto: advancing issue #42'))
@@ -1763,7 +1890,6 @@ describe('shipCommand auto merge-failure retry handling', () => {
     mockWithIssueLock.mockReset();
     mockWithIssueLock.mockImplementation(defaultWithIssueLock);
     mockSpawn.mockReset();
-    mockSpawnSync.mockReset();
     postMergeMock.mockClear();
     postMergeMock.mockResolvedValue(undefined);
     exitSpy.mockClear();
@@ -1876,7 +2002,6 @@ describe('shipCommand parallel auto runner', () => {
       });
     });
     mockSpawn.mockReset();
-    mockSpawnSync.mockReset();
     mockReleaseIssueLock.mockReset();
     mockCreateWriteStream.mockClear();
     mockMkdirSync.mockClear();
@@ -2295,7 +2420,10 @@ describe('shipCommand parallel auto runner', () => {
 
     expect(mockSpawn).not.toHaveBeenCalled();
     expect(mockCreateWriteStream).not.toHaveBeenCalled();
-    expect(mockMkdirSync).not.toHaveBeenCalled();
+    expect(mockMkdirSync).toHaveBeenCalledWith('/mock-home/.shipper/logs', {
+      recursive: true,
+      mode: 0o700,
+    });
     expect(mockSelectIssuesForStage).toHaveBeenCalled();
     expect(getConsoleOutput(logSpy)).not.toContain('[#');
     expect(exitSpy).toHaveBeenCalledWith(0);
@@ -2312,7 +2440,10 @@ describe('shipCommand parallel auto runner', () => {
 
     expect(mockSpawn).not.toHaveBeenCalled();
     expect(mockCreateWriteStream).not.toHaveBeenCalled();
-    expect(mockMkdirSync).not.toHaveBeenCalled();
+    expect(mockMkdirSync).toHaveBeenCalledWith('/mock-home/.shipper/logs', {
+      recursive: true,
+      mode: 0o700,
+    });
     expect(mockSelectIssuesForStage).toHaveBeenCalled();
     expect(getConsoleOutput(logSpy)).not.toContain('[#');
     expect(exitSpy).toHaveBeenCalledWith(0);
