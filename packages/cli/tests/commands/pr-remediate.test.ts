@@ -577,6 +577,74 @@ describe('prRemediateCommand', () => {
     expect(executeTransitionMock).not.toHaveBeenCalled();
   });
 
+  it('posts prepared outputs before reporting a push failure crash and stops remediation', async () => {
+    readResultFileMock.mockResolvedValue({
+      verdict: 'accept',
+      comment: '.shipper/output/comment-10.md',
+      replies: '.shipper/output/replies',
+    });
+    pushWorktreeMock.mockRejectedValue(new Error('fatal: unable to access remote'));
+
+    const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
+
+    await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
+
+    expect(postRepliesMock).toHaveBeenCalledWith(
+      'owner/repo',
+      '42',
+      '/tmp/fake-wt',
+      '.shipper/output/replies'
+    );
+    expect(postCommentMock).toHaveBeenCalledWith(
+      'owner/repo',
+      '10',
+      '/tmp/fake-wt/.shipper/output/comment-10.md'
+    );
+    expect(postRepliesMock.mock.invocationCallOrder[0]).toBeLessThan(
+      handleAgentCrashMock.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY
+    );
+    expect(postCommentMock.mock.invocationCallOrder[0]).toBeLessThan(
+      handleAgentCrashMock.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY
+    );
+    expect(handleAgentCrashMock).toHaveBeenCalledWith(
+      'owner/repo',
+      '10',
+      'pr_remediate',
+      'fatal: unable to access remote'
+    );
+    expect(process.exitCode).toBe(1);
+    expect(resolveTransitionMock).not.toHaveBeenCalled();
+    expect(executeTransitionMock).not.toHaveBeenCalled();
+    expect(syncWorktreeMock).toHaveBeenCalledTimes(1);
+    expect(pushWorktreeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('still reports a push failure crash when posting prepared outputs also fails', async () => {
+    readResultFileMock.mockResolvedValue({
+      verdict: 'accept',
+      comment: '.shipper/output/comment-10.md',
+      replies: '.shipper/output/replies',
+    });
+    pushWorktreeMock.mockRejectedValue(new Error('fatal: unable to access remote'));
+    postRepliesMock.mockRejectedValue(new Error('reply post failed'));
+    postCommentMock.mockRejectedValue(new Error('comment post failed'));
+
+    const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
+
+    await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
+
+    expect(postRepliesMock).toHaveBeenCalledTimes(1);
+    expect(postCommentMock).toHaveBeenCalledTimes(1);
+    expect(handleAgentCrashMock).toHaveBeenCalledWith(
+      'owner/repo',
+      '10',
+      'pr_remediate',
+      'fatal: unable to access remote'
+    );
+    expect(process.exitCode).toBe(1);
+    expect(executeTransitionMock).not.toHaveBeenCalled();
+  });
+
   it('handles sync failures as agent crashes', async () => {
     fetchChecksMock.mockResolvedValue(PASS_CHECKS);
     syncWorktreeMock.mockRejectedValue(new Error('rebase failed'));
