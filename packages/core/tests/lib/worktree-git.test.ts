@@ -258,6 +258,7 @@ describe('pushWorktree', () => {
   });
 
   it('aborts and throws when the recovery rebase fails, preserving any abort failure detail', async () => {
+    queueExecResult({ stdout: 'feature/retry\n' });
     queueExecResult({ code: 1, stderr: 'non-fast-forward' });
     queueSpawnExit();
     queueExecResult({ stdout: 'feature/retry\n' });
@@ -283,6 +284,7 @@ describe('pushWorktree', () => {
   });
 
   it('surfaces recovery fetch failures immediately', async () => {
+    queueExecResult({ stdout: 'feature/retry\n' });
     queueExecResult({ code: 1, stderr: 'non-fast-forward' });
     queueSpawnExit(1);
 
@@ -295,11 +297,15 @@ describe('pushWorktree', () => {
       })
     ).rejects.toThrow('git fetch origin failed: git exited with code 1');
 
-    expect(gitArgsFromExecCalls()).toEqual([['push', '--force-with-lease']]);
+    expect(gitArgsFromExecCalls()).toEqual([
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
+    ]);
     expect(gitArgsFromSpawnCalls()).toEqual([['fetch', 'origin']]);
   });
 
   it('stops after three recovery attempts and throws the final push failure', async () => {
+    queueExecResult({ stdout: 'feature/retry\n' });
     queueExecResult({ code: 1, stderr: 'pre-push hook failed', stdout: 'attempt 1' });
     queueSpawnExit();
     queueExecResult({ stdout: 'feature/retry\n' });
@@ -322,20 +328,21 @@ describe('pushWorktree', () => {
         pushMode: 'force-with-lease',
       })
     ).rejects.toThrow(
-      'git push --force-with-lease exited with code 1:\npre-push hook failed\nattempt 4'
+      'git push --force-with-lease origin HEAD:refs/heads/feature/retry exited with code 1:\npre-push hook failed\nattempt 4'
     );
 
     expect(gitArgsFromExecCalls()).toEqual([
-      ['push', '--force-with-lease'],
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
-      ['push', '--force-with-lease'],
+      ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
-      ['push', '--force-with-lease'],
+      ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
-      ['push', '--force-with-lease'],
+      ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
     ]);
     expect(gitArgsFromSpawnCalls()).toEqual([
       ['fetch', 'origin'],
@@ -426,6 +433,7 @@ describe('withGitTransport', () => {
         ['<<<<<<< HEAD', 'left', '=======', 'right', '>>>>>>> origin/main'].join('\n')
       );
     queueExecResult();
+    queueExecResult({ stdout: 'feature/retry\n' });
     queueExecResult();
     const runAgent = vi.fn().mockResolvedValue(0);
 
@@ -461,7 +469,8 @@ describe('withGitTransport', () => {
       ['rebase', '--autostash', 'origin/main'],
       ['diff', '--name-only', '--diff-filter=U'],
       ['rebase', '--continue'],
-      ['push', '--force-with-lease'],
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
     ]);
   });
 
@@ -543,6 +552,7 @@ describe('withGitTransport', () => {
   it('re-enters conflict resolution when the recovery rebase hits conflicts', async () => {
     queueSpawnExit();
     queueExecResult();
+    queueExecResult({ stdout: 'feature/retry\n' });
     queueExecResult({ code: 1, stderr: 'non-fast-forward' });
     queueSpawnExit();
     queueExecResult({ stdout: 'feature/retry\n' });
@@ -586,13 +596,14 @@ describe('withGitTransport', () => {
     ]);
     expect(gitArgsFromExecCalls()).toEqual([
       ['rebase', '--autostash', 'origin/main'],
-      ['push', '--force-with-lease'],
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
       ['rebase', '--autostash', 'origin/feature/retry'],
       ['diff', '--name-only', '--diff-filter=U'],
       ['rebase', '--continue'],
-      ['push', '--force-with-lease'],
+      ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
     ]);
   });
 
@@ -636,6 +647,7 @@ describe('withGitTransport', () => {
   it('feeds a failed recovery rebase --continue error into the next retry context', async () => {
     queueSpawnExit();
     queueExecResult();
+    queueExecResult({ stdout: 'feature/retry\n' });
     queueExecResult({ code: 1, stderr: 'non-fast-forward' });
     queueSpawnExit();
     queueExecResult({ stdout: 'feature/retry\n' });
@@ -681,7 +693,8 @@ describe('withGitTransport', () => {
     });
     expect(gitArgsFromExecCalls()).toEqual([
       ['rebase', '--autostash', 'origin/main'],
-      ['push', '--force-with-lease'],
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
       ['rebase', '--autostash', 'origin/feature/retry'],
@@ -689,7 +702,7 @@ describe('withGitTransport', () => {
       ['rebase', '--continue'],
       ['diff', '--name-only', '--diff-filter=U'],
       ['rebase', '--continue'],
-      ['push', '--force-with-lease'],
+      ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
     ]);
   });
 
@@ -737,6 +750,7 @@ describe('withGitTransport', () => {
   it('surfaces recovery fetch failures immediately as transport errors', async () => {
     queueSpawnExit();
     queueExecResult();
+    queueExecResult({ stdout: 'feature/retry\n' });
     queueExecResult({ code: 1, stderr: 'non-fast-forward' });
     queueSpawnExit(1);
     const runAgent = vi.fn().mockResolvedValue(0);
@@ -760,7 +774,8 @@ describe('withGitTransport', () => {
     ]);
     expect(gitArgsFromExecCalls()).toEqual([
       ['rebase', '--autostash', 'origin/main'],
-      ['push', '--force-with-lease'],
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
     ]);
   });
 
@@ -941,6 +956,7 @@ describe('withGitTransport', () => {
     queueExecResult({ stdout: '.git\n' });
     // accessMock rejects by default (ENOENT) → no rebase dirs → rebase complete
     // push (via execAsync, not spawnAsync)
+    queueExecResult({ stdout: 'feature/retry\n' });
     queueExecResult();
     const runAgent = vi.fn().mockResolvedValue(0);
 
@@ -963,7 +979,8 @@ describe('withGitTransport', () => {
       ['rebase', '--continue'],
       ['diff', '--name-only', '--diff-filter=U'],
       ['rev-parse', '--git-dir'],
-      ['push', '--force-with-lease'],
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
     ]);
   });
 
