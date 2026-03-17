@@ -610,7 +610,8 @@ describe('prRemediateCommand', () => {
       'owner/repo',
       '10',
       'pr_remediate',
-      'fatal: unable to access remote'
+      'fatal: unable to access remote',
+      'The `pr_remediate` agent run failed while pushing the remediation worktree after producing a valid `.shipper/output/result.json`.'
     );
     expect(process.exitCode).toBe(1);
     expect(resolveTransitionMock).not.toHaveBeenCalled();
@@ -620,6 +621,7 @@ describe('prRemediateCommand', () => {
   });
 
   it('still reports a push failure crash when posting prepared outputs also fails', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     readResultFileMock.mockResolvedValue({
       verdict: 'accept',
       comment: '.shipper/output/comment-10.md',
@@ -635,14 +637,23 @@ describe('prRemediateCommand', () => {
 
     expect(postRepliesMock).toHaveBeenCalledTimes(1);
     expect(postCommentMock).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith(
+      'Failed to post replies during push failure handling: reply post failed'
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      'Failed to post comment during push failure handling: comment post failed'
+    );
     expect(handleAgentCrashMock).toHaveBeenCalledWith(
       'owner/repo',
       '10',
       'pr_remediate',
-      'fatal: unable to access remote'
+      'fatal: unable to access remote',
+      'The `pr_remediate` agent run failed while pushing the remediation worktree after producing a valid `.shipper/output/result.json`.'
     );
     expect(process.exitCode).toBe(1);
     expect(executeTransitionMock).not.toHaveBeenCalled();
+
+    warnSpy.mockRestore();
   });
 
   it('handles sync failures as agent crashes', async () => {

@@ -533,15 +533,10 @@ export async function handleAgentCrash(
   repo: string,
   issueNumber: string,
   stage: StageName,
-  errorDetail: string
+  errorDetail: string,
+  summary = `The \`${stage}\` agent run exited without producing a valid \`.shipper/output/result.json\`.`
 ): Promise<void> {
-  const body = [
-    '## Agent Failure',
-    '',
-    `The \`${stage}\` agent run exited without producing a valid \`.shipper/output/result.json\`.`,
-    '',
-    errorDetail,
-  ].join('\n');
+  const body = ['## Agent Failure', '', summary, '', errorDetail].join('\n');
 
   await gh(['issue', 'comment', issueNumber, '-R', repo, '--body', body]);
 }
