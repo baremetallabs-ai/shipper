@@ -786,4 +786,31 @@ describe('output protocol helpers', () => {
       ].join('\n'),
     ]);
   });
+
+  it('allows a custom crash summary when the failure happens after valid output exists', async () => {
+    await handleAgentCrash(
+      'owner/repo',
+      '248',
+      'pr_remediate',
+      'fatal: unable to access remote',
+      'The `pr_remediate` agent run failed while pushing the remediation worktree after producing a valid `.shipper/output/result.json`.'
+    );
+
+    expect(ghMock).toHaveBeenCalledTimes(1);
+    expect(ghMock).toHaveBeenCalledWith([
+      'issue',
+      'comment',
+      '248',
+      '-R',
+      'owner/repo',
+      '--body',
+      [
+        '## Agent Failure',
+        '',
+        'The `pr_remediate` agent run failed while pushing the remediation worktree after producing a valid `.shipper/output/result.json`.',
+        '',
+        'fatal: unable to access remote',
+      ].join('\n'),
+    ]);
+  });
 });

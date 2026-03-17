@@ -415,15 +415,35 @@ export async function prRemediateCommand(
               const detail = error instanceof Error ? error.message : String(error);
               try {
                 await postReplies(repo, prRef, wtPath, result.replies);
-              } catch {
+              } catch (postRepliesError) {
+                console.warn(
+                  `Failed to post replies during push failure handling: ${
+                    postRepliesError instanceof Error
+                      ? postRepliesError.message
+                      : String(postRepliesError)
+                  }`
+                );
                 // Best-effort: still attempt the main comment and crash report.
               }
               try {
                 await postComment(repo, issueNumber, commentPath);
-              } catch {
+              } catch (postCommentError) {
+                console.warn(
+                  `Failed to post comment during push failure handling: ${
+                    postCommentError instanceof Error
+                      ? postCommentError.message
+                      : String(postCommentError)
+                  }`
+                );
                 // Best-effort: the crash report is the required audit trail.
               }
-              await handleAgentCrash(repo, issueNumber, 'pr_remediate', detail);
+              await handleAgentCrash(
+                repo,
+                issueNumber,
+                'pr_remediate',
+                detail,
+                'The `pr_remediate` agent run failed while pushing the remediation worktree after producing a valid `.shipper/output/result.json`.'
+              );
               return 1;
             }
             await postReplies(repo, prRef, wtPath, result.replies);
