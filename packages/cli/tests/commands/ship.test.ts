@@ -1082,6 +1082,44 @@ describe('shipCommand single-issue path', () => {
     vi.useRealTimers();
   });
 
+  it('does not let a destroyed log stream hang or override a successful ship result', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    mockIssueViewSequence(['shipper:planned', 'shipper:ready']);
+    mockSpawn.mockImplementationOnce(() => {
+      const child = new FakeChildProcess();
+      globalThis.queueMicrotask(() => {
+        child.stdout.write('agent output\n');
+        child.finish(0);
+      });
+      return child as never;
+    });
+
+    mockCreateWriteStream.mockImplementationOnce((filePath: string) => {
+      const stream = new PassThrough();
+      let failed = false;
+      fsMockState.capturedLogs.set(filePath, '');
+      stream.on('data', (chunk: Buffer | string) => {
+        fsMockState.capturedLogs.set(
+          filePath,
+          `${fsMockState.capturedLogs.get(filePath) ?? ''}${chunk.toString()}`
+        );
+        if (!failed) {
+          failed = true;
+          stream.destroy(new Error('disk full'));
+        }
+      });
+      return stream;
+    });
+
+    await shipCommand(repo, '42', { auto: false, merge: false });
+
+    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining('disk full'));
+
+    errorSpy.mockRestore();
+  });
+
   it('keeps prioritized issues shippable in the single-issue path', async () => {
     mockIssueViewSequence([
       'shipper:planned\nshipper:priority-high',
