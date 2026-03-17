@@ -71,7 +71,7 @@ For any path that `git check-ignore` confirms is ignored:
 Check whether the repo has a pre-push hook by looking for these locations in order:
 
 1. `.husky/pre-push`
-2. `.git/hooks/pre-push`
+2. The path resolved by `git rev-parse --git-path hooks/pre-push`
 3. Any repo-configured hooks path that contains a `pre-push` hook (for example, a custom `core.hooksPath`)
 
 If one of these hook files exists, read the first one you find and extract each runnable command it invokes (for example, `npm run lint` or `npm run test`). Ignore bootstrap/setup lines such as sourced Husky helper scripts, and record only the exact commands that the implementer can run directly from the repo root so you can include each one as an explicit verification step in Phase 2.
