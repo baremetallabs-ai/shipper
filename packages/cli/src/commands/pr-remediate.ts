@@ -409,7 +409,23 @@ export async function prRemediateCommand(
               return 0;
             }
 
-            await pushWorktree(gitOpts);
+            try {
+              await pushWorktree(gitOpts);
+            } catch (error) {
+              const detail = error instanceof Error ? error.message : String(error);
+              try {
+                await postReplies(repo, prRef, wtPath, result.replies);
+              } catch {
+                // Best-effort: still attempt the main comment and crash report.
+              }
+              try {
+                await postComment(repo, issueNumber, commentPath);
+              } catch {
+                // Best-effort: the crash report is the required audit trail.
+              }
+              await handleAgentCrash(repo, issueNumber, 'pr_remediate', detail);
+              return 1;
+            }
             await postReplies(repo, prRef, wtPath, result.replies);
             await postComment(repo, issueNumber, commentPath);
 
