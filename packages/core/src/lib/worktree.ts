@@ -308,6 +308,7 @@ async function pushWorktreeBranch(
 
   const cleanResult = await execAsync('git', ['clean', '-fd', '--exclude=.shipper'], {
     cwd: opts.wtPath,
+    maxBuffer: PUSH_OUTPUT_MAX_BUFFER,
   });
   if (cleanResult.code !== 0) {
     throw formatTransportError(
