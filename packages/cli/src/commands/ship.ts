@@ -13,6 +13,7 @@ import {
   gh,
   getSettings,
   processResult,
+  retryOnInvalidOutput,
   scrubOutputDir,
   withStageHooks,
   releaseIssueLock,
@@ -60,6 +61,7 @@ export interface UnblockAttempt {
   issue: number;
   title: string;
   outcome: 'unblocked' | 'still blocked';
+  logFile?: string;
 }
 
 export interface ShipOptions {
@@ -1084,14 +1086,21 @@ async function attemptUnblock(
   repo: string,
   issueStr: string,
   agent?: AgentName,
-  model?: string
+  model?: string,
+  logFile?: string
 ): Promise<boolean> {
   const cwd = process.cwd();
 
   return await withIssueLock(repo, issueStr, async () => {
     await scrubOutputDir(cwd);
     await prepareUnblockContext(repo, issueStr, cwd);
-    await runPrompt('unblock', { repo, issueRef: issueStr, agent, model });
+    await runPrompt('unblock', { repo, issueRef: issueStr, agent, model, logFile });
+
+    await retryOnInvalidOutput({
+      cwd,
+      retry: (userInput) =>
+        runPrompt('unblock', { repo, issueRef: issueStr, agent, model, logFile, userInput }),
+    });
 
     try {
       const result = await processResult({
@@ -1275,16 +1284,27 @@ async function resumeParkedIssue(
   recordAutoResult(results, skippedIssues, readyParked.issue, resumedOutcome.result);
 }
 
-export function printUnblockSummary(attempts: UnblockAttempt[]): void {
+export function printUnblockSummary(attempts: UnblockAttempt[], homeDir = homedir()): void {
   console.log('\n  Unblock attempts:\n');
   console.log('  #    Issue                                          Outcome');
   for (const a of attempts) {
-    const num = String(a.issue).padEnd(5);
+    const ref = `unblock #${a.issue}`;
+    const num = ref.padEnd(5);
     const titleChars = Array.from(a.title);
     const title =
       titleChars.length > 45 ? titleChars.slice(0, 42).join('') + '...' : a.title.padEnd(45);
     const outcome = a.outcome === 'unblocked' ? '✓ unblocked' : '— still blocked';
     console.log(`  ${num}${title} ${outcome}`);
+  }
+
+  const withLogFiles = attempts.filter(
+    (a): a is UnblockAttempt & { logFile: string } => !!a.logFile
+  );
+  if (withLogFiles.length > 0) {
+    console.log('\n  Unblock log files:');
+    for (const a of withLogFiles) {
+      console.log(`  unblock #${a.issue}   ${formatLogDisplayPath(a.logFile, homeDir)}`);
+    }
   }
 }
 
@@ -1354,11 +1374,22 @@ async function shipAutoSequential(repo: string, agent?: AgentName, model?: strin
     let progress = false;
     for (const issue of blocked) {
       console.log(`\nAuto: attempting unblock of #${issue.number} — ${issue.title}`);
-      const unblocked = await attemptUnblock(repo, String(issue.number), agent, model);
+      const unblockLogFile = path.join(
+        logsDir,
+        `unblock-${issue.number}-${formatLogTimestamp()}.log`
+      );
+      const unblocked = await attemptUnblock(
+        repo,
+        String(issue.number),
+        agent,
+        model,
+        unblockLogFile
+      );
       allUnblockAttempts.push({
         issue: issue.number,
         title: issue.title,
         outcome: unblocked ? 'unblocked' : 'still blocked',
+        logFile: unblockLogFile,
       });
       if (unblocked) progress = true;
     }
@@ -1377,7 +1408,7 @@ async function shipAutoSequential(repo: string, agent?: AgentName, model?: strin
 
   printAutoSummary(results);
   if (allUnblockAttempts.length > 0) {
-    printUnblockSummary(allUnblockAttempts);
+    printUnblockSummary(allUnblockAttempts, homeDir);
   }
   if (results.length > 0) {
     console.log('\n  Log files:');
@@ -1483,11 +1514,22 @@ async function shipAutoParallel(
           console.log(
             `\n[#${issue.number}] Auto: attempting unblock of #${issue.number} — ${issue.title}`
           );
-          const unblocked = await attemptUnblock(repo, String(issue.number), agent, model);
+          const unblockLogFile = path.join(
+            logsDir,
+            `unblock-${issue.number}-${formatLogTimestamp()}.log`
+          );
+          const unblocked = await attemptUnblock(
+            repo,
+            String(issue.number),
+            agent,
+            model,
+            unblockLogFile
+          );
           allUnblockAttempts.push({
             issue: issue.number,
             title: issue.title,
             outcome: unblocked ? 'unblocked' : 'still blocked',
+            logFile: unblockLogFile,
           });
           if (unblocked) progress = true;
         }
@@ -1528,7 +1570,7 @@ async function shipAutoParallel(
 
   printAutoSummary(results);
   if (allUnblockAttempts.length > 0) {
-    printUnblockSummary(allUnblockAttempts);
+    printUnblockSummary(allUnblockAttempts, homeDir);
   }
   if (results.length > 0) {
     console.log('\n  Log files:');

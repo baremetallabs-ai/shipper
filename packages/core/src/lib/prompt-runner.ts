@@ -25,6 +25,7 @@ export interface RunPromptOpts {
   mode?: CommandMode;
   agent?: AgentName;
   model?: string;
+  logFile?: string;
 }
 
 export interface PromptCommand {
@@ -383,7 +384,7 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
   const effectiveModel = getEffectiveModel(agent, args);
 
   try {
-    const spawnLogFile = effectiveMode === 'headless' ? logFile : undefined;
+    const spawnLogFile = opts.logFile ?? (effectiveMode === 'headless' ? logFile : undefined);
     const exitCode = await spawnAsync(agent, args, {
       cwd: opts.cwd,
       timeoutMs,
