@@ -731,6 +731,24 @@ function registerIpcHandlers(): void {
     return { sessionId };
   });
 
+  ipcMain.handle('pty-spawn-shipper-ship', async (_event, payload: unknown) => {
+    const parsedPayload = parseSpawnShipperGroomPayload(payload);
+    if (parsedPayload === null) {
+      throw new Error('Invalid pty-spawn-shipper-ship payload.');
+    }
+
+    const repoPath = await ensureRepoClone(parsedPayload.repo);
+
+    const sessionId = randomUUID();
+    ptyManager.spawn(sessionId, 'shipper', ['ship', String(parsedPayload.issueNumber)], {
+      cols: parsedPayload.cols,
+      rows: parsedPayload.rows,
+      cwd: repoPath,
+    });
+
+    return { sessionId };
+  });
+
   ipcMain.handle('adopt-issue', async (_event, payload: unknown) => {
     const parsedPayload = parseAdoptIssuePayload(payload);
     if (parsedPayload === null) {
