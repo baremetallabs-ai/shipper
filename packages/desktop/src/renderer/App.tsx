@@ -956,7 +956,7 @@ export default function App(): JSX.Element {
         <div ref={contentPaneRef} tabIndex={-1} className="min-w-0 flex-1 overflow-y-auto">
           <header
             className={cn(
-              'sticky top-0 z-10 bg-background',
+              'sticky top-0 z-10 bg-background nautical-wave-border',
               repos.length === 0 && 'border-b border-border'
             )}
           >
@@ -1047,7 +1047,26 @@ export default function App(): JSX.Element {
             ) : null}
 
             {repos.length === 0 ? (
-              <section className="flex min-h-[24rem] flex-col items-center justify-center rounded-sm border border-dashed border-border bg-card px-6 py-10 text-center">
+              <section className="relative flex min-h-[24rem] flex-col items-center justify-center rounded-sm border border-dashed border-border bg-card px-6 py-10 text-center">
+                <svg
+                  className="absolute opacity-[0.06] text-foreground"
+                  width="140"
+                  height="140"
+                  viewBox="0 0 100 100"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  aria-hidden="true"
+                >
+                  <circle cx="50" cy="50" r="40" />
+                  <circle cx="50" cy="50" r="3" fill="currentColor" />
+                  <line x1="50" y1="5" x2="50" y2="95" />
+                  <line x1="5" y1="50" x2="95" y2="50" />
+                  <polygon points="50,8 46,25 54,25" fill="currentColor" />
+                  <polygon points="50,92 46,75 54,75" fill="currentColor" />
+                  <polygon points="8,50 25,46 25,54" fill="currentColor" />
+                  <polygon points="92,50 75,46 75,54" fill="currentColor" />
+                </svg>
                 <div className="max-w-md space-y-3">
                   <h2 className="text-xl font-semibold tracking-tight">
                     Add a repository to get started
