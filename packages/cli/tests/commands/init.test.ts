@@ -1,8 +1,16 @@
 import path from 'node:path';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { mockGh } = vi.hoisted(() => ({
+const { mockGh, mockExecFileAsync } = vi.hoisted(() => ({
   mockGh: vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>(),
+  mockExecFileAsync:
+    vi.fn<
+      (
+        cmd: string,
+        args: string[],
+        opts?: Record<string, unknown>
+      ) => Promise<{ stdout: string; stderr: string }>
+    >(),
 }));
 
 const { canonicalLabels } = vi.hoisted(() => ({
@@ -70,6 +78,21 @@ vi.mock('node:fs', async () => {
       chmodSyncMock(path, mode);
     },
   };
+});
+
+vi.mock('node:child_process', async () => {
+  const { promisify } = await import('node:util');
+  const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+  const execFile = Object.assign(
+    (...args: unknown[]) => {
+      void mockExecFileAsync(...(args as Parameters<typeof mockExecFileAsync>));
+    },
+    {
+      [promisify.custom]: (...args: unknown[]) =>
+        mockExecFileAsync(...(args as Parameters<typeof mockExecFileAsync>)),
+    }
+  );
+  return { ...actual, execFile };
 });
 
 vi.mock('@dnsquared/shipper-core', () => ({
@@ -160,7 +183,22 @@ beforeEach(() => {
   existsSyncMock.mockReset();
   chmodSyncMock.mockReset();
   mockGh.mockReset();
-  mockGh.mockResolvedValue({ stdout: '', stderr: '' });
+  mockGh.mockImplementation((args: string[]) => {
+    if (args[0] === 'repo' && args[1] === 'view') {
+      return Promise.resolve({ stdout: 'main\n', stderr: '' });
+    }
+    return Promise.resolve({ stdout: '', stderr: '' });
+  });
+  mockExecFileAsync.mockReset();
+  mockExecFileAsync.mockImplementation((cmd: string, args: string[]) => {
+    if (cmd === 'git' && args[0] === 'branch' && args[1] === '--show-current') {
+      return Promise.resolve({ stdout: 'main\n', stderr: '' });
+    }
+    if (cmd === 'git' && args[0] === 'diff' && args[1] === '--cached' && args[2] === '--quiet') {
+      return Promise.resolve({ stdout: '', stderr: '' });
+    }
+    return Promise.resolve({ stdout: '', stderr: '' });
+  });
   questionMock.mockReset();
   closeMock.mockReset();
   exitMock.mockClear();
@@ -187,8 +225,9 @@ describe('initCommand label sync', () => {
   it('syncs each canonical label with --force and reports the synced count', async () => {
     await initCommand({ agent: 'claude' });
 
-    expect(mockGh).toHaveBeenCalledTimes(expectedLabels.length);
-    expect(mockGh.mock.calls).toEqual(
+    const labelCalls = mockGh.mock.calls.filter((call) => call[0][0] === 'label');
+    expect(labelCalls).toHaveLength(expectedLabels.length);
+    expect(labelCalls).toEqual(
       expectedLabels.map((label) => [
         [
           'label',
@@ -503,5 +542,133 @@ describe('initCommand agent selection', () => {
     const written = parseWrittenSettings();
     expect(written.commands).toEqual({ default: { agent: 'codex' } });
     expect(exitMock).not.toHaveBeenCalledWith(1);
+  });
+});
+
+describe('initCommand commit and push', () => {
+  it('stages, commits, and pushes .shipper/ files on happy path', async () => {
+    mockExecFileAsync.mockImplementation((cmd: string, args: string[]) => {
+      if (cmd === 'git' && args[0] === 'branch' && args[1] === '--show-current') {
+        return Promise.resolve({ stdout: 'main\n', stderr: '' });
+      }
+      if (cmd === 'git' && args[0] === 'diff' && args[1] === '--cached' && args[2] === '--quiet') {
+        return Promise.reject(new Error('exit code 1'));
+      }
+      return Promise.resolve({ stdout: '', stderr: '' });
+    });
+
+    await initCommand({ agent: 'claude' });
+
+    expect(mockGh).toHaveBeenCalledWith([
+      'repo',
+      'view',
+      '--json',
+      'defaultBranchRef',
+      '-q',
+      '.defaultBranchRef.name',
+    ]);
+    expect(mockExecFileAsync).toHaveBeenCalledWith('git', ['add', '--', '.shipper/']);
+    expect(mockExecFileAsync).toHaveBeenCalledWith('git', [
+      'commit',
+      '-m',
+      'chore: initialize shipper',
+      '--',
+      '.shipper/',
+    ]);
+    expect(mockExecFileAsync).toHaveBeenCalledWith('git', ['push', 'origin', 'main']);
+    expect(console.log).toHaveBeenCalledWith('Committed and pushed .shipper/ files to main');
+  });
+
+  it('skips commit and push when .shipper/ files are unchanged', async () => {
+    await initCommand({ agent: 'claude' });
+
+    expect(mockExecFileAsync).toHaveBeenCalledWith('git', ['add', '--', '.shipper/']);
+    expect(mockExecFileAsync).not.toHaveBeenCalledWith('git', expect.arrayContaining(['commit']));
+    expect(mockExecFileAsync).not.toHaveBeenCalledWith('git', expect.arrayContaining(['push']));
+    expect(console.log).toHaveBeenCalledWith('.shipper/ files are unchanged — nothing to push.');
+  });
+
+  it('errors and exits when on wrong branch', async () => {
+    mockExecFileAsync.mockImplementation((cmd: string, args: string[]) => {
+      if (cmd === 'git' && args[0] === 'branch' && args[1] === '--show-current') {
+        return Promise.resolve({ stdout: 'feature-x\n', stderr: '' });
+      }
+      return Promise.resolve({ stdout: '', stderr: '' });
+    });
+
+    await initCommand({ agent: 'claude' });
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('must be run from the default branch (main)')
+    );
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('You are on: feature-x'));
+    expect(exitMock).toHaveBeenCalledWith(1);
+  });
+
+  it('errors and exits on detached HEAD', async () => {
+    mockExecFileAsync.mockImplementation((cmd: string, args: string[]) => {
+      if (cmd === 'git' && args[0] === 'branch' && args[1] === '--show-current') {
+        return Promise.resolve({ stdout: '\n', stderr: '' });
+      }
+      return Promise.resolve({ stdout: '', stderr: '' });
+    });
+
+    await initCommand({ agent: 'claude' });
+
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('(detached HEAD)'));
+    expect(exitMock).toHaveBeenCalledWith(1);
+  });
+
+  it('reports error with stderr when push fails', async () => {
+    mockExecFileAsync.mockImplementation((cmd: string, args: string[]) => {
+      if (cmd === 'git' && args[0] === 'branch' && args[1] === '--show-current') {
+        return Promise.resolve({ stdout: 'main\n', stderr: '' });
+      }
+      if (cmd === 'git' && args[0] === 'diff' && args[1] === '--cached' && args[2] === '--quiet') {
+        return Promise.reject(new Error('exit code 1'));
+      }
+      if (cmd === 'git' && args[0] === 'push') {
+        const err = Object.assign(new Error('push failed'), {
+          stderr: 'remote: protected branch',
+        });
+        return Promise.reject(err);
+      }
+      return Promise.resolve({ stdout: '', stderr: '' });
+    });
+
+    await initCommand({ agent: 'claude' });
+
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('Failed to push to main'));
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('protected branch'));
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('branch protection rules'));
+    expect(exitMock).toHaveBeenCalledWith(1);
+    // Commit was called before push
+    expect(mockExecFileAsync).toHaveBeenCalledWith('git', [
+      'commit',
+      '-m',
+      'chore: initialize shipper',
+      '--',
+      '.shipper/',
+    ]);
+  });
+
+  it('does not roll back labels when push fails', async () => {
+    mockExecFileAsync.mockImplementation((cmd: string, args: string[]) => {
+      if (cmd === 'git' && args[0] === 'branch' && args[1] === '--show-current') {
+        return Promise.resolve({ stdout: 'main\n', stderr: '' });
+      }
+      if (cmd === 'git' && args[0] === 'diff' && args[1] === '--cached' && args[2] === '--quiet') {
+        return Promise.reject(new Error('exit code 1'));
+      }
+      if (cmd === 'git' && args[0] === 'push') {
+        return Promise.reject(new Error('push failed'));
+      }
+      return Promise.resolve({ stdout: '', stderr: '' });
+    });
+
+    await initCommand({ agent: 'claude' });
+
+    const labelCalls = mockGh.mock.calls.filter((call) => call[0][0] === 'label');
+    expect(labelCalls).toHaveLength(expectedLabels.length);
   });
 });
