@@ -1545,4 +1545,96 @@ describe('resetCommand', () => {
     expect(body).toContain('Artifacts after this stage have been cleaned up.');
     expect(body).toContain('suggestion for the next grooming attempt');
   });
+
+  describe('shipper:failed-only issues', () => {
+    it('succeeds with --to planned when the issue has only shipper:failed', async () => {
+      setupExecMock({
+        issueJson: mockIssueView('OPEN', ['shipper:failed']),
+        timelineByStage: { planned: '2024-01-15T12:00:00Z\n' },
+      });
+
+      await resetCommand('18', { force: true, to: 'planned' });
+
+      const editArgs = getIssueEditArgs();
+      expect(editArgs).toContain('--remove-label');
+      expect(editArgs[editArgs.indexOf('--remove-label') + 1]).toBe('shipper:failed');
+      expect(editArgs).toContain('--add-label');
+      expect(editArgs[editArgs.indexOf('--add-label') + 1]).toBe('shipper:planned');
+    });
+
+    it('succeeds with --to new when the issue has only shipper:failed', async () => {
+      setupExecMock({
+        issueJson: mockIssueView('OPEN', ['shipper:failed']),
+        commentIds: '',
+      });
+
+      await resetCommand('18', { force: true, to: 'new' });
+
+      const editArgs = getIssueEditArgs();
+      expect(editArgs).toContain('--remove-label');
+      expect(editArgs[editArgs.indexOf('--remove-label') + 1]).toBe('shipper:failed');
+      expect(editArgs).toContain('--add-label');
+      expect(editArgs[editArgs.indexOf('--add-label') + 1]).toBe('shipper:new');
+    });
+
+    it('succeeds with --to implemented when the issue has only shipper:failed', async () => {
+      setupExecMock({
+        issueJson: mockIssueView('OPEN', ['shipper:failed']),
+        timelineByStage: { implemented: '2024-01-15T12:00:00Z\n' },
+      });
+
+      await resetCommand('18', { force: true, to: 'implemented' });
+
+      const editArgs = getIssueEditArgs();
+      expect(editArgs).toContain('--remove-label');
+      expect(editArgs[editArgs.indexOf('--remove-label') + 1]).toBe('shipper:failed');
+      expect(editArgs).toContain('--add-label');
+      expect(editArgs[editArgs.indexOf('--add-label') + 1]).toBe('shipper:implemented');
+    });
+
+    it('lists all 5 stages in interactive mode when the issue has only shipper:failed', async () => {
+      setupExecMock({
+        issueJson: mockIssueView('OPEN', ['shipper:failed']),
+        timelineByStage: { new: '' },
+      });
+
+      await resetCommand('18', { force: true });
+
+      expect(mockConsoleLog).toHaveBeenCalledWith('  1) new');
+      expect(mockConsoleLog).toHaveBeenCalledWith('  2) groomed');
+      expect(mockConsoleLog).toHaveBeenCalledWith('  3) designed');
+      expect(mockConsoleLog).toHaveBeenCalledWith('  4) planned');
+      expect(mockConsoleLog).toHaveBeenCalledWith('  5) implemented');
+      expect(mockPromptChoice).toHaveBeenCalledWith('Select [1-5]: ', ['1', '2', '3', '4', '5']);
+    });
+
+    it('succeeds with dual-label backward reset (shipper:planned + shipper:failed to groomed)', async () => {
+      setupExecMock({
+        issueJson: mockIssueView('OPEN', ['shipper:planned', 'shipper:failed']),
+        timelineByStage: { groomed: '2024-01-15T12:00:00Z\n' },
+      });
+
+      await resetCommand('18', { force: true, to: 'groomed' });
+
+      const editArgs = getIssueEditArgs();
+      expect(editArgs).toContain('--remove-label');
+      expect(editArgs[editArgs.indexOf('--remove-label') + 1]).toBe(
+        'shipper:planned,shipper:failed'
+      );
+    });
+
+    it('fails with dual-label forward reset (shipper:planned + shipper:failed to implemented)', async () => {
+      setupExecMock({
+        issueJson: mockIssueView('OPEN', ['shipper:planned', 'shipper:failed']),
+      });
+
+      await expect(resetCommand('18', { force: true, to: 'implemented' })).rejects.toThrow(
+        'process.exit'
+      );
+
+      expect(mockConsoleError).toHaveBeenCalledWith(
+        'Error: shipper:implemented is ahead of the current stage shipper:planned. Reset only works backward.'
+      );
+    });
+  });
 });
