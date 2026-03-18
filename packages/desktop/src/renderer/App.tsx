@@ -300,6 +300,7 @@ export default function App(): JSX.Element {
   const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [isNewIssueOpen, setIsNewIssueOpen] = useState(false);
   const [isAdoptOpen, setIsAdoptOpen] = useState(false);
+  const [repoInitialized, setRepoInitialized] = useState<boolean | null>(null);
   const [sessions, setSessions] = useState<TerminalSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [pendingCloseSessionId, setPendingCloseSessionId] = useState<string | null>(null);
@@ -367,6 +368,7 @@ export default function App(): JSX.Element {
     setIsLoading(false);
     setResetSelection(null);
     setResettingIssues(new Set());
+    setRepoInitialized(null);
   }
 
   const loadIssues = useEffectEvent(async (repo: string) => {
@@ -402,6 +404,22 @@ export default function App(): JSX.Element {
     }
   });
 
+  const checkInitState = useEffectEvent(async (repo: string) => {
+    try {
+      const result = await window.shipperAPI.checkInit(repo);
+      setRepoInitialized(result.initialized);
+    } catch {
+      setRepoInitialized(false);
+    }
+  });
+
+  const refreshAfterInit = useEffectEvent(async () => {
+    if (activeRepo) {
+      void checkInitState(activeRepo);
+      await loadIssues(activeRepo);
+    }
+  });
+
   const persistConfig = useEffectEvent(async (config: AppConfig) => {
     await window.shipperAPI.setConfig(config);
   });
@@ -429,6 +447,7 @@ export default function App(): JSX.Element {
           prerequisiteResult.ghAuth.ok &&
           config.activeRepo.length > 0
         ) {
+          void checkInitState(config.activeRepo);
           await loadIssues(config.activeRepo);
         }
       } catch (error) {
@@ -515,6 +534,7 @@ export default function App(): JSX.Element {
       clearIssueState();
 
       if (canFetch) {
+        void checkInitState(nextRepo);
         await loadIssues(nextRepo);
       }
     } catch (error) {
@@ -534,6 +554,7 @@ export default function App(): JSX.Element {
       clearIssueState();
 
       if (canFetch) {
+        void checkInitState(repo);
         await loadIssues(repo);
       }
     } catch (error) {
@@ -580,6 +601,10 @@ export default function App(): JSX.Element {
 
   useEffect(() => {
     const unsubscribe = window.shipperAPI.onPtyExit((event) => {
+      const exitedSession = sessionsRef.current.find(
+        (session) => session.id === event.sessionId && session.status !== 'exited'
+      );
+
       setSessions((currentSessions) => {
         const sessionIndex = currentSessions.findIndex(
           (session) => session.id === event.sessionId && session.status !== 'exited'
@@ -597,6 +622,10 @@ export default function App(): JSX.Element {
         nextSessions[sessionIndex] = { ...session, status: 'exited' };
         return nextSessions;
       });
+
+      if (exitedSession?.label.startsWith('init \u2014') && event.exitCode === 0) {
+        void refreshAfterInit();
+      }
     });
 
     return unsubscribe;
@@ -704,6 +733,16 @@ export default function App(): JSX.Element {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setFetchError(`Failed to launch shipper ship: ${message}`);
+    }
+  }
+
+  async function handleShipperInit(): Promise<void> {
+    try {
+      const result = await window.shipperAPI.spawnShipperInit(activeRepo, 120, 30);
+      openRunningSession(result.sessionId, `init \u2014 ${activeRepo}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setFetchError(`Failed to launch shipper init: ${message}`);
     }
   }
 
@@ -860,6 +899,7 @@ export default function App(): JSX.Element {
         clearIssueState();
 
         if (canFetch && nextActiveRepo) {
+          void checkInitState(nextActiveRepo);
           await loadIssues(nextActiveRepo);
         }
       }
@@ -979,7 +1019,7 @@ export default function App(): JSX.Element {
                     onClick={() => {
                       setIsNewIssueOpen(true);
                     }}
-                    disabled={!canFetch || !hasActiveRepo}
+                    disabled={!canFetch || !hasActiveRepo || repoInitialized !== true}
                   >
                     New Issue
                   </Button>
@@ -988,7 +1028,7 @@ export default function App(): JSX.Element {
                     onClick={() => {
                       setIsAdoptOpen(true);
                     }}
-                    disabled={!canFetch || !hasActiveRepo}
+                    disabled={!canFetch || !hasActiveRepo || repoInitialized !== true}
                   >
                     Adopt
                   </Button>
@@ -1084,6 +1124,25 @@ export default function App(): JSX.Element {
                   </Button>
                 </div>
               </section>
+            ) : repoInitialized === false ? (
+              <section className="relative flex min-h-[24rem] flex-col items-center justify-center rounded-sm border border-dashed border-border bg-card px-6 py-10 text-center">
+                <div className="max-w-md space-y-3">
+                  <h2 className="text-xl font-semibold tracking-tight">
+                    Initialize this repository
+                  </h2>
+                  <p className="text-sm text-muted-foreground">
+                    Run shipper init to set up workflow labels and configuration.
+                  </p>
+                  <Button
+                    onClick={() => {
+                      void handleShipperInit();
+                    }}
+                    disabled={!canFetch || !hasActiveRepo}
+                  >
+                    Initialize
+                  </Button>
+                </div>
+              </section>
             ) : (
               <section className="overflow-hidden rounded-sm border border-border bg-card">
                 <div className="border-b border-border px-6 py-4">
@@ -1130,7 +1189,7 @@ export default function App(): JSX.Element {
                                 onGroom={(issueNumber) => {
                                   void handleShipperGroom(issueNumber);
                                 }}
-                                groomDisabled={!canFetch || !hasActiveRepo}
+                                groomDisabled={!canFetch || repoInitialized !== true}
                               />
                             </div>
                           ))}

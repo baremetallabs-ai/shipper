@@ -26,6 +26,7 @@ const shipperAPI = {
   setConfig: (config: ConfigPayload) => ipcRenderer.invoke('set-config', config),
   adoptIssue: (repo: string, issueNumber: number) =>
     ipcRenderer.invoke('adopt-issue', { repo, issueNumber }),
+  checkInit: (repo: string) => ipcRenderer.invoke('check-init', { repo }),
   scanReset: (repo: string, issueNumber: number, targetStage: WorkflowStage) =>
     ipcRenderer.invoke('scan-reset', { repo, issueNumber, targetStage }),
   executeReset: (repo: string, issueNumber: number, targetStage: WorkflowStage) =>
@@ -37,6 +38,8 @@ const shipperAPI = {
     ipcRenderer.invoke('pty-spawn-shipper-groom', { issueNumber, repo, cols, rows }),
   spawnShipperShip: (issueNumber: number, repo: string, cols: number, rows: number) =>
     ipcRenderer.invoke('pty-spawn-shipper-ship', { issueNumber, repo, cols, rows }),
+  spawnShipperInit: (repo: string, cols: number, rows: number) =>
+    ipcRenderer.invoke('pty-spawn-shipper-init', { repo, cols, rows }),
   ptyWrite: (sessionId: string, data: string) =>
     ipcRenderer.invoke('pty-write', { sessionId, data }),
   ptyResize: (sessionId: string, cols: number, rows: number) =>

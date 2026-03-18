@@ -62,6 +62,7 @@ interface ShipperAPI {
     repo: string,
     issueNumber: number
   ) => Promise<{ ok: true } | { ok: false; error: string }>;
+  checkInit: (repo: string) => Promise<{ initialized: boolean }>;
   scanReset: (
     repo: string,
     issueNumber: number,
@@ -91,6 +92,7 @@ interface ShipperAPI {
     cols: number,
     rows: number
   ) => Promise<{ sessionId: string }>;
+  spawnShipperInit: (repo: string, cols: number, rows: number) => Promise<{ sessionId: string }>;
   ptyWrite: (sessionId: string, data: string) => Promise<void>;
   ptyResize: (sessionId: string, cols: number, rows: number) => Promise<void>;
   ptyKill: (sessionId: string) => Promise<void>;
