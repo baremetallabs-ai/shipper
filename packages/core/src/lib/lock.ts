@@ -104,7 +104,7 @@ function releaseIssueLockWithoutAwait(repo: string, issueNumber: string): void {
 // Note: there is a brief sub-second window between remove and add where the label is absent.
 // This is acceptable — the window is <1s vs a 10-minute heartbeat interval, and the lock
 // system already has an inherent race in acquireIssueLock between checking and adding.
-async function renewIssueLock(
+export async function renewIssueLock(
   repo: string,
   issueNumber: string,
   cancelled: { value: boolean }
