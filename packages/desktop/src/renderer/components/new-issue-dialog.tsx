@@ -55,7 +55,7 @@ export function NewIssueDialog({ open, onOpenChange, onSubmit }: NewIssueDialogP
             onKeyDown={handleKeyDown}
             placeholder="What do you want to build?"
             rows={4}
-            className="w-full resize-none rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none"
+            className="w-full resize-none rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground transition-[color,box-shadow] placeholder:text-muted-foreground outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
             autoFocus
           />
           <p className="mt-1 text-xs text-muted-foreground">
