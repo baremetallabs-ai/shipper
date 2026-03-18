@@ -55,15 +55,17 @@ export function NewIssueDialog({ open, onOpenChange, onSubmit }: NewIssueDialogP
             onKeyDown={handleKeyDown}
             placeholder="What do you want to build?"
             rows={4}
-            className="w-full resize-none rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:border-zinc-500 focus:outline-none"
+            className="w-full resize-none rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none"
             autoFocus
           />
-          <p className="mt-1 text-xs text-zinc-500">Enter to submit, Shift+Enter for newline</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Enter to submit, Shift+Enter for newline
+          </p>
           <div className="mt-3 flex justify-end">
             <button
               type="submit"
               disabled={request.trim().length === 0}
-              className="rounded-md bg-zinc-100 px-4 py-1.5 text-sm font-medium text-zinc-900 transition-colors hover:bg-white disabled:opacity-40"
+              className="rounded-md bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
             >
               Launch
             </button>

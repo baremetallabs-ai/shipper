@@ -19,9 +19,9 @@ interface SessionTabBarProps {
 }
 
 const STATUS_DOT_CLASS: Record<TerminalSessionStatus, string> = {
-  running: 'bg-emerald-400',
-  waiting: 'bg-amber-400',
-  exited: 'bg-zinc-500',
+  running: 'bg-success',
+  waiting: 'bg-warning',
+  exited: 'bg-muted-foreground',
 };
 
 export function SessionTabBar({
@@ -31,7 +31,7 @@ export function SessionTabBar({
   onCloseSession,
 }: SessionTabBarProps): JSX.Element {
   return (
-    <div className="flex items-center gap-2 overflow-x-auto border-b border-white/10 bg-zinc-950/80 px-3 py-2">
+    <div className="flex items-center gap-2 overflow-x-auto border-b border-border bg-muted px-3 py-2">
       {sessions.map((session) => {
         const isActive = session.id === activeSessionId;
         const waitingAttention = session.status === 'waiting' && !isActive;
@@ -44,8 +44,8 @@ export function SessionTabBar({
               isActive
                 ? 'border-primary bg-primary text-primary-foreground'
                 : waitingAttention
-                  ? 'border-amber-400/50 bg-amber-400/10 text-zinc-100'
-                  : 'border-white/10 bg-zinc-900 text-zinc-200'
+                  ? 'border-warning/50 bg-warning/10 text-foreground'
+                  : 'border-border bg-card text-card-foreground'
             )}
           >
             <button
@@ -68,8 +68,8 @@ export function SessionTabBar({
                 isActive
                   ? 'border-primary-foreground/20 hover:bg-primary-foreground/10'
                   : waitingAttention
-                    ? 'border-amber-400/20 hover:bg-amber-400/10'
-                    : 'border-white/10 hover:bg-zinc-800 hover:text-zinc-50'
+                    ? 'border-warning/20 hover:bg-warning/10'
+                    : 'border-border hover:bg-accent hover:text-accent-foreground'
               )}
               aria-label={`Close ${session.label}`}
               onClick={(event) => {
