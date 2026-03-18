@@ -86,12 +86,21 @@ Reportable items include:
 
 ## Writing Results
 
-Every unblock decision must end by writing:
+Every unblock decision must end by writing two files:
 
-1. `.shipper/output/comment-<number>.md`
-2. `.shipper/output/result.json`
+1. **Comment file** — Write your decision to `.shipper/output/comment-<number>.md` (where `<number>` is the issue number).
+2. **Result file** — Write `.shipper/output/result.json`:
 
-Use these verdicts:
+```json
+{
+  "verdict": "accept",
+  "comment": ".shipper/output/comment-<number>.md"
+}
+```
+
+Valid verdicts: `accept`, `reject`, `fail`.
+
+Verdict mapping:
 
 - Resolved block or stale block -> `accept`
 - Still blocked -> `reject`
