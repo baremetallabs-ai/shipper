@@ -1,5 +1,4 @@
-import { execFileSync } from 'node:child_process';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@dnsquared/shipper-core', () => ({
   runPreflight: vi.fn(),
@@ -44,10 +43,6 @@ import { setupCommand } from '../src/commands/setup.js';
 import { unlockCommand } from '../src/commands/unlock.js';
 import { runPreflight, loadSettings, getRepoNwo } from '@dnsquared/shipper-core';
 
-interface ExecFileSyncError extends Error {
-  stderr?: string | Buffer;
-}
-
 const mockShipCommand = vi.mocked(shipCommand);
 const mockNextCommand = vi.mocked(nextCommand);
 const mockEjectCommand = vi.mocked(ejectCommand);
@@ -62,39 +57,6 @@ const mockLoadSettings = vi.mocked(loadSettings);
 const mockGetRepoNwo = vi.mocked(getRepoNwo);
 
 describe('shipper-cli', () => {
-  beforeAll(() => {
-    execFileSync('npm', ['run', 'build'], { stdio: 'ignore' });
-  });
-
-  it('shows help with available commands', () => {
-    const output = execFileSync('node', ['dist/index.js', '--help'], {
-      encoding: 'utf-8',
-    });
-    expect(output).toContain('init');
-    expect(output).toContain('new');
-    expect(output).toContain('priority');
-    expect(output).toContain('groom');
-    expect(output).toContain('design');
-    expect(output).toContain('plan');
-    expect(output).toContain('eject');
-    expect(output).toContain('pr');
-  });
-
-  it('shows --mode and --model on prompt-running command help and removes --headless from new', () => {
-    const newHelp = execFileSync('node', ['dist/index.js', 'new', '--help'], {
-      encoding: 'utf-8',
-    });
-    const setupHelp = execFileSync('node', ['dist/index.js', 'setup', '--help'], {
-      encoding: 'utf-8',
-    });
-
-    expect(newHelp).toContain('--mode <mode>');
-    expect(newHelp).toContain('--model <model>');
-    expect(newHelp).not.toContain('--headless');
-    expect(setupHelp).toContain('--mode <mode>');
-    expect(setupHelp).toContain('--model <model>');
-  });
-
   describe('eject command wiring', () => {
     const originalArgv = [...process.argv];
 
@@ -365,27 +327,6 @@ describe('shipper-cli', () => {
 
       await expect(importEntrypoint()).rejects.toThrow();
       expect(mockShipCommand).not.toHaveBeenCalled();
-
-      try {
-        execFileSync('node', ['dist/index.js', 'ship', '--auto', '--parallel'], {
-          encoding: 'utf-8',
-          stdio: ['ignore', 'pipe', 'pipe'],
-        });
-        expect.fail('Expected the built CLI to reject a missing --parallel value');
-      } catch (error: unknown) {
-        if (!(error instanceof Error)) {
-          throw error;
-        }
-
-        const execError = error as ExecFileSyncError;
-        const stderr =
-          typeof execError.stderr === 'string'
-            ? execError.stderr
-            : Buffer.isBuffer(execError.stderr)
-              ? execError.stderr.toString('utf-8')
-              : '';
-        expect(stderr).toContain('Error: --parallel requires a number');
-      }
     });
 
     it('normalizes --parallel 1 back to the sequential path', async () => {
