@@ -11,6 +11,7 @@ import {
   ensureRepoClone,
   gh,
   listIssues,
+  type ListIssueItem,
 } from '@dnsquared/shipper-core';
 
 import { PtyManager } from './pty-manager.js';
@@ -47,6 +48,20 @@ interface SpawnShipperNewPayload extends SpawnPtyPayload {
 
 interface SpawnShipperGroomPayload extends SpawnPtyPayload {
   issueNumber: number;
+}
+
+interface AdoptIssuePayload {
+  repo: string;
+  issueNumber: number;
+}
+
+interface RawListIssueData {
+  number: number;
+  title: string;
+  state: string;
+  labels: { name: string }[];
+  author: { login: string };
+  createdAt: string;
 }
 
 const defaultConfig: AppConfig = { repos: [], activeRepo: '' };
@@ -170,6 +185,27 @@ function parseSpawnShipperGroomPayload(value: unknown): SpawnShipperGroomPayload
 
   return {
     ...payload,
+    issueNumber: value.issueNumber,
+  };
+}
+
+function parseAdoptIssuePayload(value: unknown): AdoptIssuePayload | null {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('repo' in value) ||
+    !('issueNumber' in value)
+  ) {
+    return null;
+  }
+
+  const repo = parseRepo(value.repo);
+  if (repo === null || !isPositiveInteger(value.issueNumber)) {
+    return null;
+  }
+
+  return {
+    repo,
     issueNumber: value.issueNumber,
   };
 }
@@ -320,6 +356,53 @@ function registerIpcHandlers(): void {
     }
   });
 
+  ipcMain.handle('list-adoptable-issues', async (_event, payload: unknown) => {
+    const repo =
+      typeof payload === 'object' && payload !== null && 'repo' in payload
+        ? parseRepo(payload.repo)
+        : null;
+
+    if (repo === null) {
+      const response: ListIssuesFailure = {
+        ok: false,
+        error: 'Enter a repository in owner/repo format.',
+      };
+      return response;
+    }
+
+    try {
+      const result = await gh([
+        'issue',
+        'list',
+        '-R',
+        repo,
+        '--state',
+        'open',
+        '--limit',
+        '1000',
+        '--json',
+        'number,title,labels,state,author,createdAt',
+      ]);
+      const rawIssues = JSON.parse(result.stdout) as RawListIssueData[];
+      const issues: ListIssueItem[] = rawIssues
+        .map((issue) => ({
+          number: issue.number,
+          title: issue.title,
+          labels: issue.labels.map((label) => label.name),
+          state: issue.state,
+          author: issue.author.login,
+          createdAt: issue.createdAt,
+        }))
+        .filter((issue) => !issue.labels.some((label) => label.startsWith('shipper:')));
+      const response: ListIssuesSuccess = { ok: true, issues };
+      return response;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const response: ListIssuesFailure = { ok: false, error: message };
+      return response;
+    }
+  });
+
   ipcMain.handle('get-config', () => readConfig());
   ipcMain.handle('list-repos', async () => {
     const result = await gh(['repo', 'list', '--json', 'nameWithOwner', '--limit', '100']);
@@ -381,6 +464,29 @@ function registerIpcHandlers(): void {
     });
 
     return { sessionId };
+  });
+
+  ipcMain.handle('adopt-issue', async (_event, payload: unknown) => {
+    const parsedPayload = parseAdoptIssuePayload(payload);
+    if (parsedPayload === null) {
+      return { ok: false, error: 'Enter a repository in owner/repo format.' };
+    }
+
+    try {
+      await gh([
+        'issue',
+        'edit',
+        String(parsedPayload.issueNumber),
+        '-R',
+        parsedPayload.repo,
+        '--add-label',
+        'shipper:new',
+      ]);
+      return { ok: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { ok: false, error: message };
+    }
   });
 
   ipcMain.handle('pty-write', (_event, payload: unknown) => {
