@@ -208,7 +208,7 @@ export function AdoptDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[min(80vh,40rem)] w-[min(calc(100vw-2rem),48rem)] gap-0 overflow-hidden p-0">
+      <DialogContent className="max-h-[min(80vh,40rem)] w-[min(calc(100vw-2rem),48rem)] grid-rows-[auto_1fr] gap-0 overflow-hidden p-0">
         <DialogHeader className="border-b border-border px-6 py-5">
           <DialogTitle>Adopt Issues</DialogTitle>
           <DialogDescription>
@@ -260,7 +260,7 @@ export function AdoptDialog({
           ) : null}
 
           {!isLoading && issues.length > 0 ? (
-            <div className="min-h-0 overflow-y-auto rounded-sm border border-border bg-card">
+            <div className="min-h-0 flex-1 overflow-y-auto rounded-sm border border-border bg-card">
               <ul className="divide-y divide-border">
                 {issues.map((issue) => {
                   const isAdopting = adoptingSet.has(issue.number);
