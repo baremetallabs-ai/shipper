@@ -20,6 +20,15 @@ import {
 
 const execFileAsync = promisify(execFile);
 
+function getErrorStderr(err: unknown): string {
+  return typeof err === 'object' &&
+    err !== null &&
+    'stderr' in err &&
+    typeof err.stderr === 'string'
+    ? err.stderr.trim()
+    : '';
+}
+
 const VALID_AGENTS = ['claude', 'codex'] as const;
 const UNSAFE_COMMAND_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
@@ -321,19 +330,30 @@ export async function initCommand(options: { agent?: string }) {
   } else {
     await execFileAsync('git', ['commit', '-m', 'chore: initialize shipper', '--', '.shipper/']);
 
+    // Resolve the push remote from branch config, falling back to 'origin'
+    let remote = 'origin';
     try {
-      await execFileAsync('git', ['push', 'origin', defaultBranch]);
+      const { stdout: remoteOut } = await execFileAsync(
+        'git',
+        ['config', `branch.${defaultBranch}.remote`],
+        { encoding: 'utf-8' }
+      );
+      if (remoteOut.trim()) {
+        remote = remoteOut.trim();
+      }
+    } catch {
+      // No branch remote configured — fall back to 'origin'
+    }
+
+    try {
+      await execFileAsync('git', ['push', remote, defaultBranch]);
     } catch (err) {
-      const stderr =
-        typeof err === 'object' && err !== null && 'stderr' in err && typeof err.stderr === 'string'
-          ? err.stderr.trim()
-          : '';
+      const stderr = getErrorStderr(err);
       console.error(
         `Error: Failed to push to ${defaultBranch}.` +
           (stderr ? `\n${stderr}` : '') +
           '\n\nThis may be due to branch protection rules.' +
-          '\nPush manually with: git push origin ' +
-          defaultBranch +
+          `\nPush manually with: git push ${remote} ${defaultBranch}` +
           '\nOr adjust your branch protection settings.'
       );
       process.exit(1);
