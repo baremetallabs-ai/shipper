@@ -7,7 +7,10 @@ args:
   - --permission-mode
   - acceptEdits
   - --allowedTools
-  - WebSearch
+  - WebSearch,mcp__context7__resolve-library-id,mcp__context7__get-library-docs
+  - --mcp-config
+  # prettier-ignore
+  - {"mcpServers":{"context7":{"command":"npx","args":["-y","@upstash/context7-mcp"]}}}
 append-issue: true
 append-pr: true
 ---

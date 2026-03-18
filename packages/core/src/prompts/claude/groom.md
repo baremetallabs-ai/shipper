@@ -6,7 +6,10 @@ args:
   - --permission-mode
   - acceptEdits
   - --allowedTools
-  - Task,Bash(gh label list *),Bash(gh issue list *),Bash(gh issue view *),Bash(gh issue edit *),Bash(gh issue comment *),Bash(gh issue create *),Bash(gh issue close *),WebSearch
+  - Task,Bash(gh label list *),Bash(gh issue list *),Bash(gh issue view *),Bash(gh issue edit *),Bash(gh issue comment *),Bash(gh issue create *),Bash(gh issue close *),WebSearch,mcp__context7__resolve-library-id,mcp__context7__get-library-docs
+  - --mcp-config
+  # prettier-ignore
+  - {"mcpServers":{"context7":{"command":"npx","args":["-y","@upstash/context7-mcp"]}}}
 append-issue: true
 ---
 

@@ -207,6 +207,36 @@ You are helping a developer turn a rough idea into a lightweight GitHub issue.`;
     }
   });
 
+  it('parses every prompt that passes --mcp-config as valid JSON', () => {
+    const promptPaths = [
+      '../../src/prompts/claude/new.md',
+      '../../src/prompts/claude/groom.md',
+      '../../src/prompts/claude/design.md',
+      '../../src/prompts/claude/plan.md',
+      '../../src/prompts/claude/implement.md',
+      '../../src/prompts/claude/pr_open.md',
+      '../../src/prompts/claude/pr_review.md',
+      '../../src/prompts/claude/pr_remediate.md',
+      '../../src/prompts/claude/unblock.md',
+    ];
+
+    for (const promptPath of promptPaths) {
+      const input = readFileSync(resolve(testDir, promptPath), 'utf8');
+      const result = parseFrontmatter(input);
+      const mcpIndex = result.frontmatter.args.indexOf('--mcp-config');
+      expect(mcpIndex, `${promptPath} is missing --mcp-config`).toBeGreaterThanOrEqual(0);
+
+      const mcpArg = result.frontmatter.args[mcpIndex + 1];
+      expect(mcpArg, `${promptPath} is missing the MCP config payload`).toBeDefined();
+      if (mcpArg === undefined) {
+        throw new Error(`${promptPath} is missing the MCP config payload`);
+      }
+      expect(() => {
+        JSON.parse(mcpArg);
+      }).not.toThrow();
+    }
+  });
+
   it('requires append-user-input on the transport-aware prompts', () => {
     const promptPaths = [
       '../../src/prompts/codex/implement.md',

@@ -8,7 +8,10 @@ args:
   - acceptEdits
   - --settings
   # prettier-ignore
-  - {"permissions":{"allow":["Bash(git branch *)","Bash(git log *)","Bash(git diff *)","Bash(git add *)","Bash(git commit *)","Bash(./.shipper/scripts/install-deps.sh)","WebSearch"]},"sandbox":{"enabled":true,"autoAllowBashIfSandboxed":true,"excludedCommands":["git branch *","git log *","git diff *","git add *","git commit *","./.shipper/scripts/install-deps.sh"],"network":{"allowedDomains":["registry.npmjs.org","fonts.googleapis.com","fonts.gstatic.com","cdn.jsdelivr.net","unpkg.com","cdnjs.cloudflare.com"]}}}
+  - {"permissions":{"allow":["Bash(git branch *)","Bash(git log *)","Bash(git diff *)","Bash(git add *)","Bash(git commit *)","Bash(./.shipper/scripts/install-deps.sh)","WebSearch","mcp__context7__resolve-library-id","mcp__context7__get-library-docs"]},"sandbox":{"enabled":true,"autoAllowBashIfSandboxed":true,"excludedCommands":["git branch *","git log *","git diff *","git add *","git commit *","./.shipper/scripts/install-deps.sh"],"network":{"allowedDomains":["registry.npmjs.org","fonts.googleapis.com","fonts.gstatic.com","cdn.jsdelivr.net","unpkg.com","cdnjs.cloudflare.com"]}}}
+  - --mcp-config
+  # prettier-ignore
+  - {"mcpServers":{"context7":{"command":"npx","args":["-y","@upstash/context7-mcp"]}}}
 append-issue: true
 append-user-input: true
 ---
