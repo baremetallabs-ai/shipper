@@ -168,6 +168,8 @@ interface IssueCardProps {
   resetTargets?: WorkflowStage[];
   groomDisabled?: boolean;
   isResetting?: boolean;
+  onShip?: (issueNumber: number) => void;
+  shipDisabled?: boolean;
 }
 
 function IssueCard({
@@ -177,11 +179,14 @@ function IssueCard({
   resetTargets = [],
   groomDisabled = false,
   isResetting = false,
+  onShip,
+  shipDisabled = false,
 }: IssueCardProps): JSX.Element {
   const isBlocked = issue.labels.includes(BLOCKED_LABEL);
   const isLocked = issue.labels.includes(LOCKED_LABEL);
   const isGroomDisabled = groomDisabled || isBlocked || isLocked;
   const showOverflowMenu = onResetSelect !== undefined && resetTargets.length > 0;
+  const isShipDisabled = shipDisabled || isBlocked || isLocked;
 
   return (
     <article
@@ -244,6 +249,19 @@ function IssueCard({
           disabled={isGroomDisabled}
         >
           Groom
+        </Button>
+      ) : null}
+      {onShip ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            onShip(issue.number);
+          }}
+          disabled={isShipDisabled}
+        >
+          Ship
         </Button>
       ) : null}
       {isResetting ? (
@@ -640,6 +658,16 @@ export default function App(): JSX.Element {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setFetchError(`Failed to launch shipper groom: ${message}`);
+    }
+  }
+
+  async function handleShipperShip(issueNumber: number): Promise<void> {
+    try {
+      const result = await window.shipperAPI.spawnShipperShip(issueNumber, activeRepo, 120, 30);
+      openRunningSession(result.sessionId, `ship — #${issueNumber}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setFetchError(`Failed to launch shipper ship: ${message}`);
     }
   }
 
@@ -1085,6 +1113,14 @@ export default function App(): JSX.Element {
                                         }}
                                         resetTargets={resetTargets}
                                         isResetting={resettingIssues.has(issue.number)}
+                                        onShip={
+                                          !isReadyColumn
+                                            ? (issueNumber) => {
+                                                void handleShipperShip(issueNumber);
+                                              }
+                                            : undefined
+                                        }
+                                        shipDisabled={!canFetch || !hasActiveRepo}
                                       />
                                     );
                                   })
