@@ -88,7 +88,14 @@ concerns in any UI code.
 - Is focus moved to the appropriate element after dynamic content changes?
 - Do elements have accessible names, roles, and states for assistive technology?
 
-**Context-specific dimensions:** If the change warrants additional analysis beyond the four core
+**Environmental assumptions** — Identify implicit dependencies on framework behavior, runtime
+ordering, or host configuration that are not enforced by the code itself.
+
+- Does the code assume a specific execution order across async boundaries when context could change between an await and its continuation?
+- Does the code assume framework internals (cascade priority, rendering order, module resolution) that other code in the project could violate?
+- Are there hardcoded values that assume a specific host or repo configuration rather than resolving dynamically?
+
+**Context-specific dimensions:** If the change warrants additional analysis beyond the five core
 dimensions (e.g., security for auth/crypto changes, concurrency safety for async code, backwards
 compatibility for API changes, performance for hot paths), add them and apply the same rigor.
 
@@ -145,6 +152,7 @@ Prepare a review summary body in this structure:
 | Edge-case resilience                      | [1-2 sentences, or N/A — reason]                                     |
 | Key-collision and silent-overwrite safety | [1-2 sentences, or N/A — reason]                                     |
 | Accessibility                             | [1-2 sentences, or N/A — reason]                                     |
+| Environmental assumptions                 | [1-2 sentences, or N/A — reason]                                     |
 | [Any additional dimensions]               | [1-2 sentences, or N/A — reason]                                     |
 
 ### Findings ([N] total)
