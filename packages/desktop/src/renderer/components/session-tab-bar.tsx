@@ -9,6 +9,8 @@ export interface TerminalSessionTab {
   id: string;
   label: string;
   status: TerminalSessionStatus;
+  repo?: string;
+  issueNumber?: number;
 }
 
 interface SessionTabBarProps {

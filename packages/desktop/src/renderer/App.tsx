@@ -161,6 +161,17 @@ function getResetTargetLabel(stage: WorkflowStage): string {
   return DISPLAY_NAME_MAP[RESET_STAGE_LABELS[stage]] ?? stage;
 }
 
+function findActiveIssueSession(
+  sessions: TerminalSession[],
+  repo: string,
+  issueNumber: number
+): TerminalSession | undefined {
+  return sessions.find(
+    (session) =>
+      session.repo === repo && session.issueNumber === issueNumber && session.status !== 'exited'
+  );
+}
+
 interface IssueCardProps {
   issue: ListIssueItem;
   onGroom?: (issueNumber: number) => void;
@@ -628,11 +639,16 @@ export default function App(): JSX.Element {
     };
   }, [sessions.length]);
 
-  function openRunningSession(sessionId: string, label: string): void {
+  function openRunningSession(
+    sessionId: string,
+    label: string,
+    metadata?: { repo: string; issueNumber: number }
+  ): void {
     const session: TerminalSession = {
       id: sessionId,
       label,
       status: 'running',
+      ...metadata,
     };
 
     lastOutputAtBySessionRef.current.set(session.id, Date.now());
@@ -652,9 +668,19 @@ export default function App(): JSX.Element {
   }
 
   async function handleShipperGroom(issueNumber: number): Promise<void> {
+    const existing = findActiveIssueSession(sessionsRef.current, activeRepo, issueNumber);
+    if (existing) {
+      setActiveSessionId(existing.id);
+      setDrawerOpen(true);
+      return;
+    }
+
     try {
       const result = await window.shipperAPI.spawnShipperGroom(issueNumber, activeRepo, 120, 30);
-      openRunningSession(result.sessionId, `groom — #${issueNumber}`);
+      openRunningSession(result.sessionId, `groom — #${issueNumber}`, {
+        repo: activeRepo,
+        issueNumber,
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setFetchError(`Failed to launch shipper groom: ${message}`);
@@ -662,9 +688,19 @@ export default function App(): JSX.Element {
   }
 
   async function handleShipperShip(issueNumber: number): Promise<void> {
+    const existing = findActiveIssueSession(sessionsRef.current, activeRepo, issueNumber);
+    if (existing) {
+      setActiveSessionId(existing.id);
+      setDrawerOpen(true);
+      return;
+    }
+
     try {
       const result = await window.shipperAPI.spawnShipperShip(issueNumber, activeRepo, 120, 30);
-      openRunningSession(result.sessionId, `ship — #${issueNumber}`);
+      openRunningSession(result.sessionId, `ship — #${issueNumber}`, {
+        repo: activeRepo,
+        issueNumber,
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setFetchError(`Failed to launch shipper ship: ${message}`);
