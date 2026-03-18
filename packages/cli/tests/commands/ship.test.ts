@@ -2361,7 +2361,9 @@ describe('shipCommand parallel auto runner', () => {
     expect(output).toContain('[#2] ✗ fail');
     expect(output).toContain('[#7] Auto: attempting unblock of #7 — Blocked issue');
     expect(output).toContain('Auto run complete.');
-    expect(output).toContain('  #    Issue                                          Outcome');
+    expect(output).toContain(
+      '  Ref              Issue                                          Outcome'
+    );
     expect(output).toContain('✗ fail — boom');
     expect(output).toContain('  Unblock attempts:');
     expect(output).toContain('unblock #7');
