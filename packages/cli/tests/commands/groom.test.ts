@@ -6,6 +6,7 @@ const generateBranchNameMock = vi.fn((_repo: string, issueRef: string) =>
 );
 const getRepoRootMock = vi.fn(() => Promise.resolve('/tmp/fake-repo'));
 const printAutoSummaryMock = vi.fn();
+const resolveModeMock = vi.fn((_step: string, override?: string) => override ?? 'default');
 const runPromptMock = vi.fn(() => Promise.resolve(0));
 const withIssueLockMock = vi.fn((_repo: unknown, _issue: unknown, fn: () => Promise<unknown>) =>
   fn()
@@ -21,6 +22,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   autoSelectIssue: autoSelectIssueMock,
   generateBranchName: generateBranchNameMock,
   getRepoRoot: getRepoRootMock,
+  resolveMode: resolveModeMock,
   runPrompt: runPromptMock,
   withIssueLock: withIssueLockMock,
   withStageHooks: withStageHooksMock,
@@ -37,6 +39,7 @@ describe('groomCommand', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.exitCode = undefined;
+    resolveModeMock.mockImplementation((_step: string, override?: string) => override ?? 'default');
     exitSpy = vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
       throw new Error(`exit:${code}`);
     });
@@ -127,6 +130,41 @@ describe('groomCommand', () => {
     expect(process.exitCode).toBe(0);
 
     logSpy.mockRestore();
+  });
+
+  it('rejects explicitly headless grooming before doing any work', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { groomCommand } = await import('../../src/commands/groom.js');
+
+    await expect(
+      groomCommand('owner/repo', '123', { auto: false, mode: 'headless' })
+    ).rejects.toThrow('exit:1');
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      'Error: groom does not support headless mode. Grooming requires interactive input.'
+    );
+    expect(autoSelectIssueMock).not.toHaveBeenCalled();
+    expect(withWorktreeMock).not.toHaveBeenCalled();
+    expect(runPromptMock).not.toHaveBeenCalled();
+
+    errorSpy.mockRestore();
+  });
+
+  it('rejects settings-resolved headless grooming before doing any work', async () => {
+    resolveModeMock.mockReturnValueOnce('headless');
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { groomCommand } = await import('../../src/commands/groom.js');
+
+    await expect(groomCommand('owner/repo', '123', { auto: false })).rejects.toThrow('exit:1');
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      'Error: groom does not support headless mode. Grooming requires interactive input.'
+    );
+    expect(autoSelectIssueMock).not.toHaveBeenCalled();
+    expect(withWorktreeMock).not.toHaveBeenCalled();
+    expect(runPromptMock).not.toHaveBeenCalled();
+
+    errorSpy.mockRestore();
   });
 
   it('fails hard when worktree creation fails', async () => {

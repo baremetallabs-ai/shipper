@@ -682,9 +682,10 @@ async function shipOneIssue(
 
           logBoth(logStream, `Running stage: ${stageName}`);
 
+          const stageMode = label === NEW_LABEL ? 'interactive' : mode;
           const nextArgs = [cliEntrypoint, 'next', issueStr];
-          if (mode && mode !== 'default') {
-            nextArgs.push('--mode', mode);
+          if (stageMode && stageMode !== 'default') {
+            nextArgs.push('--mode', stageMode);
           }
           if (agent) {
             nextArgs.push('--agent', agent);
@@ -736,7 +737,7 @@ async function shipOneIssue(
             return { success: false, error: `unexpected label after stage "${stageName}"` };
           }
 
-          if (label === NEW_LABEL && previousLabel !== NEW_LABEL && mode !== 'interactive') {
+          if (label === NEW_LABEL && previousLabel !== NEW_LABEL && parkHooks) {
             const msg = `Issue #${issueStr} was reset to ${NEW_LABEL} by stage "${stageName}" - stopping to avoid interactive groom stage.`;
             errorBoth(logStream, msg);
             printSummary(results, logStream);

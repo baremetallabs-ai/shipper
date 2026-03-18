@@ -1,4 +1,9 @@
-import { autoSelectIssue, generateBranchName, getRepoRoot } from '@dnsquared/shipper-core';
+import {
+  autoSelectIssue,
+  generateBranchName,
+  getRepoRoot,
+  resolveMode,
+} from '@dnsquared/shipper-core';
 import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
 import { withStageHooks } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
@@ -45,6 +50,14 @@ export async function groomCommand(
   issue?: string,
   options: GroomOptions = { auto: false }
 ): Promise<void> {
+  const effectiveMode = resolveMode('groom', options.mode);
+  if (effectiveMode === 'headless') {
+    console.error(
+      'Error: groom does not support headless mode. Grooming requires interactive input.'
+    );
+    process.exit(1);
+  }
+
   if (options.auto) {
     const results: AutoResult[] = [];
 
