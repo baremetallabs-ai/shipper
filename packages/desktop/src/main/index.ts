@@ -8,10 +8,14 @@ import {
   buildPromptCommand,
   checkGhAuth,
   checkGhInstalled,
+  executeReset,
   ensureRepoClone,
   gh,
   listIssues,
+  parseStage,
+  scanArtifacts,
   type ListIssueItem,
+  type WorkflowStage,
 } from '@dnsquared/shipper-core';
 
 import { PtyManager } from './pty-manager.js';
@@ -55,6 +59,22 @@ interface AdoptIssuePayload {
   issueNumber: number;
 }
 
+interface ResetIssuePayload extends AdoptIssuePayload {
+  targetStage: WorkflowStage;
+}
+
+interface ArtifactScanSummary {
+  targetStage: WorkflowStage;
+  targetLabel: string;
+  labelsToRemove: string[];
+  addTarget: boolean;
+  prs: Array<{ number: number; headRefName: string }>;
+  branchesToDelete: string[];
+  localBranches: string[];
+  localWorktrees: string[];
+  commentCount: number;
+}
+
 interface RawListIssueData {
   number: number;
   title: string;
@@ -62,6 +82,12 @@ interface RawListIssueData {
   labels: { name: string }[];
   author: { login: string } | null;
   createdAt: string;
+}
+
+interface RawResetIssueData {
+  number: number;
+  state: string;
+  labels: { name: string }[];
 }
 
 const defaultConfig: AppConfig = { repos: [], activeRepo: '' };
@@ -210,6 +236,30 @@ function parseAdoptIssuePayload(value: unknown): AdoptIssuePayload | null {
   };
 }
 
+function parseResetIssuePayload(value: unknown): ResetIssuePayload | null {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('repo' in value) ||
+    !('issueNumber' in value) ||
+    !('targetStage' in value)
+  ) {
+    return null;
+  }
+
+  const repo = parseRepo(value.repo);
+  const targetStage = typeof value.targetStage === 'string' ? parseStage(value.targetStage) : null;
+  if (repo === null || !isPositiveInteger(value.issueNumber) || targetStage === null) {
+    return null;
+  }
+
+  return {
+    repo,
+    issueNumber: value.issueNumber,
+    targetStage,
+  };
+}
+
 function parseRepoPayload(value: unknown): string | null {
   if (typeof value !== 'object' || value === null || !('repo' in value)) {
     return null;
@@ -226,6 +276,81 @@ function parseIssueListJson(repo: string, json: string): RawListIssueData[] {
     const preview = json.length > 200 ? `${json.slice(0, 200)}…` : json;
     throw new Error(`Failed to list adoptable issues for ${repo}: ${message}. Output: ${preview}`);
   }
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parseResetIssueJson(repo: string, issueNumber: number, json: string): RawResetIssueData {
+  try {
+    const parsed: unknown = JSON.parse(json);
+    if (
+      !isPlainObject(parsed) ||
+      typeof parsed.number !== 'number' ||
+      typeof parsed.state !== 'string' ||
+      !Array.isArray(parsed.labels)
+    ) {
+      throw new Error('GitHub CLI returned an invalid issue payload.');
+    }
+
+    return {
+      number: parsed.number,
+      state: parsed.state,
+      labels: parsed.labels.map((label) => {
+        if (!isPlainObject(label) || typeof label.name !== 'string') {
+          throw new Error('GitHub CLI returned an invalid issue label.');
+        }
+
+        return { name: label.name };
+      }),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to fetch reset data for issue #${issueNumber} in ${repo}: ${message}`);
+  }
+}
+
+function getRepoName(repo: string): string {
+  const repoName = repo.split('/')[1];
+  if (!repoName) {
+    throw new Error(`Invalid repository name: ${repo}`);
+  }
+
+  return repoName;
+}
+
+async function loadResetIssue(repo: string, issueNumber: number): Promise<RawResetIssueData> {
+  const result = await gh([
+    'issue',
+    'view',
+    String(issueNumber),
+    '-R',
+    repo,
+    '--json',
+    'number,state,labels',
+  ]);
+
+  return parseResetIssueJson(repo, issueNumber, result.stdout);
+}
+
+function toArtifactScanSummary(
+  scan: Awaited<ReturnType<typeof scanArtifacts>>
+): ArtifactScanSummary {
+  return {
+    targetStage: scan.targetStage,
+    targetLabel: scan.targetLabel,
+    labelsToRemove: scan.labelsToRemove,
+    addTarget: scan.addTarget,
+    prs: scan.prs.map((pr) => ({
+      number: pr.number,
+      headRefName: pr.headRefName,
+    })),
+    branchesToDelete: scan.branchesToDelete,
+    localBranches: scan.localBranches,
+    localWorktrees: scan.localWorktrees,
+    commentCount: scan.commentIds.length,
+  };
 }
 
 function toRepoKey(repo: string): string {
@@ -412,6 +537,78 @@ function registerIpcHandlers(): void {
       const message = error instanceof Error ? error.message : String(error);
       const response: ListIssuesFailure = { ok: false, error: message };
       return response;
+    }
+  });
+
+  ipcMain.handle('scan-reset', async (_event, payload: unknown) => {
+    const parsedPayload = parseResetIssuePayload(payload);
+    if (parsedPayload === null) {
+      return {
+        ok: false,
+        error:
+          'Enter a repository in owner/repo format, a positive issue number, and a valid reset stage.',
+      };
+    }
+
+    try {
+      const issue = await loadResetIssue(parsedPayload.repo, parsedPayload.issueNumber);
+      if (issue.state !== 'OPEN') {
+        return {
+          ok: false,
+          error: `Issue #${parsedPayload.issueNumber} is closed. Reset only works on open issues.`,
+        };
+      }
+
+      const scan = await scanArtifacts(
+        parsedPayload.issueNumber,
+        parsedPayload.repo,
+        parsedPayload.targetStage,
+        issue.labels.map((label) => label.name),
+        { repoName: getRepoName(parsedPayload.repo) }
+      );
+
+      return {
+        ok: true,
+        scan: toArtifactScanSummary(scan),
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { ok: false, error: message };
+    }
+  });
+
+  ipcMain.handle('execute-reset', async (_event, payload: unknown) => {
+    const parsedPayload = parseResetIssuePayload(payload);
+    if (parsedPayload === null) {
+      return {
+        ok: false,
+        error:
+          'Enter a repository in owner/repo format, a positive issue number, and a valid reset stage.',
+      };
+    }
+
+    try {
+      const issue = await loadResetIssue(parsedPayload.repo, parsedPayload.issueNumber);
+      if (issue.state !== 'OPEN') {
+        return {
+          ok: false,
+          error: `Issue #${parsedPayload.issueNumber} is closed. Reset only works on open issues.`,
+        };
+      }
+
+      const scan = await scanArtifacts(
+        parsedPayload.issueNumber,
+        parsedPayload.repo,
+        parsedPayload.targetStage,
+        issue.labels.map((label) => label.name),
+        { repoName: getRepoName(parsedPayload.repo) }
+      );
+
+      await executeReset(parsedPayload.issueNumber, scan, parsedPayload.repo);
+      return { ok: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { ok: false, error: message };
     }
   });
 

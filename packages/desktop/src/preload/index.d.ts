@@ -20,6 +20,23 @@ interface ListIssuesFailure {
   error: string;
 }
 
+type WorkflowStage = 'new' | 'groomed' | 'designed' | 'planned' | 'implemented';
+
+interface ArtifactScanSummary {
+  targetStage: WorkflowStage;
+  targetLabel: string;
+  labelsToRemove: string[];
+  addTarget: boolean;
+  prs: Array<{
+    number: number;
+    headRefName: string;
+  }>;
+  branchesToDelete: string[];
+  localBranches: string[];
+  localWorktrees: string[];
+  commentCount: number;
+}
+
 interface PtyOutputEvent {
   sessionId: string;
   sequence: number;
@@ -44,6 +61,16 @@ interface ShipperAPI {
   adoptIssue: (
     repo: string,
     issueNumber: number
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
+  scanReset: (
+    repo: string,
+    issueNumber: number,
+    targetStage: WorkflowStage
+  ) => Promise<{ ok: true; scan: ArtifactScanSummary } | { ok: false; error: string }>;
+  executeReset: (
+    repo: string,
+    issueNumber: number,
+    targetStage: WorkflowStage
   ) => Promise<{ ok: true } | { ok: false; error: string }>;
 
   spawnShipperNew: (

@@ -1,6 +1,6 @@
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import type { JSX } from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, EllipsisVertical, LoaderCircle } from 'lucide-react';
 
 import {
   BLOCKED_LABEL,
@@ -15,10 +15,11 @@ import {
   PR_REVIEWED_LABEL,
   READY_LABEL,
 } from '../../../core/src/lib/labels.js';
-import type { ListIssueItem } from '@dnsquared/shipper-core';
+import type { ListIssueItem, WorkflowStage } from '@dnsquared/shipper-core';
 
 import { AdoptDialog } from './components/adopt-dialog.js';
 import { NewIssueDialog } from './components/new-issue-dialog.js';
+import { ResetConfirmDialog } from './components/reset-confirm-dialog.js';
 import { RepoPickerDialog } from './components/repo-picker-dialog.js';
 import { RepoTabBar } from './components/repo-tab-bar.js';
 import type { TerminalSessionTab } from './components/session-tab-bar.js';
@@ -34,6 +35,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from './components/ui/dialog.js';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from './components/ui/dropdown-menu.js';
 import { cn } from './lib/utils.js';
 
 interface CheckResult {
@@ -52,6 +62,10 @@ interface AppConfig {
 }
 
 type TerminalSession = TerminalSessionTab;
+type ResetSelection = {
+  issue: ListIssueItem;
+  targetStage: WorkflowStage;
+};
 
 const repoPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
@@ -67,6 +81,17 @@ const PIPELINE_COLUMNS = [
   PR_REVIEWED_LABEL,
   READY_LABEL,
 ] as const;
+const RESET_STAGE_ORDER: ReadonlyArray<{ stage: WorkflowStage; label: string }> = [
+  { stage: 'new', label: NEW_LABEL },
+  { stage: 'groomed', label: GROOMED_LABEL },
+  { stage: 'designed', label: DESIGNED_LABEL },
+  { stage: 'planned', label: PLANNED_LABEL },
+  { stage: 'implemented', label: IMPLEMENTED_LABEL },
+];
+const RESET_STAGE_LABELS: Record<WorkflowStage, string> = Object.fromEntries(
+  RESET_STAGE_ORDER.map(({ stage, label }) => [stage, label])
+) as Record<WorkflowStage, string>;
+const POST_IMPLEMENTATION_LABELS = [PR_OPEN_LABEL, PR_REVIEWED_LABEL, READY_LABEL] as const;
 
 type PipelineColumnLabel = (typeof PIPELINE_COLUMNS)[number];
 
@@ -116,20 +141,91 @@ function getPrerequisiteMessage(prerequisites: Prerequisites | null): string | n
   return null;
 }
 
+function getResetTargets(labels: string[]): WorkflowStage[] {
+  const hasPrLabels = POST_IMPLEMENTATION_LABELS.some((label) => labels.includes(label));
+  if (hasPrLabels) {
+    return RESET_STAGE_ORDER.map(({ stage }) => stage);
+  }
+
+  for (let index = RESET_STAGE_ORDER.length - 1; index >= 0; index -= 1) {
+    const entry = RESET_STAGE_ORDER[index];
+    if (entry && labels.includes(entry.label)) {
+      return RESET_STAGE_ORDER.slice(0, index).map(({ stage }) => stage);
+    }
+  }
+
+  return [];
+}
+
+function getResetTargetLabel(stage: WorkflowStage): string {
+  return DISPLAY_NAME_MAP[RESET_STAGE_LABELS[stage]] ?? stage;
+}
+
 interface IssueCardProps {
   issue: ListIssueItem;
   onGroom?: (issueNumber: number) => void;
+  onResetSelect?: (targetStage: WorkflowStage) => void;
+  resetTargets?: WorkflowStage[];
   groomDisabled?: boolean;
+  isResetting?: boolean;
 }
 
-function IssueCard({ issue, onGroom, groomDisabled = false }: IssueCardProps): JSX.Element {
+function IssueCard({
+  issue,
+  onGroom,
+  onResetSelect,
+  resetTargets = [],
+  groomDisabled = false,
+  isResetting = false,
+}: IssueCardProps): JSX.Element {
   const isBlocked = issue.labels.includes(BLOCKED_LABEL);
   const isLocked = issue.labels.includes(LOCKED_LABEL);
   const isGroomDisabled = groomDisabled || isBlocked || isLocked;
+  const showOverflowMenu = onResetSelect !== undefined && resetTargets.length > 0;
 
   return (
-    <article className="space-y-3 rounded-sm border border-border bg-background px-4 py-4">
-      <p className="text-sm font-medium text-muted-foreground">#{issue.number}</p>
+    <article
+      className={cn(
+        'relative space-y-3 rounded-sm border border-border bg-background px-4 py-4 transition-opacity',
+        isResetting && 'opacity-70'
+      )}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-sm font-medium text-muted-foreground">#{issue.number}</p>
+        {showOverflowMenu ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="size-8"
+                disabled={isResetting}
+                aria-label={`Issue #${issue.number} actions`}
+              >
+                <EllipsisVertical className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>Reset</DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  {resetTargets.map((targetStage) => (
+                    <DropdownMenuItem
+                      key={targetStage}
+                      onSelect={() => {
+                        onResetSelect(targetStage);
+                      }}
+                    >
+                      {getResetTargetLabel(targetStage)}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
+      </div>
       <h4 className="text-sm font-semibold leading-snug text-foreground">{issue.title}</h4>
       {isBlocked || isLocked ? (
         <div className="flex flex-wrap gap-2">
@@ -150,6 +246,14 @@ function IssueCard({ issue, onGroom, groomDisabled = false }: IssueCardProps): J
           Groom
         </Button>
       ) : null}
+      {isResetting ? (
+        <div className="absolute inset-0 flex items-center justify-center rounded-sm bg-background/80">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <LoaderCircle className="size-4 animate-spin" />
+            Resetting...
+          </div>
+        </div>
+      ) : null}
     </article>
   );
 }
@@ -161,6 +265,8 @@ export default function App(): JSX.Element {
   const [issues, setIssues] = useState<ListIssueItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [resetSelection, setResetSelection] = useState<ResetSelection | null>(null);
+  const [resettingIssues, setResettingIssues] = useState<Set<number>>(new Set());
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [isNewIssueOpen, setIsNewIssueOpen] = useState(false);
@@ -230,6 +336,8 @@ export default function App(): JSX.Element {
     setLastUpdated(null);
     setFetchError(null);
     setIsLoading(false);
+    setResetSelection(null);
+    setResettingIssues(new Set());
   }
 
   const loadIssues = useEffectEvent(async (repo: string) => {
@@ -535,6 +643,25 @@ export default function App(): JSX.Element {
     }
   }
 
+  function trackResetIssue(issueNumber: number): void {
+    setResettingIssues((current) => new Set(current).add(issueNumber));
+  }
+
+  function clearResetIssue(issueNumber: number): void {
+    setResettingIssues((current) => {
+      const next = new Set(current);
+      next.delete(issueNumber);
+      return next;
+    });
+  }
+
+  function handleResetSuccess(issueNumber: number): void {
+    clearResetIssue(issueNumber);
+    if (activeRepo) {
+      void loadIssues(activeRepo);
+    }
+  }
+
   function handleToggleDrawer(): void {
     setDrawerOpen((current) => !current);
   }
@@ -700,6 +827,20 @@ export default function App(): JSX.Element {
         onAdopted={() => {
           void loadIssues(activeRepo);
         }}
+      />
+      <ResetConfirmDialog
+        open={resetSelection !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setResetSelection(null);
+          }
+        }}
+        repo={activeRepo}
+        issueNumber={resetSelection?.issue.number ?? null}
+        targetStage={resetSelection?.targetStage ?? null}
+        onResetStart={trackResetIssue}
+        onResetSuccess={handleResetSuccess}
+        onResetFailure={clearResetIssue}
       />
       <Dialog
         open={pendingCloseSession !== null}
@@ -932,9 +1073,21 @@ export default function App(): JSX.Element {
 
                               <div className="space-y-3">
                                 {stageIssues.length > 0 ? (
-                                  stageIssues.map((issue) => (
-                                    <IssueCard key={issue.number} issue={issue} />
-                                  ))
+                                  stageIssues.map((issue) => {
+                                    const resetTargets = getResetTargets(issue.labels);
+
+                                    return (
+                                      <IssueCard
+                                        key={issue.number}
+                                        issue={issue}
+                                        onResetSelect={(targetStage) => {
+                                          setResetSelection({ issue, targetStage });
+                                        }}
+                                        resetTargets={resetTargets}
+                                        isResetting={resettingIssues.has(issue.number)}
+                                      />
+                                    );
+                                  })
                                 ) : (
                                   <p className="rounded-sm border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
                                     No issues
