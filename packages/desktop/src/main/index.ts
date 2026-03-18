@@ -8,6 +8,7 @@ import {
   buildPromptCommand,
   checkGhAuth,
   checkGhInstalled,
+  checkLabels,
   executeReset,
   ensureRepoClone,
   getCurrentStage,
@@ -512,6 +513,20 @@ function registerIpcHandlers(): void {
     return { ghInstalled, ghAuth };
   });
 
+  ipcMain.handle('check-init', async (_event, payload: unknown) => {
+    const repo = parseRepoPayload(payload);
+    if (repo === null) {
+      return { initialized: false };
+    }
+
+    try {
+      const result = await checkLabels(repo);
+      return { initialized: result.ok };
+    } catch {
+      return { initialized: false };
+    }
+  });
+
   ipcMain.handle('list-issues', async (_event, payload: unknown) => {
     const repo = parseRepoPayload(payload);
 
@@ -741,6 +756,24 @@ function registerIpcHandlers(): void {
 
     const sessionId = randomUUID();
     ptyManager.spawn(sessionId, 'shipper', ['ship', String(parsedPayload.issueNumber)], {
+      cols: parsedPayload.cols,
+      rows: parsedPayload.rows,
+      cwd: repoPath,
+    });
+
+    return { sessionId };
+  });
+
+  ipcMain.handle('pty-spawn-shipper-init', async (_event, payload: unknown) => {
+    const parsedPayload = parseSpawnPtyPayload(payload);
+    if (parsedPayload === null) {
+      throw new Error('Invalid pty-spawn-shipper-init payload.');
+    }
+
+    const repoPath = await ensureRepoClone(parsedPayload.repo);
+
+    const sessionId = randomUUID();
+    ptyManager.spawn(sessionId, 'shipper', ['init'], {
       cols: parsedPayload.cols,
       rows: parsedPayload.rows,
       cwd: repoPath,
