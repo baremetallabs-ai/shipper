@@ -60,7 +60,7 @@ interface RawListIssueData {
   title: string;
   state: string;
   labels: { name: string }[];
-  author: { login: string };
+  author: { login: string } | null;
   createdAt: string;
 }
 
@@ -210,6 +210,24 @@ function parseAdoptIssuePayload(value: unknown): AdoptIssuePayload | null {
   };
 }
 
+function parseRepoPayload(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null || !('repo' in value)) {
+    return null;
+  }
+
+  return parseRepo(value.repo);
+}
+
+function parseIssueListJson(repo: string, json: string): RawListIssueData[] {
+  try {
+    return JSON.parse(json) as RawListIssueData[];
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const preview = json.length > 200 ? `${json.slice(0, 200)}…` : json;
+    throw new Error(`Failed to list adoptable issues for ${repo}: ${message}. Output: ${preview}`);
+  }
+}
+
 function toRepoKey(repo: string): string {
   return repo.trim().toLowerCase();
 }
@@ -332,10 +350,7 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('list-issues', async (_event, payload: unknown) => {
-    const repo =
-      typeof payload === 'object' && payload !== null && 'repo' in payload
-        ? parseRepo(payload.repo)
-        : null;
+    const repo = parseRepoPayload(payload);
 
     if (repo === null) {
       const response: ListIssuesFailure = {
@@ -357,10 +372,7 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('list-adoptable-issues', async (_event, payload: unknown) => {
-    const repo =
-      typeof payload === 'object' && payload !== null && 'repo' in payload
-        ? parseRepo(payload.repo)
-        : null;
+    const repo = parseRepoPayload(payload);
 
     if (repo === null) {
       const response: ListIssuesFailure = {
@@ -383,14 +395,14 @@ function registerIpcHandlers(): void {
         '--json',
         'number,title,labels,state,author,createdAt',
       ]);
-      const rawIssues = JSON.parse(result.stdout) as RawListIssueData[];
+      const rawIssues = parseIssueListJson(repo, result.stdout);
       const issues: ListIssueItem[] = rawIssues
         .map((issue) => ({
           number: issue.number,
           title: issue.title,
           labels: issue.labels.map((label) => label.name),
           state: issue.state,
-          author: issue.author.login,
+          author: issue.author?.login ?? 'ghost',
           createdAt: issue.createdAt,
         }))
         .filter((issue) => !issue.labels.some((label) => label.startsWith('shipper:')));
@@ -469,7 +481,10 @@ function registerIpcHandlers(): void {
   ipcMain.handle('adopt-issue', async (_event, payload: unknown) => {
     const parsedPayload = parseAdoptIssuePayload(payload);
     if (parsedPayload === null) {
-      return { ok: false, error: 'Enter a repository in owner/repo format.' };
+      return {
+        ok: false,
+        error: 'Enter a repository in owner/repo format and a positive issue number.',
+      };
     }
 
     try {

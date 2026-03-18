@@ -1,5 +1,5 @@
 import { LoaderCircle } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { JSX } from 'react';
 
 import type { ListIssueItem } from '@dnsquared/shipper-core';
@@ -41,8 +41,23 @@ export function AdoptDialog({
   const [error, setError] = useState<string | null>(null);
   const [adoptingSet, setAdoptingSet] = useState<Set<number>>(new Set());
   const [isBulkAdopting, setIsBulkAdopting] = useState(false);
+  const isMountedRef = useRef(true);
+  const activeRunIdRef = useRef(0);
 
   useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  function isRunActive(runId: number): boolean {
+    return isMountedRef.current && activeRunIdRef.current === runId;
+  }
+
+  useEffect(() => {
+    activeRunIdRef.current += 1;
+    const runId = activeRunIdRef.current;
+
     setIssues([]);
     setError(null);
     setAdoptingSet(new Set());
@@ -60,7 +75,7 @@ export function AdoptDialog({
     void window.shipperAPI
       .listAdoptableIssues(repo)
       .then((result) => {
-        if (cancelled) {
+        if (cancelled || !isRunActive(runId)) {
           return;
         }
 
@@ -72,13 +87,13 @@ export function AdoptDialog({
         setIssues(result.issues);
       })
       .catch((fetchError: unknown) => {
-        if (!cancelled) {
+        if (!cancelled && isRunActive(runId)) {
           const message = fetchError instanceof Error ? fetchError.message : String(fetchError);
           setError(message);
         }
       })
       .finally(() => {
-        if (!cancelled) {
+        if (!cancelled && isRunActive(runId)) {
           setIsLoading(false);
         }
       });
@@ -89,11 +104,17 @@ export function AdoptDialog({
   }, [open, repo]);
 
   async function handleAdoptIssue(issueNumber: number): Promise<boolean> {
+    const runId = activeRunIdRef.current;
+
     setError(null);
     setAdoptingSet((current) => new Set(current).add(issueNumber));
 
     try {
       const result = await window.shipperAPI.adoptIssue(repo, issueNumber);
+      if (!isRunActive(runId)) {
+        return false;
+      }
+
       if (!result.ok) {
         setError(result.error);
         return false;
@@ -103,15 +124,21 @@ export function AdoptDialog({
       onAdopted();
       return true;
     } catch (adoptError) {
+      if (!isRunActive(runId)) {
+        return false;
+      }
+
       const message = adoptError instanceof Error ? adoptError.message : String(adoptError);
       setError(message);
       return false;
     } finally {
-      setAdoptingSet((current) => {
-        const next = new Set(current);
-        next.delete(issueNumber);
-        return next;
-      });
+      if (isRunActive(runId)) {
+        setAdoptingSet((current) => {
+          const next = new Set(current);
+          next.delete(issueNumber);
+          return next;
+        });
+      }
     }
   }
 
@@ -121,17 +148,27 @@ export function AdoptDialog({
       return;
     }
 
+    const runId = activeRunIdRef.current;
+
     setError(null);
     setIsBulkAdopting(true);
-    setAdoptingSet(new Set(issueNumbers));
+    setAdoptingSet(new Set());
 
     let adoptedCount = 0;
     const failures: string[] = [];
 
     try {
       for (const issueNumber of issueNumbers) {
+        if (!isRunActive(runId)) {
+          break;
+        }
+
         try {
           const result = await window.shipperAPI.adoptIssue(repo, issueNumber);
+          if (!isRunActive(runId)) {
+            break;
+          }
+
           if (!result.ok) {
             failures.push(`#${issueNumber}: ${result.error}`);
             continue;
@@ -140,15 +177,17 @@ export function AdoptDialog({
           adoptedCount += 1;
           setIssues((currentIssues) => removeIssue(currentIssues, issueNumber));
         } catch (adoptError) {
+          if (!isRunActive(runId)) {
+            break;
+          }
+
           const message = adoptError instanceof Error ? adoptError.message : String(adoptError);
           failures.push(`#${issueNumber}: ${message}`);
-        } finally {
-          setAdoptingSet((current) => {
-            const next = new Set(current);
-            next.delete(issueNumber);
-            return next;
-          });
         }
+      }
+
+      if (!isRunActive(runId)) {
+        return;
       }
 
       if (adoptedCount > 0) {
@@ -159,7 +198,9 @@ export function AdoptDialog({
         setError(`Failed to adopt ${failures.length} issue(s): ${failures.join(' ')}`);
       }
     } finally {
-      setIsBulkAdopting(false);
+      if (isRunActive(runId)) {
+        setIsBulkAdopting(false);
+      }
     }
   }
 
@@ -171,7 +212,8 @@ export function AdoptDialog({
         <DialogHeader className="border-b border-border px-6 py-5">
           <DialogTitle>Adopt Issues</DialogTitle>
           <DialogDescription>
-            Add `shipper:new` to existing GitHub issues so they enter the Shipper workflow.
+            Add <code>shipper:new</code> to existing GitHub issues so they enter the Shipper
+            workflow.
           </DialogDescription>
         </DialogHeader>
 
@@ -185,7 +227,11 @@ export function AdoptDialog({
 
           <div className="flex items-center justify-between gap-3">
             <p className="text-sm text-muted-foreground">
-              {issues.length === 1 ? '1 adoptable issue' : `${issues.length} adoptable issues`}
+              {isLoading
+                ? 'Loading adoptable issues...'
+                : issues.length === 1
+                  ? '1 adoptable issue'
+                  : `${issues.length} adoptable issues`}
             </p>
             <Button
               type="button"
