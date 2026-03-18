@@ -1618,9 +1618,10 @@ describe('resetCommand', () => {
 
       const editArgs = getIssueEditArgs();
       expect(editArgs).toContain('--remove-label');
-      expect(editArgs[editArgs.indexOf('--remove-label') + 1]).toBe(
-        'shipper:planned,shipper:failed'
-      );
+      const removedLabels = editArgs[editArgs.indexOf('--remove-label') + 1].split(',');
+      expect(removedLabels).toHaveLength(2);
+      expect(removedLabels).toContain('shipper:planned');
+      expect(removedLabels).toContain('shipper:failed');
     });
 
     it('fails with dual-label forward reset (shipper:planned + shipper:failed to implemented)', async () => {
