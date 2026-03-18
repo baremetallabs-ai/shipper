@@ -21,7 +21,7 @@ interface Issue {
 
 interface ControlIssue {
   issue: Issue;
-  stageLabel: string;
+  stageLabel: string | undefined;
 }
 
 export async function issueListCommand(options: { status?: string }): Promise<void> {
@@ -42,7 +42,7 @@ export async function issueListCommand(options: { status?: string }): Promise<vo
       '--state',
       'open',
       '--search',
-      `label:${STAGE_LABEL_NAMES.join(',')}`,
+      `label:${[...STAGE_LABEL_NAMES, BLOCKED_LABEL, FAILED_LABEL].join(',')}`,
       '--limit',
       '1000',
       '--json',
@@ -107,6 +107,18 @@ export async function issueListCommand(options: { status?: string }): Promise<vo
     }
   }
 
+  for (const issue of issues) {
+    const issueLabels = issue.labels.map((l) => l.name);
+    const hasStageLabel = STAGE_LABEL_NAMES.some((label) => issueLabels.includes(label));
+    if (hasStageLabel) continue;
+
+    if (issueLabels.includes(FAILED_LABEL)) {
+      failedIssues.push({ issue, stageLabel: undefined });
+    } else if (issueLabels.includes(BLOCKED_LABEL)) {
+      blockedIssues.push({ issue, stageLabel: undefined });
+    }
+  }
+
   blockedIssues.sort((a, b) => a.issue.number - b.issue.number);
   failedIssues.sort((a, b) => a.issue.number - b.issue.number);
 
@@ -125,11 +137,11 @@ export async function issueListCommand(options: { status?: string }): Promise<vo
 
     console.log(`\n${heading} (${filteredItems.length})`);
     for (const { issue, stageLabel } of filteredItems) {
-      const stageSuffix = `[${stageLabel.replace('shipper:', '')}]`;
+      const stageSuffix = stageLabel ? ` [${stageLabel.replace('shipper:', '')}]` : '';
       const lockedSuffix = issue.labels.some((label) => label.name === LOCKED_LABEL)
         ? ' [locked]'
         : '';
-      console.log(`  #${issue.number} ${issue.title} ${stageSuffix}${lockedSuffix}`);
+      console.log(`  #${issue.number} ${issue.title}${stageSuffix}${lockedSuffix}`);
     }
 
     return true;
