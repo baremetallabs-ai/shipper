@@ -209,30 +209,14 @@ describe('pushWorktree', () => {
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '-u', 'origin', 'HEAD'],
     ]);
+    expect(execFileMock.mock.calls[1]?.[2]).toMatchObject({
+      cwd: '/tmp/wt',
+      maxBuffer: 10 * 1024 * 1024,
+    });
     expect(execFileMock.mock.calls[2]?.[2]).toMatchObject({
       cwd: '/tmp/wt',
       maxBuffer: 10 * 1024 * 1024,
     });
-  });
-
-  it('runs checkout and clean before pushing a new branch', async () => {
-    queueCleanBeforePush();
-    queueExecResult();
-
-    await expect(
-      pushWorktree({
-        wtPath: '/tmp/wt',
-        repoRoot: '/tmp/repo',
-        baseBranch: 'main',
-        pushMode: 'new-branch',
-      })
-    ).resolves.toBeUndefined();
-
-    expect(gitArgsFromExecCalls()).toEqual([
-      ['checkout', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
-      ['push', '-u', 'origin', 'HEAD'],
-    ]);
   });
 
   it('aborts before push when git checkout -- . fails', async () => {
