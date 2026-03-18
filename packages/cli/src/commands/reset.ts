@@ -4,6 +4,7 @@ import path from 'node:path';
 import { confirm, promptChoice } from '../lib/confirm.js';
 import {
   BLOCKED_LABEL,
+  FAILED_LABEL,
   IMPLEMENTED_LABEL,
   LOCKED_LABEL,
   STAGE_LABEL_NAMES,
@@ -183,6 +184,8 @@ export async function resetCommand(
 
   const currentStage = getCurrentStage(labels);
   const currentIndex = getStageIndex(currentStage.stage);
+  const isFailedOnly =
+    labels.includes(FAILED_LABEL) && !labels.some((l) => STAGE_LABEL_NAMES.includes(l));
 
   let targetStage: WorkflowStage;
   if (opts.to) {
@@ -192,24 +195,28 @@ export async function resetCommand(
       process.exit(1);
     }
 
-    const targetIndex = getStageIndex(parsedStage);
-    const sameImplementedStage = currentStage.hasPrLabels && parsedStage === 'implemented';
-    if (targetIndex === currentIndex && !sameImplementedStage) {
-      console.error(
-        `Error: Issue #${issueNum} is already at ${getStageLabel(parsedStage)}. Reset only works backward.`
-      );
-      process.exit(1);
-    }
-    if (targetIndex > currentIndex) {
-      console.error(
-        `Error: ${getStageLabel(parsedStage)} is ahead of the current stage ${getStageLabel(currentStage.stage)}. Reset only works backward.`
-      );
-      process.exit(1);
+    if (!isFailedOnly) {
+      const targetIndex = getStageIndex(parsedStage);
+      const sameImplementedStage = currentStage.hasPrLabels && parsedStage === 'implemented';
+      if (targetIndex === currentIndex && !sameImplementedStage) {
+        console.error(
+          `Error: Issue #${issueNum} is already at ${getStageLabel(parsedStage)}. Reset only works backward.`
+        );
+        process.exit(1);
+      }
+      if (targetIndex > currentIndex) {
+        console.error(
+          `Error: ${getStageLabel(parsedStage)} is ahead of the current stage ${getStageLabel(currentStage.stage)}. Reset only works backward.`
+        );
+        process.exit(1);
+      }
     }
 
     targetStage = parsedStage;
   } else {
-    const validTargets = getValidTargets(currentStage);
+    const validTargets = isFailedOnly
+      ? ([...RESETTABLE_STAGE_NAMES] as WorkflowStage[])
+      : getValidTargets(currentStage);
     if (validTargets.length === 0) {
       console.error(
         `Error: Issue #${issueNum} is already at ${getStageLabel(currentStage.stage)}. Reset only works backward.`
