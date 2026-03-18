@@ -65,7 +65,7 @@ export function NewIssueDialog({ open, onOpenChange, onSubmit }: NewIssueDialogP
             <button
               type="submit"
               disabled={request.trim().length === 0}
-              className="cursor-pointer rounded-md bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+              className="cursor-pointer rounded-md bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-default disabled:opacity-50"
             >
               Launch
             </button>
