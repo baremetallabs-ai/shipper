@@ -413,4 +413,122 @@ describe('issueListCommand', () => {
     await expect(issueListCommand({})).rejects.toThrow('process.exit');
     expect(mockConsoleError).toHaveBeenCalledWith('Error: Failed to fetch issues.');
   });
+
+  it('shows a stageless failed issue in Failed with no stage suffix', async () => {
+    mockGhIssueList([
+      {
+        number: 42,
+        title: 'Stageless failed',
+        labels: [{ name: failedLabel }],
+      },
+    ]);
+
+    await issueListCommand({});
+
+    const calls = loggedLines();
+    expect(calls).toEqual(['\nFailed (1)', '  #42 Stageless failed']);
+  });
+
+  it('shows a stageless blocked issue in Blocked with no stage suffix', async () => {
+    mockGhIssueList([
+      {
+        number: 43,
+        title: 'Stageless blocked',
+        labels: [{ name: blockedLabel }],
+      },
+    ]);
+
+    await issueListCommand({});
+
+    const calls = loggedLines();
+    expect(calls).toEqual(['\nBlocked (1)', '  #43 Stageless blocked']);
+  });
+
+  it('--status failed includes stageless failed issues', async () => {
+    mockGhIssueList([
+      {
+        number: 10,
+        title: 'Staged failed',
+        labels: [{ name: 'shipper:designed' }, { name: failedLabel }],
+      },
+      {
+        number: 11,
+        title: 'Stageless failed',
+        labels: [{ name: failedLabel }],
+      },
+    ]);
+
+    await issueListCommand({ status: 'failed' });
+
+    const calls = loggedLines();
+    expect(calls).toEqual([
+      '\nFailed (2)',
+      '  #10 Staged failed [designed]',
+      '  #11 Stageless failed',
+    ]);
+  });
+
+  it('--status blocked includes stageless blocked issues', async () => {
+    mockGhIssueList([
+      {
+        number: 20,
+        title: 'Staged blocked',
+        labels: [{ name: 'shipper:planned' }, { name: blockedLabel }],
+      },
+      {
+        number: 21,
+        title: 'Stageless blocked',
+        labels: [{ name: blockedLabel }],
+      },
+    ]);
+
+    await issueListCommand({ status: 'blocked' });
+
+    const calls = loggedLines();
+    expect(calls).toEqual([
+      '\nBlocked (2)',
+      '  #20 Staged blocked [planned]',
+      '  #21 Stageless blocked',
+    ]);
+  });
+
+  it('shows stageless and staged control issues together correctly', async () => {
+    mockGhIssueList([
+      { number: 1, title: 'Normal issue', labels: [{ name: 'shipper:new' }] },
+      {
+        number: 2,
+        title: 'Staged blocked',
+        labels: [{ name: 'shipper:designed' }, { name: blockedLabel }],
+      },
+      {
+        number: 3,
+        title: 'Stageless blocked',
+        labels: [{ name: blockedLabel }],
+      },
+      {
+        number: 4,
+        title: 'Staged failed',
+        labels: [{ name: 'shipper:planned' }, { name: failedLabel }],
+      },
+      {
+        number: 5,
+        title: 'Stageless failed',
+        labels: [{ name: failedLabel }],
+      },
+    ]);
+
+    await issueListCommand({});
+
+    const calls = loggedLines();
+    expect(calls).toEqual([
+      '\nNew (1)',
+      '  #1 Normal issue',
+      '\nBlocked (2)',
+      '  #2 Staged blocked [designed]',
+      '  #3 Stageless blocked',
+      '\nFailed (2)',
+      '  #4 Staged failed [planned]',
+      '  #5 Stageless failed',
+    ]);
+  });
 });
