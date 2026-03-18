@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
+import type { WorkflowStage } from '@dnsquared/shipper-core';
 
 interface ConfigPayload {
   repos: string[];
@@ -25,9 +26,9 @@ const shipperAPI = {
   setConfig: (config: ConfigPayload) => ipcRenderer.invoke('set-config', config),
   adoptIssue: (repo: string, issueNumber: number) =>
     ipcRenderer.invoke('adopt-issue', { repo, issueNumber }),
-  scanReset: (repo: string, issueNumber: number, targetStage: string) =>
+  scanReset: (repo: string, issueNumber: number, targetStage: WorkflowStage) =>
     ipcRenderer.invoke('scan-reset', { repo, issueNumber, targetStage }),
-  executeReset: (repo: string, issueNumber: number, targetStage: string) =>
+  executeReset: (repo: string, issueNumber: number, targetStage: WorkflowStage) =>
     ipcRenderer.invoke('execute-reset', { repo, issueNumber, targetStage }),
 
   spawnShipperNew: (request: string, repo: string, cols: number, rows: number) =>

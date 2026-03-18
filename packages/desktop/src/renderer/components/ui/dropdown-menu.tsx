@@ -64,13 +64,15 @@ export const DropdownMenuSubContent = forwardRef<
   ComponentRef<typeof DropdownMenuPrimitive.SubContent>,
   ComponentProps<typeof DropdownMenuPrimitive.SubContent>
 >(({ className, ...props }, ref) => (
-  <DropdownMenuPrimitive.SubContent
-    ref={ref}
-    className={cn(
-      'z-50 min-w-[12rem] overflow-hidden rounded-sm border border-border bg-popover p-1 text-popover-foreground shadow-md',
-      className
-    )}
-    {...props}
-  />
+  <DropdownMenuPrimitive.Portal>
+    <DropdownMenuPrimitive.SubContent
+      ref={ref}
+      className={cn(
+        'z-50 min-w-[12rem] overflow-hidden rounded-sm border border-border bg-popover p-1 text-popover-foreground shadow-md',
+        className
+      )}
+      {...props}
+    />
+  </DropdownMenuPrimitive.Portal>
 ));
 DropdownMenuSubContent.displayName = DropdownMenuPrimitive.SubContent.displayName;
