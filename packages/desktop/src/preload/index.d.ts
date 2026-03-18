@@ -62,7 +62,7 @@ interface ShipperAPI {
     repo: string,
     issueNumber: number
   ) => Promise<{ ok: true } | { ok: false; error: string }>;
-  checkInit: (repo: string) => Promise<{ initialized: boolean }>;
+  checkInit: (repo: string) => Promise<{ initialized: boolean; error?: string }>;
   scanReset: (
     repo: string,
     issueNumber: number,

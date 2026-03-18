@@ -306,6 +306,7 @@ export default function App(): JSX.Element {
   const [pendingCloseSessionId, setPendingCloseSessionId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const requestVersionRef = useRef(0);
+  const initVersionRef = useRef(0);
   const contentPaneRef = useRef<HTMLDivElement | null>(null);
   const toggleButtonRef = useRef<HTMLButtonElement | null>(null);
   const drawerPanelRef = useRef<HTMLDivElement | null>(null);
@@ -369,6 +370,7 @@ export default function App(): JSX.Element {
     setResetSelection(null);
     setResettingIssues(new Set());
     setRepoInitialized(null);
+    initVersionRef.current = 0;
   }
 
   const loadIssues = useEffectEvent(async (repo: string) => {
@@ -405,11 +407,22 @@ export default function App(): JSX.Element {
   });
 
   const checkInitState = useEffectEvent(async (repo: string) => {
+    const version = initVersionRef.current + 1;
+    initVersionRef.current = version;
+
     try {
       const result = await window.shipperAPI.checkInit(repo);
+      if (version !== initVersionRef.current) return;
+
+      if (result.error) {
+        // Operational failure (e.g. gh CLI error) — keep null to avoid
+        // incorrectly showing the init CTA for an initialized repo.
+        return;
+      }
       setRepoInitialized(result.initialized);
     } catch {
-      setRepoInitialized(false);
+      if (version !== initVersionRef.current) return;
+      // IPC failure — keep null (unknown)
     }
   });
 
@@ -1124,7 +1137,11 @@ export default function App(): JSX.Element {
                   </Button>
                 </div>
               </section>
-            ) : repoInitialized === false ? (
+            ) : repoInitialized === null ? (
+              <section className="relative flex min-h-[24rem] flex-col items-center justify-center rounded-sm border border-dashed border-border bg-card px-6 py-10 text-center">
+                <LoaderCircle className="size-8 animate-spin text-muted-foreground" />
+              </section>
+            ) : !repoInitialized ? (
               <section className="relative flex min-h-[24rem] flex-col items-center justify-center rounded-sm border border-dashed border-border bg-card px-6 py-10 text-center">
                 <div className="max-w-md space-y-3">
                   <h2 className="text-xl font-semibold tracking-tight">
@@ -1189,7 +1206,7 @@ export default function App(): JSX.Element {
                                 onGroom={(issueNumber) => {
                                   void handleShipperGroom(issueNumber);
                                 }}
-                                groomDisabled={!canFetch || repoInitialized !== true}
+                                groomDisabled={!canFetch}
                               />
                             </div>
                           ))}

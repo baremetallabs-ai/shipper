@@ -516,14 +516,18 @@ function registerIpcHandlers(): void {
   ipcMain.handle('check-init', async (_event, payload: unknown) => {
     const repo = parseRepoPayload(payload);
     if (repo === null) {
-      return { initialized: false };
+      return { initialized: false, error: 'Invalid repo payload.' };
     }
 
     try {
       const result = await checkLabels(repo);
+      if (!result.ok && result.message.startsWith('Could not check')) {
+        return { initialized: false, error: result.message };
+      }
       return { initialized: result.ok };
-    } catch {
-      return { initialized: false };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { initialized: false, error: message };
     }
   });
 
