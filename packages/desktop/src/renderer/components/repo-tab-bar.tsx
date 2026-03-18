@@ -36,7 +36,7 @@ export function RepoTabBar({
           >
             <button
               type="button"
-              className="min-w-0 px-3 py-2 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring"
+              className="cursor-pointer min-w-0 px-3 py-2 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring"
               onClick={() => {
                 onSelectRepo(repo);
               }}
@@ -46,7 +46,7 @@ export function RepoTabBar({
             <button
               type="button"
               className={cn(
-                'border-l px-2 py-2 transition-colors',
+                'cursor-pointer border-l px-2 py-2 transition-colors',
                 isActive
                   ? 'border-primary-foreground/20 hover:bg-primary-foreground/10'
                   : 'border-border hover:bg-accent hover:text-accent-foreground'

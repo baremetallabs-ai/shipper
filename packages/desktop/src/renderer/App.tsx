@@ -1146,7 +1146,7 @@ export default function App(): JSX.Element {
               ref={toggleButtonRef}
               type="button"
               onClick={handleToggleDrawer}
-              className="flex w-5 flex-shrink-0 items-center justify-center border-l border-border bg-background text-muted-foreground outline-none transition-[color,box-shadow] hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              className="cursor-pointer flex w-5 flex-shrink-0 items-center justify-center border-l border-border bg-background text-muted-foreground outline-none transition-[color,box-shadow] hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
               aria-label={drawerOpen ? 'Close terminal drawer' : 'Open terminal drawer'}
             >
               {drawerOpen ? (
