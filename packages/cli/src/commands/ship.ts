@@ -1286,10 +1286,10 @@ async function resumeParkedIssue(
 
 export function printUnblockSummary(attempts: UnblockAttempt[], homeDir = homedir()): void {
   console.log('\n  Unblock attempts:\n');
-  console.log('  #    Issue                                          Outcome');
+  console.log('  Ref              Issue                                          Outcome');
   for (const a of attempts) {
     const ref = `unblock #${a.issue}`;
-    const num = ref.padEnd(5);
+    const num = ref.padEnd(17);
     const titleChars = Array.from(a.title);
     const title =
       titleChars.length > 45 ? titleChars.slice(0, 42).join('') + '...' : a.title.padEnd(45);
