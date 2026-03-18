@@ -1064,7 +1064,7 @@ describe('shipCommand single-issue path', () => {
     expect(firstCall).toEqual([
       process.execPath,
       [cliEntrypoint, 'next', '42', '--mode', 'interactive'],
-      expect.objectContaining({ stdio: ['inherit', 'pipe', 'pipe'] }),
+      expect.objectContaining({ stdio: ['inherit', 'pipe', 'inherit'] }),
     ]);
     expect(secondCall).toEqual([
       process.execPath,
@@ -1282,11 +1282,37 @@ describe('shipCommand single-issue path', () => {
       '--mode',
       'interactive',
     ]);
+    expect(mockSpawn.mock.calls[1]?.[2]).toMatchObject({ stdio: ['inherit', 'pipe', 'inherit'] });
     expect(mockSpawn.mock.calls[2]?.[1]).toEqual([cliEntrypoint, 'next', '42']);
     expect(exitSpy).toHaveBeenCalledWith(0);
     expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining('was reset to shipper:new'));
 
     errorSpy.mockRestore();
+  });
+
+  it('stops when an auto-child run resets an issue to shipper:new', async () => {
+    const previousAutoChild = process.env.SHIPPER_AUTO_CHILD_RUN;
+    process.env.SHIPPER_AUTO_CHILD_RUN = '1';
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      mockIssueViewSequence(['shipper:planned', 'shipper:new']);
+
+      await shipCommand(repo, '42', { auto: false, merge: false, mode: 'default' });
+
+      expect(mockSpawn).toHaveBeenCalledTimes(1);
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(errorSpy).toHaveBeenCalledWith(
+        'Issue #42 was reset to shipper:new by stage "implement" - stopping to avoid interactive groom stage.'
+      );
+    } finally {
+      if (previousAutoChild === undefined) {
+        delete process.env.SHIPPER_AUTO_CHILD_RUN;
+      } else {
+        process.env.SHIPPER_AUTO_CHILD_RUN = previousAutoChild;
+      }
+      errorSpy.mockRestore();
+    }
   });
 
   it('continues into groom when an interactive run resets an issue to shipper:new', async () => {
@@ -2178,6 +2204,31 @@ describe('shipCommand parallel auto runner', () => {
     expect(exitSpy).toHaveBeenCalledWith(0);
   });
 
+  it('marks parallel ship children as auto-child runs', async () => {
+    let plannedIssues = [{ number: 1, title: 'Issue one' }];
+    mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
+      if (label === 'shipper:planned') return plannedIssues;
+      return [];
+    });
+
+    const child = new FakeChildProcess();
+    mockSpawn.mockReturnValueOnce(child as never);
+
+    const runPromise = shipCommand(repo, undefined, { auto: true, merge: false, parallel: 2 });
+
+    await flushMicrotasks();
+
+    expect(getCallEnv(mockSpawn.mock.calls[0])).toEqual(
+      expect.objectContaining({ SHIPPER_AUTO_CHILD_RUN: '1' })
+    );
+
+    plannedIssues = [];
+    child.finish(0);
+    await runPromise;
+
+    expect(exitSpy).toHaveBeenCalledWith(0);
+  });
+
   it('skips a successful completion when the same issue is still returned on refill', async () => {
     const plannedIssues = [
       { number: 1, title: 'Issue one' },
@@ -2241,11 +2292,10 @@ describe('shipCommand parallel auto runner', () => {
 
     const cliEntrypoint = process.argv[1];
     expect(cliEntrypoint).toBeDefined();
-    expect(mockSpawn).toHaveBeenCalledWith(
-      process.execPath,
-      [cliEntrypoint, 'ship', '1', '--merge', '--model', 'gpt-5'],
-      expect.objectContaining({ env: process.env })
-    );
+    const firstCall = mockSpawn.mock.calls[0];
+    expect(firstCall?.[0]).toBe(process.execPath);
+    expect(firstCall?.[1]).toEqual([cliEntrypoint, 'ship', '1', '--merge', '--model', 'gpt-5']);
+    expect(getCallEnv(firstCall)).toEqual(expect.objectContaining({ SHIPPER_AUTO_CHILD_RUN: '1' }));
 
     plannedIssues = [];
     child.finish(0);

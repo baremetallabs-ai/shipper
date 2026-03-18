@@ -56,6 +56,7 @@ export async function groomCommand(
       'Error: groom does not support headless mode. Grooming requires interactive input.'
     );
     process.exit(1);
+    return;
   }
 
   if (options.auto) {
@@ -94,6 +95,7 @@ export async function groomCommand(
     if (!selected) {
       console.error("No issues ready for grooming. Create one with 'shipper new'.");
       process.exit(1);
+      return;
     }
     console.error(`Auto-selected #${selected.number}: ${selected.title}`);
     issue = String(selected.number);
