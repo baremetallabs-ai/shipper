@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
-import { access, mkdir, readFile } from 'node:fs/promises';
+import { access, mkdir, readFile, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -680,7 +680,8 @@ export async function createWorktree(opts: CreateWorktreeOpts): Promise<string> 
     try {
       await spawnAsync('git', ['worktree', 'remove', '--force', wtPath], { cwd: opts.repoRoot });
     } catch {
-      // If git worktree remove fails, try just deleting the directory
+      // If git worktree remove fails (orphaned directory), delete it directly
+      await rm(wtPath, { recursive: true, force: true });
     }
   } catch {
     // Worktree doesn't exist
@@ -718,7 +719,8 @@ export async function removeWorktree(repoRoot: string, wtPath: string): Promise<
   try {
     await spawnAsync('git', ['worktree', 'remove', '--force', wtPath], { cwd: repoRoot });
   } catch {
-    // Idempotent — ignore errors if already removed
+    // Not a registered worktree — remove the orphaned directory
+    await rm(wtPath, { recursive: true, force: true });
   }
 }
 
