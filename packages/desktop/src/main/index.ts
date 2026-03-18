@@ -5,12 +5,14 @@ import { fileURLToPath } from 'node:url';
 
 import { app, BrowserWindow, ipcMain } from 'electron';
 import {
+  acquireIssueLock,
   buildPromptCommand,
   checkGhAuth,
   checkGhInstalled,
   checkLabels,
   executeReset,
   ensureRepoClone,
+  getSettings,
   getCurrentStage,
   getStageIndex,
   getStageLabel,
@@ -20,6 +22,8 @@ import {
   listIssues,
   LOCKED_LABEL,
   parseStage,
+  releaseIssueLock,
+  renewIssueLock,
   scanArtifacts,
   type ListIssueItem,
   type WorkflowStage,
@@ -671,16 +675,23 @@ function registerIpcHandlers(): void {
         return { ok: false, error: validationError };
       }
 
-      const scan = await scanArtifacts(
-        parsedPayload.issueNumber,
-        parsedPayload.repo,
-        parsedPayload.targetStage,
-        issue.labels.map((label) => label.name),
-        { repoName: getRepoName(parsedPayload.repo) }
-      );
+      const issueNumber = String(parsedPayload.issueNumber);
+      await acquireIssueLock(parsedPayload.repo, issueNumber);
 
-      await executeReset(parsedPayload.issueNumber, scan, parsedPayload.repo);
-      return { ok: true };
+      try {
+        const scan = await scanArtifacts(
+          parsedPayload.issueNumber,
+          parsedPayload.repo,
+          parsedPayload.targetStage,
+          issue.labels.map((label) => label.name),
+          { repoName: getRepoName(parsedPayload.repo) }
+        );
+
+        await executeReset(parsedPayload.issueNumber, scan, parsedPayload.repo);
+        return { ok: true };
+      } finally {
+        await releaseIssueLock(parsedPayload.repo, issueNumber);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return { ok: false, error: message };
@@ -732,13 +743,28 @@ function registerIpcHandlers(): void {
       throw new Error('Invalid pty-spawn-shipper-groom payload.');
     }
 
+    const issueNumber = String(parsedPayload.issueNumber);
+    await acquireIssueLock(parsedPayload.repo, issueNumber);
+
     const repoPath = await ensureRepoClone(parsedPayload.repo);
 
     const cmd = await buildPromptCommand('groom', {
-      issueRef: String(parsedPayload.issueNumber),
+      issueRef: issueNumber,
       repo: parsedPayload.repo,
       mode: 'interactive',
     });
+
+    const heartbeatMs = (getSettings().lockTimeoutMinutes / 3) * 60_000;
+    const heartbeatCancelled = { value: false };
+    const heartbeatTimer = setInterval(() => {
+      void renewIssueLock(parsedPayload.repo, issueNumber, heartbeatCancelled);
+    }, heartbeatMs);
+
+    const releaseLock = () => {
+      clearInterval(heartbeatTimer);
+      heartbeatCancelled.value = true;
+      void releaseIssueLock(parsedPayload.repo, issueNumber);
+    };
 
     const sessionId = randomUUID();
     ptyManager.spawn(sessionId, cmd.command, cmd.args, {
@@ -746,6 +772,7 @@ function registerIpcHandlers(): void {
       rows: parsedPayload.rows,
       cwd: cmd.cwd ?? repoPath,
     });
+    ptyManager.onSessionExit(sessionId, releaseLock);
 
     return { sessionId };
   });

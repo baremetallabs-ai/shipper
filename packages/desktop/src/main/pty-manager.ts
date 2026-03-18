@@ -99,10 +99,15 @@ function drainPendingUtf8(pending: number[], flush: boolean): string {
 
 export class PtyManager {
   private sessions = new Map<string, PtySessionEntry>();
+  private exitCallbacks = new Map<string, () => void>();
   private window: BrowserWindow | null = null;
 
   setWindow(win: BrowserWindow): void {
     this.window = win;
+  }
+
+  onSessionExit(id: string, callback: () => void): void {
+    this.exitCallbacks.set(id, callback);
   }
 
   spawn(id: string, command: string, args: string[], options: PtySpawnOptions): void {
@@ -153,6 +158,11 @@ export class PtyManager {
       }
 
       this.sessions.delete(id);
+      const exitCb = this.exitCallbacks.get(id);
+      if (exitCb) {
+        this.exitCallbacks.delete(id);
+        exitCb();
+      }
       this.window?.webContents.send('pty-exit', {
         sessionId: id,
         exitCode,
