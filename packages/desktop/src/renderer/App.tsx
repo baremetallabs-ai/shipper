@@ -17,6 +17,7 @@ import {
 } from '../../../core/src/lib/labels.js';
 import type { ListIssueItem } from '@dnsquared/shipper-core';
 
+import { AdoptDialog } from './components/adopt-dialog.js';
 import { NewIssueDialog } from './components/new-issue-dialog.js';
 import { RepoPickerDialog } from './components/repo-picker-dialog.js';
 import { RepoTabBar } from './components/repo-tab-bar.js';
@@ -163,6 +164,7 @@ export default function App(): JSX.Element {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [isNewIssueOpen, setIsNewIssueOpen] = useState(false);
+  const [isAdoptOpen, setIsAdoptOpen] = useState(false);
   const [sessions, setSessions] = useState<TerminalSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [pendingCloseSessionId, setPendingCloseSessionId] = useState<string | null>(null);
@@ -691,6 +693,14 @@ export default function App(): JSX.Element {
           void handleShipperNew(request);
         }}
       />
+      <AdoptDialog
+        open={isAdoptOpen}
+        onOpenChange={setIsAdoptOpen}
+        repo={activeRepo}
+        onAdopted={() => {
+          void loadIssues(activeRepo);
+        }}
+      />
       <Dialog
         open={pendingCloseSession !== null}
         onOpenChange={(open) => {
@@ -762,6 +772,15 @@ export default function App(): JSX.Element {
                     disabled={!canFetch || !hasActiveRepo}
                   >
                     New Issue
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setIsAdoptOpen(true);
+                    }}
+                    disabled={!canFetch || !hasActiveRepo}
+                  >
+                    Adopt
                   </Button>
                   <Button
                     variant="outline"

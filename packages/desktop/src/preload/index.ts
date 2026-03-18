@@ -20,8 +20,11 @@ const shipperAPI = {
   checkPrerequisites: () => ipcRenderer.invoke('check-prerequisites'),
   getConfig: () => ipcRenderer.invoke('get-config'),
   listRepos: () => ipcRenderer.invoke('list-repos'),
+  listAdoptableIssues: (repo: string) => ipcRenderer.invoke('list-adoptable-issues', { repo }),
   listIssues: (repo: string) => ipcRenderer.invoke('list-issues', { repo }),
   setConfig: (config: ConfigPayload) => ipcRenderer.invoke('set-config', config),
+  adoptIssue: (repo: string, issueNumber: number) =>
+    ipcRenderer.invoke('adopt-issue', { repo, issueNumber }),
 
   spawnShipperNew: (request: string, repo: string, cols: number, rows: number) =>
     ipcRenderer.invoke('pty-spawn-shipper-new', { request, repo, cols, rows }),
