@@ -1065,7 +1065,7 @@ export default function App(): JSX.Element {
                         </div>
                         <div className="flex flex-wrap gap-3">
                           {attentionIssues.map((issue) => (
-                            <div key={issue.number} className="w-[240px]">
+                            <div key={issue.number} className="w-[240px] shrink-0">
                               <IssueCard
                                 issue={issue}
                                 onGroom={(issueNumber) => {
