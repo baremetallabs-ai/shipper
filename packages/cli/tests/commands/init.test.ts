@@ -575,8 +575,30 @@ describe('initCommand commit and push', () => {
       '--',
       '.shipper/',
     ]);
+    expect(mockExecFileAsync).toHaveBeenCalledWith('git', ['config', 'branch.main.remote'], {
+      encoding: 'utf-8',
+    });
     expect(mockExecFileAsync).toHaveBeenCalledWith('git', ['push', 'origin', 'main']);
     expect(console.log).toHaveBeenCalledWith('Committed and pushed .shipper/ files to main');
+  });
+
+  it('uses the configured remote instead of origin', async () => {
+    mockExecFileAsync.mockImplementation((cmd: string, args: string[]) => {
+      if (cmd === 'git' && args[0] === 'branch' && args[1] === '--show-current') {
+        return Promise.resolve({ stdout: 'main\n', stderr: '' });
+      }
+      if (cmd === 'git' && args[0] === 'diff' && args[1] === '--cached' && args[2] === '--quiet') {
+        return Promise.reject(new Error('exit code 1'));
+      }
+      if (cmd === 'git' && args[0] === 'config' && args[1] === 'branch.main.remote') {
+        return Promise.resolve({ stdout: 'upstream\n', stderr: '' });
+      }
+      return Promise.resolve({ stdout: '', stderr: '' });
+    });
+
+    await initCommand({ agent: 'claude' });
+
+    expect(mockExecFileAsync).toHaveBeenCalledWith('git', ['push', 'upstream', 'main']);
   });
 
   it('skips commit and push when .shipper/ files are unchanged', async () => {
