@@ -111,20 +111,22 @@
   }
 }
 
-.nautical-wave-border {
-  position: relative;
-}
+@layer components {
+  .nautical-wave-border {
+    position: relative;
+  }
 
-.nautical-wave-border::after {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 4px;
-  background: var(--primary);
-  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 4'%3E%3Cpath d='M0 3Q5 0 10 3Q15 6 20 3' fill='none' stroke='black' stroke-width='4'/%3E%3C/svg%3E");
-  mask-size: 20px 4px;
-  mask-repeat: repeat-x;
-  opacity: 0.4;
+  .nautical-wave-border::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: var(--primary);
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 4'%3E%3Cpath d='M0 3Q5 0 10 3Q15 6 20 3' fill='none' stroke='black' stroke-width='4'/%3E%3C/svg%3E");
+    mask-size: 20px 4px;
+    mask-repeat: repeat-x;
+    opacity: 0.4;
+  }
 }
