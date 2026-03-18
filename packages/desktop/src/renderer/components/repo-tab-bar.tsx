@@ -20,53 +20,54 @@ export function RepoTabBar({
   onAddRepo,
 }: RepoTabBarProps): JSX.Element {
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      {repos.map((repo) => {
-        const isActive = repo === activeRepo;
+    <div className="border-b border-border bg-muted">
+      <div className="mx-auto flex max-w-7xl items-end gap-1 overflow-x-auto px-6 pt-2">
+        {repos.map((repo) => {
+          const isActive = repo === activeRepo;
 
-        return (
-          <div
-            key={repo}
-            className={cn(
-              'flex items-center overflow-hidden rounded-sm border',
-              isActive
-                ? 'border-primary bg-primary text-primary-foreground'
-                : 'border-border bg-card text-card-foreground'
-            )}
-          >
-            <button
-              type="button"
-              className="cursor-pointer min-w-0 px-3 py-2 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring"
-              onClick={() => {
-                onSelectRepo(repo);
-              }}
-            >
-              <span className="block max-w-52 truncate">{repo}</span>
-            </button>
-            <button
-              type="button"
+          return (
+            <div
+              key={repo}
               className={cn(
-                'cursor-pointer border-l px-2 py-2 transition-colors',
                 isActive
-                  ? 'border-primary-foreground/20 hover:bg-primary-foreground/10'
-                  : 'border-border hover:bg-accent hover:text-accent-foreground'
+                  ? 'relative z-10 -mb-px flex shrink-0 items-center rounded-t-md border border-border border-b-background bg-background text-foreground'
+                  : 'flex shrink-0 items-center rounded-t-md text-muted-foreground transition-colors hover:bg-background/50 hover:text-foreground'
               )}
-              aria-label={`Remove ${repo}`}
-              onClick={(event) => {
-                event.stopPropagation();
-                onCloseRepo(repo);
-              }}
             >
-              <X className="size-4" />
-            </button>
-          </div>
-        );
-      })}
+              <button
+                type="button"
+                className="cursor-pointer min-w-0 px-3 py-2 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => {
+                  onSelectRepo(repo);
+                }}
+              >
+                <span className="block max-w-52 truncate">{repo}</span>
+              </button>
+              <button
+                type="button"
+                className="cursor-pointer rounded-sm px-1.5 py-2 opacity-60 transition-colors hover:opacity-100 hover:bg-foreground/10"
+                aria-label={`Remove ${repo}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onCloseRepo(repo);
+                }}
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+          );
+        })}
 
-      <Button variant="outline" size="sm" onClick={onAddRepo}>
-        <Plus className="size-4" />
-        Add repo
-      </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="shrink-0 border-transparent text-muted-foreground hover:text-foreground"
+          onClick={onAddRepo}
+        >
+          <Plus className="size-4" />
+          Add repo
+        </Button>
+      </div>
     </div>
   );
 }

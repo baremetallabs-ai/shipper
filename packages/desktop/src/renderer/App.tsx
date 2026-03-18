@@ -954,7 +954,12 @@ export default function App(): JSX.Element {
 
       <div className="flex min-h-0 flex-1">
         <div ref={contentPaneRef} tabIndex={-1} className="min-w-0 flex-1 overflow-y-auto">
-          <header className="sticky top-0 z-10 border-b border-border bg-background">
+          <header
+            className={cn(
+              'sticky top-0 z-10 bg-background',
+              repos.length === 0 && 'border-b border-border'
+            )}
+          >
             <div className="mx-auto flex max-w-7xl flex-col gap-4 px-6 py-5">
               <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
                 <div>
@@ -998,23 +1003,22 @@ export default function App(): JSX.Element {
                   </Button>
                 </div>
               </div>
-
-              {repos.length > 0 ? (
-                <RepoTabBar
-                  repos={repos}
-                  activeRepo={activeRepo}
-                  onSelectRepo={(repo) => {
-                    void handleSwitchRepo(repo);
-                  }}
-                  onCloseRepo={(repo) => {
-                    void handleCloseRepo(repo);
-                  }}
-                  onAddRepo={() => {
-                    setIsPickerOpen(true);
-                  }}
-                />
-              ) : null}
             </div>
+            {repos.length > 0 ? (
+              <RepoTabBar
+                repos={repos}
+                activeRepo={activeRepo}
+                onSelectRepo={(repo) => {
+                  void handleSwitchRepo(repo);
+                }}
+                onCloseRepo={(repo) => {
+                  void handleCloseRepo(repo);
+                }}
+                onAddRepo={() => {
+                  setIsPickerOpen(true);
+                }}
+              />
+            ) : null}
           </header>
 
           <main className="mx-auto flex max-w-7xl flex-col gap-4 px-6 py-6">
