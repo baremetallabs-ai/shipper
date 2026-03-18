@@ -10,8 +10,14 @@ import {
   checkGhInstalled,
   executeReset,
   ensureRepoClone,
+  getCurrentStage,
+  getStageIndex,
+  getStageLabel,
+  getValidTargets,
   gh,
+  isLockStale,
   listIssues,
+  LOCKED_LABEL,
   parseStage,
   scanArtifacts,
   type ListIssueItem,
@@ -334,6 +340,38 @@ async function loadResetIssue(repo: string, issueNumber: number): Promise<RawRes
   return parseResetIssueJson(repo, issueNumber, result.stdout);
 }
 
+async function getResetValidationError(
+  repo: string,
+  issue: RawResetIssueData,
+  targetStage: WorkflowStage
+): Promise<string | null> {
+  const labels = issue.labels.map((label) => label.name);
+
+  if (labels.includes(LOCKED_LABEL) && !(await isLockStale(repo, String(issue.number)))) {
+    return `Issue #${issue.number} is locked by another shipper instance. Reset is unavailable until that run finishes.`;
+  }
+
+  const currentStage = getCurrentStage(labels);
+  const validTargets = getValidTargets(currentStage);
+  if (validTargets.includes(targetStage)) {
+    return null;
+  }
+
+  const currentIndex = getStageIndex(currentStage.stage);
+  const targetIndex = getStageIndex(targetStage);
+  const sameImplementedStage = currentStage.hasPrLabels && targetStage === 'implemented';
+
+  if (targetIndex === currentIndex && !sameImplementedStage) {
+    return `Issue #${issue.number} is already at ${getStageLabel(targetStage)}. Reset only works backward.`;
+  }
+
+  if (targetIndex > currentIndex) {
+    return `${getStageLabel(targetStage)} is ahead of the current stage ${getStageLabel(currentStage.stage)}. Reset only works backward.`;
+  }
+
+  return `Issue #${issue.number} cannot be reset to ${getStageLabel(targetStage)}.`;
+}
+
 function toArtifactScanSummary(
   scan: Awaited<ReturnType<typeof scanArtifacts>>
 ): ArtifactScanSummary {
@@ -559,6 +597,15 @@ function registerIpcHandlers(): void {
         };
       }
 
+      const validationError = await getResetValidationError(
+        parsedPayload.repo,
+        issue,
+        parsedPayload.targetStage
+      );
+      if (validationError !== null) {
+        return { ok: false, error: validationError };
+      }
+
       const scan = await scanArtifacts(
         parsedPayload.issueNumber,
         parsedPayload.repo,
@@ -594,6 +641,15 @@ function registerIpcHandlers(): void {
           ok: false,
           error: `Issue #${parsedPayload.issueNumber} is closed. Reset only works on open issues.`,
         };
+      }
+
+      const validationError = await getResetValidationError(
+        parsedPayload.repo,
+        issue,
+        parsedPayload.targetStage
+      );
+      if (validationError !== null) {
+        return { ok: false, error: validationError };
       }
 
       const scan = await scanArtifacts(

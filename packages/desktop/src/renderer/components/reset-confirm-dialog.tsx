@@ -168,7 +168,7 @@ export function ResetConfirmDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex min-h-0 flex-col gap-4 px-6 py-4">
+        <div className="flex min-h-0 flex-col gap-4 overflow-y-auto px-6 py-4">
           {scanError ? (
             <Alert variant="destructive">
               <AlertTitle>Could not load reset summary</AlertTitle>
