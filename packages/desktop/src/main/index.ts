@@ -745,36 +745,53 @@ function registerIpcHandlers(): void {
 
     const issueNumber = String(parsedPayload.issueNumber);
     await acquireIssueLock(parsedPayload.repo, issueNumber);
-
-    const repoPath = await ensureRepoClone(parsedPayload.repo);
-
-    const cmd = await buildPromptCommand('groom', {
-      issueRef: issueNumber,
-      repo: parsedPayload.repo,
-      mode: 'interactive',
-    });
-
-    const heartbeatMs = (getSettings().lockTimeoutMinutes / 3) * 60_000;
     const heartbeatCancelled = { value: false };
-    const heartbeatTimer = setInterval(() => {
-      void renewIssueLock(parsedPayload.repo, issueNumber, heartbeatCancelled);
-    }, heartbeatMs);
+    let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+    let lockReleased = false;
 
-    const releaseLock = () => {
-      clearInterval(heartbeatTimer);
+    const releaseLock = async (): Promise<void> => {
+      if (lockReleased) {
+        return;
+      }
+
+      lockReleased = true;
       heartbeatCancelled.value = true;
-      void releaseIssueLock(parsedPayload.repo, issueNumber);
+      if (heartbeatTimer !== null) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+      }
+      await releaseIssueLock(parsedPayload.repo, issueNumber);
     };
 
-    const sessionId = randomUUID();
-    ptyManager.spawn(sessionId, cmd.command, cmd.args, {
-      cols: parsedPayload.cols,
-      rows: parsedPayload.rows,
-      cwd: cmd.cwd ?? repoPath,
-    });
-    ptyManager.onSessionExit(sessionId, releaseLock);
+    try {
+      const repoPath = await ensureRepoClone(parsedPayload.repo);
 
-    return { sessionId };
+      const cmd = await buildPromptCommand('groom', {
+        issueRef: issueNumber,
+        repo: parsedPayload.repo,
+        mode: 'interactive',
+      });
+
+      const heartbeatMs = (getSettings().lockTimeoutMinutes / 3) * 60_000;
+      heartbeatTimer = setInterval(() => {
+        void renewIssueLock(parsedPayload.repo, issueNumber, heartbeatCancelled);
+      }, heartbeatMs);
+
+      const sessionId = randomUUID();
+      ptyManager.spawn(sessionId, cmd.command, cmd.args, {
+        cols: parsedPayload.cols,
+        rows: parsedPayload.rows,
+        cwd: cmd.cwd ?? repoPath,
+      });
+      ptyManager.onSessionExit(sessionId, () => {
+        void releaseLock();
+      });
+
+      return { sessionId };
+    } catch (error) {
+      await releaseLock();
+      throw error;
+    }
   });
 
   ipcMain.handle('pty-spawn-shipper-ship', async (_event, payload: unknown) => {

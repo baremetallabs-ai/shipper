@@ -309,6 +309,35 @@ describe('desktop IPC locking', () => {
     expect(state.ptySpawnMock).not.toHaveBeenCalled();
   });
 
+  it('releases the groom lock when setup fails before PTY spawn', async () => {
+    await loadHandlers();
+    const handler = getHandler('pty-spawn-shipper-groom');
+    state.ensureRepoCloneMock.mockRejectedValueOnce(new Error('clone failed'));
+
+    await expect(
+      handler({}, { repo: 'owner/repo', issueNumber: 42, cols: 120, rows: 40 })
+    ).rejects.toThrow('clone failed');
+    expect(state.ptySpawnMock).not.toHaveBeenCalled();
+    expect(state.releaseIssueLockMock).toHaveBeenCalledWith('owner/repo', '42');
+  });
+
+  it('releases the groom lock and stops the heartbeat when PTY spawn fails', async () => {
+    vi.useFakeTimers();
+    await loadHandlers();
+    const handler = getHandler('pty-spawn-shipper-groom');
+    state.ptySpawnMock.mockImplementationOnce(() => {
+      throw new Error('spawn failed');
+    });
+
+    await expect(
+      handler({}, { repo: 'owner/repo', issueNumber: 42, cols: 120, rows: 40 })
+    ).rejects.toThrow('spawn failed');
+    expect(state.releaseIssueLockMock).toHaveBeenCalledWith('owner/repo', '42');
+
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(state.renewIssueLockMock).not.toHaveBeenCalled();
+  });
+
   it('renews the groom lock heartbeat until the PTY exits', async () => {
     vi.useFakeTimers();
     await loadHandlers();
