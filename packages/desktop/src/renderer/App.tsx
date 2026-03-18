@@ -667,13 +667,18 @@ export default function App(): JSX.Element {
     }
   }
 
-  async function handleShipperGroom(issueNumber: number): Promise<void> {
+  function focusExistingIssueSession(issueNumber: number): boolean {
     const existing = findActiveIssueSession(sessionsRef.current, activeRepo, issueNumber);
     if (existing) {
       setActiveSessionId(existing.id);
       setDrawerOpen(true);
-      return;
+      return true;
     }
+    return false;
+  }
+
+  async function handleShipperGroom(issueNumber: number): Promise<void> {
+    if (focusExistingIssueSession(issueNumber)) return;
 
     try {
       const result = await window.shipperAPI.spawnShipperGroom(issueNumber, activeRepo, 120, 30);
@@ -688,12 +693,7 @@ export default function App(): JSX.Element {
   }
 
   async function handleShipperShip(issueNumber: number): Promise<void> {
-    const existing = findActiveIssueSession(sessionsRef.current, activeRepo, issueNumber);
-    if (existing) {
-      setActiveSessionId(existing.id);
-      setDrawerOpen(true);
-      return;
-    }
+    if (focusExistingIssueSession(issueNumber)) return;
 
     try {
       const result = await window.shipperAPI.spawnShipperShip(issueNumber, activeRepo, 120, 30);
