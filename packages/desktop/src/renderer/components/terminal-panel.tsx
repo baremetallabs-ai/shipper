@@ -20,14 +20,14 @@ export function TerminalPanel({
   onSessionInput,
 }: TerminalPanelProps): JSX.Element {
   return (
-    <div className="flex h-full flex-col border-l border-white/10">
+    <div className="flex h-full flex-col border-l border-border">
       <SessionTabBar
         sessions={sessions}
         activeSessionId={activeSessionId}
         onSelectSession={onSelectSession}
         onCloseSession={onCloseSession}
       />
-      <div className="min-h-0 flex-1 bg-[#0b1020]">
+      <div className="min-h-0 flex-1 bg-terminal-bg">
         {sessions.map((session) => (
           <TerminalInstance
             key={session.id}

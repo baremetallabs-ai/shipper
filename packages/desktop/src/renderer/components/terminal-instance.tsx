@@ -20,7 +20,7 @@ export function TerminalInstance({
   const { containerRef } = useTerminalRuntime({ sessionId, status, visible, onInput });
 
   return (
-    <div className={cn('h-full min-h-0 flex-1 bg-[#0b1020]', visible ? 'block' : 'hidden')}>
+    <div className={cn('h-full min-h-0 flex-1 bg-terminal-bg', visible ? 'block' : 'hidden')}>
       <div ref={containerRef} className="h-full w-full" />
     </div>
   );
