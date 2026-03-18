@@ -13,6 +13,7 @@ export * from './lib/prompt-runner.js';
 export * from './lib/prompts.js';
 export * from './lib/repo-clone.js';
 export * from './lib/repo.js';
+export * from './lib/reset.js';
 export * from './lib/result-schema.js';
 export * from './lib/scripts.js';
 export * from './lib/session.js';
