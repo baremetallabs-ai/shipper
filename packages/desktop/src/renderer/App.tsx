@@ -1065,7 +1065,7 @@ export default function App(): JSX.Element {
                         </div>
                         <div className="flex flex-wrap gap-3">
                           {attentionIssues.map((issue) => (
-                            <div key={issue.number} className="min-w-[240px] flex-1 basis-[240px]">
+                            <div key={issue.number} className="w-[240px]">
                               <IssueCard
                                 issue={issue}
                                 onGroom={(issueNumber) => {
@@ -1089,7 +1089,7 @@ export default function App(): JSX.Element {
                             <section
                               key={label}
                               className={[
-                                'flex min-w-[240px] flex-1 basis-[240px] flex-col gap-4 rounded-sm border px-4 py-4',
+                                'flex w-[240px] shrink-0 flex-col gap-4 rounded-sm border px-4 py-4',
                                 isReadyColumn
                                   ? 'border-success/30 bg-success/10'
                                   : 'border-border bg-background/40',
