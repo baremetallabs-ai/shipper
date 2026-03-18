@@ -38,6 +38,7 @@ import { prepareUnblockContext } from './unblock.js';
 const MAX_TRANSITIONS = 15;
 const MERGE_FAILURE_PREFIX = 'Merge failed for PR #';
 const PARKED_POLL_INTERVAL_MS = 20_000;
+const AUTO_CHILD_RUN_ENV_VAR = 'SHIPPER_AUTO_CHILD_RUN';
 
 export const STAGE_NAME: Record<string, string> = { ...STAGE_NAME_MAP };
 
@@ -208,11 +209,17 @@ function closeLogStream(logStream: WriteStream | undefined): Promise<void> {
 function spawnTee(
   command: string,
   args: string[],
-  opts: { env?: typeof process.env; logStream?: WriteStream }
+  opts: { env?: typeof process.env; logStream?: WriteStream; interactive?: boolean }
 ): Promise<number> {
   return new Promise((resolve, reject) => {
+    const stdio: 'inherit' | ['inherit', 'pipe', 'inherit'] | ['inherit', 'pipe', 'pipe'] =
+      opts.logStream
+        ? opts.interactive
+          ? ['inherit', 'pipe', 'inherit']
+          : ['inherit', 'pipe', 'pipe']
+        : 'inherit';
     const child = spawn(command, args, {
-      stdio: opts.logStream ? ['inherit', 'pipe', 'pipe'] : 'inherit',
+      stdio,
       env: opts.env,
     });
 
@@ -582,6 +589,7 @@ async function shipOneIssue(
   logFile?: string
 ): Promise<ShipIssueResult> {
   const issueStr = issue.replace(/^#/, '');
+  const isAutoChildRun = process.env[AUTO_CHILD_RUN_ENV_VAR] === '1';
   const logStream = logFile ? createWriteStream(logFile) : undefined;
   let logStreamError: string | undefined;
 
@@ -682,7 +690,8 @@ async function shipOneIssue(
 
           logBoth(logStream, `Running stage: ${stageName}`);
 
-          const stageMode = label === NEW_LABEL ? 'interactive' : mode;
+          const stageMode =
+            label === NEW_LABEL && !parkHooks && !isAutoChildRun ? 'interactive' : mode;
           const nextArgs = [cliEntrypoint, 'next', issueStr];
           if (stageMode && stageMode !== 'default') {
             nextArgs.push('--mode', stageMode);
@@ -699,6 +708,7 @@ async function shipOneIssue(
               label === PR_REVIEWED_LABEL && skipPrRemediateWaitOnce
             ),
             logStream,
+            interactive: stageMode === 'interactive',
           });
           skipPrRemediateWaitOnce = false;
 
@@ -737,7 +747,7 @@ async function shipOneIssue(
             return { success: false, error: `unexpected label after stage "${stageName}"` };
           }
 
-          if (label === NEW_LABEL && previousLabel !== NEW_LABEL && parkHooks) {
+          if (label === NEW_LABEL && previousLabel !== NEW_LABEL && (parkHooks || isAutoChildRun)) {
             const msg = `Issue #${issueStr} was reset to ${NEW_LABEL} by stage "${stageName}" - stopping to avoid interactive groom stage.`;
             errorBoth(logStream, msg);
             printSummary(results, logStream);
@@ -858,7 +868,10 @@ function shipOneIssueAsync(
   }
   const child = spawn(process.execPath, shipArgs, {
     stdio: logFile ? ['ignore', 'pipe', 'pipe'] : ['ignore', 'ignore', 'pipe'],
-    env: process.env,
+    env: {
+      ...process.env,
+      [AUTO_CHILD_RUN_ENV_VAR]: '1',
+    },
   });
 
   if (logStream) {
