@@ -33,13 +33,8 @@ vi.mock('../../src/lib/confirm.js', () => ({
   promptChoice: mockPromptChoice,
 }));
 
-vi.mock('@dnsquared/shipper-core', () => ({
-  getRepoNwo: () => mockGetRepoNwo(),
-  getRepoRoot: () => mockGetRepoRoot(),
-  gh: (args: string[]) => mockGh(args),
-  isLockStale: (repo: string, issue: string) => mockIsLockStale(repo, issue),
-  removeWorktree: (repoRoot: string, wtPath: string) => mockRemoveWorktree(repoRoot, wtPath),
-  STAGE_LABEL_NAMES: [
+vi.mock('@dnsquared/shipper-core', () => {
+  const STAGE_LABEL_NAMES = [
     'shipper:new',
     'shipper:groomed',
     'shipper:designed',
@@ -48,13 +43,424 @@ vi.mock('@dnsquared/shipper-core', () => ({
     'shipper:pr-open',
     'shipper:pr-reviewed',
     'shipper:ready',
-  ],
-  IMPLEMENTED_LABEL: 'shipper:implemented',
-  BLOCKED_LABEL: 'shipper:blocked',
-  FAILED_LABEL: 'shipper:failed',
-  LOCKED_LABEL: 'shipper:locked',
-  PRIORITY_LABEL_NAMES: ['shipper:priority-high', 'shipper:priority-low'],
-}));
+  ];
+  const IMPLEMENTED_LABEL = 'shipper:implemented';
+  const BLOCKED_LABEL = 'shipper:blocked';
+  const FAILED_LABEL = 'shipper:failed';
+  const LOCKED_LABEL = 'shipper:locked';
+  const PRIORITY_LABEL_NAMES = ['shipper:priority-high', 'shipper:priority-low'];
+  const IMPLEMENTED_STAGE_INDEX = STAGE_LABEL_NAMES.indexOf(IMPLEMENTED_LABEL);
+  const RESETTABLE_STAGE_NAMES = STAGE_LABEL_NAMES.slice(0, IMPLEMENTED_STAGE_INDEX + 1).map(
+    (label) => label.replace(/^shipper:/, '')
+  );
+  const POST_IMPLEMENTATION_STAGE_LABELS = STAGE_LABEL_NAMES.slice(IMPLEMENTED_STAGE_INDEX + 1);
+
+  function getStageLabel(stage: string): string {
+    return `shipper:${stage}`;
+  }
+
+  function getStageIndex(stage: string): number {
+    return RESETTABLE_STAGE_NAMES.indexOf(stage);
+  }
+
+  function parseStage(input: string): string | null {
+    const normalized = input.replace(/^shipper:/, '');
+    return RESETTABLE_STAGE_NAMES.includes(normalized) ? normalized : null;
+  }
+
+  function getCurrentStage(labels: string[]): { stage: string; hasPrLabels: boolean } {
+    const hasPrLabels = labels.some((label) => POST_IMPLEMENTATION_STAGE_LABELS.includes(label));
+
+    if (hasPrLabels) {
+      return { stage: 'implemented', hasPrLabels: true };
+    }
+
+    for (let index = RESETTABLE_STAGE_NAMES.length - 1; index >= 0; index -= 1) {
+      const stage = RESETTABLE_STAGE_NAMES[index];
+      if (stage && labels.includes(getStageLabel(stage))) {
+        return { stage, hasPrLabels: false };
+      }
+    }
+
+    return { stage: 'new', hasPrLabels: false };
+  }
+
+  function getValidTargets(currentStage: { stage: string; hasPrLabels: boolean }): string[] {
+    const targets = RESETTABLE_STAGE_NAMES.slice(0, getStageIndex(currentStage.stage));
+    if (currentStage.hasPrLabels) {
+      targets.push('implemented');
+    }
+    return targets;
+  }
+
+  function isClean(scan: {
+    labelsToRemove: string[];
+    addTarget: boolean;
+    commentIds: number[];
+    prs: unknown[];
+    branchesToDelete: string[];
+    localBranches: string[];
+    localWorktrees: string[];
+  }): boolean {
+    return (
+      scan.labelsToRemove.length === 0 &&
+      !scan.addTarget &&
+      scan.commentIds.length === 0 &&
+      scan.prs.length === 0 &&
+      scan.branchesToDelete.length === 0 &&
+      scan.localBranches.length === 0 &&
+      scan.localWorktrees.length === 0
+    );
+  }
+
+  async function getStageTimestamp(
+    issueNum: number,
+    nwo: string,
+    stage: string
+  ): Promise<string | null> {
+    try {
+      const { stdout } = await mockGh([
+        'api',
+        `repos/${nwo}/issues/${issueNum}/timeline`,
+        '--paginate',
+        '--jq',
+        `.[] | select(.event == "labeled" and .label.name? == "${getStageLabel(stage)}") | .created_at`,
+      ]);
+      const output = stdout.trim();
+      if (!output) {
+        return null;
+      }
+
+      const timestamps = output.split('\n').filter((line) => line.trim());
+      return timestamps.at(-1) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function scanArtifacts(
+    issueNum: number,
+    nwo: string,
+    targetStage: string,
+    labels: string[],
+    options: { repoRoot?: string; repoName: string }
+  ) {
+    const targetIndex = getStageIndex(targetStage);
+    const targetLabel = getStageLabel(targetStage);
+    const labelsToRemove = labels.filter((label) => {
+      if (PRIORITY_LABEL_NAMES.includes(label)) {
+        return false;
+      }
+
+      if (targetStage === 'new') {
+        return label.startsWith('shipper:') && label !== targetLabel;
+      }
+
+      if (POST_IMPLEMENTATION_STAGE_LABELS.includes(label)) {
+        return true;
+      }
+
+      if (!label.startsWith('shipper:')) {
+        return false;
+      }
+
+      const labelStage = parseStage(label);
+      return labelStage !== null && getStageIndex(labelStage) > targetIndex;
+    });
+
+    if (labels.includes(FAILED_LABEL) && !labelsToRemove.includes(FAILED_LABEL)) {
+      labelsToRemove.push(FAILED_LABEL);
+    }
+
+    const addTarget = !labels.includes(targetLabel);
+
+    let commentIds: number[] = [];
+    if (targetStage === 'new') {
+      const { stdout } = await mockGh([
+        'api',
+        `repos/${nwo}/issues/${issueNum}/comments`,
+        '--paginate',
+        '--jq',
+        '.[].id',
+      ]);
+      commentIds = stdout
+        .trim()
+        .split('\n')
+        .filter((line) => line !== '')
+        .map(Number);
+    } else {
+      const stageTimestamp = await getStageTimestamp(issueNum, nwo, targetStage);
+      if (stageTimestamp) {
+        const cutoff = Date.parse(stageTimestamp) + 60_000;
+        const { stdout } = await mockGh([
+          'api',
+          `repos/${nwo}/issues/${issueNum}/comments`,
+          '--paginate',
+          '--jq',
+          '.[] | {id, created_at}',
+        ]);
+
+        for (const line of stdout.trim().split('\n').filter(Boolean)) {
+          const comment = JSON.parse(line) as { id: number; created_at: string };
+          if (Date.parse(comment.created_at) > cutoff) {
+            commentIds.push(comment.id);
+          }
+        }
+      } else {
+        console.warn(
+          `Warning: Could not determine when ${targetLabel} was applied. Skipping comment cleanup.`
+        );
+      }
+    }
+
+    const { stdout: prJson } = await mockGh([
+      'pr',
+      'list',
+      '-R',
+      nwo,
+      '--search',
+      String(issueNum),
+      '--state',
+      'open',
+      '--json',
+      'number,headRefName',
+    ]);
+    const allPrs = JSON.parse(prJson) as Array<{ number: number; headRefName: string }>;
+    const prs = allPrs.filter(
+      (pr) =>
+        pr.headRefName === `shipper/${issueNum}` ||
+        pr.headRefName.startsWith(`shipper/${issueNum}-`) ||
+        pr.headRefName === `${issueNum}` ||
+        pr.headRefName.startsWith(`${issueNum}-`)
+    );
+
+    const branchesToDelete =
+      targetStage === 'implemented'
+        ? []
+        : prs.map((pr) => pr.headRefName).filter((branchName) => branchName.startsWith('shipper/'));
+
+    let localWorktrees: string[] = [];
+    try {
+      const entries = mockReaddirSync(`${mockHomedir()}/.shipper/worktrees`);
+      localWorktrees = entries
+        .filter((entry) => {
+          if (!entry.isDirectory()) {
+            return false;
+          }
+
+          return (
+            entry.name === `${options.repoName}--wt--shipper-${issueNum}` ||
+            entry.name.startsWith(`${options.repoName}--wt--shipper-${issueNum}-`)
+          );
+        })
+        .map((entry) => `${mockHomedir()}/.shipper/worktrees/${entry.name}`);
+    } catch (error) {
+      if ((error as ErrnoError).code !== 'ENOENT') {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`Warning: Could not scan local worktrees for issue #${issueNum}: ${message}`);
+      }
+    }
+
+    let localBranches: string[] = [];
+    if (targetStage !== 'implemented' && options.repoRoot) {
+      try {
+        const raw = mockExecFileSync('git', [
+          'branch',
+          '--list',
+          `shipper/${issueNum}`,
+          `shipper/${issueNum}-*`,
+        ]);
+        localBranches = raw
+          .split('\n')
+          .map((line) =>
+            line
+              .trim()
+              .replace(/^[*+]\s*/, '')
+              .trim()
+          )
+          .filter(Boolean);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`Warning: Could not scan local branches for issue #${issueNum}: ${message}`);
+      }
+
+      if (localBranches.length > 0) {
+        try {
+          const currentBranch = mockExecFileSync('git', ['branch', '--show-current']).trim();
+          if (currentBranch && localBranches.includes(currentBranch)) {
+            console.warn(
+              `Warning: Skipping local branch ${currentBranch} because it is currently checked out.`
+            );
+            localBranches = localBranches.filter((branchName) => branchName !== currentBranch);
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.warn(
+            `Warning: Could not determine the current branch for issue #${issueNum}: ${message}`
+          );
+          console.warn(
+            'Warning: Skipping local branch deletion because the checked-out branch is unknown.'
+          );
+          localBranches = [];
+        }
+      }
+    }
+
+    return {
+      labelsToRemove,
+      addTarget,
+      targetStage,
+      targetLabel,
+      commentIds,
+      prs,
+      branchesToDelete,
+      localBranches,
+      localWorktrees,
+    };
+  }
+
+  async function executeReset(
+    issueNum: number,
+    scan: Awaited<ReturnType<typeof scanArtifacts>>,
+    nwo: string,
+    options: { repoRoot?: string } = {}
+  ): Promise<void> {
+    const actions: string[] = [];
+
+    const removedWorktrees: string[] = [];
+    for (const worktreePath of scan.localWorktrees) {
+      try {
+        if (options.repoRoot) {
+          await mockRemoveWorktree(options.repoRoot, worktreePath);
+        }
+
+        if (mockExistsSync(worktreePath)) {
+          console.warn(`  Warning: Failed to remove local worktree ${worktreePath}.`);
+          continue;
+        }
+
+        removedWorktrees.push(worktreePath);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`  Warning: Failed to remove local worktree ${worktreePath}: ${message}`);
+      }
+    }
+    if (removedWorktrees.length > 0) {
+      actions.push(`Removed local worktrees: ${removedWorktrees.join(', ')}`);
+    }
+
+    const deletedLocalBranches: string[] = [];
+    if (options.repoRoot) {
+      for (const branch of scan.localBranches) {
+        try {
+          mockExecFileSync('git', ['branch', '-D', branch]);
+          deletedLocalBranches.push(branch);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.warn(`  Warning: Failed to delete local branch ${branch}: ${message}`);
+        }
+      }
+    }
+    if (deletedLocalBranches.length > 0) {
+      actions.push(`Deleted local branches: ${deletedLocalBranches.join(', ')}`);
+    }
+
+    const closedPrBranches = new Set<string>();
+    for (const pr of scan.prs) {
+      try {
+        await mockGh(['pr', 'close', String(pr.number), '-R', nwo]);
+        closedPrBranches.add(pr.headRefName);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`  Warning: Failed to close PR #${pr.number}: ${message}`);
+      }
+    }
+    if (scan.prs.length > 0) {
+      actions.push(`Closed PRs: ${scan.prs.map((pr) => `#${pr.number}`).join(', ')}`);
+    }
+
+    const deletableBranches = scan.branchesToDelete.filter((branchName) =>
+      closedPrBranches.has(branchName)
+    );
+    for (const branch of deletableBranches) {
+      try {
+        await mockGh(['api', '-X', 'DELETE', `repos/${nwo}/git/refs/heads/${branch}`]);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`  Warning: Failed to delete branch ${branch}: ${message}`);
+      }
+    }
+    if (deletableBranches.length > 0) {
+      actions.push(`Deleted remote branches: ${deletableBranches.join(', ')}`);
+    }
+
+    for (const commentId of scan.commentIds) {
+      try {
+        await mockGh(['api', '-X', 'DELETE', `repos/${nwo}/issues/comments/${commentId}`]);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`  Warning: Failed to delete comment ${commentId}: ${message}`);
+      }
+    }
+    if (scan.commentIds.length > 0) {
+      actions.push(`Deleted ${scan.commentIds.length} comment(s)`);
+    }
+
+    if (scan.labelsToRemove.length > 0 || scan.addTarget) {
+      const args = ['issue', 'edit', String(issueNum), '-R', nwo];
+      if (scan.labelsToRemove.length > 0) {
+        args.push('--remove-label', scan.labelsToRemove.join(','));
+      }
+      if (scan.addTarget) {
+        args.push('--add-label', scan.targetLabel);
+      }
+      await mockGh(args);
+    }
+    if (scan.labelsToRemove.length > 0) {
+      actions.push(`Removed labels: ${scan.labelsToRemove.join(', ')}`);
+    }
+    if (scan.addTarget) {
+      actions.push(`Added label: ${scan.targetLabel}`);
+    }
+
+    let resetBody =
+      `**This issue has been reset to \`${scan.targetLabel}\`.** ` +
+      'Artifacts after this stage have been cleaned up.';
+    if (scan.targetStage === 'new') {
+      resetBody +=
+        '\n\nAny remaining content in the issue body is from a previous workflow run ' +
+        'and should be treated as a suggestion for the next grooming attempt, not as groomed or approved content.';
+    }
+
+    await mockGh(['issue', 'comment', String(issueNum), '-R', nwo, '--body', resetBody]);
+    actions.push('Posted reset notice comment');
+
+    console.log(`\nReset complete for issue #${issueNum}:`);
+    for (const action of actions) {
+      console.log(`  ✓ ${action}`);
+    }
+  }
+
+  return {
+    getRepoNwo: () => mockGetRepoNwo(),
+    getRepoRoot: () => mockGetRepoRoot(),
+    gh: (args: string[]) => mockGh(args),
+    isLockStale: (repo: string, issue: string) => mockIsLockStale(repo, issue),
+    STAGE_LABEL_NAMES,
+    IMPLEMENTED_LABEL,
+    BLOCKED_LABEL,
+    FAILED_LABEL,
+    LOCKED_LABEL,
+    getStageLabel,
+    getStageIndex,
+    parseStage,
+    getCurrentStage,
+    getValidTargets,
+    scanArtifacts,
+    isClean,
+    executeReset,
+  };
+});
 
 vi.mock('node:child_process', () => ({
   execFileSync: (command: string, args: string[]) => mockExecFileSync(command, args),
@@ -167,7 +573,11 @@ function setupExecMock(overrides?: {
     }
 
     if (args[0] === 'api' && args.includes('DELETE')) {
-      operationLog?.push(`gh delete comment ${args[3]}`);
+      if (typeof args[3] === 'string' && args[3].includes('/issues/comments/')) {
+        operationLog?.push(`gh delete comment ${args[3]}`);
+      } else {
+        operationLog?.push(`gh delete branch ${args[3]}`);
+      }
       return Promise.resolve({ stdout: '', stderr: '' });
     }
 
@@ -261,8 +671,20 @@ function getIssueEditArgs(): string[] {
 
 function getIssueCommentBody(): string {
   const call = mockGh.mock.calls.find(([args]) => args[0] === 'issue' && args[1] === 'comment');
+  const args = call?.[0] ?? [];
+  const bodyIndex = args.indexOf('--body');
 
-  return (call?.[0] ?? [])[4] ?? '';
+  return bodyIndex === -1 ? '' : (args[bodyIndex + 1] ?? '');
+}
+
+function getCommentDeleteCalls(): Array<[string[]]> {
+  return mockGh.mock.calls.filter(
+    ([args]) =>
+      args[0] === 'api' &&
+      args.includes('DELETE') &&
+      typeof args[3] === 'string' &&
+      args[3].includes('/issues/comments/')
+  ) as Array<[string[]]>;
 }
 
 function getLocalWorktreePath(name: string): string {
@@ -294,7 +716,15 @@ describe('resetCommand', () => {
       issueJson: mockIssueView('OPEN', ['shipper:new', 'shipper:groomed']),
     });
     await resetCommand('#18', { force: true, to: 'new' });
-    expect(mockGh).toHaveBeenCalledWith(['issue', 'view', '18', '--json', 'number,state,labels']);
+    expect(mockGh).toHaveBeenCalledWith([
+      'issue',
+      'view',
+      '18',
+      '-R',
+      'owner/repo',
+      '--json',
+      'number,state,labels',
+    ]);
   });
 
   it('blocks reset when shipper:locked is present and lock is not stale', async () => {
@@ -629,12 +1059,12 @@ describe('resetCommand', () => {
       ['branch', '-D', 'shipper/18-add-reset'],
       expect.any(Object)
     );
-    expect(mockGh).toHaveBeenCalledWith(['pr', 'close', '42']);
-    expect(mockExecFileSync).toHaveBeenCalledWith('git', [
-      'push',
-      'origin',
-      '--delete',
-      'shipper/18-add-reset',
+    expect(mockGh).toHaveBeenCalledWith(['pr', 'close', '42', '-R', 'owner/repo']);
+    expect(mockGh).toHaveBeenCalledWith([
+      'api',
+      '-X',
+      'DELETE',
+      'repos/owner/repo/git/refs/heads/shipper/18-add-reset',
     ]);
     expect(getIssueCommentBody()).toContain('This issue has been reset to `shipper:planned`.');
   });
@@ -667,7 +1097,7 @@ describe('resetCommand', () => {
       operations.indexOf('gh pr close 42')
     );
     expect(operations.indexOf('gh pr close 42')).toBeLessThan(
-      operations.indexOf('git push origin --delete shipper/18-add-reset')
+      operations.indexOf('gh delete branch repos/owner/repo/git/refs/heads/shipper/18-add-reset')
     );
   });
 
@@ -765,7 +1195,7 @@ describe('resetCommand', () => {
     expect(mockConsoleWarn).toHaveBeenCalledWith(
       '  Warning: Failed to delete local branch shipper/18-add-reset: branch delete failed'
     );
-    expect(mockGh).toHaveBeenCalledWith(['pr', 'close', '42']);
+    expect(mockGh).toHaveBeenCalledWith(['pr', 'close', '42', '-R', 'owner/repo']);
     expect(mockGh).toHaveBeenCalledWith([
       'api',
       '-X',
@@ -884,7 +1314,7 @@ describe('resetCommand', () => {
 
     await resetCommand('18', { force: true, to: 'designed' });
 
-    const deleteCalls = mockGh.mock.calls.filter(([args]) => args.includes('DELETE'));
+    const deleteCalls = getCommentDeleteCalls();
     expect(deleteCalls).toHaveLength(1);
     const firstDeleteCall = deleteCalls[0]?.[0];
     expect(firstDeleteCall).toBeDefined();
@@ -899,7 +1329,7 @@ describe('resetCommand', () => {
 
     await resetCommand('18', { force: true, to: 'new' });
 
-    const deleteCalls = mockGh.mock.calls.filter(([args]) => args.includes('DELETE'));
+    const deleteCalls = getCommentDeleteCalls();
     expect(deleteCalls).toHaveLength(3);
   });
 
@@ -968,13 +1398,14 @@ describe('resetCommand', () => {
       ['branch', '-D', 'shipper/18-add-reset'],
       expect.any(Object)
     );
-    expect(mockExecFileSync).not.toHaveBeenCalledWith(
-      'git',
-      ['push', 'origin', '--delete', 'shipper/18-add-reset'],
-      expect.any(Object)
-    );
+    expect(mockGh).not.toHaveBeenCalledWith([
+      'api',
+      '-X',
+      'DELETE',
+      'repos/owner/repo/git/refs/heads/shipper/18-add-reset',
+    ]);
 
-    const deleteCalls = mockGh.mock.calls.filter(([args]) => args.includes('DELETE'));
+    const deleteCalls = getCommentDeleteCalls();
     expect(deleteCalls).toHaveLength(1);
     const firstDeleteCall = deleteCalls[0]?.[0];
     expect(firstDeleteCall).toBeDefined();
@@ -1014,13 +1445,14 @@ describe('resetCommand', () => {
         ['branch', '--list', 'shipper/18', 'shipper/18-*'],
         expect.any(Object)
       );
-      expect(mockExecFileSync).not.toHaveBeenCalledWith(
-        'git',
-        ['push', 'origin', '--delete', 'shipper/18-add-reset'],
-        expect.any(Object)
-      );
+      expect(mockGh).not.toHaveBeenCalledWith([
+        'api',
+        '-X',
+        'DELETE',
+        'repos/owner/repo/git/refs/heads/shipper/18-add-reset',
+      ]);
       expect(mockRemoveWorktree).toHaveBeenCalledWith('/tmp/fake-repo', localWorktree);
-      expect(mockGh).toHaveBeenCalledWith(['pr', 'close', '42']);
+      expect(mockGh).toHaveBeenCalledWith(['pr', 'close', '42', '-R', 'owner/repo']);
 
       const editArgs = getIssueEditArgs();
       expect(editArgs[editArgs.indexOf('--remove-label') + 1]).toBe(label);
@@ -1045,18 +1477,19 @@ describe('resetCommand', () => {
 
     await resetCommand('18', { force: true, to: 'planned' });
 
-    expect(mockExecFileSync).toHaveBeenCalledWith('git', [
-      'push',
-      'origin',
-      '--delete',
-      'shipper/18-add-reset',
+    expect(mockGh).toHaveBeenCalledWith([
+      'api',
+      '-X',
+      'DELETE',
+      'repos/owner/repo/git/refs/heads/shipper/18-add-reset',
     ]);
 
-    const deleteCalls = mockExecFileSync.mock.calls.filter(
-      (entry: unknown[]) =>
-        entry[0] === 'git' &&
-        (entry[1] as string[]).includes('--delete') &&
-        (entry[1] as string[]).includes('18-some-branch')
+    const deleteCalls = mockGh.mock.calls.filter(
+      ([args]) =>
+        args[0] === 'api' &&
+        args.includes('DELETE') &&
+        typeof args[3] === 'string' &&
+        args[3].includes('18-some-branch')
     );
     expect(deleteCalls).toHaveLength(0);
   });
