@@ -20,7 +20,7 @@ export function RepoTabBar({
   onAddRepo,
 }: RepoTabBarProps): JSX.Element {
   return (
-    <div className="border-b border-border bg-muted">
+    <div className="bg-muted shadow-[inset_0_-1px_0_0_var(--color-border)]">
       <div className="mx-auto flex max-w-7xl items-end gap-1 overflow-x-auto px-6 pt-2">
         {repos.map((repo) => {
           const isActive = repo === activeRepo;
@@ -30,13 +30,13 @@ export function RepoTabBar({
               key={repo}
               className={cn(
                 isActive
-                  ? 'relative z-10 -mb-px flex shrink-0 items-center rounded-t-md border border-border border-b-background bg-background text-foreground'
-                  : 'flex shrink-0 items-center rounded-t-md text-muted-foreground transition-colors hover:bg-background/50 hover:text-foreground'
+                  ? 'relative z-10 flex shrink-0 items-center rounded-t-md border border-border border-b-background bg-background text-foreground'
+                  : 'flex shrink-0 items-center rounded-t-md text-muted-foreground transition-colors hover:bg-background/50'
               )}
             >
               <button
                 type="button"
-                className="cursor-pointer min-w-0 px-3 py-2 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring"
+                className="cursor-pointer min-w-0 px-3 py-2 text-sm font-medium outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                 onClick={() => {
                   onSelectRepo(repo);
                 }}
