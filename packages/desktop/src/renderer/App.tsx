@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
-import type { JSX } from 'react';
+import type { DragEvent, JSX } from 'react';
 import { ChevronLeft, ChevronRight, EllipsisVertical, LoaderCircle } from 'lucide-react';
 
 import {
@@ -95,6 +95,13 @@ const POST_IMPLEMENTATION_LABELS = [PR_OPEN_LABEL, PR_REVIEWED_LABEL, READY_LABE
 
 type PipelineColumnLabel = (typeof PIPELINE_COLUMNS)[number];
 
+const COLUMN_RESET_STAGE: Partial<Record<PipelineColumnLabel, WorkflowStage>> = {
+  [GROOMED_LABEL]: 'groomed',
+  [DESIGNED_LABEL]: 'designed',
+  [PLANNED_LABEL]: 'planned',
+  [IMPLEMENTED_LABEL]: 'implemented',
+};
+
 function isValidRepo(repo: string): boolean {
   return repoPattern.test(repo);
 }
@@ -161,6 +168,19 @@ function getResetTargetLabel(stage: WorkflowStage): string {
   return DISPLAY_NAME_MAP[RESET_STAGE_LABELS[stage]] ?? stage;
 }
 
+function isValidDropTarget(
+  source: { issue: ListIssueItem; columnIndex: number },
+  targetColumnIndex: number
+): boolean {
+  if (targetColumnIndex >= source.columnIndex) return false;
+  const targetLabel = PIPELINE_COLUMNS[targetColumnIndex];
+  if (!targetLabel) return false;
+  const targetStage = COLUMN_RESET_STAGE[targetLabel];
+  if (!targetStage) return false;
+  const resetTargets = getResetTargets(source.issue.labels);
+  return resetTargets.includes(targetStage);
+}
+
 function findActiveIssueSession(
   sessions: TerminalSession[],
   repo: string,
@@ -181,6 +201,9 @@ interface IssueCardProps {
   isResetting?: boolean;
   onShip?: (issueNumber: number) => void;
   shipDisabled?: boolean;
+  draggable?: boolean;
+  onDragStart?: (e: DragEvent) => void;
+  onDragEnd?: () => void;
 }
 
 function IssueCard({
@@ -192,6 +215,9 @@ function IssueCard({
   isResetting = false,
   onShip,
   shipDisabled = false,
+  draggable,
+  onDragStart,
+  onDragEnd,
 }: IssueCardProps): JSX.Element {
   const isBlocked = issue.labels.includes(BLOCKED_LABEL);
   const isLocked = issue.labels.includes(LOCKED_LABEL);
@@ -201,9 +227,13 @@ function IssueCard({
 
   return (
     <article
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
       className={cn(
         'relative space-y-3 rounded-sm border border-border bg-background px-4 py-4 transition-opacity',
-        isResetting && 'opacity-70'
+        isResetting && 'opacity-70',
+        draggable && 'cursor-grab'
       )}
     >
       <div className="flex items-start justify-between gap-3">
@@ -305,6 +335,11 @@ export default function App(): JSX.Element {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [pendingCloseSessionId, setPendingCloseSessionId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [dragSource, setDragSource] = useState<{
+    issue: ListIssueItem;
+    columnIndex: number;
+  } | null>(null);
+  const [dragOverColumn, setDragOverColumn] = useState<number | null>(null);
   const requestVersionRef = useRef(0);
   const initVersionRef = useRef(0);
   const contentPaneRef = useRef<HTMLDivElement | null>(null);
@@ -1216,19 +1251,59 @@ export default function App(): JSX.Element {
 
                     <div className="overflow-x-auto pb-1">
                       <div className="flex min-w-max items-start gap-4">
-                        {PIPELINE_COLUMNS.map((label) => {
+                        {PIPELINE_COLUMNS.map((label, columnIndex) => {
                           const stageIssues = columnMap.get(label) ?? [];
                           const isReadyColumn = label === READY_LABEL;
+                          const isValidTarget =
+                            dragSource !== null && isValidDropTarget(dragSource, columnIndex);
 
                           return (
                             <section
                               key={label}
-                              className={[
-                                'flex w-[240px] shrink-0 flex-col gap-4 rounded-sm border px-4 py-4',
+                              className={cn(
+                                'flex w-[240px] shrink-0 flex-col gap-4 rounded-sm border px-4 py-4 transition-colors',
                                 isReadyColumn
                                   ? 'border-success/30 bg-success/10'
                                   : 'border-border bg-background/40',
-                              ].join(' ')}
+                                dragSource !== null &&
+                                  (isValidTarget
+                                    ? dragOverColumn === columnIndex
+                                      ? 'border-blue-400 bg-blue-500/10'
+                                      : 'border-blue-400/40'
+                                    : 'opacity-50')
+                              )}
+                              onDragOver={(e) => {
+                                if (dragSource && isValidDropTarget(dragSource, columnIndex)) {
+                                  e.preventDefault();
+                                  e.dataTransfer.dropEffect = 'move';
+                                } else {
+                                  e.dataTransfer.dropEffect = 'none';
+                                }
+                              }}
+                              onDragEnter={(e) => {
+                                e.preventDefault();
+                                setDragOverColumn(columnIndex);
+                              }}
+                              onDragLeave={(e) => {
+                                if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                                  setDragOverColumn(null);
+                                }
+                              }}
+                              onDrop={(e) => {
+                                e.preventDefault();
+                                const targetLabel = PIPELINE_COLUMNS[columnIndex];
+                                const targetStage = targetLabel
+                                  ? COLUMN_RESET_STAGE[targetLabel]
+                                  : undefined;
+                                if (dragSource && targetStage) {
+                                  setResetSelection({
+                                    issue: dragSource.issue,
+                                    targetStage,
+                                  });
+                                }
+                                setDragSource(null);
+                                setDragOverColumn(null);
+                              }}
                             >
                               <div>
                                 <h3 className="text-sm font-semibold">{DISPLAY_NAME_MAP[label]}</h3>
@@ -1254,6 +1329,15 @@ export default function App(): JSX.Element {
                                             : undefined
                                         }
                                         shipDisabled={!canFetch || !hasActiveRepo}
+                                        draggable={!resettingIssues.has(issue.number)}
+                                        onDragStart={(e) => {
+                                          e.dataTransfer.effectAllowed = 'move';
+                                          setDragSource({ issue, columnIndex });
+                                        }}
+                                        onDragEnd={() => {
+                                          setDragSource(null);
+                                          setDragOverColumn(null);
+                                        }}
                                       />
                                     );
                                   })
