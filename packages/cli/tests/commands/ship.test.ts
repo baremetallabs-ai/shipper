@@ -139,6 +139,9 @@ vi.mock('@dnsquared/shipper-core', () => ({
       lockState.lockedIssues.delete(issue);
     });
   }),
+  retryOnInvalidOutput: vi.fn<
+    (opts: { cwd: string; retry: (msg: string) => Promise<number> }) => Promise<void>
+  >(() => Promise.resolve()),
   releaseIssueLock: vi.fn<(repo: string, issue: string) => Promise<void>>(() => Promise.resolve()),
   runPrompt: vi.fn<(name: string, opts: unknown) => Promise<number>>(() => Promise.resolve(0)),
 }));
@@ -189,6 +192,7 @@ import {
   gh,
   fetchChecks,
   classifyChecks,
+  retryOnInvalidOutput,
   withStageHooks,
   withIssueLock,
   releaseIssueLock,
@@ -201,6 +205,7 @@ const mockClearStaleLockIfNeeded = vi.mocked(clearStaleLockIfNeeded);
 const mockGh = vi.mocked(gh);
 const mockFetchChecks = vi.mocked(fetchChecks);
 const mockClassifyChecks = vi.mocked(classifyChecks);
+const mockRetryOnInvalidOutput = vi.mocked(retryOnInvalidOutput);
 const mockWithStageHooks = vi.mocked(withStageHooks);
 const mockWithIssueLock = vi.mocked(withIssueLock);
 const mockReleaseIssueLock = vi.mocked(releaseIssueLock);
@@ -821,24 +826,37 @@ describe('selectBlockedIssues', () => {
 });
 
 describe('printUnblockSummary', () => {
-  it('prints each attempt with correct outcome markers', () => {
+  it('prints each attempt with unblock #<issue> reference and correct outcome markers', () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     const attempts: UnblockAttempt[] = [
-      { issue: 12, title: 'Fix database migration', outcome: 'unblocked' },
-      { issue: 15, title: 'Add OAuth provider', outcome: 'still blocked' },
+      {
+        issue: 12,
+        title: 'Fix database migration',
+        outcome: 'unblocked',
+        logFile: '/mock-home/.shipper/logs/unblock-12-20260318T040000.log',
+      },
+      {
+        issue: 15,
+        title: 'Add OAuth provider',
+        outcome: 'still blocked',
+        logFile: '/mock-home/.shipper/logs/unblock-15-20260318T040000.log',
+      },
     ];
 
-    printUnblockSummary(attempts);
+    printUnblockSummary(attempts, '/mock-home');
 
     const output = getConsoleOutput(logSpy);
     expect(output).toContain('Unblock attempts:');
-    expect(output).toContain('12');
+    expect(output).toContain('unblock #12');
     expect(output).toContain('Fix database migration');
     expect(output).toContain('✓ unblocked');
-    expect(output).toContain('15');
+    expect(output).toContain('unblock #15');
     expect(output).toContain('Add OAuth provider');
     expect(output).toContain('— still blocked');
+    expect(output).toContain('Unblock log files:');
+    expect(output).toContain('~/.shipper/logs/unblock-12-20260318T040000.log');
+    expect(output).toContain('~/.shipper/logs/unblock-15-20260318T040000.log');
 
     logSpy.mockRestore();
   });
@@ -859,6 +877,21 @@ describe('printUnblockSummary', () => {
     const output = getConsoleOutput(logSpy);
     expect(output).toContain('This is a very long title that exceeds the...');
     expect(output).not.toContain('forty-five character limit');
+
+    logSpy.mockRestore();
+  });
+
+  it('does not print unblock log files section when no attempts have log files', () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const attempts: UnblockAttempt[] = [
+      { issue: 5, title: 'Legacy attempt', outcome: 'unblocked' },
+    ];
+
+    printUnblockSummary(attempts);
+
+    const output = getConsoleOutput(logSpy);
+    expect(output).not.toContain('Unblock log files:');
 
     logSpy.mockRestore();
   });
@@ -2224,12 +2257,22 @@ describe('shipCommand parallel auto runner', () => {
       model: 'haiku',
     });
 
-    expect(mockRunPrompt).toHaveBeenCalledWith('unblock', {
-      repo,
-      issueRef: '7',
-      agent: undefined,
-      model: 'haiku',
-    });
+    expect(mockRunPrompt).toHaveBeenCalledWith(
+      'unblock',
+      expect.objectContaining({
+        repo,
+        issueRef: '7',
+        agent: undefined,
+        model: 'haiku',
+      })
+    );
+    const unblockCall = mockRunPrompt.mock.calls.find(([name]) => name === 'unblock');
+    const unblockOpts = unblockCall?.[1] as Record<string, unknown> | undefined;
+    expect(unblockOpts).toBeDefined();
+    expect(String(unblockOpts?.logFile)).toMatch(/unblock-7-\d{8}T\d{6}\.log$/);
+    expect(mockRetryOnInvalidOutput).toHaveBeenCalledWith(
+      expect.objectContaining({ cwd: process.cwd() })
+    );
     expect(mockPrepareUnblockContext).toHaveBeenCalledWith(repo, '7', process.cwd());
     expect(mockProcessResult).toHaveBeenCalledWith({
       repo,
@@ -2321,6 +2364,9 @@ describe('shipCommand parallel auto runner', () => {
     expect(output).toContain('  #    Issue                                          Outcome');
     expect(output).toContain('✗ fail — boom');
     expect(output).toContain('  Unblock attempts:');
+    expect(output).toContain('unblock #7');
+    expect(output).toContain('Unblock log files:');
+    expect(output).toContain('~/.shipper/logs/unblock-7-20260306T023000.log');
     expect(output).toContain('  Log files:');
     expect(output).toContain('  #1   ~/.shipper/logs/ship-1-20260306T023000.log');
     expect(output).toContain('  #2   ~/.shipper/logs/ship-2-20260306T023000.log');
@@ -2366,11 +2412,68 @@ describe('shipCommand parallel auto runner', () => {
 
     await shipCommand(repo, undefined, { auto: true, merge: false, parallel: 1 });
 
+    // retryOnInvalidOutput should be called before processResult
+    expect(mockRetryOnInvalidOutput).toHaveBeenCalledWith(
+      expect.objectContaining({ cwd: process.cwd() })
+    );
+
     const output = getConsoleOutput(logSpy);
     expect(output).toContain('still blocked');
     expect(mockHandleAgentCrash).toHaveBeenCalledWith(repo, '7', 'unblock', 'Missing result.json');
 
     logSpy.mockRestore();
+  });
+
+  it('invokes the retry callback with correction text and the same logFile on invalid unblock output', async () => {
+    let blockedReturned = false;
+    mockSelectIssuesForStage.mockImplementation(() => []);
+    mockGh.mockImplementation((args: string[]) => {
+      if (args[0] === 'issue' && args[1] === 'list' && !blockedReturned) {
+        blockedReturned = true;
+        return {
+          stdout: JSON.stringify([
+            {
+              number: 23,
+              title: 'Retry target',
+              labels: [{ name: 'shipper:planned' }, { name: 'shipper:blocked' }],
+            },
+          ]),
+          stderr: '',
+        };
+      }
+      if (args[0] === 'issue' && args[1] === 'list') {
+        return { stdout: '[]', stderr: '' };
+      }
+      return { stdout: '[]', stderr: '' };
+    });
+
+    // Simulate retryOnInvalidOutput invoking the retry callback
+    mockRetryOnInvalidOutput.mockImplementationOnce(async (opts) => {
+      await opts.retry('Fix: missing comment field in result.json');
+    });
+
+    await shipCommand(repo, undefined, { auto: true, merge: false, parallel: 1 });
+
+    // First call is the initial runPrompt
+    expect(mockRunPrompt).toHaveBeenCalledWith(
+      'unblock',
+      expect.objectContaining({
+        repo,
+        issueRef: '23',
+        agent: undefined,
+        model: undefined,
+      })
+    );
+    const firstOpts = mockRunPrompt.mock.calls[0]?.[1] as Record<string, unknown> | undefined;
+    expect(firstOpts).toBeDefined();
+    expect(String(firstOpts?.logFile)).toMatch(/unblock-23-\d{8}T\d{6}\.log$/);
+
+    // Second call is the retry with userInput and the same logFile
+    const secondOpts = mockRunPrompt.mock.calls[1]?.[1] as Record<string, unknown> | undefined;
+    expect(secondOpts).toBeDefined();
+    expect(secondOpts?.logFile).toBe(firstOpts?.logFile);
+    expect(secondOpts?.userInput).toBe('Fix: missing comment field in result.json');
+    expect(secondOpts?.issueRef).toBe('23');
   });
 
   it('reuses a failed slot for the next candidate and skips the failed issue afterwards', async () => {

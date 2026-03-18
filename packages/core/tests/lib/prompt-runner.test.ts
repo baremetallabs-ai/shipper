@@ -606,6 +606,59 @@ describe('runPrompt', () => {
     });
   });
 
+  it('captures stdout to a caller-supplied logFile override instead of the session log path', async () => {
+    resolveModeMock.mockReturnValue('headless');
+    readFileMock.mockResolvedValueOnce(makePrompt('claude'));
+    mockSpawnResult();
+
+    const overridePath = '/home/user/.shipper/logs/unblock-376-20260318T040000.log';
+    await expect(
+      runPrompt('unblock', {
+        mode: 'headless',
+        repo: 'owner/repo',
+        issueRef: '376',
+        logFile: overridePath,
+      })
+    ).resolves.toBe(0);
+
+    // The createWriteStream should receive the override path, not the session path
+    expect(createWriteStreamMock).toHaveBeenCalledWith(overridePath);
+    expect(spawnMock.mock.calls[0]?.[2]).toMatchObject({
+      stdio: ['inherit', 'pipe', 'inherit'],
+    });
+
+    // Session metadata should still be written under ~/.shipper/sessions/...
+    const writeMetaCall = writeSessionMetaMock.mock.calls[0];
+    expect(writeMetaCall?.[0]).toContain('/home/user/.shipper/sessions/owner-repo/');
+    // But the logFile in metadata should point at the override path
+    expect((writeMetaCall?.[1] as { logFile: string }).logFile).toBe(overridePath);
+  });
+
+  it('uses caller-supplied logFile for non-headless runs that would otherwise skip capture', async () => {
+    resolveModeMock.mockReturnValue('interactive');
+    readFileMock.mockResolvedValueOnce(makePrompt('claude'));
+    mockSpawnResult();
+
+    const overridePath = '/home/user/.shipper/logs/unblock-42-20260318T050000.log';
+    await expect(
+      runPrompt('unblock', {
+        mode: 'interactive',
+        repo: 'owner/repo',
+        issueRef: '42',
+        logFile: overridePath,
+      })
+    ).resolves.toBe(0);
+
+    // Even in interactive mode, the override path should be used for capture
+    expect(createWriteStreamMock).toHaveBeenCalledWith(overridePath);
+    expect(spawnMock.mock.calls[0]?.[2]).toMatchObject({
+      stdio: ['inherit', 'pipe', 'inherit'],
+    });
+    expect((writeSessionMetaMock.mock.calls[0]?.[1] as { logFile: string }).logFile).toBe(
+      overridePath
+    );
+  });
+
   it('does not echo headless stdout back to the terminal while capturing session logs', async () => {
     resolveModeMock.mockReturnValue('headless');
     readFileMock.mockResolvedValueOnce(makePrompt('claude'));
