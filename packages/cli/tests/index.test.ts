@@ -57,6 +57,73 @@ const mockLoadSettings = vi.mocked(loadSettings);
 const mockGetRepoNwo = vi.mocked(getRepoNwo);
 
 describe('shipper-cli', () => {
+  describe('help output', () => {
+    const originalArgv = [...process.argv];
+    let exitSpy: ReturnType<typeof vi.spyOn>;
+    let writeSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+        throw new Error(`process.exit:${code ?? 0}`);
+      }) as typeof process.exit);
+      writeSpy = vi
+        .spyOn(process.stdout, 'write')
+        .mockImplementation((() => true) as typeof process.stdout.write);
+      mockRunPreflight.mockClear();
+      mockLoadSettings.mockClear();
+      mockGetRepoNwo.mockClear();
+      mockNewCommand.mockClear();
+      mockSetupCommand.mockClear();
+    });
+
+    afterEach(() => {
+      process.argv = [...originalArgv];
+      exitSpy.mockRestore();
+      writeSpy.mockRestore();
+    });
+
+    function getStdout(): string {
+      return writeSpy.mock.calls.map(([chunk]) => String(chunk)).join('');
+    }
+
+    async function renderHelp(args: string[]): Promise<string> {
+      vi.resetModules();
+      writeSpy.mockClear();
+      process.argv = ['node', 'src/index.ts', ...args];
+
+      await expect(import('../src/index.ts')).rejects.toThrow('process.exit:0');
+
+      return getStdout();
+    }
+
+    it('shows help with available commands', async () => {
+      const output = await renderHelp(['--help']);
+
+      expect(output).toContain('init');
+      expect(output).toContain('new');
+      expect(output).toContain('priority');
+      expect(output).toContain('groom');
+      expect(output).toContain('design');
+      expect(output).toContain('plan');
+      expect(output).toContain('eject');
+      expect(output).toContain('pr');
+      expect(mockRunPreflight).not.toHaveBeenCalled();
+    });
+
+    it('shows --mode and --model on prompt-running command help and removes --headless from new', async () => {
+      const newHelp = await renderHelp(['new', '--help']);
+      const setupHelp = await renderHelp(['setup', '--help']);
+
+      expect(newHelp).toContain('--mode <mode>');
+      expect(newHelp).toContain('--model <model>');
+      expect(newHelp).not.toContain('--headless');
+      expect(setupHelp).toContain('--mode <mode>');
+      expect(setupHelp).toContain('--model <model>');
+      expect(mockNewCommand).not.toHaveBeenCalled();
+      expect(mockSetupCommand).not.toHaveBeenCalled();
+    });
+  });
+
   describe('eject command wiring', () => {
     const originalArgv = [...process.argv];
 
@@ -325,7 +392,7 @@ describe('shipper-cli', () => {
     it('errors when --parallel is missing its numeric value', async () => {
       process.argv = ['node', 'src/index.ts', 'ship', '--auto', '--parallel'];
 
-      await expect(importEntrypoint()).rejects.toThrow();
+      await expect(importEntrypoint()).rejects.toThrow('process.exit:1');
       expect(mockShipCommand).not.toHaveBeenCalled();
     });
 
