@@ -40,7 +40,11 @@ export function AdoptDialog({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [adoptingSet, setAdoptingSet] = useState<Set<number>>(new Set());
-  const [isBulkAdopting, setIsBulkAdopting] = useState(false);
+  const [bulkAdoptProgress, setBulkAdoptProgress] = useState<{
+    processed: number;
+    total: number;
+  } | null>(null);
+  const isBulkAdopting = bulkAdoptProgress !== null;
   const isMountedRef = useRef(true);
   const activeRunIdRef = useRef(0);
 
@@ -61,7 +65,7 @@ export function AdoptDialog({
     setIssues([]);
     setError(null);
     setAdoptingSet(new Set());
-    setIsBulkAdopting(false);
+    setBulkAdoptProgress(null);
 
     let cancelled = false;
 
@@ -151,7 +155,7 @@ export function AdoptDialog({
     const runId = activeRunIdRef.current;
 
     setError(null);
-    setIsBulkAdopting(true);
+    setBulkAdoptProgress({ processed: 0, total: issueNumbers.length });
     setAdoptingSet(new Set());
 
     let adoptedCount = 0;
@@ -183,6 +187,12 @@ export function AdoptDialog({
 
           const message = adoptError instanceof Error ? adoptError.message : String(adoptError);
           failures.push(`#${issueNumber}: ${message}`);
+        } finally {
+          if (isRunActive(runId)) {
+            setBulkAdoptProgress((prev) =>
+              prev ? { ...prev, processed: prev.processed + 1 } : null
+            );
+          }
         }
       }
 
@@ -199,7 +209,7 @@ export function AdoptDialog({
       }
     } finally {
       if (isRunActive(runId)) {
-        setIsBulkAdopting(false);
+        setBulkAdoptProgress(null);
       }
     }
   }
@@ -242,7 +252,14 @@ export function AdoptDialog({
               }}
               disabled={isLoading || isBulkAdopting || adoptingSet.size > 0 || issues.length === 0}
             >
-              {isBulkAdopting ? 'Adopting all...' : 'Adopt All'}
+              {bulkAdoptProgress ? (
+                <>
+                  <LoaderCircle className="size-4 animate-spin" />
+                  Adopting {bulkAdoptProgress.processed}/{bulkAdoptProgress.total}...
+                </>
+              ) : (
+                'Adopt All'
+              )}
             </Button>
           </div>
 
