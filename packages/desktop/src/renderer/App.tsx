@@ -1115,9 +1115,7 @@ export default function App(): JSX.Element {
                                         isResetting={resettingIssues.has(issue.number)}
                                         onShip={
                                           !isReadyColumn
-                                            ? (issueNumber) => {
-                                                void handleShipperShip(issueNumber);
-                                              }
+                                            ? (issueNumber) => void handleShipperShip(issueNumber)
                                             : undefined
                                         }
                                         shipDisabled={!canFetch || !hasActiveRepo}
