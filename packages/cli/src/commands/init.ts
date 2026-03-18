@@ -1,6 +1,8 @@
+import { execFile } from 'node:child_process';
 import { mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline/promises';
+import { promisify } from 'node:util';
 import {
   gh,
   scripts,
@@ -15,6 +17,8 @@ import {
   checkGhAuth,
   checkGitHubRemote,
 } from '@dnsquared/shipper-core';
+
+const execFileAsync = promisify(execFile);
 
 const VALID_AGENTS = ['claude', 'codex'] as const;
 const UNSAFE_COMMAND_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
@@ -275,6 +279,68 @@ export async function initCommand(options: { agent?: string }) {
     ]);
   }
   console.log(`Synced ${LABELS.length} labels`);
+
+  // Resolve the default branch name
+  const { stdout: branchOut } = await gh([
+    'repo',
+    'view',
+    '--json',
+    'defaultBranchRef',
+    '-q',
+    '.defaultBranchRef.name',
+  ]);
+  const defaultBranch = branchOut.trim();
+
+  // Validate the current branch
+  const { stdout: currentOut } = await execFileAsync('git', ['branch', '--show-current'], {
+    encoding: 'utf-8',
+  });
+  const currentBranch = currentOut.trim();
+
+  if (currentBranch !== defaultBranch) {
+    console.error(
+      `Error: shipper init must be run from the default branch (${defaultBranch}).\n` +
+        `You are on: ${currentBranch || '(detached HEAD)'}\n` +
+        `Switch with: git checkout ${defaultBranch}`
+    );
+    process.exit(1);
+  }
+
+  // Stage, check for changes, commit, and push
+  await execFileAsync('git', ['add', '--', '.shipper/']);
+
+  let hasChanges = false;
+  try {
+    await execFileAsync('git', ['diff', '--cached', '--quiet', '--', '.shipper/']);
+  } catch {
+    hasChanges = true;
+  }
+
+  if (!hasChanges) {
+    console.log('.shipper/ files are unchanged — nothing to push.');
+  } else {
+    await execFileAsync('git', ['commit', '-m', 'chore: initialize shipper', '--', '.shipper/']);
+
+    try {
+      await execFileAsync('git', ['push', 'origin', defaultBranch]);
+    } catch (err) {
+      const stderr =
+        typeof err === 'object' && err !== null && 'stderr' in err && typeof err.stderr === 'string'
+          ? err.stderr.trim()
+          : '';
+      console.error(
+        `Error: Failed to push to ${defaultBranch}.` +
+          (stderr ? `\n${stderr}` : '') +
+          '\n\nThis may be due to branch protection rules.' +
+          '\nPush manually with: git push origin ' +
+          defaultBranch +
+          '\nOr adjust your branch protection settings.'
+      );
+      process.exit(1);
+    }
+
+    console.log(`Committed and pushed .shipper/ files to ${defaultBranch}`);
+  }
 
   // Check if .shipper is gitignored or tracked
   const rootGitignore = path.resolve('.gitignore');
