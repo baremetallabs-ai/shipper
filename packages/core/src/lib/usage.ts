@@ -1,4 +1,5 @@
-import { readFile } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { createInterface } from 'node:readline';
 import type { AgentName } from './settings.js';
 
 export interface TokenUsage {
@@ -14,22 +15,31 @@ export async function parseAgentUsage(
   agent: AgentName,
   logFile: string
 ): Promise<TokenUsage | undefined> {
-  let contents: string;
-  try {
-    contents = await readFile(logFile, 'utf-8');
-  } catch {
-    return undefined;
-  }
+  const parseUsageRecord = agent === 'claude' ? getClaudeUsageRecord : getCodexUsageRecord;
+  let lastUsage: TokenUsage | undefined;
 
-  if (!contents.trim()) {
-    return undefined;
-  }
+  const logStream = createReadStream(logFile, { encoding: 'utf-8' });
+  const lines = createInterface({
+    input: logStream,
+    crlfDelay: Infinity,
+  });
 
   try {
-    return agent === 'claude' ? parseClaudeUsage(contents) : parseCodexUsage(contents);
+    for await (const line of lines) {
+      const record = parseJsonLine(line);
+      const usage = record ? parseUsageRecord(record) : undefined;
+      if (usage) {
+        lastUsage = usage;
+      }
+    }
   } catch {
     return undefined;
+  } finally {
+    lines.close();
+    logStream.destroy();
   }
+
+  return lastUsage;
 }
 
 export function formatUsageLine(usage: TokenUsage): string {
@@ -44,48 +54,36 @@ export function totalTokens(usage: TokenUsage): number {
   return usage.inputTokens + usage.outputTokens;
 }
 
-function parseClaudeUsage(contents: string): TokenUsage | undefined {
-  let lastUsage: TokenUsage | undefined;
-
-  for (const line of contents.split(/\r?\n/)) {
-    const record = parseJsonLine(line);
-    const usage = record ? getUsageRecord(record.usage) : undefined;
-    if (usage) {
-      lastUsage = {
-        inputTokens: getNumericField(usage.input_tokens),
-        outputTokens: getNumericField(usage.output_tokens),
-        cacheReadTokens: getNumericField(usage.cache_read_input_tokens),
-        cacheWriteTokens: getNumericField(usage.cache_creation_input_tokens),
-      };
-    }
+function getClaudeUsageRecord(record: Record<string, unknown>): TokenUsage | undefined {
+  const usage = getUsageRecord(record.usage);
+  if (!usage) {
+    return undefined;
   }
 
-  return lastUsage;
+  return {
+    inputTokens: getNumericField(usage.input_tokens),
+    outputTokens: getNumericField(usage.output_tokens),
+    cacheReadTokens: getNumericField(usage.cache_read_input_tokens),
+    cacheWriteTokens: getNumericField(usage.cache_creation_input_tokens),
+  };
 }
 
-function parseCodexUsage(contents: string): TokenUsage | undefined {
-  let lastUsage: TokenUsage | undefined;
-
-  for (const line of contents.split(/\r?\n/)) {
-    const record = parseJsonLine(line);
-    if (!record || record.type !== 'turn.completed') {
-      continue;
-    }
-
-    const usage = getUsageRecord(record.usage);
-    if (!usage) {
-      continue;
-    }
-
-    lastUsage = {
-      inputTokens: getNumericField(usage.input_tokens),
-      outputTokens: getNumericField(usage.output_tokens),
-      cacheReadTokens: getNumericField(usage.cached_input_tokens),
-      cacheWriteTokens: 0,
-    };
+function getCodexUsageRecord(record: Record<string, unknown>): TokenUsage | undefined {
+  if (record.type !== 'turn.completed') {
+    return undefined;
   }
 
-  return lastUsage;
+  const usage = getUsageRecord(record.usage);
+  if (!usage) {
+    return undefined;
+  }
+
+  return {
+    inputTokens: getNumericField(usage.input_tokens),
+    outputTokens: getNumericField(usage.output_tokens),
+    cacheReadTokens: getNumericField(usage.cached_input_tokens),
+    cacheWriteTokens: 0,
+  };
 }
 
 function parseJsonLine(line: string): Record<string, unknown> | undefined {

@@ -82,9 +82,10 @@ export async function aggregateSessionUsage(
   issue: string,
   since: Date
 ): Promise<TokenUsage | undefined> {
+  const sessionDir = getSessionDir(toRepoSlug(repo));
   let entries: string[];
   try {
-    entries = await readdir(getSessionDir(toRepoSlug(repo)));
+    entries = await readdir(sessionDir);
   } catch {
     return undefined;
   }
@@ -92,15 +93,13 @@ export async function aggregateSessionUsage(
   let total: TokenUsage | undefined;
 
   for (const entry of entries) {
-    if (!entry.endsWith('.meta.json')) {
+    if (!entry.startsWith(`${issue}-`) || !entry.endsWith('.meta.json')) {
       continue;
     }
 
     let parsed: unknown;
     try {
-      parsed = JSON.parse(
-        await readFile(path.join(getSessionDir(toRepoSlug(repo)), entry), 'utf-8')
-      );
+      parsed = JSON.parse(await readFile(path.join(sessionDir, entry), 'utf-8'));
     } catch {
       continue;
     }

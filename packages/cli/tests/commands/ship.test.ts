@@ -1393,6 +1393,27 @@ describe('shipCommand single-issue path', () => {
     }
   });
 
+  it('skips token aggregation inside auto-child ship runs', async () => {
+    const previousAutoChild = process.env.SHIPPER_AUTO_CHILD_RUN;
+    process.env.SHIPPER_AUTO_CHILD_RUN = '1';
+
+    try {
+      mockIssueViewSequence(['shipper:planned', 'shipper:ready']);
+
+      await shipCommand(repo, '42', { auto: false, merge: false });
+
+      expect(mockAggregateSessionUsage).not.toHaveBeenCalled();
+      expect(mockTotalTokens).not.toHaveBeenCalled();
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    } finally {
+      if (previousAutoChild === undefined) {
+        delete process.env.SHIPPER_AUTO_CHILD_RUN;
+      } else {
+        process.env.SHIPPER_AUTO_CHILD_RUN = previousAutoChild;
+      }
+    }
+  });
+
   it('continues into groom when an interactive run resets an issue to shipper:new', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
