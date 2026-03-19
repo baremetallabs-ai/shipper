@@ -20,6 +20,7 @@ export * from './lib/session.js';
 export * from './lib/settings.js';
 export * from './lib/sleep.js';
 export * from './lib/stage-transitions.js';
+export * from './lib/usage.js';
 export * from './lib/version.js';
 export * from './lib/worktree.js';
 export { default as readmeTemplate } from './templates/readme.js';

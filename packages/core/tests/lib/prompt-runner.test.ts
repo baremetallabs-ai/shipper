@@ -50,6 +50,12 @@ const getSessionPathsMock = vi
   });
 const writeSessionMetaMock =
   vi.fn<(metaFile: string, meta: Record<string, unknown>) => Promise<void>>();
+const parseAgentUsageMock = vi
+  .fn<(agent: 'claude' | 'codex', logFile: string) => Promise<Record<string, number> | undefined>>()
+  .mockResolvedValue(undefined);
+const formatUsageLineMock = vi
+  .fn<(usage: Record<string, number>) => string>()
+  .mockReturnValue('Usage: 45 input │ 12 output │ 8 cache read │ 2 cache write tokens');
 const resolveAgentMock = vi
   .fn<(promptName: string, agent?: string) => 'claude' | 'codex'>()
   .mockReturnValue('claude');
@@ -111,6 +117,11 @@ vi.mock('../../src/lib/session.js', () => ({
   resolveSessionRepo: (...args: unknown[]) => resolveSessionRepoMock(...args),
   getSessionPaths: (...args: unknown[]) => getSessionPathsMock(...args),
   writeSessionMeta: (...args: unknown[]) => writeSessionMetaMock(...args),
+}));
+
+vi.mock('../../src/lib/usage.js', () => ({
+  parseAgentUsage: (...args: unknown[]) => parseAgentUsageMock(...args),
+  formatUsageLine: (...args: unknown[]) => formatUsageLineMock(...args),
 }));
 
 function mockSpawnResult(
@@ -242,6 +253,12 @@ afterEach(() => {
   fetchPRMock.mockResolvedValue('pr body');
   resolveSessionRepoMock.mockResolvedValue({ repo: 'owner/repo', repoSlug: 'owner-repo' });
   writeSessionMetaMock.mockResolvedValue(undefined);
+  parseAgentUsageMock.mockReset();
+  parseAgentUsageMock.mockResolvedValue(undefined);
+  formatUsageLineMock.mockReset();
+  formatUsageLineMock.mockReturnValue(
+    'Usage: 45 input │ 12 output │ 8 cache read │ 2 cache write tokens'
+  );
   statSyncMock.mockImplementation(() => {
     throw new Error('ENOENT');
   });
@@ -464,11 +481,12 @@ describe('runPrompt', () => {
 
     await expect(runPrompt('test', { model: 'gpt-5' })).resolves.toBe(0);
 
-    expect(spawnedArgs().slice(0, 6)).toEqual([
+    expect(spawnedArgs().slice(0, 7)).toEqual([
       '-m',
       'gpt-5',
       'exec',
       '--full-auto',
+      '--json',
       '-c',
       'sandbox_workspace_write.network_access=true',
     ]);
@@ -571,6 +589,10 @@ describe('runPrompt', () => {
     expect((writeMetaCall?.[1] as { logFile: string }).logFile).toContain(
       '/home/user/.shipper/sessions/owner-repo/308-implement-'
     );
+    expect(parseAgentUsageMock).toHaveBeenCalledWith(
+      'claude',
+      expect.stringContaining('/home/user/.shipper/sessions/owner-repo/308-implement-')
+    );
   });
 
   it('inherits stdio for non-headless runs to preserve TTY and writes metadata without logFile', async () => {
@@ -657,6 +679,7 @@ describe('runPrompt', () => {
     expect((writeSessionMetaMock.mock.calls[0]?.[1] as { logFile: string }).logFile).toBe(
       overridePath
     );
+    expect(parseAgentUsageMock).not.toHaveBeenCalled();
   });
 
   it('does not echo headless stdout back to the terminal while capturing session logs', async () => {
@@ -785,6 +808,109 @@ describe('runPrompt', () => {
     );
   });
 
+  it('prints and persists parsed usage for headless runs', async () => {
+    resolveModeMock.mockReturnValue('headless');
+    readFileMock.mockResolvedValueOnce(makePrompt('claude'));
+    parseAgentUsageMock.mockResolvedValueOnce({
+      inputTokens: 45,
+      outputTokens: 12,
+      cacheReadTokens: 8,
+      cacheWriteTokens: 2,
+    });
+    const logMock = vi.spyOn(console, 'log').mockImplementation(() => {});
+    mockSpawnResult();
+
+    await expect(runPrompt('test', { mode: 'headless', repo: 'owner/repo' })).resolves.toBe(0);
+
+    expect(formatUsageLineMock).toHaveBeenCalledWith({
+      inputTokens: 45,
+      outputTokens: 12,
+      cacheReadTokens: 8,
+      cacheWriteTokens: 2,
+    });
+    expect(logMock).toHaveBeenCalledWith(
+      'Usage: 45 input │ 12 output │ 8 cache read │ 2 cache write tokens'
+    );
+    expect(writeSessionMetaMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        usage: {
+          inputTokens: 45,
+          outputTokens: 12,
+          cacheReadTokens: 8,
+          cacheWriteTokens: 2,
+        },
+      })
+    );
+
+    logMock.mockRestore();
+  });
+
+  it('does not parse or persist usage for interactive runs even with a caller log file', async () => {
+    resolveModeMock.mockReturnValue('interactive');
+    readFileMock.mockResolvedValueOnce(makePrompt('claude'));
+    mockSpawnResult();
+
+    await expect(
+      runPrompt('test', {
+        mode: 'interactive',
+        repo: 'owner/repo',
+        logFile: '/tmp/interactive.log',
+      })
+    ).resolves.toBe(0);
+
+    expect(parseAgentUsageMock).not.toHaveBeenCalled();
+    expect(formatUsageLineMock).not.toHaveBeenCalled();
+    const interactiveMeta = writeSessionMetaMock.mock.calls[0]?.[1];
+    expect(interactiveMeta).toBeDefined();
+    expect(interactiveMeta).toMatchObject({ usage: undefined });
+  });
+
+  it('persists partial usage on failed headless runs without changing the exit code', async () => {
+    resolveModeMock.mockReturnValue('headless');
+    readFileMock.mockResolvedValueOnce(makePrompt('claude'));
+    parseAgentUsageMock.mockResolvedValueOnce({
+      inputTokens: 11,
+      outputTokens: 4,
+      cacheReadTokens: 3,
+      cacheWriteTokens: 1,
+    });
+    mockSpawnResult({ code: 17 });
+
+    await expect(runPrompt('test', { mode: 'headless', repo: 'owner/repo' })).resolves.toBe(17);
+
+    expect(writeSessionMetaMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        exitCode: 17,
+        usage: {
+          inputTokens: 11,
+          outputTokens: 4,
+          cacheReadTokens: 3,
+          cacheWriteTokens: 1,
+        },
+      })
+    );
+  });
+
+  it('ignores usage parser failures and preserves the original exit code', async () => {
+    resolveModeMock.mockReturnValue('headless');
+    readFileMock.mockResolvedValueOnce(makePrompt('claude'));
+    parseAgentUsageMock.mockRejectedValueOnce(new Error('parse failed'));
+    const logMock = vi.spyOn(console, 'log').mockImplementation(() => {});
+    mockSpawnResult({ code: 23 });
+
+    await expect(runPrompt('test', { mode: 'headless', repo: 'owner/repo' })).resolves.toBe(23);
+
+    expect(formatUsageLineMock).not.toHaveBeenCalled();
+    expect(logMock).not.toHaveBeenCalled();
+    const failedMeta = writeSessionMetaMock.mock.calls[0]?.[1];
+    expect(failedMeta).toBeDefined();
+    expect(failedMeta).toMatchObject({ usage: undefined });
+
+    logMock.mockRestore();
+  });
+
   it('injects codex headless args when absent', async () => {
     resolveAgentMock.mockReturnValue('codex');
     resolveModeMock.mockReturnValue('headless');
@@ -793,9 +919,10 @@ describe('runPrompt', () => {
 
     await runPrompt('test', { mode: 'headless' });
 
-    expect(spawnedArgs().slice(0, 4)).toEqual([
+    expect(spawnedArgs().slice(0, 5)).toEqual([
       'exec',
       '--full-auto',
+      '--json',
       '-c',
       'sandbox_workspace_write.network_access=true',
     ]);
@@ -809,9 +936,10 @@ describe('runPrompt', () => {
 
     await runPrompt('test', { mode: 'headless' });
 
-    expect(spawnedArgs().slice(0, 4)).toEqual([
+    expect(spawnedArgs().slice(0, 5)).toEqual([
       'exec',
       '--full-auto',
+      '--json',
       '-c',
       'sandbox_workspace_write.network_access=true',
     ]);
@@ -824,6 +952,7 @@ describe('runPrompt', () => {
       makePrompt('codex', [
         'exec',
         '--full-auto',
+        '--json',
         '-c',
         'sandbox_workspace_write.network_access=true',
       ])
@@ -834,6 +963,7 @@ describe('runPrompt', () => {
 
     expect(spawnedArgs()).not.toContain('exec');
     expect(spawnedArgs()).not.toContain('--full-auto');
+    expect(spawnedArgs()).not.toContain('--json');
     expect(spawnedArgs()).not.toContain('-c');
     expect(spawnedArgs()).not.toContain('sandbox_workspace_write.network_access=true');
     expect(spawnedArgs()).toContain('prompt body');
