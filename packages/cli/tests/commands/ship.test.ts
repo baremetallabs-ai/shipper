@@ -101,6 +101,7 @@ vi.mock('../../src/commands/unblock.js', () => ({
 import {
   STAGE_NAME,
   AUTO_PRIORITY_LABELS,
+  printAutoSummary,
   selectNextCandidate,
   selectBlockedIssues,
   printUnblockSummary,
@@ -115,6 +116,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   clearStaleLockIfNeeded: vi.fn<
     (repo: string, issueNumber: string, staleLocked: Set<number>) => Promise<void>
   >(() => Promise.resolve()),
+  aggregateSessionUsage: vi.fn(),
   gh: vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>(),
   fetchChecks: vi.fn<(repo: string, pr: string) => Promise<MockCheck[]>>(() => Promise.resolve([])),
   classifyChecks: vi.fn(() => ({ pending: [], failed: [], passed: [], total: 0 })),
@@ -142,6 +144,9 @@ vi.mock('@dnsquared/shipper-core', () => ({
   retryOnInvalidOutput: vi.fn<
     (opts: { cwd: string; retry: (msg: string) => Promise<number> }) => Promise<void>
   >(() => Promise.resolve()),
+  totalTokens: vi.fn((usage: { inputTokens: number; outputTokens: number }) => {
+    return usage.inputTokens + usage.outputTokens;
+  }),
   releaseIssueLock: vi.fn<(repo: string, issue: string) => Promise<void>>(() => Promise.resolve()),
   runPrompt: vi.fn<(name: string, opts: unknown) => Promise<number>>(() => Promise.resolve(0)),
 }));
@@ -187,12 +192,14 @@ vi.mock('node:child_process', async () => {
 });
 
 import {
+  aggregateSessionUsage,
   selectIssuesForStage,
   clearStaleLockIfNeeded,
   gh,
   fetchChecks,
   classifyChecks,
   retryOnInvalidOutput,
+  totalTokens,
   withStageHooks,
   withIssueLock,
   releaseIssueLock,
@@ -200,12 +207,14 @@ import {
 } from '@dnsquared/shipper-core';
 import { spawn } from 'node:child_process';
 
+const mockAggregateSessionUsage = vi.mocked(aggregateSessionUsage);
 const mockSelectIssuesForStage = vi.mocked(selectIssuesForStage);
 const mockClearStaleLockIfNeeded = vi.mocked(clearStaleLockIfNeeded);
 const mockGh = vi.mocked(gh);
 const mockFetchChecks = vi.mocked(fetchChecks);
 const mockClassifyChecks = vi.mocked(classifyChecks);
 const mockRetryOnInvalidOutput = vi.mocked(retryOnInvalidOutput);
+const mockTotalTokens = vi.mocked(totalTokens);
 const mockWithStageHooks = vi.mocked(withStageHooks);
 const mockWithIssueLock = vi.mocked(withIssueLock);
 const mockReleaseIssueLock = vi.mocked(releaseIssueLock);
@@ -222,6 +231,15 @@ const repo = 'owner/repo';
 const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((_code?: number) => {
   return undefined as never;
 }) as typeof process.exit);
+
+beforeEach(() => {
+  mockAggregateSessionUsage.mockReset();
+  mockAggregateSessionUsage.mockResolvedValue(undefined);
+  mockTotalTokens.mockReset();
+  mockTotalTokens.mockImplementation((usage: { inputTokens: number; outputTokens: number }) => {
+    return usage.inputTokens + usage.outputTokens;
+  });
+});
 
 type ShipSignal = 'SIGINT' | 'SIGTERM' | 'SIGKILL';
 
@@ -933,6 +951,25 @@ describe('printUnblockSummary', () => {
 
     const output = getConsoleOutput(logSpy);
     expect(output).not.toContain('Unblock log files:');
+
+    logSpy.mockRestore();
+  });
+});
+
+describe('printAutoSummary', () => {
+  it('renders the Tokens column with formatted totals and an em dash fallback', () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    printAutoSummary([
+      { issue: 308, title: 'Issue title here', outcome: 'pass', totalTokens: 57_338 },
+      { issue: 310, title: 'Another issue', outcome: 'fail', error: 'error' },
+    ]);
+
+    const output = getConsoleOutput(logSpy);
+    expect(output).toContain('Tokens');
+    expect(output).toContain('57,338');
+    expect(output).toContain('Another issue');
+    expect(output).toContain('—  ✗ fail — error');
 
     logSpy.mockRestore();
   });
@@ -1964,6 +2001,39 @@ describe('shipCommand sequential auto runner parking', () => {
     logSpy.mockRestore();
   });
 
+  it('aggregates persisted token totals for sequential auto summary rows', async () => {
+    setMockIssues([
+      {
+        number: 1,
+        title: 'Tokenized issue',
+        labels: ['shipper:planned'],
+        nextLabels: ['shipper:ready'],
+        prNumber: 101,
+      },
+    ]);
+    mockAggregateSessionUsage.mockResolvedValueOnce({
+      inputTokens: 10,
+      outputTokens: 3,
+      cacheReadTokens: 2,
+      cacheWriteTokens: 1,
+    });
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await shipCommand(repo, undefined, { auto: true, merge: false, parallel: 1 });
+
+    expect(mockAggregateSessionUsage).toHaveBeenCalledWith(repo, '1', expect.any(Date));
+    expect(mockTotalTokens).toHaveBeenCalledWith({
+      inputTokens: 10,
+      outputTokens: 3,
+      cacheReadTokens: 2,
+      cacheWriteTokens: 1,
+    });
+    expect(getConsoleOutput(logSpy)).toContain('13');
+
+    logSpy.mockRestore();
+  });
+
   it('does not enable parking for non-auto ship runs', async () => {
     setMockIssues([
       {
@@ -2511,6 +2581,54 @@ describe('shipCommand parallel auto runner', () => {
     expect(fsMockState.capturedLogs.get(logFile1)).toContain('lock acquired');
     expect(fsMockState.capturedLogs.get(logFile2)).toContain('Running stage: merge');
     expect(fsMockState.capturedLogs.get(logFile2)).toContain('boom');
+
+    logSpy.mockRestore();
+  });
+
+  it('aggregates token totals for both passing and failing parallel rows', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    let plannedIssues = [
+      { number: 1, title: 'Issue one' },
+      { number: 2, title: 'Issue two' },
+    ];
+    mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
+      if (label === 'shipper:planned') return plannedIssues;
+      return [];
+    });
+    mockAggregateSessionUsage
+      .mockResolvedValueOnce({
+        inputTokens: 8,
+        outputTokens: 5,
+        cacheReadTokens: 2,
+        cacheWriteTokens: 0,
+      })
+      .mockResolvedValueOnce({
+        inputTokens: 7,
+        outputTokens: 2,
+        cacheReadTokens: 1,
+        cacheWriteTokens: 0,
+      });
+
+    const child1 = new FakeChildProcess();
+    const child2 = new FakeChildProcess();
+    mockSpawn.mockReturnValueOnce(child1 as never).mockReturnValueOnce(child2 as never);
+
+    const runPromise = shipCommand(repo, undefined, { auto: true, merge: false, parallel: 2 });
+
+    await flushMicrotasks();
+    plannedIssues = plannedIssues.filter((issue) => issue.number !== 1);
+    child1.finish(0);
+    await flushMicrotasks();
+    plannedIssues = plannedIssues.filter((issue) => issue.number !== 2);
+    child2.finish(1, null, 'boom');
+    await runPromise;
+
+    expect(mockAggregateSessionUsage).toHaveBeenCalledWith(repo, '1', expect.any(Date));
+    expect(mockAggregateSessionUsage).toHaveBeenCalledWith(repo, '2', expect.any(Date));
+    const output = getConsoleOutput(logSpy);
+    expect(output).toContain('13');
+    expect(output).toContain('9');
 
     logSpy.mockRestore();
   });
