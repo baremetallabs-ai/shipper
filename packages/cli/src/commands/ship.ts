@@ -5,6 +5,7 @@ import { createWriteStream, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import {
+  aggregateSessionUsage,
   classifyChecks,
   clearStaleLockIfNeeded,
   fetchChecks,
@@ -15,6 +16,7 @@ import {
   processResult,
   retryOnInvalidOutput,
   scrubOutputDir,
+  totalTokens as getTotalTokens,
   withStageHooks,
   releaseIssueLock,
   withIssueLock,
@@ -39,6 +41,7 @@ const MAX_TRANSITIONS = 15;
 const MERGE_FAILURE_PREFIX = 'Merge failed for PR #';
 const PARKED_POLL_INTERVAL_MS = 20_000;
 const AUTO_CHILD_RUN_ENV_VAR = 'SHIPPER_AUTO_CHILD_RUN';
+const tokenFormatter = new Intl.NumberFormat('en-US');
 
 export const STAGE_NAME: Record<string, string> = { ...STAGE_NAME_MAP };
 
@@ -56,6 +59,7 @@ export interface AutoResult {
   title: string;
   outcome: 'pass' | 'fail';
   error?: string;
+  totalTokens?: number;
 }
 
 export interface UnblockAttempt {
@@ -78,6 +82,7 @@ interface ShipIssueResult {
   success: boolean;
   error?: string;
   retriable?: boolean;
+  totalTokens?: number;
 }
 
 interface AsyncIssueRun {
@@ -293,15 +298,29 @@ export function printAutoSummary(results: AutoResult[]): void {
     console.log('\nAuto run complete. No eligible issues found.');
     return;
   }
+
+  const tokenWidth = Math.max(
+    'Tokens'.length,
+    ...results.map((result) =>
+      result.totalTokens === undefined ? 1 : tokenFormatter.format(result.totalTokens).length
+    )
+  );
+
   console.log('\nAuto run complete.\n');
-  console.log('  #    Issue                                          Outcome');
+  console.log(
+    `  #    Issue                                          ${'Tokens'.padStart(tokenWidth)}  Outcome`
+  );
   for (const r of results) {
     const num = String(r.issue).padEnd(5);
     const titleChars = Array.from(r.title);
     const title =
       titleChars.length > 45 ? titleChars.slice(0, 42).join('') + '...' : r.title.padEnd(45);
+    const tokens =
+      r.totalTokens === undefined
+        ? '—'.padStart(tokenWidth)
+        : tokenFormatter.format(r.totalTokens).padStart(tokenWidth);
     const outcome = r.outcome === 'pass' ? '✓ pass' : `✗ fail — ${r.error ?? 'unknown error'}`;
-    console.log(`  ${num}${title} ${outcome}`);
+    console.log(`  ${num}${title} ${tokens}  ${outcome}`);
   }
 }
 
@@ -589,6 +608,7 @@ async function shipOneIssue(
   logFile?: string
 ): Promise<ShipIssueResult> {
   const issueStr = issue.replace(/^#/, '');
+  const issueStartTime = new Date();
   const isAutoChildRun = process.env[AUTO_CHILD_RUN_ENV_VAR] === '1';
   const logStream = logFile ? createWriteStream(logFile) : undefined;
   let logStreamError: string | undefined;
@@ -603,7 +623,7 @@ async function shipOneIssue(
   }
 
   try {
-    return await withIssueLock(repo, issueStr, async () => {
+    const result = await withIssueLock(repo, issueStr, async () => {
       let label = await getCurrentLabel(repo, issueStr);
 
       if (label === FAILED_LABEL) {
@@ -836,6 +856,7 @@ async function shipOneIssue(
       printSummary(results, logStream);
       return { success: true };
     });
+    return await attachIssueTotalTokens(repo, issueStr, issueStartTime, result);
   } finally {
     try {
       await closeLogStream(logStream);
@@ -1262,7 +1283,12 @@ function recordAutoResult(
 ): void {
   if (result.success) {
     skippedIssues.add(issue.number);
-    results.push({ issue: issue.number, title: issue.title, outcome: 'pass' });
+    results.push({
+      issue: issue.number,
+      title: issue.title,
+      outcome: 'pass',
+      totalTokens: result.totalTokens,
+    });
     return;
   }
 
@@ -1274,6 +1300,7 @@ function recordAutoResult(
     title: issue.title,
     outcome: 'fail',
     error: result.error,
+    totalTokens: result.totalTokens,
   });
 }
 
@@ -1451,6 +1478,7 @@ async function shipAutoParallel(
   const results: AutoResult[] = [];
   const allUnblockAttempts: UnblockAttempt[] = [];
   const activeRuns = new Map<number, ActiveIssueRun>();
+  const issueStartTimes = new Map<number, Date>();
   const homeDir = homedir();
   const logsDir = path.join(homeDir, '.shipper', 'logs');
   const logFiles = new Map<number, string>();
@@ -1515,6 +1543,7 @@ async function shipAutoParallel(
           `\n[#${candidate.number}] Auto: advancing issue #${candidate.number} — ${candidate.title}`
         );
         const run = shipOneIssueAsync(String(candidate.number), logFile, agent, model);
+        issueStartTimes.set(candidate.number, new Date());
         logFiles.set(candidate.number, logFile);
         activeRuns.set(candidate.number, {
           issue: candidate,
@@ -1562,6 +1591,12 @@ async function shipAutoParallel(
         Array.from(activeRuns.values(), (run) => run.completion)
       );
       activeRuns.delete(completed.issue.number);
+      const issueStartTime = issueStartTimes.get(completed.issue.number);
+      issueStartTimes.delete(completed.issue.number);
+      const totalTokens =
+        issueStartTime === undefined
+          ? undefined
+          : await resolveIssueTotalTokens(repo, String(completed.issue.number), issueStartTime);
       console.log(`[#${completed.issue.number}] ${completed.result.success ? '✓ pass' : '✗ fail'}`);
 
       if (completed.result.success) {
@@ -1570,6 +1605,7 @@ async function shipAutoParallel(
           issue: completed.issue.number,
           title: completed.issue.title,
           outcome: 'pass',
+          totalTokens,
         });
       } else {
         if (!isRetriableMergeFailure(completed.result.error)) {
@@ -1580,6 +1616,7 @@ async function shipAutoParallel(
           title: completed.issue.title,
           outcome: 'fail',
           error: completed.result.error,
+          totalTokens,
         });
       }
     }
@@ -1601,6 +1638,29 @@ async function shipAutoParallel(
     }
   }
   process.exit(0);
+}
+
+async function attachIssueTotalTokens(
+  repo: string,
+  issue: string,
+  since: Date,
+  result: ShipIssueResult
+): Promise<ShipIssueResult> {
+  const totalTokens = await resolveIssueTotalTokens(repo, issue, since);
+  return totalTokens === undefined ? result : { ...result, totalTokens };
+}
+
+async function resolveIssueTotalTokens(
+  repo: string,
+  issue: string,
+  since: Date
+): Promise<number | undefined> {
+  try {
+    const usage = await aggregateSessionUsage(repo, issue, since);
+    return usage ? getTotalTokens(usage) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function shipCommand(
