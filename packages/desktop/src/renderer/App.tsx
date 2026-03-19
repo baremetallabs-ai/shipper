@@ -1007,6 +1007,14 @@ export default function App(): JSX.Element {
     await loadIssues(activeRepo);
   }
 
+  function handleOpenNewIssue(): void {
+    setIsNewIssueOpen(true);
+  }
+
+  function handleOpenAdopt(): void {
+    setIsAdoptOpen(true);
+  }
+
   async function handleAddRepo(repo: string): Promise<void> {
     const nextRepo = repo.trim();
     if (
@@ -1680,22 +1688,10 @@ export default function App(): JSX.Element {
                     Last updated {dateFormatter.format(lastUpdated)}
                   </p>
                 ) : null}
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setIsNewIssueOpen(true);
-                  }}
-                  disabled={!canFetch}
-                >
+                <Button variant="outline" onClick={handleOpenNewIssue} disabled={!canFetch}>
                   New Issue
                 </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setIsAdoptOpen(true);
-                  }}
-                  disabled={!canFetch}
-                >
+                <Button variant="outline" onClick={handleOpenAdopt} disabled={!canFetch}>
                   Adopt
                 </Button>
                 <Button
