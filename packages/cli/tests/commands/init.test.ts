@@ -437,15 +437,15 @@ describe('initCommand stored agent', () => {
 
   it('settings.local.json overrides settings.json', async () => {
     readFileSyncMock.mockImplementation((p: string) => {
-      if (p === localSettingsPath) return '{"commands": {"default": {"agent": "codex"}}}';
+      if (p === localSettingsPath) return '{"commands": {"default": {"agent": "copilot"}}}';
       if (p === settingsPath) return '{"commands": {"default": {"agent": "claude"}}}';
       throw new Error('ENOENT');
     });
     await initCommand({});
     expect(questionMock).not.toHaveBeenCalled();
-    expect(console.log).toHaveBeenCalledWith('Using agent: codex (from settings)');
+    expect(console.log).toHaveBeenCalledWith('Using agent: copilot (from settings)');
     const written = parseWrittenSettings();
-    expect(written.commands).toEqual({ default: { agent: 'codex' } });
+    expect(written.commands).toEqual({ default: { agent: 'copilot' } });
   });
 
   it('invalid stored agent falls through to interactive prompt', async () => {
@@ -493,9 +493,18 @@ describe('initCommand agent selection', () => {
     expect(exitMock).not.toHaveBeenCalledWith(1);
   });
 
+  it('--agent copilot writes copilot agent to settings', async () => {
+    await initCommand({ agent: 'copilot' });
+    const written = parseWrittenSettings();
+    expect(written.commands).toEqual({ default: { agent: 'copilot' } });
+    expect(exitMock).not.toHaveBeenCalledWith(1);
+  });
+
   it('--agent invalid prints validation error and exits', async () => {
     await initCommand({ agent: 'invalid' });
-    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('Invalid agent'));
+    expect(console.error).toHaveBeenCalledWith(
+      'Error: Invalid agent "invalid". Must be one of: claude, codex, copilot'
+    );
     expect(exitMock).toHaveBeenCalledWith(1);
   });
 
@@ -542,6 +551,21 @@ describe('initCommand agent selection', () => {
     const written = parseWrittenSettings();
     expect(written.commands).toEqual({ default: { agent: 'codex' } });
     expect(exitMock).not.toHaveBeenCalledWith(1);
+  });
+
+  it('interactive prompt accepts "Copilot CLI" and writes copilot agent to settings', async () => {
+    questionMock.mockResolvedValueOnce('Copilot CLI');
+    await initCommand({});
+    const written = parseWrittenSettings();
+    expect(written.commands).toEqual({ default: { agent: 'copilot' } });
+    expect(exitMock).not.toHaveBeenCalledWith(1);
+  });
+
+  it('interactive prompt accepts "github copilot" alias', async () => {
+    questionMock.mockResolvedValueOnce('github copilot');
+    await initCommand({});
+    const written = parseWrittenSettings();
+    expect(written.commands).toEqual({ default: { agent: 'copilot' } });
   });
 });
 

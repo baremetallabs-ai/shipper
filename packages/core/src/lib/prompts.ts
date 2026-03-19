@@ -20,6 +20,17 @@ import codexPrRemediatePrompt from '../prompts/codex/pr_remediate.md';
 import codexUnblockPrompt from '../prompts/codex/unblock.md';
 import codexSetupPrompt from '../prompts/codex/setup.md';
 
+import copilotNewPrompt from '../prompts/copilot/new.md';
+import copilotGroomPrompt from '../prompts/copilot/groom.md';
+import copilotDesignPrompt from '../prompts/copilot/design.md';
+import copilotPlanPrompt from '../prompts/copilot/plan.md';
+import copilotImplementPrompt from '../prompts/copilot/implement.md';
+import copilotPrOpenPrompt from '../prompts/copilot/pr_open.md';
+import copilotPrReviewPrompt from '../prompts/copilot/pr_review.md';
+import copilotPrRemediatePrompt from '../prompts/copilot/pr_remediate.md';
+import copilotUnblockPrompt from '../prompts/copilot/unblock.md';
+import copilotSetupPrompt from '../prompts/copilot/setup.md';
+
 export const agentPrompts: Record<string, Record<string, string>> = {
   claude: {
     'new.md': newPrompt,
@@ -44,5 +55,17 @@ export const agentPrompts: Record<string, Record<string, string>> = {
     'pr_remediate.md': codexPrRemediatePrompt,
     'unblock.md': codexUnblockPrompt,
     'setup.md': codexSetupPrompt,
+  },
+  copilot: {
+    'new.md': copilotNewPrompt,
+    'groom.md': copilotGroomPrompt,
+    'design.md': copilotDesignPrompt,
+    'plan.md': copilotPlanPrompt,
+    'implement.md': copilotImplementPrompt,
+    'pr_open.md': copilotPrOpenPrompt,
+    'pr_review.md': copilotPrReviewPrompt,
+    'pr_remediate.md': copilotPrRemediatePrompt,
+    'unblock.md': copilotUnblockPrompt,
+    'setup.md': copilotSetupPrompt,
   },
 };

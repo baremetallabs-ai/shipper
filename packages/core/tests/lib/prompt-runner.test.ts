@@ -21,6 +21,8 @@ type PromptChild = EventEmitter & {
 
 const spawnMock =
   vi.fn<(command: string, args?: string[], options?: Record<string, unknown>) => PromptChild>();
+const execFileSyncMock =
+  vi.fn<(command: string, args?: string[], options?: Record<string, unknown>) => void>();
 const readFileMock = vi.fn<(path: string, encoding: string) => Promise<string>>();
 const mkdirMock = vi.fn<(path: string, options?: Record<string, unknown>) => Promise<void>>();
 const statSyncMock = vi.fn<(path: string) => unknown>();
@@ -51,13 +53,18 @@ const getSessionPathsMock = vi
 const writeSessionMetaMock =
   vi.fn<(metaFile: string, meta: Record<string, unknown>) => Promise<void>>();
 const parseAgentUsageMock = vi
-  .fn<(agent: 'claude' | 'codex', logFile: string) => Promise<Record<string, number> | undefined>>()
+  .fn<
+    (
+      agent: 'claude' | 'codex' | 'copilot',
+      logFile: string
+    ) => Promise<Record<string, number> | undefined>
+  >()
   .mockResolvedValue(undefined);
 const formatUsageLineMock = vi
   .fn<(usage: Record<string, number>) => string>()
   .mockReturnValue('Usage: 45 input │ 12 output │ 8 cache read │ 2 cache write tokens');
 const resolveAgentMock = vi
-  .fn<(promptName: string, agent?: string) => 'claude' | 'codex'>()
+  .fn<(promptName: string, agent?: string) => 'claude' | 'codex' | 'copilot'>()
   .mockReturnValue('claude');
 const resolveModelMock = vi
   .fn<(promptName: string, model?: string) => string | undefined>()
@@ -71,7 +78,13 @@ const getSettingsMock = vi.fn<() => { agentTimeoutMinutes: number }>().mockRetur
 
 vi.mock('node:child_process', async () => {
   const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
-  return { ...actual, spawn: (...args: unknown[]) => spawnMock(...args) };
+  return {
+    ...actual,
+    execFileSync: (...args: unknown[]) => {
+      execFileSyncMock(...args);
+    },
+    spawn: (...args: unknown[]) => spawnMock(...args),
+  };
 });
 
 vi.mock('node:fs/promises', async () => {
@@ -109,6 +122,9 @@ vi.mock('../../src/lib/prompts.js', () => ({
     claude: {
       'test.md': '---\ncmd: claude\n---\n\nbundled body',
       'stale.md': '---\ncmd: claude\n---\n\ngh issue edit 248 --add-label "shipper:planned"',
+    },
+    copilot: {
+      'test.md': '---\ncmd: copilot\n---\n\nbundled body',
     },
   },
 }));
@@ -178,9 +194,13 @@ function mockSpawnResult(
   });
 }
 
-const { runPrompt } = await import('../../src/lib/prompt-runner.js');
+const { buildPromptCommand, runPrompt } = await import('../../src/lib/prompt-runner.js');
 
-function makePrompt(cmd: 'claude' | 'codex', args: string[] = [], body = 'prompt body'): string {
+function makePrompt(
+  cmd: 'claude' | 'codex' | 'copilot',
+  args: string[] = [],
+  body = 'prompt body'
+): string {
   const lines = ['---', `cmd: ${cmd}`];
   if (args.length > 0) {
     lines.push('args:');
@@ -245,6 +265,14 @@ createWriteStreamMock.mockImplementation(() => makeLogStream());
 
 afterEach(() => {
   vi.clearAllMocks();
+  spawnMock.mockReset();
+  readFileMock.mockReset();
+  mkdirMock.mockReset();
+  statSyncMock.mockReset();
+  createWriteStreamMock.mockReset();
+  readFileSyncMock.mockReset();
+  execFileSyncMock.mockReset();
+  execFileSyncMock.mockImplementation(() => {});
   resolveAgentMock.mockReturnValue('claude');
   resolveModelMock.mockReturnValue(undefined);
   resolveModeMock.mockReturnValue('default');
@@ -262,6 +290,7 @@ afterEach(() => {
   statSyncMock.mockImplementation(() => {
     throw new Error('ENOENT');
   });
+  readFileSyncMock.mockReset();
   mkdirMock.mockResolvedValue(undefined);
   createWriteStreamMock.mockImplementation(() => makeLogStream());
 });
@@ -288,6 +317,19 @@ describe('runPrompt', () => {
     const args = spawnMock.mock.calls[0][1] as string[];
     expect(args).not.toContain('--append-system-prompt');
     expect(args).toContain('prompt body');
+  });
+
+  it('passes the prompt body with -p for copilot', async () => {
+    resolveAgentMock.mockReturnValue('copilot');
+    readFileMock.mockResolvedValueOnce(
+      ['---', 'cmd: copilot', '---', '', 'prompt body'].join('\n')
+    );
+    mockSpawnResult();
+
+    await expect(runPrompt('test', {})).resolves.toBe(0);
+
+    expect(execFileSyncMock).toHaveBeenCalledWith('which', ['copilot'], { stdio: 'ignore' });
+    expect(spawnedArgs()).toEqual(['-p', 'prompt body']);
   });
 
   it('reads the prompt from the resolved agent subdirectory', async () => {
@@ -364,6 +406,18 @@ describe('runPrompt', () => {
 
     const args = spawnMock.mock.calls[0][1] as string[];
     expect(args).toContain('prompt body\n\n---\n\nresolve the merge conflict');
+  });
+
+  it('appends user input into the combined prompt body for copilot prompts', async () => {
+    resolveAgentMock.mockReturnValue('copilot');
+    readFileMock.mockResolvedValueOnce(
+      ['---', 'cmd: copilot', 'append-user-input: true', '---', '', 'prompt body'].join('\n')
+    );
+    mockSpawnResult();
+
+    await expect(runPrompt('test', { userInput: 'resolve the merge conflict' })).resolves.toBe(0);
+
+    expect(spawnedArgs()).toEqual(['-p', 'prompt body\n\n---\n\nresolve the merge conflict']);
   });
 
   it('returns 1 when appended issue or PR context is requested without a repo', async () => {
@@ -503,6 +557,28 @@ describe('runPrompt', () => {
     expect(spawnedArgs()).not.toContain('--model');
   });
 
+  it('passes --model for copilot when a model is resolved', async () => {
+    resolveAgentMock.mockReturnValue('copilot');
+    resolveModelMock.mockReturnValue('gpt-5');
+    readFileMock.mockResolvedValueOnce(makePrompt('copilot'));
+    mockSpawnResult();
+
+    await expect(runPrompt('test', { model: 'gpt-5' })).resolves.toBe(0);
+
+    expect(spawnedArgs()).toEqual(['--model', 'gpt-5', '-p', 'prompt body']);
+  });
+
+  it('does not add a model flag for copilot when no model is resolved', async () => {
+    resolveAgentMock.mockReturnValue('copilot');
+    readFileMock.mockResolvedValueOnce(makePrompt('copilot'));
+    mockSpawnResult();
+
+    await expect(runPrompt('test', {})).resolves.toBe(0);
+
+    expect(spawnedArgs()).toEqual(['-p', 'prompt body']);
+    expect(spawnedArgs()).not.toContain('--model');
+  });
+
   it('injects -p for claude headless mode when absent', async () => {
     resolveModeMock.mockReturnValue('headless');
     readFileMock.mockResolvedValueOnce(makePrompt('claude', ['--model', 'opus']));
@@ -547,6 +623,42 @@ describe('runPrompt', () => {
     await runPrompt('test', { mode: 'default' });
 
     expect(spawnedArgs().slice(0, 2)).toEqual(['--model', 'opus']);
+  });
+
+  it('injects copilot headless flags when absent', async () => {
+    resolveAgentMock.mockReturnValue('copilot');
+    resolveModeMock.mockReturnValue('headless');
+    readFileMock.mockResolvedValueOnce(makePrompt('copilot'));
+    mockSpawnResult();
+
+    await runPrompt('test', { mode: 'headless' });
+
+    expect(spawnedArgs()).toEqual([
+      '--autopilot',
+      '--allow-all-tools',
+      '--allow-all-urls',
+      '--no-ask-user',
+      '-p',
+      'prompt body',
+    ]);
+  });
+
+  it('strips copilot headless flags for interactive mode but preserves -p', async () => {
+    resolveAgentMock.mockReturnValue('copilot');
+    resolveModeMock.mockReturnValue('interactive');
+    readFileMock.mockResolvedValueOnce(
+      makePrompt('copilot', [
+        '--autopilot',
+        '--allow-all-tools',
+        '--allow-all-urls',
+        '--no-ask-user',
+      ])
+    );
+    mockSpawnResult();
+
+    await runPrompt('test', { mode: 'interactive' });
+
+    expect(spawnedArgs()).toEqual(['-p', 'prompt body']);
   });
 
   it('captures headless stdout to a session log and writes metadata after exit', async () => {
@@ -1044,6 +1156,28 @@ describe('worktree --add-dir', () => {
     expect(statSyncMock).not.toHaveBeenCalled();
   });
 
+  it('does not add --add-dir for copilot agent in a worktree', async () => {
+    resolveAgentMock.mockReturnValue('copilot');
+    resolveModeMock.mockReturnValue('headless');
+    readFileMock.mockResolvedValueOnce(makePrompt('copilot'));
+    statSyncMock.mockReturnValue({ isFile: () => true });
+    readFileSyncMock.mockReturnValue('gitdir: /repo/.git/worktrees/copilot-wt\n');
+    mockSpawnResult();
+
+    await runPrompt('test', { cwd: '/tmp/wt' });
+
+    expect(spawnedArgs()).toEqual([
+      '--autopilot',
+      '--allow-all-tools',
+      '--allow-all-urls',
+      '--no-ask-user',
+      '-p',
+      'prompt body',
+    ]);
+    expect(spawnedArgs()).not.toContain('--add-dir');
+    expect(statSyncMock).not.toHaveBeenCalled();
+  });
+
   it('warns and skips --add-dir when .git file has no gitdir line', async () => {
     resolveAgentMock.mockReturnValue('codex');
     resolveModeMock.mockReturnValue('headless');
@@ -1089,6 +1223,35 @@ describe('worktree --add-dir', () => {
     expect(spawnMock).toHaveBeenCalled();
     warnMock.mockRestore();
   });
+
+  it('returns 1 with a clear error when the copilot binary is missing', async () => {
+    resolveAgentMock.mockReturnValue('copilot');
+    readFileMock.mockResolvedValueOnce(makePrompt('copilot'));
+    execFileSyncMock.mockImplementationOnce(() => {
+      throw new Error('not found');
+    });
+    const errorMock = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await expect(runPrompt('test', {})).resolves.toBe(1);
+
+    expect(errorMock).toHaveBeenCalledWith(
+      'Error: copilot binary not found on PATH.\nInstall the GitHub Copilot CLI: https://docs.github.com/copilot/cli'
+    );
+    expect(spawnMock).not.toHaveBeenCalled();
+    errorMock.mockRestore();
+  });
+
+  it('fails buildPromptCommand early when the copilot binary is missing', async () => {
+    resolveAgentMock.mockReturnValue('copilot');
+    readFileMock.mockResolvedValueOnce(makePrompt('copilot'));
+    execFileSyncMock.mockImplementationOnce(() => {
+      throw new Error('not found');
+    });
+
+    await expect(buildPromptCommand('test', {})).rejects.toThrow(
+      'copilot binary not found on PATH.\nInstall the GitHub Copilot CLI: https://docs.github.com/copilot/cli'
+    );
+  });
 });
 
 describe('agent timeout', () => {
@@ -1113,6 +1276,8 @@ describe('agent timeout', () => {
     spawnMock.mockReturnValueOnce(child);
 
     const promise = runPrompt('test', { mode: 'headless' });
+    await Promise.resolve();
+    await Promise.resolve();
     await vi.advanceTimersByTimeAsync(0);
 
     await vi.advanceTimersByTimeAsync(60 * 60_000);
@@ -1134,6 +1299,8 @@ describe('agent timeout', () => {
     spawnMock.mockReturnValueOnce(child);
 
     const promise = runPrompt('test', { mode: 'headless' });
+    await Promise.resolve();
+    await Promise.resolve();
     await vi.advanceTimersByTimeAsync(0);
 
     await vi.advanceTimersByTimeAsync(60 * 60_000);
@@ -1156,6 +1323,8 @@ describe('agent timeout', () => {
     spawnMock.mockReturnValueOnce(child);
 
     const promise = runPrompt('test', { mode: 'interactive' });
+    await Promise.resolve();
+    await Promise.resolve();
 
     await vi.advanceTimersByTimeAsync(60 * 60_000 + 10_000);
     expect(child.kill).not.toHaveBeenCalled();
@@ -1174,6 +1343,8 @@ describe('agent timeout', () => {
     spawnMock.mockReturnValueOnce(child);
 
     const promise = runPrompt('test', { mode: 'headless' });
+    await Promise.resolve();
+    await Promise.resolve();
     await vi.advanceTimersByTimeAsync(0);
 
     await vi.advanceTimersByTimeAsync(120 * 60_000);
@@ -1193,6 +1364,8 @@ describe('agent timeout', () => {
     spawnMock.mockReturnValueOnce(child);
 
     const promise = runPrompt('test', { mode: 'headless' });
+    await Promise.resolve();
+    await Promise.resolve();
     await vi.advanceTimersByTimeAsync(0);
 
     await vi.advanceTimersByTimeAsync(60 * 60_000);
@@ -1213,6 +1386,8 @@ describe('agent timeout', () => {
     spawnMock.mockReturnValueOnce(child);
 
     const promise = runPrompt('test', { mode: 'headless' });
+    await Promise.resolve();
+    await Promise.resolve();
 
     // Flush microtasks so runPrompt reaches the spawn call
     await vi.advanceTimersByTimeAsync(0);

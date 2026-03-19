@@ -51,7 +51,11 @@ function addModeOption(command: Command): Command {
 
 function addAgentOption(command: Command): Command {
   return command.addOption(
-    new Option('--agent <name>', 'agent to use: claude or codex').choices(['claude', 'codex'])
+    new Option('--agent <name>', 'agent to use: claude, codex, or copilot').choices([
+      'claude',
+      'codex',
+      'copilot',
+    ])
   );
 }
 
@@ -115,7 +119,7 @@ program.hook(
 program
   .command('init')
   .description('Initialize shipper in the current repository')
-  .option('--agent <name>', 'coding agent to use (claude or codex)')
+  .option('--agent <name>', 'coding agent to use (claude, codex, or copilot)')
   .action(
     wrapAction(async (options: { agent?: string }) => {
       await initCommand(options);

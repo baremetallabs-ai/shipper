@@ -125,10 +125,13 @@ describe('shipper-cli', () => {
       expect(newHelp).toContain('Usage: shipper new [options] [request...]');
       expect(newHelp).toContain('Create a new issue interactively or from a request');
       expect(newHelp).toContain('--mode <mode>');
+      expect(newHelp).toContain('--agent <name>');
+      expect(newHelp).toContain('agent to use: claude, codex, or copilot');
       expect(newHelp).toContain('--model <model>');
       expect(newHelp).toContain('--log-file <path>');
       expect(newHelp).not.toContain('--headless');
       expect(setupHelp).toContain('--mode <mode>');
+      expect(setupHelp).toContain('agent to use: claude, codex, or copilot');
       expect(setupHelp).toContain('--model <model>');
       expect(mockNewCommand).not.toHaveBeenCalled();
       expect(mockSetupCommand).not.toHaveBeenCalled();
@@ -255,14 +258,14 @@ describe('shipper-cli', () => {
       });
     });
 
-    it('passes an empty request array and codex agent through bare new invocation', async () => {
-      process.argv = ['node', 'src/index.ts', 'new', '--agent', 'codex'];
+    it('passes an empty request array and copilot agent through bare new invocation', async () => {
+      process.argv = ['node', 'src/index.ts', 'new', '--agent', 'copilot'];
 
       await importEntrypoint();
 
       expect(mockNewCommand).toHaveBeenCalledWith([], {
         mode: 'default',
-        agent: 'codex',
+        agent: 'copilot',
         model: undefined,
         logFile: undefined,
       });
