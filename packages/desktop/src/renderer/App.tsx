@@ -67,6 +67,7 @@ interface Prerequisites {
 interface AppConfig {
   repos: string[];
   activeRepo: string;
+  autoMergeRepos: string[];
 }
 
 type TerminalSession = TerminalSessionTab;
@@ -78,11 +79,12 @@ type BackgroundCommandKind = 'new' | 'ship' | 'init';
 type BackgroundCommandStatus = 'queued' | 'running' | 'complete' | 'failed';
 type BackgroundRetryPayload =
   | { command: 'new'; repo: string; request: string }
-  | { command: 'ship'; repo: string; issueNumber: number }
+  | { command: 'ship'; repo: string; issueNumber: number; merge: boolean }
   | { command: 'init'; repo: string };
 
 interface BackgroundStatusMeta {
   issueNumber?: number;
+  merge?: boolean;
   issueUrl?: string;
   logFile?: string;
   request?: string;
@@ -113,6 +115,7 @@ interface BackgroundCommandState {
   output: string;
   request?: string;
   issueNumber?: number;
+  merge?: boolean;
   issueUrl?: string;
   logFile?: string;
   exitCode?: number | null;
@@ -204,26 +207,28 @@ function getLatestOutputLine(output: string): string | null {
   return lines.at(-1) ?? null;
 }
 
-function getBackgroundTitle(
+export function getBackgroundTitle(
   command: BackgroundCommandKind,
   repo: string,
-  issueNumber?: number
+  issueNumber?: number,
+  merge?: boolean
 ): string {
   switch (command) {
     case 'new':
       return 'New issue';
     case 'ship':
-      return issueNumber ? `Ship #${issueNumber}` : 'Ship';
+      return issueNumber ? `Ship #${issueNumber}${merge ? ' · merge' : ''}` : 'Ship';
     case 'init':
       return `Init ${repo}`;
   }
 }
 
-function getBackgroundDetail({
+export function getBackgroundDetail({
   command,
   status,
   repo,
   issueNumber,
+  merge,
   latestOutput,
   cancelled,
 }: {
@@ -231,6 +236,7 @@ function getBackgroundDetail({
   status: BackgroundCommandStatus;
   repo: string;
   issueNumber?: number;
+  merge?: boolean;
   latestOutput?: string | null;
   cancelled?: boolean;
 }): string {
@@ -251,7 +257,7 @@ function getBackgroundDetail({
       case 'new':
         return 'Issue created';
       case 'ship':
-        return 'Ship completed';
+        return merge ? 'Ship completed · merged' : 'Ship completed';
       case 'init':
         return 'Initialization complete';
     }
@@ -268,17 +274,18 @@ function getBackgroundDetail({
   return latestOutput ?? `Initializing ${repo}...`;
 }
 
-function getBackgroundRetryPayload(
+export function getBackgroundRetryPayload(
   command: BackgroundCommandKind,
   repo: string,
   request?: string,
-  issueNumber?: number
+  issueNumber?: number,
+  merge?: boolean
 ): BackgroundRetryPayload | undefined {
   switch (command) {
     case 'new':
       return request ? { command, repo, request } : undefined;
     case 'ship':
-      return issueNumber ? { command, repo, issueNumber } : undefined;
+      return issueNumber ? { command, repo, issueNumber, merge: merge ?? false } : undefined;
     case 'init':
       return { command, repo };
   }
@@ -675,6 +682,7 @@ function IssueCard({
 export default function App(): JSX.Element {
   const [repos, setRepos] = useState<string[]>([]);
   const [activeRepo, setActiveRepo] = useState('');
+  const [autoMergeRepos, setAutoMergeRepos] = useState<Set<string>>(new Set());
   const [prerequisites, setPrerequisites] = useState<Prerequisites | null>(null);
   const [issues, setIssues] = useState<ListIssueItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -834,6 +842,23 @@ export default function App(): JSX.Element {
     autoShipSkippedRef.current.set(repo, new Set());
   }
 
+  async function handleToggleAutoMerge(repo: string): Promise<void> {
+    const nextAutoMergeRepos = new Set(autoMergeRepos);
+    if (nextAutoMergeRepos.has(repo)) {
+      nextAutoMergeRepos.delete(repo);
+    } else {
+      nextAutoMergeRepos.add(repo);
+    }
+
+    try {
+      await persistConfig({ repos, activeRepo, autoMergeRepos: [...nextAutoMergeRepos] });
+      setAutoMergeRepos(nextAutoMergeRepos);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setFetchError(`Failed to save auto-merge preference: ${message}`);
+    }
+  }
+
   const loadIssues = useEffectEvent(async (repo: string) => {
     const requestVersion = requestVersionRef.current + 1;
     requestVersionRef.current = requestVersion;
@@ -932,7 +957,11 @@ export default function App(): JSX.Element {
         await window.shipperAPI.spawnBackgroundNew(payload.request, payload.repo);
         return;
       case 'ship':
-        await window.shipperAPI.spawnBackgroundShip(payload.issueNumber, payload.repo);
+        await window.shipperAPI.spawnBackgroundShip(
+          payload.issueNumber,
+          payload.repo,
+          payload.merge
+        );
         return;
       case 'init':
         await window.shipperAPI.spawnBackgroundInit(payload.repo);
@@ -954,6 +983,7 @@ export default function App(): JSX.Element {
     const latestOutput = getLatestOutputLine(output);
     const request = event.meta?.request ?? previousCommand?.request;
     const issueNumber = event.meta?.issueNumber ?? previousCommand?.issueNumber;
+    const merge = event.meta?.merge ?? previousCommand?.merge ?? false;
     const issueUrl = event.meta?.issueUrl ?? previousCommand?.issueUrl;
     const logFile = event.meta?.logFile ?? previousCommand?.logFile;
     const cancelled = event.meta?.cancelled ?? previousCommand?.cancelled ?? false;
@@ -962,18 +992,20 @@ export default function App(): JSX.Element {
       command: event.command,
       repo: event.repo,
       status: event.status,
-      title: getBackgroundTitle(event.command, event.repo, issueNumber),
+      title: getBackgroundTitle(event.command, event.repo, issueNumber, merge),
       detail: getBackgroundDetail({
         command: event.command,
         status: event.status,
         repo: event.repo,
         issueNumber,
+        merge,
         latestOutput,
         cancelled,
       }),
       output,
       request,
       issueNumber,
+      merge,
       issueUrl,
       logFile,
       exitCode: event.exitCode,
@@ -1020,12 +1052,14 @@ export default function App(): JSX.Element {
                 event.command === 'init'
                   ? `Initialized ${event.repo}`
                   : issueNumber
-                    ? `Ship #${issueNumber} finished`
+                    ? `Ship #${issueNumber} ${merge ? 'merged' : 'finished'}`
                     : 'Ship finished',
               description:
                 event.command === 'init'
                   ? 'Repository labels and settings were updated.'
-                  : 'The background ship command completed successfully.',
+                  : merge
+                    ? 'The background ship command completed and merged successfully.'
+                    : 'The background ship command completed successfully.',
             };
       pushToast(successToast);
       await refreshRepoAfterBackground(event.repo, event.command, event.status);
@@ -1051,10 +1085,22 @@ export default function App(): JSX.Element {
             (event.exitCode === null || event.exitCode === undefined
               ? 'The background command exited unsuccessfully.'
               : `The command exited with code ${event.exitCode}.`),
-          retryable: getBackgroundRetryPayload(event.command, event.repo, request, issueNumber)
+          retryable: getBackgroundRetryPayload(
+            event.command,
+            event.repo,
+            request,
+            issueNumber,
+            merge
+          )
             ? true
             : false,
-          retryPayload: getBackgroundRetryPayload(event.command, event.repo, request, issueNumber),
+          retryPayload: getBackgroundRetryPayload(
+            event.command,
+            event.repo,
+            request,
+            issueNumber,
+            merge
+          ),
         });
       }
 
@@ -1115,7 +1161,11 @@ export default function App(): JSX.Element {
         return;
       }
 
-      await window.shipperAPI.spawnBackgroundShip(nextIssue.number, event.repo);
+      await window.shipperAPI.spawnBackgroundShip(
+        nextIssue.number,
+        event.repo,
+        autoMergeRepos.has(event.repo)
+      );
       pushToast({
         id: `auto-ship-${event.repo}-${nextIssue.number}-${Date.now()}`,
         sessionId: event.sessionId,
@@ -1145,6 +1195,7 @@ export default function App(): JSX.Element {
         setPrerequisites(prerequisiteResult);
         setRepos(config.repos);
         setActiveRepo(config.activeRepo);
+        setAutoMergeRepos(new Set(config.autoMergeRepos));
 
         if (
           prerequisiteResult.ghInstalled.ok &&
@@ -1233,6 +1284,7 @@ export default function App(): JSX.Element {
               status: command.status,
               repo: command.repo,
               issueNumber: command.issueNumber,
+              merge: command.merge,
               latestOutput: getLatestOutputLine(output),
               cancelled: command.cancelled,
             }),
@@ -1296,7 +1348,11 @@ export default function App(): JSX.Element {
     const nextRepos = [...repos, nextRepo];
 
     try {
-      await persistConfig({ repos: nextRepos, activeRepo: nextRepo });
+      await persistConfig({
+        repos: nextRepos,
+        activeRepo: nextRepo,
+        autoMergeRepos: [...autoMergeRepos],
+      });
       setRepos(nextRepos);
       setActiveRepo(nextRepo);
       clearIssueState();
@@ -1317,7 +1373,7 @@ export default function App(): JSX.Element {
     }
 
     try {
-      await persistConfig({ repos, activeRepo: repo });
+      await persistConfig({ repos, activeRepo: repo, autoMergeRepos: [...autoMergeRepos] });
       setActiveRepo(repo);
       clearIssueState();
 
@@ -1533,7 +1589,7 @@ export default function App(): JSX.Element {
 
   async function handleShipperShip(issueNumber: number, repo = activeRepo): Promise<void> {
     try {
-      await window.shipperAPI.spawnBackgroundShip(issueNumber, repo);
+      await window.shipperAPI.spawnBackgroundShip(issueNumber, repo, autoMergeRepos.has(repo));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setFetchError(`Failed to launch shipper ship: ${message}`);
@@ -1880,11 +1936,17 @@ export default function App(): JSX.Element {
     const nextRepos = repos.filter((currentRepo) => currentRepo !== repo);
     const nextActiveRepo =
       repo === activeRepo ? (nextRepos[index] ?? nextRepos.at(-1) ?? '') : activeRepo;
+    const nextAutoMergeRepos = [...autoMergeRepos].filter((currentRepo) => currentRepo !== repo);
 
     try {
-      await persistConfig({ repos: nextRepos, activeRepo: nextActiveRepo });
+      await persistConfig({
+        repos: nextRepos,
+        activeRepo: nextActiveRepo,
+        autoMergeRepos: nextAutoMergeRepos,
+      });
       setRepos(nextRepos);
       setActiveRepo(nextActiveRepo);
+      setAutoMergeRepos(new Set(nextAutoMergeRepos));
       clearAutoShipStateForRepo(repo);
 
       if (repo === activeRepo) {
@@ -2212,6 +2274,24 @@ export default function App(): JSX.Element {
                           {activeRepo}
                         </Badge>
                       ) : null}
+                      <Button
+                        type="button"
+                        aria-pressed={activeRepo ? autoMergeRepos.has(activeRepo) : false}
+                        variant={
+                          activeRepo && autoMergeRepos.has(activeRepo) ? 'default' : 'outline'
+                        }
+                        size="sm"
+                        onClick={() => {
+                          if (!activeRepo) {
+                            return;
+                          }
+
+                          void handleToggleAutoMerge(activeRepo);
+                        }}
+                        disabled={!canFetch || !hasActiveRepo}
+                      >
+                        Auto-merge
+                      </Button>
                       <Button
                         type="button"
                         aria-pressed={activeRepo ? autoShipRepos.has(activeRepo) : false}

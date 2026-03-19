@@ -8,6 +8,7 @@ interface CheckResult {
 interface ConfigPayload {
   repos: string[];
   activeRepo: string;
+  autoMergeRepos: string[];
 }
 
 interface ListIssuesSuccess {
@@ -53,6 +54,7 @@ type BackgroundStatus = 'queued' | 'running' | 'complete' | 'failed';
 
 interface BackgroundStatusMeta {
   issueNumber?: number;
+  merge?: boolean;
   issueUrl?: string;
   logFile?: string;
   request?: string;
@@ -115,7 +117,11 @@ interface ShipperAPI {
     rows: number
   ) => Promise<{ sessionId: string }>;
   spawnBackgroundNew: (request: string, repo: string) => Promise<{ sessionId: string }>;
-  spawnBackgroundShip: (issueNumber: number, repo: string) => Promise<{ sessionId: string }>;
+  spawnBackgroundShip: (
+    issueNumber: number,
+    repo: string,
+    merge: boolean
+  ) => Promise<{ sessionId: string }>;
   spawnBackgroundInit: (repo: string) => Promise<{ sessionId: string }>;
   killBackground: (sessionId: string) => Promise<void>;
   getBackgroundOutput: (sessionId: string) => Promise<string>;

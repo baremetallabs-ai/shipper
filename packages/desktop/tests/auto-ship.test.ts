@@ -22,25 +22,57 @@ type BackgroundCommandLike = {
   cancelled: boolean;
 };
 
-const { getActiveShipIssueNumbers, getNextAutoShipFailureState, selectNextAutoShipIssue } =
-  autoShipModule as {
-    getActiveShipIssueNumbers: (commands: BackgroundCommandLike[], repo: string) => Set<number>;
-    getNextAutoShipFailureState: (
-      status: 'complete' | 'failed',
-      issueNumber: number | undefined,
-      currentFailures: number,
-      currentSkipped: Set<number>
-    ) => {
-      consecutiveFailures: number;
-      skippedIssueNumbers: Set<number>;
-      pauseAutoShip: boolean;
-    };
-    selectNextAutoShipIssue: (
-      issues: ListIssueItem[],
-      activeIssueNumbers: Set<number>,
-      skippedIssueNumbers: Set<number>
-    ) => ListIssueItem | null;
+const {
+  getActiveShipIssueNumbers,
+  getBackgroundDetail,
+  getBackgroundRetryPayload,
+  getBackgroundTitle,
+  getNextAutoShipFailureState,
+  selectNextAutoShipIssue,
+} = autoShipModule as {
+  getActiveShipIssueNumbers: (commands: BackgroundCommandLike[], repo: string) => Set<number>;
+  getBackgroundDetail: (input: {
+    command: 'new' | 'ship' | 'init';
+    status: 'queued' | 'running' | 'complete' | 'failed';
+    repo: string;
+    issueNumber?: number;
+    merge?: boolean;
+    latestOutput?: string | null;
+    cancelled?: boolean;
+  }) => string;
+  getBackgroundRetryPayload: (
+    command: 'new' | 'ship' | 'init',
+    repo: string,
+    request?: string,
+    issueNumber?: number,
+    merge?: boolean
+  ) =>
+    | { command: 'new'; repo: string; request: string }
+    | { command: 'ship'; repo: string; issueNumber: number; merge: boolean }
+    | { command: 'init'; repo: string }
+    | undefined;
+  getBackgroundTitle: (
+    command: 'new' | 'ship' | 'init',
+    repo: string,
+    issueNumber?: number,
+    merge?: boolean
+  ) => string;
+  getNextAutoShipFailureState: (
+    status: 'complete' | 'failed',
+    issueNumber: number | undefined,
+    currentFailures: number,
+    currentSkipped: Set<number>
+  ) => {
+    consecutiveFailures: number;
+    skippedIssueNumbers: Set<number>;
+    pauseAutoShip: boolean;
   };
+  selectNextAutoShipIssue: (
+    issues: ListIssueItem[],
+    activeIssueNumbers: Set<number>,
+    skippedIssueNumbers: Set<number>
+  ) => ListIssueItem | null;
+};
 
 function createIssue(number: number, labels: string[]): ListIssueItem {
   return {
@@ -184,6 +216,49 @@ describe('getActiveShipIssueNumbers', () => {
     ];
 
     expect(getActiveShipIssueNumbers(commands, 'owner/repo')).toEqual(new Set([51, 52]));
+  });
+});
+
+describe('merge-aware background helpers', () => {
+  it('adds the merge suffix to ship titles only when merge is enabled', () => {
+    expect(getBackgroundTitle('ship', 'owner/repo', 71, true)).toBe('Ship #71 · merge');
+    expect(getBackgroundTitle('ship', 'owner/repo', 71, false)).toBe('Ship #71');
+  });
+
+  it('distinguishes merge-enabled completed ships in the detail copy', () => {
+    expect(
+      getBackgroundDetail({
+        command: 'ship',
+        status: 'complete',
+        repo: 'owner/repo',
+        issueNumber: 72,
+        merge: true,
+      })
+    ).toBe('Ship completed · merged');
+    expect(
+      getBackgroundDetail({
+        command: 'ship',
+        status: 'complete',
+        repo: 'owner/repo',
+        issueNumber: 72,
+        merge: false,
+      })
+    ).toBe('Ship completed');
+  });
+
+  it('preserves merge mode in ship retry payloads', () => {
+    expect(getBackgroundRetryPayload('ship', 'owner/repo', undefined, 73, true)).toEqual({
+      command: 'ship',
+      repo: 'owner/repo',
+      issueNumber: 73,
+      merge: true,
+    });
+    expect(getBackgroundRetryPayload('ship', 'owner/repo', undefined, 74, false)).toEqual({
+      command: 'ship',
+      repo: 'owner/repo',
+      issueNumber: 74,
+      merge: false,
+    });
   });
 });
 
