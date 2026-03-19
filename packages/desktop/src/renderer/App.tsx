@@ -23,6 +23,7 @@ import { AdoptDialog } from './components/adopt-dialog.js';
 import { BackgroundLogViewer } from './components/background-log-viewer.js';
 import { BackgroundStatusIndicator } from './components/background-status-indicator.js';
 import { BackgroundToastRegion } from './components/background-toast-region.js';
+import { CloseNotPlannedDialog } from './components/close-not-planned-dialog.js';
 import { NewIssueDialog } from './components/new-issue-dialog.js';
 import { ResetConfirmDialog } from './components/reset-confirm-dialog.js';
 import { RepoPickerDialog } from './components/repo-picker-dialog.js';
@@ -44,6 +45,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
@@ -498,6 +500,7 @@ interface IssueCardProps {
   issue: ListIssueItem;
   onGroom?: (issueNumber: number) => void;
   onResetSelect?: (targetStage: WorkflowStage) => void;
+  onCloseNotPlanned?: () => void;
   resetTargets?: WorkflowStage[];
   groomDisabled?: boolean;
   isResetting?: boolean;
@@ -514,6 +517,7 @@ function IssueCard({
   issue,
   onGroom,
   onResetSelect,
+  onCloseNotPlanned,
   resetTargets = [],
   groomDisabled = false,
   isResetting = false,
@@ -529,7 +533,9 @@ function IssueCard({
   const isLocked = issue.labels.includes(LOCKED_LABEL);
   const isShipping = !!shippingStatus;
   const isGroomDisabled = groomDisabled || isBlocked || isLocked || isShipping;
-  const showOverflowMenu = !isShipping && onResetSelect !== undefined && resetTargets.length > 0;
+  const canCloseNotPlanned = !!onCloseNotPlanned && !isLocked && !isShipping;
+  const hasResetMenu = onResetSelect !== undefined && resetTargets.length > 0;
+  const showOverflowMenu = !isShipping && (hasResetMenu || canCloseNotPlanned);
   const isShipDisabled = shipDisabled || isBlocked || isLocked || isShipping;
 
   return (
@@ -561,21 +567,34 @@ function IssueCard({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger>Reset</DropdownMenuSubTrigger>
-                <DropdownMenuSubContent>
-                  {resetTargets.map((targetStage) => (
-                    <DropdownMenuItem
-                      key={targetStage}
-                      onSelect={() => {
-                        onResetSelect(targetStage);
-                      }}
-                    >
-                      {getResetTargetLabel(targetStage)}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
+              {hasResetMenu ? (
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>Reset</DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent>
+                    {resetTargets.map((targetStage) => (
+                      <DropdownMenuItem
+                        key={targetStage}
+                        onSelect={() => {
+                          onResetSelect(targetStage);
+                        }}
+                      >
+                        {getResetTargetLabel(targetStage)}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+              ) : null}
+              {hasResetMenu && canCloseNotPlanned ? <DropdownMenuSeparator /> : null}
+              {canCloseNotPlanned ? (
+                <DropdownMenuItem
+                  onSelect={() => {
+                    onCloseNotPlanned();
+                  }}
+                  className="text-destructive focus:text-destructive"
+                >
+                  Close as not planned
+                </DropdownMenuItem>
+              ) : null}
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null}
@@ -645,6 +664,7 @@ export default function App(): JSX.Element {
   const [isLoading, setIsLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [resetSelection, setResetSelection] = useState<ResetSelection | null>(null);
+  const [closeNotPlannedIssue, setCloseNotPlannedIssue] = useState<ListIssueItem | null>(null);
   const [resettingIssues, setResettingIssues] = useState<Set<number>>(new Set());
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [isPickerOpen, setIsPickerOpen] = useState(false);
@@ -751,6 +771,7 @@ export default function App(): JSX.Element {
     setFetchError(null);
     setIsLoading(false);
     setResetSelection(null);
+    setCloseNotPlannedIssue(null);
     setResettingIssues(new Set());
     setRepoInitialized(null);
     initVersionRef.current = 0;
@@ -1508,6 +1529,31 @@ export default function App(): JSX.Element {
     }
   }
 
+  function handleCloseNotPlannedSuccess(issueNumber: number): void {
+    setCloseNotPlannedIssue(null);
+    pushToast({
+      id: `close-not-planned-${issueNumber}`,
+      sessionId: '',
+      variant: 'success',
+      title: 'Issue closed',
+      description: `#${issueNumber} closed as not planned.`,
+    });
+    if (activeRepo) {
+      void loadIssues(activeRepo);
+    }
+  }
+
+  function handleCloseNotPlannedError(issueNumber: number, error: string): void {
+    setCloseNotPlannedIssue(null);
+    pushToast({
+      id: `close-not-planned-error-${issueNumber}`,
+      sessionId: '',
+      variant: 'error',
+      title: 'Failed to close issue',
+      description: error,
+    });
+  }
+
   function handleToggleDrawer(): void {
     setDrawerOpen((current) => !current);
   }
@@ -1764,6 +1810,18 @@ export default function App(): JSX.Element {
         onResetStart={trackResetIssue}
         onResetSuccess={handleResetSuccess}
         onResetFailure={clearResetIssue}
+      />
+      <CloseNotPlannedDialog
+        open={closeNotPlannedIssue !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setCloseNotPlannedIssue(null);
+          }
+        }}
+        repo={activeRepo}
+        issue={closeNotPlannedIssue}
+        onSuccess={handleCloseNotPlannedSuccess}
+        onError={handleCloseNotPlannedError}
       />
       <Dialog
         open={pendingCloseSession !== null}
@@ -2048,6 +2106,9 @@ export default function App(): JSX.Element {
                                 onGroom={(issueNumber) => {
                                   void handleShipperGroom(issueNumber);
                                 }}
+                                onCloseNotPlanned={() => {
+                                  setCloseNotPlannedIssue(issue);
+                                }}
                                 groomDisabled={!canFetch}
                               />
                             </div>
@@ -2129,6 +2190,9 @@ export default function App(): JSX.Element {
                                         issue={issue}
                                         onResetSelect={(targetStage) => {
                                           setResetSelection({ issue, targetStage });
+                                        }}
+                                        onCloseNotPlanned={() => {
+                                          setCloseNotPlannedIssue(issue);
                                         }}
                                         resetTargets={resetTargets}
                                         isResetting={resettingIssues.has(issue.number)}

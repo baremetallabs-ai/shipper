@@ -98,6 +98,10 @@ interface ShipperAPI {
     issueNumber: number,
     targetStage: WorkflowStage
   ) => Promise<{ ok: true } | { ok: false; error: string }>;
+  closeNotPlanned: (
+    repo: string,
+    issueNumber: number
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
 
   spawnShipperGroom: (
     issueNumber: number,

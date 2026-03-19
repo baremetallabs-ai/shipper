@@ -877,6 +877,63 @@ function registerIpcHandlers(): void {
     }
   });
 
+  ipcMain.handle('close-not-planned', async (_event, payload: unknown) => {
+    const parsedPayload = parseAdoptIssuePayload(payload);
+    if (parsedPayload === null) {
+      return {
+        ok: false,
+        error: 'Enter a repository in owner/repo format and a positive issue number.',
+      };
+    }
+
+    try {
+      const issue = await loadResetIssue(parsedPayload.repo, parsedPayload.issueNumber);
+      if (issue.state !== 'OPEN') {
+        return {
+          ok: false,
+          error: `Issue #${issue.number} is already closed.`,
+        };
+      }
+
+      if (issue.labels.some((label) => label.name === LOCKED_LABEL)) {
+        return {
+          ok: false,
+          error: `Issue #${issue.number} is locked. Close as not planned is unavailable until that run finishes.`,
+        };
+      }
+
+      await gh([
+        'issue',
+        'close',
+        String(issue.number),
+        '-R',
+        parsedPayload.repo,
+        '--reason',
+        'not planned',
+      ]);
+
+      const shipperLabels = issue.labels
+        .map((label) => label.name)
+        .filter((label) => label.startsWith('shipper:'));
+      if (shipperLabels.length > 0) {
+        await gh([
+          'issue',
+          'edit',
+          String(issue.number),
+          '-R',
+          parsedPayload.repo,
+          '--remove-label',
+          shipperLabels.join(','),
+        ]);
+      }
+
+      return { ok: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { ok: false, error: message };
+    }
+  });
+
   ipcMain.handle('get-config', () => readConfig());
   ipcMain.handle('list-repos', async () => {
     const result = await gh(['repo', 'list', '--json', 'nameWithOwner', '--limit', '100']);
