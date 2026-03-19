@@ -98,6 +98,11 @@ interface ShipperAPI {
     issueNumber: number,
     targetStage: WorkflowStage
   ) => Promise<{ ok: true } | { ok: false; error: string }>;
+  checkLockStale: (repo: string, issueNumber: number) => Promise<{ stale: boolean }>;
+  unlockIssue: (
+    repo: string,
+    issueNumber: number
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
   closeNotPlanned: (
     repo: string,
     issueNumber: number

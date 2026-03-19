@@ -28,6 +28,7 @@ import { NewIssueDialog } from './components/new-issue-dialog.js';
 import { ResetConfirmDialog } from './components/reset-confirm-dialog.js';
 import { RepoPickerDialog } from './components/repo-picker-dialog.js';
 import { RepoTabBar } from './components/repo-tab-bar.js';
+import { UnlockConfirmDialog } from './components/unlock-confirm-dialog.js';
 import type { TerminalSessionTab } from './components/session-tab-bar.js';
 import { TerminalPanel } from './components/terminal-panel.js';
 import { Alert, AlertDescription, AlertTitle } from './components/ui/alert.js';
@@ -501,9 +502,11 @@ interface IssueCardProps {
   onGroom?: (issueNumber: number) => void;
   onResetSelect?: (targetStage: WorkflowStage) => void;
   onCloseNotPlanned?: () => void;
+  onUnlock?: () => void;
   resetTargets?: WorkflowStage[];
   groomDisabled?: boolean;
   isResetting?: boolean;
+  isUnlocking?: boolean;
   onShip?: (issueNumber: number) => void;
   shipDisabled?: boolean;
   shippingStatus?: 'queued' | 'running';
@@ -518,9 +521,11 @@ function IssueCard({
   onGroom,
   onResetSelect,
   onCloseNotPlanned,
+  onUnlock,
   resetTargets = [],
   groomDisabled = false,
   isResetting = false,
+  isUnlocking = false,
   onShip,
   shipDisabled = false,
   shippingStatus,
@@ -532,10 +537,14 @@ function IssueCard({
   const isBlocked = issue.labels.includes(BLOCKED_LABEL);
   const isLocked = issue.labels.includes(LOCKED_LABEL);
   const isShipping = !!shippingStatus;
+  const isBusy = isResetting || isUnlocking;
+  const busyLabel = isResetting ? 'Resetting...' : isUnlocking ? 'Unlocking...' : null;
   const isGroomDisabled = groomDisabled || isBlocked || isLocked || isShipping;
+  const canUnlock = isLocked && !!onUnlock;
   const canCloseNotPlanned = !!onCloseNotPlanned && !isLocked && !isShipping;
   const hasResetMenu = onResetSelect !== undefined && resetTargets.length > 0;
-  const showOverflowMenu = !isShipping && (hasResetMenu || canCloseNotPlanned);
+  const hasFlatActions = canCloseNotPlanned || canUnlock;
+  const showOverflowMenu = !isShipping && (hasResetMenu || hasFlatActions);
   const isShipDisabled = shipDisabled || isBlocked || isLocked || isShipping;
 
   return (
@@ -545,7 +554,7 @@ function IssueCard({
       onDragEnd={onDragEnd}
       className={cn(
         'relative space-y-3 rounded-sm border border-border bg-background px-4 py-4 transition-opacity',
-        isResetting && 'opacity-70',
+        isBusy && 'opacity-70',
         shippingStatus === 'running' && 'shipping-active',
         draggable && 'cursor-grab'
       )}
@@ -560,7 +569,7 @@ function IssueCard({
                 variant="ghost"
                 size="icon"
                 className="size-8"
-                disabled={isResetting}
+                disabled={isBusy}
                 aria-label={`Issue #${issue.number} actions`}
               >
                 <EllipsisVertical className="size-4" />
@@ -584,7 +593,7 @@ function IssueCard({
                   </DropdownMenuSubContent>
                 </DropdownMenuSub>
               ) : null}
-              {hasResetMenu && canCloseNotPlanned ? <DropdownMenuSeparator /> : null}
+              {hasResetMenu && hasFlatActions ? <DropdownMenuSeparator /> : null}
               {canCloseNotPlanned ? (
                 <DropdownMenuItem
                   onSelect={() => {
@@ -593,6 +602,15 @@ function IssueCard({
                   className="text-destructive focus:text-destructive"
                 >
                   Close as not planned
+                </DropdownMenuItem>
+              ) : null}
+              {canUnlock ? (
+                <DropdownMenuItem
+                  onSelect={() => {
+                    onUnlock();
+                  }}
+                >
+                  Unlock
                 </DropdownMenuItem>
               ) : null}
             </DropdownMenuContent>
@@ -644,11 +662,11 @@ function IssueCard({
           Ship
         </Button>
       ) : null}
-      {isResetting ? (
+      {busyLabel ? (
         <div className="absolute inset-0 flex items-center justify-center rounded-sm bg-background/80">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <LoaderCircle className="size-4 animate-spin" />
-            Resetting...
+            {busyLabel}
           </div>
         </div>
       ) : null}
@@ -665,7 +683,9 @@ export default function App(): JSX.Element {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [resetSelection, setResetSelection] = useState<ResetSelection | null>(null);
   const [closeNotPlannedIssue, setCloseNotPlannedIssue] = useState<ListIssueItem | null>(null);
+  const [unlockConfirmIssue, setUnlockConfirmIssue] = useState<ListIssueItem | null>(null);
   const [resettingIssues, setResettingIssues] = useState<Set<number>>(new Set());
+  const [unlockingIssues, setUnlockingIssues] = useState<Set<number>>(new Set());
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [isNewIssueOpen, setIsNewIssueOpen] = useState(false);
@@ -1533,6 +1553,18 @@ export default function App(): JSX.Element {
     });
   }
 
+  function trackUnlockIssue(issueNumber: number): void {
+    setUnlockingIssues((current) => new Set(current).add(issueNumber));
+  }
+
+  function clearUnlockIssue(issueNumber: number): void {
+    setUnlockingIssues((current) => {
+      const next = new Set(current);
+      next.delete(issueNumber);
+      return next;
+    });
+  }
+
   function handleResetSuccess(issueNumber: number): void {
     clearResetIssue(issueNumber);
     if (activeRepo) {
@@ -1566,6 +1598,85 @@ export default function App(): JSX.Element {
     if (activeRepo) {
       void loadIssues(activeRepo);
     }
+  }
+
+  async function handleUnlockExecute(issue: ListIssueItem, repo = activeRepo): Promise<void> {
+    if (!repo) {
+      return;
+    }
+
+    trackUnlockIssue(issue.number);
+
+    try {
+      const result = await window.shipperAPI.unlockIssue(repo, issue.number);
+      if (!result.ok) {
+        pushToast({
+          id: `unlock-issue-error-${issue.number}`,
+          sessionId: '',
+          variant: 'error',
+          title: 'Failed to unlock issue',
+          description: result.error,
+        });
+        setUnlockConfirmIssue(null);
+        clearUnlockIssue(issue.number);
+        return;
+      }
+
+      pushToast({
+        id: `unlock-issue-${issue.number}`,
+        sessionId: '',
+        variant: 'success',
+        title: 'Issue unlocked',
+        description: `#${issue.number} lock removed.`,
+      });
+      setUnlockConfirmIssue(null);
+      await loadIssues(repo);
+      clearUnlockIssue(issue.number);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      pushToast({
+        id: `unlock-issue-error-${issue.number}`,
+        sessionId: '',
+        variant: 'error',
+        title: 'Failed to unlock issue',
+        description: message,
+      });
+      setUnlockConfirmIssue(null);
+      clearUnlockIssue(issue.number);
+    }
+  }
+
+  async function handleUnlockClick(issue: ListIssueItem): Promise<void> {
+    if (!activeRepo) {
+      return;
+    }
+
+    try {
+      const result = await window.shipperAPI.checkLockStale(activeRepo, issue.number);
+      if (result.stale) {
+        await handleUnlockExecute(issue, activeRepo);
+        return;
+      }
+
+      setUnlockConfirmIssue(issue);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      pushToast({
+        id: `unlock-issue-check-error-${issue.number}`,
+        sessionId: '',
+        variant: 'error',
+        title: 'Failed to check issue lock',
+        description: message,
+      });
+    }
+  }
+
+  async function handleUnlockDialogConfirm(): Promise<void> {
+    if (unlockConfirmIssue === null) {
+      return;
+    }
+
+    await handleUnlockExecute(unlockConfirmIssue);
   }
 
   function handleToggleDrawer(): void {
@@ -1846,6 +1957,16 @@ export default function App(): JSX.Element {
         issue={closeNotPlannedIssue}
         onSuccess={handleCloseNotPlannedSuccess}
         onError={handleCloseNotPlannedError}
+      />
+      <UnlockConfirmDialog
+        open={unlockConfirmIssue !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setUnlockConfirmIssue(null);
+          }
+        }}
+        issue={unlockConfirmIssue}
+        onConfirm={handleUnlockDialogConfirm}
       />
       <Dialog
         open={pendingCloseSession !== null}
@@ -2135,7 +2256,11 @@ export default function App(): JSX.Element {
                                 onCloseNotPlanned={() => {
                                   setCloseNotPlannedIssue(issue);
                                 }}
+                                onUnlock={() => {
+                                  void handleUnlockClick(issue);
+                                }}
                                 groomDisabled={!canFetch}
+                                isUnlocking={unlockingIssues.has(issue.number)}
                               />
                             </div>
                           ))}
@@ -2220,8 +2345,12 @@ export default function App(): JSX.Element {
                                         onCloseNotPlanned={() => {
                                           setCloseNotPlannedIssue(issue);
                                         }}
+                                        onUnlock={() => {
+                                          void handleUnlockClick(issue);
+                                        }}
                                         resetTargets={resetTargets}
                                         isResetting={resettingIssues.has(issue.number)}
+                                        isUnlocking={unlockingIssues.has(issue.number)}
                                         onShip={
                                           !isReadyColumn
                                             ? (issueNumber) => void handleShipperShip(issueNumber)
@@ -2237,7 +2366,9 @@ export default function App(): JSX.Element {
                                             : undefined
                                         }
                                         draggable={
-                                          !resettingIssues.has(issue.number) && !shippingStatus
+                                          !resettingIssues.has(issue.number) &&
+                                          !unlockingIssues.has(issue.number) &&
+                                          !shippingStatus
                                         }
                                         onDragStart={(e) => {
                                           e.dataTransfer.effectAllowed = 'move';

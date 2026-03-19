@@ -603,6 +603,93 @@ describe('desktop IPC locking', () => {
     expect(state.executeResetMock).not.toHaveBeenCalled();
   });
 
+  it('reports when an issue lock is stale', async () => {
+    await loadHandlers();
+    state.isLockStaleMock.mockResolvedValueOnce(true);
+    const handler = getHandler('check-lock-stale');
+
+    await expect(handler({}, { repo: 'owner/repo', issueNumber: 42 })).resolves.toEqual({
+      stale: true,
+    });
+    expect(state.isLockStaleMock).toHaveBeenCalledWith('owner/repo', '42');
+  });
+
+  it('reports when an issue lock is not stale', async () => {
+    await loadHandlers();
+    state.isLockStaleMock.mockResolvedValueOnce(false);
+    const handler = getHandler('check-lock-stale');
+
+    await expect(handler({}, { repo: 'owner/repo', issueNumber: 42 })).resolves.toEqual({
+      stale: false,
+    });
+    expect(state.isLockStaleMock).toHaveBeenCalledWith('owner/repo', '42');
+  });
+
+  it('fails closed for stale-lock checks with invalid payloads', async () => {
+    await loadHandlers();
+    const handler = getHandler('check-lock-stale');
+
+    await expect(handler({}, { repo: 'owner/repo', issueNumber: 0 })).resolves.toEqual({
+      stale: false,
+    });
+    expect(state.isLockStaleMock).not.toHaveBeenCalled();
+  });
+
+  it('fails closed for stale-lock checks when isLockStale throws', async () => {
+    await loadHandlers();
+    state.isLockStaleMock.mockRejectedValueOnce(new Error('lock lookup failed'));
+    const handler = getHandler('check-lock-stale');
+
+    await expect(handler({}, { repo: 'owner/repo', issueNumber: 42 })).resolves.toEqual({
+      stale: false,
+    });
+    expect(state.isLockStaleMock).toHaveBeenCalledWith('owner/repo', '42');
+  });
+
+  it('removes only the locked label when unlocking an issue', async () => {
+    await loadHandlers();
+    state.ghMock.mockResolvedValueOnce({ stdout: '', stderr: '' });
+    const handler = getHandler('unlock-issue');
+
+    await expect(handler({}, { repo: 'owner/repo', issueNumber: 42 })).resolves.toEqual({
+      ok: true,
+    });
+    expect(state.ghMock).toHaveBeenCalledWith([
+      'issue',
+      'edit',
+      '42',
+      '-R',
+      'owner/repo',
+      '--remove-label',
+      'shipper:locked',
+    ]);
+    expect(state.releaseIssueLockMock).not.toHaveBeenCalled();
+  });
+
+  it('returns an inline error for unlock requests with invalid payloads', async () => {
+    await loadHandlers();
+    const handler = getHandler('unlock-issue');
+
+    await expect(handler({}, { repo: 'owner/repo', issueNumber: 0 })).resolves.toEqual({
+      ok: false,
+      error: 'Enter a repository in owner/repo format and a positive issue number.',
+    });
+    expect(state.ghMock).not.toHaveBeenCalled();
+    expect(state.releaseIssueLockMock).not.toHaveBeenCalled();
+  });
+
+  it('surfaces unlock failures without routing through releaseIssueLock', async () => {
+    await loadHandlers();
+    state.ghMock.mockRejectedValueOnce(new Error('gh failed'));
+    const handler = getHandler('unlock-issue');
+
+    await expect(handler({}, { repo: 'owner/repo', issueNumber: 42 })).resolves.toEqual({
+      ok: false,
+      error: 'gh failed',
+    });
+    expect(state.releaseIssueLockMock).not.toHaveBeenCalled();
+  });
+
   it('still registers groom on the PTY path with lock acquisition intact', async () => {
     await loadHandlers();
 
