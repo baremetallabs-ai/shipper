@@ -56,6 +56,10 @@ const shipperAPI = {
     ipcRenderer.invoke('scan-reset', { repo, issueNumber, targetStage }),
   executeReset: (repo: string, issueNumber: number, targetStage: WorkflowStage) =>
     ipcRenderer.invoke('execute-reset', { repo, issueNumber, targetStage }),
+  checkLockStale: (repo: string, issueNumber: number) =>
+    ipcRenderer.invoke('check-lock-stale', { repo, issueNumber }),
+  unlockIssue: (repo: string, issueNumber: number) =>
+    ipcRenderer.invoke('unlock-issue', { repo, issueNumber }),
   closeNotPlanned: (repo: string, issueNumber: number) =>
     ipcRenderer.invoke('close-not-planned', { repo, issueNumber }),
 
