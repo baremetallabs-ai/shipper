@@ -547,6 +547,10 @@ function IssueCard({
   const showOverflowMenu = !isShipping && (hasResetMenu || hasFlatActions);
   const isShipDisabled = shipDisabled || isBlocked || isLocked || isShipping;
 
+  function handleUnlockSelect(): void {
+    onUnlock?.();
+  }
+
   return (
     <article
       draggable={draggable}
@@ -605,13 +609,7 @@ function IssueCard({
                 </DropdownMenuItem>
               ) : null}
               {canUnlock ? (
-                <DropdownMenuItem
-                  onSelect={() => {
-                    onUnlock();
-                  }}
-                >
-                  Unlock
-                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={handleUnlockSelect}>Unlock</DropdownMenuItem>
               ) : null}
             </DropdownMenuContent>
           </DropdownMenu>
@@ -803,7 +801,9 @@ export default function App(): JSX.Element {
     setIsLoading(false);
     setResetSelection(null);
     setCloseNotPlannedIssue(null);
+    setUnlockConfirmIssue(null);
     setResettingIssues(new Set());
+    setUnlockingIssues(new Set());
     setRepoInitialized(null);
     initVersionRef.current = 0;
   }
@@ -889,6 +889,14 @@ export default function App(): JSX.Element {
 
   const persistConfig = useEffectEvent(async (config: AppConfig) => {
     await window.shipperAPI.setConfig(config);
+  });
+
+  const refreshIssuesForActiveRepo = useEffectEvent(async (repo: string) => {
+    if (repo !== activeRepo) {
+      return;
+    }
+
+    await loadIssues(repo);
   });
 
   const dismissToast = useEffectEvent((toastId: string) => {
@@ -1617,8 +1625,6 @@ export default function App(): JSX.Element {
           title: 'Failed to unlock issue',
           description: result.error,
         });
-        setUnlockConfirmIssue(null);
-        clearUnlockIssue(issue.number);
         return;
       }
 
@@ -1629,9 +1635,7 @@ export default function App(): JSX.Element {
         title: 'Issue unlocked',
         description: `#${issue.number} lock removed.`,
       });
-      setUnlockConfirmIssue(null);
-      await loadIssues(repo);
-      clearUnlockIssue(issue.number);
+      await refreshIssuesForActiveRepo(repo);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       pushToast({
@@ -1641,6 +1645,7 @@ export default function App(): JSX.Element {
         title: 'Failed to unlock issue',
         description: message,
       });
+    } finally {
       setUnlockConfirmIssue(null);
       clearUnlockIssue(issue.number);
     }
@@ -1651,10 +1656,15 @@ export default function App(): JSX.Element {
       return;
     }
 
+    const repo = activeRepo;
+    let clearPendingState = true;
+    trackUnlockIssue(issue.number);
+
     try {
-      const result = await window.shipperAPI.checkLockStale(activeRepo, issue.number);
+      const result = await window.shipperAPI.checkLockStale(repo, issue.number);
       if (result.stale) {
-        await handleUnlockExecute(issue, activeRepo);
+        clearPendingState = false;
+        await handleUnlockExecute(issue, repo);
         return;
       }
 
@@ -1668,6 +1678,10 @@ export default function App(): JSX.Element {
         title: 'Failed to check issue lock',
         description: message,
       });
+    } finally {
+      if (clearPendingState) {
+        clearUnlockIssue(issue.number);
+      }
     }
   }
 
