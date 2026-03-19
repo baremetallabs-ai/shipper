@@ -7,6 +7,7 @@ import {
   DESIGNED_LABEL,
   DISPLAY_NAME_MAP,
   GROOMED_LABEL,
+  getPriorityTier,
   IMPLEMENTED_LABEL,
   LOCKED_LABEL,
   NEW_LABEL,
@@ -164,6 +165,15 @@ const RESET_STAGE_LABELS: Record<WorkflowStage, string> = Object.fromEntries(
   RESET_STAGE_ORDER.map(({ stage, label }) => [stage, label])
 ) as Record<WorkflowStage, string>;
 const POST_IMPLEMENTATION_LABELS = [PR_OPEN_LABEL, PR_REVIEWED_LABEL, READY_LABEL] as const;
+const MAX_AUTO_SHIP_CONSECUTIVE_FAILURES = 3;
+export const AUTO_SHIP_PRIORITY_LABELS = [
+  PR_REVIEWED_LABEL,
+  PR_OPEN_LABEL,
+  IMPLEMENTED_LABEL,
+  PLANNED_LABEL,
+  DESIGNED_LABEL,
+  GROOMED_LABEL,
+] as const;
 
 type PipelineColumnLabel = (typeof PIPELINE_COLUMNS)[number];
 
@@ -376,6 +386,112 @@ function findActiveIssueSession(
   );
 }
 
+export function getActiveShipIssueNumbers(
+  commands: BackgroundCommandState[],
+  repo: string
+): Set<number> {
+  const activeIssueNumbers = new Set<number>();
+
+  for (const command of commands) {
+    if (
+      command.command === 'ship' &&
+      command.repo === repo &&
+      command.issueNumber !== undefined &&
+      (command.status === 'queued' || command.status === 'running') &&
+      !command.cancelled
+    ) {
+      activeIssueNumbers.add(command.issueNumber);
+    }
+  }
+
+  return activeIssueNumbers;
+}
+
+export function selectNextAutoShipIssue(
+  issues: ListIssueItem[],
+  activeIssueNumbers: Set<number>,
+  skippedIssueNumbers: Set<number>
+): ListIssueItem | null {
+  const candidates: Array<{
+    issue: ListIssueItem;
+    priorityTier: 0 | 1 | 2;
+    stageIndex: number;
+    issueIndex: number;
+  }> = [];
+
+  issues.forEach((issue, issueIndex) => {
+    if (
+      activeIssueNumbers.has(issue.number) ||
+      skippedIssueNumbers.has(issue.number) ||
+      issue.labels.includes(BLOCKED_LABEL) ||
+      issue.labels.includes(LOCKED_LABEL)
+    ) {
+      return;
+    }
+
+    const stageIndex = AUTO_SHIP_PRIORITY_LABELS.findIndex((label) => issue.labels.includes(label));
+    if (stageIndex < 0) {
+      return;
+    }
+
+    candidates.push({
+      issue,
+      priorityTier: getPriorityTier(issue.labels),
+      stageIndex,
+      issueIndex,
+    });
+  });
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  candidates.sort((left, right) => {
+    if (left.priorityTier !== right.priorityTier) {
+      return left.priorityTier - right.priorityTier;
+    }
+
+    if (left.stageIndex !== right.stageIndex) {
+      return left.stageIndex - right.stageIndex;
+    }
+
+    return left.issueIndex - right.issueIndex;
+  });
+
+  return candidates[0]?.issue ?? null;
+}
+
+export function getNextAutoShipFailureState(
+  status: 'complete' | 'failed',
+  issueNumber: number | undefined,
+  currentFailures: number,
+  currentSkipped: Set<number>
+): {
+  consecutiveFailures: number;
+  skippedIssueNumbers: Set<number>;
+  pauseAutoShip: boolean;
+} {
+  if (status === 'complete') {
+    return {
+      consecutiveFailures: 0,
+      skippedIssueNumbers: new Set(currentSkipped),
+      pauseAutoShip: false,
+    };
+  }
+
+  const skippedIssueNumbers = new Set(currentSkipped);
+  if (issueNumber !== undefined) {
+    skippedIssueNumbers.add(issueNumber);
+  }
+
+  const consecutiveFailures = currentFailures + 1;
+  return {
+    consecutiveFailures,
+    skippedIssueNumbers,
+    pauseAutoShip: consecutiveFailures >= 3,
+  };
+}
+
 interface IssueCardProps {
   issue: ListIssueItem;
   onGroom?: (issueNumber: number) => void;
@@ -535,6 +651,7 @@ export default function App(): JSX.Element {
   const [repoInitialized, setRepoInitialized] = useState<boolean | null>(null);
   const [backgroundCommands, setBackgroundCommands] = useState<BackgroundCommandState[]>([]);
   const [toasts, setToasts] = useState<BackgroundToastItem[]>([]);
+  const [autoShipRepos, setAutoShipRepos] = useState<Set<string>>(new Set());
   const [logViewer, setLogViewer] = useState<BackgroundLogViewerState>({
     open: false,
     sessionId: null,
@@ -556,6 +673,8 @@ export default function App(): JSX.Element {
   const toggleButtonRef = useRef<HTMLButtonElement | null>(null);
   const drawerPanelRef = useRef<HTMLDivElement | null>(null);
   const backgroundCommandsRef = useRef<BackgroundCommandState[]>([]);
+  const autoShipFailuresRef = useRef<Map<string, number>>(new Map());
+  const autoShipSkippedRef = useRef<Map<string, Set<number>>>(new Map());
   const sessionsRef = useRef<TerminalSession[]>([]);
   const activeSessionIdRef = useRef<string | null>(null);
   const lastOutputAtBySessionRef = useRef<Map<string, number>>(new Map());
@@ -633,6 +752,20 @@ export default function App(): JSX.Element {
     setResettingIssues(new Set());
     setRepoInitialized(null);
     initVersionRef.current = 0;
+  }
+
+  function clearAutoShipStateForRepo(repo: string): void {
+    setAutoShipRepos((currentRepos) => {
+      if (!currentRepos.has(repo)) {
+        return currentRepos;
+      }
+
+      const nextRepos = new Set(currentRepos);
+      nextRepos.delete(repo);
+      return nextRepos;
+    });
+    autoShipFailuresRef.current.delete(repo);
+    autoShipSkippedRef.current.delete(repo);
   }
 
   const loadIssues = useEffectEvent(async (repo: string) => {
@@ -772,22 +905,19 @@ export default function App(): JSX.Element {
       exitCode: event.exitCode,
       cancelled,
     };
+    const currentCommands = backgroundCommandsRef.current;
+    const existingIndex = currentCommands.findIndex((command) => command.id === event.sessionId);
+    const nextCommands =
+      existingIndex >= 0
+        ? currentCommands.map((command, index) => (index === existingIndex ? nextCommand : command))
+        : [...currentCommands, nextCommand];
+    const postEventCommands =
+      event.status === 'complete'
+        ? nextCommands.filter((command) => command.id !== event.sessionId)
+        : nextCommands;
 
-    setBackgroundCommands((currentCommands) => {
-      const existingIndex = currentCommands.findIndex((command) => command.id === event.sessionId);
-      const nextCommands =
-        existingIndex >= 0
-          ? currentCommands.map((command, index) =>
-              index === existingIndex ? nextCommand : command
-            )
-          : [...currentCommands, nextCommand];
-
-      if (event.status === 'complete') {
-        return nextCommands.filter((command) => command.id !== event.sessionId);
-      }
-
-      return nextCommands;
-    });
+    backgroundCommandsRef.current = postEventCommands;
+    setBackgroundCommands(postEventCommands);
 
     if (event.status === 'complete') {
       const successToast: BackgroundToastItem =
@@ -821,7 +951,6 @@ export default function App(): JSX.Element {
             };
       pushToast(successToast);
       await refreshRepoAfterBackground(event.repo, event.command, event.status);
-      return;
     }
 
     if (event.status === 'failed') {
@@ -852,6 +981,72 @@ export default function App(): JSX.Element {
       }
 
       await refreshRepoAfterBackground(event.repo, event.command, event.status);
+    }
+
+    if (
+      event.command !== 'ship' ||
+      (event.status !== 'complete' && event.status !== 'failed') ||
+      cancelled ||
+      !autoShipRepos.has(event.repo)
+    ) {
+      return;
+    }
+
+    const currentFailures = autoShipFailuresRef.current.get(event.repo) ?? 0;
+    const currentSkipped = autoShipSkippedRef.current.get(event.repo) ?? new Set<number>();
+    const nextFailureState = getNextAutoShipFailureState(
+      event.status,
+      issueNumber,
+      currentFailures,
+      currentSkipped
+    );
+    autoShipFailuresRef.current.set(event.repo, nextFailureState.consecutiveFailures);
+    autoShipSkippedRef.current.set(event.repo, nextFailureState.skippedIssueNumbers);
+
+    if (nextFailureState.pauseAutoShip) {
+      clearAutoShipStateForRepo(event.repo);
+      pushToast({
+        id: `auto-ship-paused-${event.repo}-${Date.now()}`,
+        sessionId: event.sessionId,
+        variant: 'error',
+        title: 'Auto-ship paused',
+        description: `${MAX_AUTO_SHIP_CONSECUTIVE_FAILURES} consecutive failures disabled auto-ship for this repository.`,
+      });
+      return;
+    }
+
+    const activeIssueNumbers = getActiveShipIssueNumbers(postEventCommands, event.repo);
+    if (activeIssueNumbers.size > 0) {
+      return;
+    }
+
+    try {
+      const issueResult = await window.shipperAPI.listIssues(event.repo);
+      if (!issueResult.ok || !autoShipRepos.has(event.repo)) {
+        return;
+      }
+
+      const skippedIssueNumbers = autoShipSkippedRef.current.get(event.repo) ?? new Set<number>();
+      const nextIssue = selectNextAutoShipIssue(
+        issueResult.issues,
+        activeIssueNumbers,
+        skippedIssueNumbers
+      );
+
+      if (!nextIssue) {
+        return;
+      }
+
+      await window.shipperAPI.spawnBackgroundShip(nextIssue.number, event.repo);
+      pushToast({
+        id: `auto-ship-${event.repo}-${nextIssue.number}-${Date.now()}`,
+        sessionId: event.sessionId,
+        variant: 'success',
+        title: `Auto-ship: starting #${nextIssue.number}`,
+        description: nextIssue.title,
+      });
+    } catch {
+      // Auto-ship enqueue is best-effort; the user can still ship manually.
     }
   });
 
@@ -1481,6 +1676,7 @@ export default function App(): JSX.Element {
       await persistConfig({ repos: nextRepos, activeRepo: nextActiveRepo });
       setRepos(nextRepos);
       setActiveRepo(nextActiveRepo);
+      clearAutoShipStateForRepo(repo);
 
       if (repo === activeRepo) {
         clearIssueState();
@@ -1777,11 +1973,44 @@ export default function App(): JSX.Element {
                         Review the current repository as a pipeline organized by shipper stage.
                       </p>
                     </div>
-                    {activeRepo ? (
-                      <Badge variant="outline" className="w-fit">
-                        {activeRepo}
-                      </Badge>
-                    ) : null}
+                    <div className="flex items-center gap-3">
+                      {activeRepo ? (
+                        <Badge variant="outline" className="w-fit">
+                          {activeRepo}
+                        </Badge>
+                      ) : null}
+                      <Button
+                        type="button"
+                        variant={
+                          activeRepo && autoShipRepos.has(activeRepo) ? 'default' : 'outline'
+                        }
+                        size="sm"
+                        onClick={() => {
+                          if (!activeRepo) {
+                            return;
+                          }
+
+                          setAutoShipRepos((currentRepos) => {
+                            const nextRepos = new Set(currentRepos);
+
+                            if (nextRepos.has(activeRepo)) {
+                              nextRepos.delete(activeRepo);
+                              autoShipFailuresRef.current.delete(activeRepo);
+                              autoShipSkippedRef.current.delete(activeRepo);
+                            } else {
+                              nextRepos.add(activeRepo);
+                              autoShipFailuresRef.current.set(activeRepo, 0);
+                              autoShipSkippedRef.current.set(activeRepo, new Set());
+                            }
+
+                            return nextRepos;
+                          });
+                        }}
+                        disabled={!canFetch || !hasActiveRepo}
+                      >
+                        Auto-ship
+                      </Button>
+                    </div>
                   </div>
                 </div>
 
