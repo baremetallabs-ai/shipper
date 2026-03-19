@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import type { Settings } from '../../src/lib/settings.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const spawnMock =
@@ -14,7 +15,7 @@ const execFileMock =
   >();
 const readFileMock = vi.fn<(path: string, encoding: string) => Promise<string>>();
 const accessMock = vi.fn<(path: string) => Promise<void>>();
-const getSettingsMock = vi.fn<() => Record<string, unknown>>();
+const getSettingsMock = vi.fn<() => Pick<Settings, 'installCommand'>>();
 
 vi.mock('node:child_process', async () => {
   const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
@@ -40,7 +41,7 @@ vi.mock('../../src/lib/hooks.js', () => ({
 }));
 
 vi.mock('../../src/lib/settings.js', () => ({
-  getSettings: (...args: unknown[]) => getSettingsMock(...args),
+  getSettings: () => getSettingsMock(),
 }));
 
 const { formatConflictContext, pushWorktree, syncWorktree, withGitTransport } =
