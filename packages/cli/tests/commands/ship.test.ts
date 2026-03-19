@@ -826,7 +826,7 @@ describe('selectBlockedIssues', () => {
 });
 
 describe('printUnblockSummary', () => {
-  it('prints one final outcome row per issue while preserving every unblock log file', () => {
+  it('prints one final outcome row per issue in final-attempt order while preserving every unblock log file', () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     const attempts: UnblockAttempt[] = [
@@ -837,16 +837,16 @@ describe('printUnblockSummary', () => {
         logFile: '/mock-home/.shipper/logs/unblock-12-20260318T040000.log',
       },
       {
-        issue: 12,
-        title: 'Fix database migration',
-        outcome: 'unblocked',
-        logFile: '/mock-home/.shipper/logs/unblock-12-20260318T050000.log',
-      },
-      {
         issue: 15,
         title: 'Add OAuth provider',
         outcome: 'still blocked',
         logFile: '/mock-home/.shipper/logs/unblock-15-20260318T040000.log',
+      },
+      {
+        issue: 12,
+        title: 'Fix database migration',
+        outcome: 'unblocked',
+        logFile: '/mock-home/.shipper/logs/unblock-12-20260318T050000.log',
       },
     ];
 
@@ -854,10 +854,13 @@ describe('printUnblockSummary', () => {
 
     const entries = getConsoleEntries(logSpy);
     const output = getConsoleOutput(logSpy);
+    const outcomeRows = entries.filter((entry) => entry.includes('unblock #'));
     const retriedIssueRows = entries.filter((entry) => entry.includes('Fix database migration'));
     const singleAttemptIssueRows = entries.filter((entry) => entry.includes('Add OAuth provider'));
 
     expect(output).toContain('Unblock attempts:');
+    expect(outcomeRows[0]).toContain('Add OAuth provider');
+    expect(outcomeRows[1]).toContain('Fix database migration');
     expect(retriedIssueRows).toHaveLength(1);
     expect(retriedIssueRows[0]).toContain('unblock #12');
     expect(retriedIssueRows[0]).toContain('✓ unblocked');
