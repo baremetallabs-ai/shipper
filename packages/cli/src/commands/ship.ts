@@ -1301,7 +1301,12 @@ async function resumeParkedIssue(
 export function printUnblockSummary(attempts: UnblockAttempt[], homeDir = homedir()): void {
   console.log('\n  Unblock attempts:\n');
   console.log('  Ref              Issue                                          Outcome');
+  const finalByIssue = new Map<number, UnblockAttempt>();
   for (const a of attempts) {
+    finalByIssue.set(a.issue, a);
+  }
+
+  for (const a of finalByIssue.values()) {
     const ref = `unblock #${a.issue}`;
     const num = ref.padEnd(17);
     const titleChars = Array.from(a.title);
