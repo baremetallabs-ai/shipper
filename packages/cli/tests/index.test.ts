@@ -100,7 +100,7 @@ describe('shipper-cli', () => {
       const output = await renderHelp(['--help']);
 
       expect(output).toContain('init');
-      expect(output).toContain('new');
+      expect(output).toContain('new [options] [request...]');
       expect(output).toContain('priority');
       expect(output).toContain('groom');
       expect(output).toContain('design');
@@ -114,6 +114,7 @@ describe('shipper-cli', () => {
       const newHelp = await renderHelp(['new', '--help']);
       const setupHelp = await renderHelp(['setup', '--help']);
 
+      expect(newHelp).toContain('Usage: shipper new [options] [request...]');
       expect(newHelp).toContain('--mode <mode>');
       expect(newHelp).toContain('--model <model>');
       expect(newHelp).toContain('--log-file <path>');
@@ -239,6 +240,19 @@ describe('shipper-cli', () => {
         mode: 'headless',
         model: 'sonnet',
         logFile: '/tmp/example.jsonl',
+      });
+    });
+
+    it('passes an empty request array and codex agent through bare new invocation', async () => {
+      process.argv = ['node', 'src/index.ts', 'new', '--agent', 'codex'];
+
+      await importEntrypoint();
+
+      expect(mockNewCommand).toHaveBeenCalledWith([], {
+        mode: 'default',
+        agent: 'codex',
+        model: undefined,
+        logFile: undefined,
       });
     });
 
