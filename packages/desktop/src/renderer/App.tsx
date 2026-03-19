@@ -6,6 +6,7 @@ import {
   BLOCKED_LABEL,
   DESIGNED_LABEL,
   DISPLAY_NAME_MAP,
+  FAILED_LABEL,
   GROOMED_LABEL,
   getPriorityTier,
   IMPLEMENTED_LABEL,
@@ -424,6 +425,7 @@ export function selectNextAutoShipIssue(
       activeIssueNumbers.has(issue.number) ||
       skippedIssueNumbers.has(issue.number) ||
       issue.labels.includes(BLOCKED_LABEL) ||
+      issue.labels.includes(FAILED_LABEL) ||
       issue.labels.includes(LOCKED_LABEL)
     ) {
       return;
@@ -488,7 +490,7 @@ export function getNextAutoShipFailureState(
   return {
     consecutiveFailures,
     skippedIssueNumbers,
-    pauseAutoShip: consecutiveFailures >= 3,
+    pauseAutoShip: consecutiveFailures >= MAX_AUTO_SHIP_CONSECUTIVE_FAILURES,
   };
 }
 
@@ -766,6 +768,18 @@ export default function App(): JSX.Element {
     });
     autoShipFailuresRef.current.delete(repo);
     autoShipSkippedRef.current.delete(repo);
+  }
+
+  function enableAutoShipForRepo(repo: string): void {
+    setAutoShipRepos((currentRepos) => {
+      if (currentRepos.has(repo)) {
+        return currentRepos;
+      }
+
+      return new Set(currentRepos).add(repo);
+    });
+    autoShipFailuresRef.current.set(repo, 0);
+    autoShipSkippedRef.current.set(repo, new Set());
   }
 
   const loadIssues = useEffectEvent(async (repo: string) => {
@@ -1981,6 +1995,7 @@ export default function App(): JSX.Element {
                       ) : null}
                       <Button
                         type="button"
+                        aria-pressed={activeRepo ? autoShipRepos.has(activeRepo) : false}
                         variant={
                           activeRepo && autoShipRepos.has(activeRepo) ? 'default' : 'outline'
                         }
@@ -1990,21 +2005,12 @@ export default function App(): JSX.Element {
                             return;
                           }
 
-                          setAutoShipRepos((currentRepos) => {
-                            const nextRepos = new Set(currentRepos);
+                          if (autoShipRepos.has(activeRepo)) {
+                            clearAutoShipStateForRepo(activeRepo);
+                            return;
+                          }
 
-                            if (nextRepos.has(activeRepo)) {
-                              nextRepos.delete(activeRepo);
-                              autoShipFailuresRef.current.delete(activeRepo);
-                              autoShipSkippedRef.current.delete(activeRepo);
-                            } else {
-                              nextRepos.add(activeRepo);
-                              autoShipFailuresRef.current.set(activeRepo, 0);
-                              autoShipSkippedRef.current.set(activeRepo, new Set());
-                            }
-
-                            return nextRepos;
-                          });
+                          enableAutoShipForRepo(activeRepo);
                         }}
                         disabled={!canFetch || !hasActiveRepo}
                       >
