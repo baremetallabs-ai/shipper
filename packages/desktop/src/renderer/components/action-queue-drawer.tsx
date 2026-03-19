@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import type { JSX } from 'react';
 import {
   ChevronLeft,
@@ -111,14 +111,26 @@ export function ActionQueueDrawer({
   const activeCount = commands.filter(
     (command) => command.status === 'queued' || command.status === 'running'
   ).length;
-  const sortedCommands = [...commands].sort((a, b) => {
-    const groupDiff = statusPriority[a.status] - statusPriority[b.status];
-    if (groupDiff !== 0) {
-      return groupDiff;
-    }
+  const commandIndexById = useMemo(
+    () => new Map(commands.map((command, index) => [command.id, index])),
+    [commands]
+  );
+  const sortedCommands = useMemo(
+    () =>
+      [...commands].sort((a, b) => {
+        const groupDiff = statusPriority[a.status] - statusPriority[b.status];
+        if (groupDiff !== 0) {
+          return groupDiff;
+        }
 
-    return commands.indexOf(b) - commands.indexOf(a);
-  });
+        const indexA = commandIndexById.get(a.id) ?? 0;
+        const indexB = commandIndexById.get(b.id) ?? 0;
+        return indexB - indexA;
+      }),
+    [commandIndexById, commands]
+  );
+  const toggleAriaLabel =
+    activeCount > 0 ? `Open action queue (${activeCount} active)` : 'Open action queue';
 
   useEffect(() => {
     const panel = panelRef.current;
@@ -140,8 +152,8 @@ export function ActionQueueDrawer({
         ref={panelRef}
         aria-hidden={!open}
         className={cn(
-          'flex-shrink-0 overflow-hidden border-r border-border transition-[width] duration-200',
-          open ? 'w-[300px]' : 'pointer-events-none w-0'
+          'flex-shrink-0 overflow-hidden transition-[width] duration-200',
+          open ? 'w-[300px] border-r border-border' : 'pointer-events-none w-0'
         )}
       >
         <div className="flex h-full min-w-[300px] flex-col bg-background">
@@ -228,7 +240,7 @@ export function ActionQueueDrawer({
         type="button"
         onClick={onToggle}
         className="relative flex w-5 flex-shrink-0 cursor-pointer items-center justify-center border-r border-border bg-background text-muted-foreground outline-none transition-[color,box-shadow] hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-        aria-label={open ? 'Close action queue' : 'Open action queue'}
+        aria-label={open ? 'Close action queue' : toggleAriaLabel}
       >
         {open ? (
           <ChevronLeft className="h-4 w-4" />

@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
-import type { DragEvent, JSX } from 'react';
+import type { DragEvent, JSX, SetStateAction } from 'react';
 import { ChevronLeft, ChevronRight, EllipsisVertical, LoaderCircle, Square } from 'lucide-react';
 
 import {
@@ -765,6 +765,16 @@ export default function App(): JSX.Element {
     }
   }
 
+  const commitBackgroundCommands = useEffectEvent(
+    (updater: SetStateAction<BackgroundCommandState[]>) => {
+      setBackgroundCommands((currentCommands) => {
+        const nextCommands = typeof updater === 'function' ? updater(currentCommands) : updater;
+        backgroundCommandsRef.current = nextCommands;
+        return nextCommands;
+      });
+    }
+  );
+
   function clearIssueState(): void {
     requestVersionRef.current += 1;
     setIssues([]);
@@ -957,8 +967,7 @@ export default function App(): JSX.Element {
         ? nextCommands.filter((command) => command.id !== event.sessionId)
         : nextCommands;
 
-    backgroundCommandsRef.current = postEventCommands;
-    setBackgroundCommands(postEventCommands);
+    commitBackgroundCommands(postEventCommands);
 
     if (event.status === 'complete') {
       const successToast: BackgroundToastItem =
@@ -1162,10 +1171,6 @@ export default function App(): JSX.Element {
   }, [drawerOpen]);
 
   useEffect(() => {
-    backgroundCommandsRef.current = backgroundCommands;
-  }, [backgroundCommands]);
-
-  useEffect(() => {
     sessionsRef.current = sessions;
   }, [sessions]);
 
@@ -1185,7 +1190,7 @@ export default function App(): JSX.Element {
     const unsubscribe = window.shipperAPI.onBackgroundOutput((event) => {
       const payload = event as BackgroundOutputPayload;
 
-      setBackgroundCommands((currentCommands) =>
+      commitBackgroundCommands((currentCommands) =>
         currentCommands.map((command) => {
           if (command.id !== payload.sessionId) {
             return command;
@@ -1572,10 +1577,7 @@ export default function App(): JSX.Element {
   }
 
   function handleDismissBackground(sessionId: string): void {
-    backgroundCommandsRef.current = backgroundCommandsRef.current.filter(
-      (command) => command.id !== sessionId
-    );
-    setBackgroundCommands((currentCommands) =>
+    commitBackgroundCommands((currentCommands) =>
       currentCommands.filter((command) => command.id !== sessionId)
     );
   }
@@ -1624,7 +1626,7 @@ export default function App(): JSX.Element {
     try {
       await handleRetryBackgroundCommand(toast.retryPayload);
       dismissToast(toastId);
-      setBackgroundCommands((currentCommands) =>
+      commitBackgroundCommands((currentCommands) =>
         currentCommands.filter((command) => command.id !== toast.sessionId)
       );
     } catch (error) {
