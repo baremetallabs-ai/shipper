@@ -530,6 +530,12 @@ export default function App(): JSX.Element {
   const visibleBackgroundCommands = backgroundCommands.filter(
     (command) => command.status !== 'complete'
   );
+  const viewedBackgroundCommand =
+    logViewer.sessionId === null
+      ? null
+      : (backgroundCommands.find((command) => command.id === logViewer.sessionId) ?? null);
+  const viewedBackgroundCommandType = viewedBackgroundCommand?.command ?? null;
+  const viewedBackgroundCommandStatus = viewedBackgroundCommand?.status ?? null;
   const pendingCloseSession =
     pendingCloseSessionId === null
       ? null
@@ -1065,26 +1071,22 @@ export default function App(): JSX.Element {
   }, []);
 
   useEffect(() => {
-    if (!logViewer.open || logViewer.sessionId === null) {
-      return;
-    }
-
-    const activeCommand = backgroundCommands.find((command) => command.id === logViewer.sessionId);
-    if (!activeCommand) {
+    if (!logViewer.open || logViewer.sessionId === null || viewedBackgroundCommandType === null) {
       return;
     }
 
     let cancelled = false;
+    const sessionId = logViewer.sessionId;
 
     const loadOutput = async (): Promise<void> => {
       try {
-        const output = await window.shipperAPI.getBackgroundOutput(logViewer.sessionId as string);
+        const output = await window.shipperAPI.getBackgroundOutput(sessionId);
         if (cancelled) {
           return;
         }
 
         setLogViewer((currentViewer) =>
-          currentViewer.sessionId === logViewer.sessionId
+          currentViewer.sessionId === sessionId
             ? { ...currentViewer, content: output }
             : currentViewer
         );
@@ -1098,7 +1100,7 @@ export default function App(): JSX.Element {
 
     void loadOutput();
 
-    if (activeCommand.command !== 'new' || activeCommand.status !== 'running') {
+    if (viewedBackgroundCommandType !== 'new' || viewedBackgroundCommandStatus !== 'running') {
       return () => {
         cancelled = true;
       };
@@ -1112,7 +1114,12 @@ export default function App(): JSX.Element {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [backgroundCommands, logViewer.open, logViewer.sessionId]);
+  }, [
+    logViewer.open,
+    logViewer.sessionId,
+    viewedBackgroundCommandStatus,
+    viewedBackgroundCommandType,
+  ]);
 
   useEffect(() => {
     if (sessions.length === 0) {

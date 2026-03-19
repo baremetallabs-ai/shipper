@@ -60,6 +60,7 @@ function ToastItem({
 
   return (
     <Alert
+      role={toast.variant === 'error' ? 'alert' : 'status'}
       variant={toast.variant === 'error' ? 'destructive' : 'default'}
       className={cn(
         'background-toast shadow-lg',
@@ -120,7 +121,7 @@ export function BackgroundToastRegion({
   }
 
   return (
-    <section className="background-toast-region" aria-live="polite" aria-atomic="true">
+    <section className="background-toast-region">
       {toasts.map((toast) => (
         <ToastItem key={toast.id} toast={toast} onDismiss={onDismiss} onRetry={onRetry} />
       ))}
