@@ -135,7 +135,7 @@ addModelOption(
       program
         .command('new')
         .description('Create a new issue from a request')
-        .argument('<request...>', 'your idea for the new issue')
+        .argument('[request...]', 'your idea for the new issue')
         .option('--log-file <path>', 'write agent output to a specific log file')
         .action(
           wrapAction(
