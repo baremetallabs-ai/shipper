@@ -115,6 +115,7 @@ describe('shipper-cli', () => {
       const setupHelp = await renderHelp(['setup', '--help']);
 
       expect(newHelp).toContain('Usage: shipper new [options] [request...]');
+      expect(newHelp).toContain('Create a new issue interactively or from a request');
       expect(newHelp).toContain('--mode <mode>');
       expect(newHelp).toContain('--model <model>');
       expect(newHelp).toContain('--log-file <path>');
