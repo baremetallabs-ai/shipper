@@ -484,6 +484,14 @@ export async function processResult(opts: {
     );
   }
 
+  if (result.verdict === 'accept' && opts.stage === 'pr_open' && !result.pr_spec) {
+    throw new Error('pr_open accept requires a pr_spec in result.json');
+  }
+
+  if (result.verdict === 'accept' && opts.stage === 'pr_review' && !result.review_payload) {
+    throw new Error('pr_review accept requires a review_payload in result.json');
+  }
+
   if (result.verdict === 'accept' && result.pr_spec) {
     await createPrFromSpec(opts.repo, opts.cwd, result.pr_spec);
   }
