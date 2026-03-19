@@ -826,15 +826,21 @@ describe('selectBlockedIssues', () => {
 });
 
 describe('printUnblockSummary', () => {
-  it('prints each attempt with unblock #<issue> reference and correct outcome markers', () => {
+  it('prints one final outcome row per issue while preserving every unblock log file', () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     const attempts: UnblockAttempt[] = [
       {
         issue: 12,
         title: 'Fix database migration',
-        outcome: 'unblocked',
+        outcome: 'still blocked',
         logFile: '/mock-home/.shipper/logs/unblock-12-20260318T040000.log',
+      },
+      {
+        issue: 12,
+        title: 'Fix database migration',
+        outcome: 'unblocked',
+        logFile: '/mock-home/.shipper/logs/unblock-12-20260318T050000.log',
       },
       {
         issue: 15,
@@ -846,17 +852,49 @@ describe('printUnblockSummary', () => {
 
     printUnblockSummary(attempts, '/mock-home');
 
+    const entries = getConsoleEntries(logSpy);
     const output = getConsoleOutput(logSpy);
+    const retriedIssueRows = entries.filter((entry) => entry.includes('Fix database migration'));
+    const singleAttemptIssueRows = entries.filter((entry) => entry.includes('Add OAuth provider'));
+
     expect(output).toContain('Unblock attempts:');
-    expect(output).toContain('unblock #12');
-    expect(output).toContain('Fix database migration');
-    expect(output).toContain('✓ unblocked');
-    expect(output).toContain('unblock #15');
-    expect(output).toContain('Add OAuth provider');
-    expect(output).toContain('— still blocked');
+    expect(retriedIssueRows).toHaveLength(1);
+    expect(retriedIssueRows[0]).toContain('unblock #12');
+    expect(retriedIssueRows[0]).toContain('✓ unblocked');
+    expect(singleAttemptIssueRows).toHaveLength(1);
+    expect(singleAttemptIssueRows[0]).toContain('unblock #15');
+    expect(singleAttemptIssueRows[0]).toContain('— still blocked');
     expect(output).toContain('Unblock log files:');
     expect(output).toContain('~/.shipper/logs/unblock-12-20260318T040000.log');
+    expect(output).toContain('~/.shipper/logs/unblock-12-20260318T050000.log');
     expect(output).toContain('~/.shipper/logs/unblock-15-20260318T040000.log');
+
+    logSpy.mockRestore();
+  });
+
+  it('prints one still-blocked outcome row when the same issue remains blocked across attempts', () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const attempts: UnblockAttempt[] = [
+      {
+        issue: 21,
+        title: 'Stabilize flaky deployment',
+        outcome: 'still blocked',
+      },
+      {
+        issue: 21,
+        title: 'Stabilize flaky deployment',
+        outcome: 'still blocked',
+      },
+    ];
+
+    printUnblockSummary(attempts);
+
+    const entries = getConsoleEntries(logSpy);
+    const blockedRows = entries.filter((entry) => entry.includes('Stabilize flaky deployment'));
+
+    expect(blockedRows).toHaveLength(1);
+    expect(blockedRows[0]).toContain('— still blocked');
 
     logSpy.mockRestore();
   });
