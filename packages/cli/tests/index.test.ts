@@ -110,12 +110,13 @@ describe('shipper-cli', () => {
       expect(mockRunPreflight).not.toHaveBeenCalled();
     });
 
-    it('shows --mode and --model on prompt-running command help and removes --headless from new', async () => {
+    it('shows --mode, --model, and --log-file on new help and removes --headless from new', async () => {
       const newHelp = await renderHelp(['new', '--help']);
       const setupHelp = await renderHelp(['setup', '--help']);
 
       expect(newHelp).toContain('--mode <mode>');
       expect(newHelp).toContain('--model <model>');
+      expect(newHelp).toContain('--log-file <path>');
       expect(newHelp).not.toContain('--headless');
       expect(setupHelp).toContain('--mode <mode>');
       expect(setupHelp).toContain('--model <model>');
@@ -218,7 +219,7 @@ describe('shipper-cli', () => {
       await import('../src/index.ts');
     }
 
-    it('passes mode and model to newCommand', async () => {
+    it('passes mode, model, and logFile to newCommand', async () => {
       process.argv = [
         'node',
         'src/index.ts',
@@ -228,6 +229,8 @@ describe('shipper-cli', () => {
         'headless',
         '--model',
         'sonnet',
+        '--log-file',
+        '/tmp/example.jsonl',
       ];
 
       await importEntrypoint();
@@ -235,6 +238,7 @@ describe('shipper-cli', () => {
       expect(mockNewCommand).toHaveBeenCalledWith(['request'], {
         mode: 'headless',
         model: 'sonnet',
+        logFile: '/tmp/example.jsonl',
       });
     });
 

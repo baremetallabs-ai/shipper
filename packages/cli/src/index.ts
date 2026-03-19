@@ -136,16 +136,18 @@ addModelOption(
         .command('new')
         .description('Create a new issue from a request')
         .argument('<request...>', 'your idea for the new issue')
+        .option('--log-file <path>', 'write agent output to a specific log file')
         .action(
           wrapAction(
             async (
               request: string[],
-              options: { mode: string; agent?: string; model?: string }
+              options: { mode: string; agent?: string; model?: string; logFile?: string }
             ) => {
               await newCommand(request, {
                 mode: options.mode as CommandMode,
                 agent: options.agent as AgentName | undefined,
                 model: options.model,
+                logFile: options.logFile,
               });
             }
           )
