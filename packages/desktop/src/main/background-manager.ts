@@ -1,6 +1,9 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import type { Readable } from 'node:stream';
 import type { BrowserWindow } from 'electron';
+
+type BackgroundChildProcess = ChildProcessByStdio<null, Readable, Readable>;
 
 export type BackgroundCommand = 'new' | 'ship' | 'init';
 export type BackgroundStatus = 'queued' | 'running' | 'complete' | 'failed';
@@ -62,7 +65,7 @@ interface BackgroundSession {
   commandName: string;
   args: string[];
   cwd: string;
-  child?: ChildProcessWithoutNullStreams;
+  child?: BackgroundChildProcess;
   outputChunks: string[];
   status: BackgroundStatus;
   exitCode?: number | null;
@@ -164,23 +167,27 @@ export class BackgroundManager {
     if (!child) {
       return;
     }
+    const childPid = child.pid;
+    if (childPid === undefined) {
+      return;
+    }
 
     session.meta = { ...session.meta, cancelled: true };
 
     try {
-      process.kill(child.pid, 'SIGTERM');
+      process.kill(childPid, 'SIGTERM');
     } catch {
       // Already exited.
     }
 
     setTimeout(() => {
       const activeSession = this.sessions.get(sessionId);
-      if (!activeSession?.child || activeSession.child.pid !== child.pid) {
+      if (!activeSession?.child || activeSession.child.pid !== childPid) {
         return;
       }
 
       try {
-        process.kill(child.pid, 'SIGKILL');
+        process.kill(childPid, 'SIGKILL');
       } catch {
         // Already exited.
       }
