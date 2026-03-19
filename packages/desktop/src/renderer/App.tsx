@@ -1602,47 +1602,11 @@ export default function App(): JSX.Element {
             )}
           >
             <div className="mx-auto flex max-w-7xl flex-col gap-4 px-6 py-5">
-              <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">
-                    Shipper Desktop
-                  </p>
-                  <h1 className="text-2xl font-semibold tracking-tight">Pipeline</h1>
-                </div>
-                <div className="flex items-center gap-3">
-                  {lastUpdated ? (
-                    <p className="text-sm text-muted-foreground">
-                      Last updated {dateFormatter.format(lastUpdated)}
-                    </p>
-                  ) : null}
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setIsNewIssueOpen(true);
-                    }}
-                    disabled={!canFetch || !hasActiveRepo || repoInitialized !== true}
-                  >
-                    New Issue
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setIsAdoptOpen(true);
-                    }}
-                    disabled={!canFetch || !hasActiveRepo || repoInitialized !== true}
-                  >
-                    Adopt
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      void handleRefresh();
-                    }}
-                    disabled={!canFetch || !hasActiveRepo || isLoading}
-                  >
-                    {isLoading ? 'Refreshing...' : 'Refresh'}
-                  </Button>
-                </div>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">
+                  Shipper Desktop
+                </p>
+                <h1 className="text-2xl font-semibold tracking-tight">Pipeline</h1>
               </div>
               <BackgroundStatusIndicator
                 commands={visibleBackgroundCommands.map((command) => ({
@@ -1707,6 +1671,43 @@ export default function App(): JSX.Element {
                   Dismiss
                 </Button>
               </Alert>
+            ) : null}
+
+            {hasActiveRepo && repoInitialized === true ? (
+              <div className="flex items-center justify-end gap-3">
+                {lastUpdated ? (
+                  <p className="text-sm text-muted-foreground">
+                    Last updated {dateFormatter.format(lastUpdated)}
+                  </p>
+                ) : null}
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setIsNewIssueOpen(true);
+                  }}
+                  disabled={!canFetch}
+                >
+                  New Issue
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setIsAdoptOpen(true);
+                  }}
+                  disabled={!canFetch}
+                >
+                  Adopt
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    void handleRefresh();
+                  }}
+                  disabled={!canFetch || isLoading}
+                >
+                  {isLoading ? 'Refreshing...' : 'Refresh'}
+                </Button>
+              </div>
             ) : null}
 
             {repos.length === 0 ? (
