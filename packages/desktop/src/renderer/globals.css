@@ -133,14 +133,12 @@
   }
 
   .background-log-viewer {
-    background:
-      linear-gradient(to bottom, color-mix(in oklch, var(--background) 92%, black 8%), var(--background));
-    font-family:
-      'SFMono-Regular',
-      'SF Mono',
-      'Cascadia Code',
-      'JetBrains Mono',
-      monospace;
+    background: linear-gradient(
+      to bottom,
+      color-mix(in oklch, var(--background) 92%, black 8%),
+      var(--background)
+    );
+    font-family: 'SFMono-Regular', 'SF Mono', 'Cascadia Code', 'JetBrains Mono', monospace;
   }
 
   .nautical-wave-border {
