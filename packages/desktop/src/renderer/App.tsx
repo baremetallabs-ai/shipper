@@ -1475,8 +1475,10 @@ export default function App(): JSX.Element {
       <NewIssueDialog
         open={isNewIssueOpen}
         onOpenChange={setIsNewIssueOpen}
-        onSubmit={(request) => {
-          void handleShipperNew(request);
+        repos={repos}
+        activeRepo={activeRepo}
+        onSubmit={(request, repo) => {
+          void handleShipperNew(request, repo);
         }}
       />
       <AdoptDialog

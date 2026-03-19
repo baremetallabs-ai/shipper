@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { JSX, KeyboardEvent, SyntheticEvent } from 'react';
 
 import {
@@ -12,12 +12,30 @@ import {
 interface NewIssueDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSubmit: (request: string) => void;
+  repos: string[];
+  activeRepo: string;
+  onSubmit: (request: string, repo: string) => void;
 }
 
-export function NewIssueDialog({ open, onOpenChange, onSubmit }: NewIssueDialogProps): JSX.Element {
+export function NewIssueDialog({
+  open,
+  onOpenChange,
+  repos,
+  activeRepo,
+  onSubmit,
+}: NewIssueDialogProps): JSX.Element {
   const [request, setRequest] = useState('');
+  const [selectedRepo, setSelectedRepo] = useState(activeRepo);
   const formRef = useRef<HTMLFormElement>(null);
+  const wasOpenRef = useRef(open);
+
+  useEffect(() => {
+    if (open && !wasOpenRef.current) {
+      setSelectedRepo(activeRepo);
+    }
+
+    wasOpenRef.current = open;
+  }, [activeRepo, open]);
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>): void {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -31,7 +49,7 @@ export function NewIssueDialog({ open, onOpenChange, onSubmit }: NewIssueDialogP
     const trimmed = request.trim();
     if (!trimmed) return;
 
-    onSubmit(trimmed);
+    onSubmit(trimmed, selectedRepo);
     setRequest('');
     onOpenChange(false);
   }
@@ -47,6 +65,23 @@ export function NewIssueDialog({ open, onOpenChange, onSubmit }: NewIssueDialogP
         </DialogHeader>
 
         <form ref={formRef} onSubmit={handleSubmit} className="px-6 py-4">
+          <label className="mb-3 block">
+            <span className="mb-1 block text-sm font-medium text-foreground">Repository</span>
+            <select
+              value={selectedRepo}
+              onChange={(e) => {
+                setSelectedRepo(e.target.value);
+              }}
+              disabled={repos.length === 1}
+              className="border-input bg-card text-foreground focus-visible:border-ring focus-visible:ring-ring/50 block h-9 w-full rounded-md border px-3 py-1 text-sm transition-[color,box-shadow] outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {repos.map((repo) => (
+                <option key={repo} value={repo}>
+                  {repo}
+                </option>
+              ))}
+            </select>
+          </label>
           <textarea
             value={request}
             onChange={(e) => {
