@@ -18,6 +18,9 @@ import {
 import type { ListIssueItem, WorkflowStage } from '@dnsquared/shipper-core';
 
 import { AdoptDialog } from './components/adopt-dialog.js';
+import { BackgroundLogViewer } from './components/background-log-viewer.js';
+import { BackgroundStatusIndicator } from './components/background-status-indicator.js';
+import { BackgroundToastRegion } from './components/background-toast-region.js';
 import { NewIssueDialog } from './components/new-issue-dialog.js';
 import { ResetConfirmDialog } from './components/reset-confirm-dialog.js';
 import { RepoPickerDialog } from './components/repo-picker-dialog.js';
@@ -66,6 +69,69 @@ type ResetSelection = {
   issue: ListIssueItem;
   targetStage: WorkflowStage;
 };
+type BackgroundCommandKind = 'new' | 'ship' | 'init';
+type BackgroundCommandStatus = 'queued' | 'running' | 'complete' | 'failed';
+type BackgroundRetryPayload =
+  | { command: 'new'; repo: string; request: string }
+  | { command: 'ship'; repo: string; issueNumber: number }
+  | { command: 'init'; repo: string };
+
+interface BackgroundStatusMeta {
+  issueNumber?: number;
+  issueUrl?: string;
+  logFile?: string;
+  request?: string;
+  cancelled?: boolean;
+}
+
+interface BackgroundStatusPayload {
+  sessionId: string;
+  command: BackgroundCommandKind;
+  repo: string;
+  status: BackgroundCommandStatus;
+  exitCode?: number | null;
+  meta?: BackgroundStatusMeta;
+}
+
+interface BackgroundOutputPayload {
+  sessionId: string;
+  data: string;
+}
+
+interface BackgroundCommandState {
+  id: string;
+  command: BackgroundCommandKind;
+  repo: string;
+  status: BackgroundCommandStatus;
+  title: string;
+  detail: string;
+  output: string;
+  request?: string;
+  issueNumber?: number;
+  issueUrl?: string;
+  logFile?: string;
+  exitCode?: number | null;
+  cancelled: boolean;
+}
+
+interface BackgroundToastItem {
+  id: string;
+  sessionId: string;
+  variant: 'success' | 'error' | 'cancelled';
+  title: string;
+  description: string;
+  issueUrl?: string;
+  issueLabel?: string;
+  retryable?: boolean;
+  retryPayload?: BackgroundRetryPayload;
+}
+
+interface BackgroundLogViewerState {
+  open: boolean;
+  sessionId: string | null;
+  title: string;
+  content: string;
+}
 
 const repoPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
@@ -110,8 +176,107 @@ function toRepoKey(repo: string): string {
   return repo.trim().toLowerCase();
 }
 
-function buildNewSessionLabel(request: string): string {
-  return `new — ${request.trim().slice(0, 30)}`;
+function getLatestOutputLine(output: string): string | null {
+  const lines = output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  return lines.at(-1) ?? null;
+}
+
+function getBackgroundTitle(
+  command: BackgroundCommandKind,
+  repo: string,
+  issueNumber?: number
+): string {
+  switch (command) {
+    case 'new':
+      return 'New issue';
+    case 'ship':
+      return issueNumber ? `Ship #${issueNumber}` : 'Ship';
+    case 'init':
+      return `Init ${repo}`;
+  }
+}
+
+function getBackgroundDetail({
+  command,
+  status,
+  repo,
+  issueNumber,
+  latestOutput,
+  cancelled,
+}: {
+  command: BackgroundCommandKind;
+  status: BackgroundCommandStatus;
+  repo: string;
+  issueNumber?: number;
+  latestOutput?: string | null;
+  cancelled?: boolean;
+}): string {
+  if (cancelled) {
+    return 'Cancelled';
+  }
+
+  if (status === 'queued' && command === 'ship' && issueNumber) {
+    return `Ship #${issueNumber} queued`;
+  }
+
+  if (status === 'failed') {
+    return latestOutput ?? 'Command failed';
+  }
+
+  if (status === 'complete') {
+    switch (command) {
+      case 'new':
+        return 'Issue created';
+      case 'ship':
+        return 'Ship completed';
+      case 'init':
+        return 'Initialization complete';
+    }
+  }
+
+  if (command === 'new') {
+    return 'Creating issue...';
+  }
+
+  if (command === 'ship') {
+    return latestOutput ?? (issueNumber ? `Shipping #${issueNumber}...` : 'Shipping...');
+  }
+
+  return latestOutput ?? `Initializing ${repo}...`;
+}
+
+function getBackgroundRetryPayload(
+  command: BackgroundCommandKind,
+  repo: string,
+  request?: string,
+  issueNumber?: number
+): BackgroundRetryPayload | undefined {
+  switch (command) {
+    case 'new':
+      return request ? { command, repo, request } : undefined;
+    case 'ship':
+      return issueNumber ? { command, repo, issueNumber } : undefined;
+    case 'init':
+      return { command, repo };
+  }
+}
+
+function getBackgroundLogTitle(
+  command: BackgroundCommandKind,
+  repo: string,
+  issueNumber?: number
+): string {
+  switch (command) {
+    case 'new':
+      return `New issue logs — ${repo}`;
+    case 'ship':
+      return issueNumber ? `Ship #${issueNumber} logs` : `Ship logs — ${repo}`;
+    case 'init':
+      return `Init logs — ${repo}`;
+  }
 }
 
 function getNextActiveSessionId(
@@ -331,6 +496,14 @@ export default function App(): JSX.Element {
   const [isNewIssueOpen, setIsNewIssueOpen] = useState(false);
   const [isAdoptOpen, setIsAdoptOpen] = useState(false);
   const [repoInitialized, setRepoInitialized] = useState<boolean | null>(null);
+  const [backgroundCommands, setBackgroundCommands] = useState<BackgroundCommandState[]>([]);
+  const [toasts, setToasts] = useState<BackgroundToastItem[]>([]);
+  const [logViewer, setLogViewer] = useState<BackgroundLogViewerState>({
+    open: false,
+    sessionId: null,
+    title: '',
+    content: '',
+  });
   const [sessions, setSessions] = useState<TerminalSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [pendingCloseSessionId, setPendingCloseSessionId] = useState<string | null>(null);
@@ -345,6 +518,7 @@ export default function App(): JSX.Element {
   const contentPaneRef = useRef<HTMLDivElement | null>(null);
   const toggleButtonRef = useRef<HTMLButtonElement | null>(null);
   const drawerPanelRef = useRef<HTMLDivElement | null>(null);
+  const backgroundCommandsRef = useRef<BackgroundCommandState[]>([]);
   const sessionsRef = useRef<TerminalSession[]>([]);
   const activeSessionIdRef = useRef<string | null>(null);
   const lastOutputAtBySessionRef = useRef<Map<string, number>>(new Map());
@@ -353,6 +527,9 @@ export default function App(): JSX.Element {
   const canFetch = prerequisites !== null && prerequisiteMessage === null;
   const hasActiveRepo = activeRepo.length > 0 && isValidRepo(activeRepo);
   const hasSession = sessions.length > 0;
+  const visibleBackgroundCommands = backgroundCommands.filter(
+    (command) => command.status !== 'complete'
+  );
   const pendingCloseSession =
     pendingCloseSessionId === null
       ? null
@@ -461,15 +638,171 @@ export default function App(): JSX.Element {
     }
   });
 
-  const refreshAfterInit = useEffectEvent(async () => {
-    if (activeRepo) {
-      void checkInitState(activeRepo);
-      await loadIssues(activeRepo);
+  const persistConfig = useEffectEvent(async (config: AppConfig) => {
+    await window.shipperAPI.setConfig(config);
+  });
+
+  const dismissToast = useEffectEvent((toastId: string) => {
+    setToasts((currentToasts) => currentToasts.filter((toast) => toast.id !== toastId));
+  });
+
+  const refreshRepoAfterBackground = useEffectEvent(
+    async (repo: string, command: BackgroundCommandKind, status: BackgroundCommandStatus) => {
+      if (repo !== activeRepo) {
+        return;
+      }
+
+      if (command === 'new' && status === 'complete') {
+        await loadIssues(repo);
+        return;
+      }
+
+      if (command === 'init' && status === 'complete') {
+        void checkInitState(repo);
+        await loadIssues(repo);
+        return;
+      }
+
+      if (command === 'ship' && (status === 'complete' || status === 'failed')) {
+        await loadIssues(repo);
+      }
+    }
+  );
+
+  const handleRetryBackgroundCommand = useEffectEvent(async (payload: BackgroundRetryPayload) => {
+    switch (payload.command) {
+      case 'new':
+        await window.shipperAPI.spawnBackgroundNew(payload.request, payload.repo);
+        return;
+      case 'ship':
+        await window.shipperAPI.spawnBackgroundShip(payload.issueNumber, payload.repo);
+        return;
+      case 'init':
+        await window.shipperAPI.spawnBackgroundInit(payload.repo);
     }
   });
 
-  const persistConfig = useEffectEvent(async (config: AppConfig) => {
-    await window.shipperAPI.setConfig(config);
+  const pushToast = useEffectEvent((toast: BackgroundToastItem) => {
+    setToasts((currentToasts) => {
+      const nextToasts = currentToasts.filter((item) => item.id !== toast.id);
+      return [...nextToasts, toast];
+    });
+  });
+
+  const handleBackgroundStatus = useEffectEvent(async (event: BackgroundStatusPayload) => {
+    const previousCommand = backgroundCommandsRef.current.find(
+      (command) => command.id === event.sessionId
+    );
+    const output = previousCommand?.output ?? '';
+    const latestOutput = getLatestOutputLine(output);
+    const request = event.meta?.request ?? previousCommand?.request;
+    const issueNumber = event.meta?.issueNumber ?? previousCommand?.issueNumber;
+    const issueUrl = event.meta?.issueUrl ?? previousCommand?.issueUrl;
+    const logFile = event.meta?.logFile ?? previousCommand?.logFile;
+    const cancelled = event.meta?.cancelled ?? previousCommand?.cancelled ?? false;
+    const nextCommand: BackgroundCommandState = {
+      id: event.sessionId,
+      command: event.command,
+      repo: event.repo,
+      status: event.status,
+      title: getBackgroundTitle(event.command, event.repo, issueNumber),
+      detail: getBackgroundDetail({
+        command: event.command,
+        status: event.status,
+        repo: event.repo,
+        issueNumber,
+        latestOutput,
+        cancelled,
+      }),
+      output,
+      request,
+      issueNumber,
+      issueUrl,
+      logFile,
+      exitCode: event.exitCode,
+      cancelled,
+    };
+
+    setBackgroundCommands((currentCommands) => {
+      const existingIndex = currentCommands.findIndex((command) => command.id === event.sessionId);
+      const nextCommands =
+        existingIndex >= 0
+          ? currentCommands.map((command, index) =>
+              index === existingIndex ? nextCommand : command
+            )
+          : [...currentCommands, nextCommand];
+
+      if (event.status === 'complete') {
+        return nextCommands.filter((command) => command.id !== event.sessionId);
+      }
+
+      return nextCommands;
+    });
+
+    if (event.status === 'complete') {
+      const successToast: BackgroundToastItem =
+        event.command === 'new'
+          ? {
+              id: event.sessionId,
+              sessionId: event.sessionId,
+              variant: 'success',
+              title: issueNumber ? `Issue #${issueNumber} created` : 'Issue created',
+              description:
+                issueNumber && issueUrl
+                  ? 'The new issue is ready in GitHub.'
+                  : 'The new issue command completed successfully.',
+              issueUrl,
+              issueLabel: issueNumber ? `Open issue #${issueNumber}` : undefined,
+            }
+          : {
+              id: event.sessionId,
+              sessionId: event.sessionId,
+              variant: 'success',
+              title:
+                event.command === 'init'
+                  ? `Initialized ${event.repo}`
+                  : issueNumber
+                    ? `Ship #${issueNumber} finished`
+                    : 'Ship finished',
+              description:
+                event.command === 'init'
+                  ? 'Repository labels and settings were updated.'
+                  : 'The background ship command completed successfully.',
+            };
+      pushToast(successToast);
+      await refreshRepoAfterBackground(event.repo, event.command, event.status);
+      return;
+    }
+
+    if (event.status === 'failed') {
+      if (cancelled) {
+        pushToast({
+          id: event.sessionId,
+          sessionId: event.sessionId,
+          variant: 'cancelled',
+          title: `${nextCommand.title} cancelled`,
+          description: 'The background command was stopped before it finished.',
+        });
+      } else {
+        pushToast({
+          id: event.sessionId,
+          sessionId: event.sessionId,
+          variant: 'error',
+          title: `${nextCommand.title} failed`,
+          description:
+            latestOutput ??
+            (event.exitCode === null || event.exitCode === undefined
+              ? 'The background command exited unsuccessfully.'
+              : `The command exited with code ${event.exitCode}.`),
+          retryable: getBackgroundRetryPayload(event.command, event.repo, request, issueNumber)
+            ? true
+            : false,
+          retryPayload: getBackgroundRetryPayload(event.command, event.repo, request, issueNumber),
+        });
+      }
+
+      await refreshRepoAfterBackground(event.repo, event.command, event.status);
+    }
   });
 
   useEffect(() => {
@@ -543,12 +876,72 @@ export default function App(): JSX.Element {
   }, [drawerOpen]);
 
   useEffect(() => {
+    backgroundCommandsRef.current = backgroundCommands;
+  }, [backgroundCommands]);
+
+  useEffect(() => {
     sessionsRef.current = sessions;
   }, [sessions]);
 
   useEffect(() => {
     activeSessionIdRef.current = activeSessionId;
   }, [activeSessionId]);
+
+  useEffect(() => {
+    const unsubscribe = window.shipperAPI.onBackgroundStatus((event) => {
+      void handleBackgroundStatus(event as BackgroundStatusPayload);
+    });
+
+    return unsubscribe;
+  }, [handleBackgroundStatus]);
+
+  useEffect(() => {
+    const unsubscribe = window.shipperAPI.onBackgroundOutput((event) => {
+      const payload = event as BackgroundOutputPayload;
+
+      setBackgroundCommands((currentCommands) =>
+        currentCommands.map((command) => {
+          if (command.id !== payload.sessionId) {
+            return command;
+          }
+
+          const output = `${command.output}${payload.data}`;
+          return {
+            ...command,
+            output,
+            detail: getBackgroundDetail({
+              command: command.command,
+              status: command.status,
+              repo: command.repo,
+              issueNumber: command.issueNumber,
+              latestOutput: getLatestOutputLine(output),
+              cancelled: command.cancelled,
+            }),
+          };
+        })
+      );
+
+      setLogViewer((currentViewer) => {
+        if (!currentViewer.open || currentViewer.sessionId !== payload.sessionId) {
+          return currentViewer;
+        }
+
+        const activeCommand = backgroundCommandsRef.current.find(
+          (command) => command.id === payload.sessionId
+        );
+        if (activeCommand?.command === 'new') {
+          return currentViewer;
+        }
+
+        return {
+          ...currentViewer,
+          content: `${currentViewer.content}${payload.data}`,
+        };
+      });
+    });
+
+    return unsubscribe;
+  }, []);
 
   useEffect(() => {
     if (pendingCloseSessionId !== null && pendingCloseSession === null) {
@@ -649,10 +1042,6 @@ export default function App(): JSX.Element {
 
   useEffect(() => {
     const unsubscribe = window.shipperAPI.onPtyExit((event) => {
-      const exitedSession = sessionsRef.current.find(
-        (session) => session.id === event.sessionId && session.status !== 'exited'
-      );
-
       setSessions((currentSessions) => {
         const sessionIndex = currentSessions.findIndex(
           (session) => session.id === event.sessionId && session.status !== 'exited'
@@ -670,14 +1059,60 @@ export default function App(): JSX.Element {
         nextSessions[sessionIndex] = { ...session, status: 'exited' };
         return nextSessions;
       });
-
-      if (exitedSession?.label.startsWith('init \u2014') && event.exitCode === 0) {
-        void refreshAfterInit();
-      }
     });
 
     return unsubscribe;
   }, []);
+
+  useEffect(() => {
+    if (!logViewer.open || logViewer.sessionId === null) {
+      return;
+    }
+
+    const activeCommand = backgroundCommands.find((command) => command.id === logViewer.sessionId);
+    if (!activeCommand) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadOutput = async (): Promise<void> => {
+      try {
+        const output = await window.shipperAPI.getBackgroundOutput(logViewer.sessionId as string);
+        if (cancelled) {
+          return;
+        }
+
+        setLogViewer((currentViewer) =>
+          currentViewer.sessionId === logViewer.sessionId
+            ? { ...currentViewer, content: output }
+            : currentViewer
+        );
+      } catch (error) {
+        if (!cancelled) {
+          const message = error instanceof Error ? error.message : String(error);
+          setFetchError(`Failed to load background logs: ${message}`);
+        }
+      }
+    };
+
+    void loadOutput();
+
+    if (activeCommand.command !== 'new' || activeCommand.status !== 'running') {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const intervalId = window.setInterval(() => {
+      void loadOutput();
+    }, 1_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [backgroundCommands, logViewer.open, logViewer.sessionId]);
 
   useEffect(() => {
     if (sessions.length === 0) {
@@ -734,17 +1169,16 @@ export default function App(): JSX.Element {
     setDrawerOpen(true);
   }
 
-  async function handleShipperNew(request: string): Promise<void> {
+  async function handleShipperNew(request: string, repo = activeRepo): Promise<void> {
     try {
-      const result = await window.shipperAPI.spawnShipperNew(request, activeRepo, 120, 30);
-      openRunningSession(result.sessionId, buildNewSessionLabel(request));
+      await window.shipperAPI.spawnBackgroundNew(request, repo);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setFetchError(`Failed to launch shipper new: ${message}`);
     }
   }
 
-  function focusExistingIssueSession(issueNumber: number): boolean {
+  function focusExistingGroomSession(issueNumber: number): boolean {
     const existing = findActiveIssueSession(sessionsRef.current, activeRepo, issueNumber);
     if (existing) {
       setActiveSessionId(existing.id);
@@ -755,7 +1189,7 @@ export default function App(): JSX.Element {
   }
 
   async function handleShipperGroom(issueNumber: number): Promise<void> {
-    if (focusExistingIssueSession(issueNumber)) return;
+    if (focusExistingGroomSession(issueNumber)) return;
 
     try {
       const result = await window.shipperAPI.spawnShipperGroom(issueNumber, activeRepo, 120, 30);
@@ -769,25 +1203,18 @@ export default function App(): JSX.Element {
     }
   }
 
-  async function handleShipperShip(issueNumber: number): Promise<void> {
-    if (focusExistingIssueSession(issueNumber)) return;
-
+  async function handleShipperShip(issueNumber: number, repo = activeRepo): Promise<void> {
     try {
-      const result = await window.shipperAPI.spawnShipperShip(issueNumber, activeRepo, 120, 30);
-      openRunningSession(result.sessionId, `ship — #${issueNumber}`, {
-        repo: activeRepo,
-        issueNumber,
-      });
+      await window.shipperAPI.spawnBackgroundShip(issueNumber, repo);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setFetchError(`Failed to launch shipper ship: ${message}`);
     }
   }
 
-  async function handleShipperInit(): Promise<void> {
+  async function handleShipperInit(repo = activeRepo): Promise<void> {
     try {
-      const result = await window.shipperAPI.spawnShipperInit(activeRepo, 120, 30);
-      openRunningSession(result.sessionId, `init \u2014 ${activeRepo}`);
+      await window.shipperAPI.spawnBackgroundInit(repo);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setFetchError(`Failed to launch shipper init: ${message}`);
@@ -815,6 +1242,59 @@ export default function App(): JSX.Element {
 
   function handleToggleDrawer(): void {
     setDrawerOpen((current) => !current);
+  }
+
+  async function handleCancelBackground(sessionId: string): Promise<void> {
+    try {
+      await window.shipperAPI.killBackground(sessionId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setFetchError(`Failed to cancel background command: ${message}`);
+    }
+  }
+
+  async function handleShowBackgroundLogs(sessionId: string): Promise<void> {
+    const command = backgroundCommandsRef.current.find((item) => item.id === sessionId);
+    if (!command) {
+      return;
+    }
+
+    setLogViewer({
+      open: true,
+      sessionId,
+      title: getBackgroundLogTitle(command.command, command.repo, command.issueNumber),
+      content: command.command === 'new' ? '' : command.output,
+    });
+
+    try {
+      const output = await window.shipperAPI.getBackgroundOutput(sessionId);
+      setLogViewer((currentViewer) =>
+        currentViewer.sessionId === sessionId
+          ? { ...currentViewer, content: output }
+          : currentViewer
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setFetchError(`Failed to open background logs: ${message}`);
+    }
+  }
+
+  async function handleRetryToast(toastId: string): Promise<void> {
+    const toast = toasts.find((item) => item.id === toastId);
+    if (!toast?.retryPayload) {
+      return;
+    }
+
+    try {
+      await handleRetryBackgroundCommand(toast.retryPayload);
+      dismissToast(toastId);
+      setBackgroundCommands((currentCommands) =>
+        currentCommands.filter((command) => command.id !== toast.sessionId)
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setFetchError(`Failed to retry background command: ${message}`);
+    }
   }
 
   function focusVisibleShell(preferToggle: boolean): void {
@@ -959,6 +1439,26 @@ export default function App(): JSX.Element {
 
   return (
     <div className="flex h-screen flex-col bg-transparent">
+      <BackgroundToastRegion
+        toasts={toasts}
+        onDismiss={dismissToast}
+        onRetry={(toastId) => {
+          void handleRetryToast(toastId);
+        }}
+      />
+      <BackgroundLogViewer
+        open={logViewer.open}
+        title={logViewer.title}
+        content={logViewer.content}
+        onOpenChange={(open) => {
+          setLogViewer((currentViewer) => ({
+            ...currentViewer,
+            open,
+            content: open ? currentViewer.content : '',
+            sessionId: open ? currentViewer.sessionId : null,
+          }));
+        }}
+      />
       <RepoPickerDialog
         open={isPickerOpen}
         onOpenChange={setIsPickerOpen}
@@ -1091,6 +1591,28 @@ export default function App(): JSX.Element {
                   </Button>
                 </div>
               </div>
+              <BackgroundStatusIndicator
+                commands={visibleBackgroundCommands.map((command) => ({
+                  id: command.id,
+                  command: command.command,
+                  status: command.status,
+                  title: command.title,
+                  detail: command.detail,
+                  canCancel: command.status === 'queued' || command.status === 'running',
+                  canShowLogs:
+                    command.command === 'new'
+                      ? Boolean(command.logFile)
+                      : command.output.length > 0 || command.status !== 'queued',
+                  cancelled: command.cancelled,
+                }))}
+                onCancel={(sessionId) => {
+                  void handleCancelBackground(sessionId);
+                }}
+                onShowLogs={(sessionId) => {
+                  void handleShowBackgroundLogs(sessionId);
+                }}
+                className="md:justify-start"
+              />
             </div>
             {repos.length > 0 ? (
               <RepoTabBar
