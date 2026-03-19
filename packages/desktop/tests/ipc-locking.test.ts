@@ -1,3 +1,6 @@
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 type IpcHandler = (event: unknown, payload: unknown) => unknown;
@@ -20,6 +23,11 @@ const state = vi.hoisted(() => ({
   isLockStaleMock: vi.fn(),
   listIssuesMock: vi.fn(),
   scanArtifactsMock: vi.fn(),
+  backgroundSetWindowMock: vi.fn(),
+  backgroundSpawnMock: vi.fn<(options: Record<string, unknown>) => void>(),
+  backgroundKillMock: vi.fn<(sessionId: string) => void>(),
+  backgroundGetOutputMock: vi.fn<(sessionId: string) => Promise<string> | string>(),
+  backgroundDestroyAllMock: vi.fn(),
   ptySetWindowMock: vi.fn(),
   ptySpawnMock: vi.fn(),
   ptyOnSessionExitMock: vi.fn(),
@@ -39,6 +47,7 @@ const state = vi.hoisted(() => ({
   browserWindowGetAllWindowsMock: vi.fn(),
   webContentsSendMock: vi.fn(),
   ipcHandleMock: vi.fn(),
+  browserWindowEventHandlers: new Map<string, (...args: unknown[]) => void>(),
 }));
 
 vi.mock('@dnsquared/shipper-core', () => {
@@ -145,6 +154,28 @@ vi.mock('../src/main/pty-manager.js', () => ({
   },
 }));
 
+vi.mock('../src/main/background-manager.js', () => ({
+  BackgroundManager: class MockBackgroundManager {
+    setWindow = state.backgroundSetWindowMock;
+    spawn = (options: unknown) => {
+      state.backgroundSpawnMock(options);
+      if (
+        typeof options === 'object' &&
+        options !== null &&
+        'sessionId' in options &&
+        typeof options.sessionId === 'string'
+      ) {
+        return { sessionId: options.sessionId };
+      }
+
+      return { sessionId: 'background-session' };
+    };
+    kill = state.backgroundKillMock;
+    getOutput = state.backgroundGetOutputMock;
+    destroyAll = state.backgroundDestroyAllMock;
+  },
+}));
+
 function queueResetIssue(labels: string[] = ['shipper:planned']): void {
   state.ghMock.mockResolvedValueOnce({
     stdout: JSON.stringify({
@@ -160,15 +191,21 @@ async function loadHandlers(): Promise<Map<string, IpcHandler>> {
   vi.resetModules();
   state.handlers.clear();
   state.exitCallbacks.clear();
+  state.browserWindowEventHandlers.clear();
 
   state.ipcHandleMock.mockImplementation((channel: string, handler: IpcHandler) => {
     state.handlers.set(channel, handler);
   });
   state.appWhenReadyMock.mockResolvedValue(undefined);
-  state.appGetPathMock.mockReturnValue('/tmp/shipper-desktop-tests');
+  state.appGetPathMock.mockImplementation(() => '/tmp/shipper-desktop-tests');
   state.browserWindowGetAllWindowsMock.mockReturnValue([]);
   state.browserWindowLoadUrlMock.mockResolvedValue(undefined);
   state.browserWindowLoadFileMock.mockResolvedValue(undefined);
+  state.browserWindowOnMock.mockImplementation(
+    (event: string, handler: (...args: unknown[]) => void) => {
+      state.browserWindowEventHandlers.set(event, handler);
+    }
+  );
   state.getSettingsMock.mockReturnValue({ lockTimeoutMinutes: 30 });
   state.acquireIssueLockMock.mockResolvedValue(undefined);
   state.releaseIssueLockMock.mockResolvedValue(undefined);
@@ -196,6 +233,10 @@ async function loadHandlers(): Promise<Map<string, IpcHandler>> {
   state.checkGhInstalledMock.mockResolvedValue({ ok: true, message: '' });
   state.checkLabelsMock.mockResolvedValue({ ok: true, message: '' });
   state.listIssuesMock.mockResolvedValue([]);
+  state.backgroundSpawnMock.mockReset();
+  state.backgroundKillMock.mockReset();
+  state.backgroundGetOutputMock.mockResolvedValue('');
+  state.backgroundDestroyAllMock.mockReset();
 
   await import('../src/main/index.ts');
   await Promise.resolve();
@@ -225,6 +266,15 @@ function parseSessionResult(result: unknown): { sessionId: string } {
   return { sessionId: result.sessionId };
 }
 
+function parseBackgroundSpawnCall(index = 0): Record<string, unknown> {
+  const call = state.backgroundSpawnMock.mock.calls[index]?.[0];
+  if (call === undefined) {
+    throw new Error(`Expected background spawn call at index ${index}.`);
+  }
+
+  return call;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -233,9 +283,131 @@ afterEach(() => {
   vi.useRealTimers();
   state.handlers.clear();
   state.exitCallbacks.clear();
+  state.browserWindowEventHandlers.clear();
 });
 
 describe('desktop IPC locking', () => {
+  it('spawns `new` in headless mode with a deterministic log file and no PTY', async () => {
+    await loadHandlers();
+    const handler = getHandler('bg-spawn-new');
+
+    const result = parseSessionResult(
+      await handler({}, { repo: 'owner/repo', request: 'draft issue' })
+    );
+    const spawnCall = parseBackgroundSpawnCall();
+    const args = spawnCall.args;
+    const meta = spawnCall.meta;
+
+    if (!Array.isArray(args) || args.length !== 6) {
+      throw new Error('Expected background new args.');
+    }
+    if (typeof args[5] !== 'string') {
+      throw new Error('Expected deterministic log file path.');
+    }
+    if (typeof meta !== 'object' || meta === null || typeof meta.logFile !== 'string') {
+      throw new Error('Expected background new metadata.');
+    }
+
+    expect(result.sessionId).toEqual(expect.any(String));
+    expect(state.ensureRepoCloneMock).toHaveBeenCalledWith('owner/repo');
+    expect(spawnCall.sessionId).toBe(result.sessionId);
+    expect(spawnCall.command).toBe('new');
+    expect(spawnCall.repo).toBe('owner/repo');
+    expect(spawnCall.commandName).toBe('shipper');
+    expect(spawnCall.cwd).toBe('/tmp/repo');
+    expect(args.slice(0, 5)).toEqual(['new', 'draft issue', '--mode', 'headless', '--log-file']);
+    expect(args[5]).toContain('/.shipper/sessions/owner-repo/desktop-');
+    expect(meta.request).toBe('draft issue');
+    expect(meta.logFile).toContain('/.shipper/sessions/owner-repo/desktop-');
+    expect(typeof spawnCall.onComplete).toBe('function');
+    expect(state.ptySpawnMock).not.toHaveBeenCalled();
+  });
+
+  it('spawns `ship` through the background manager instead of PTY', async () => {
+    await loadHandlers();
+    const handler = getHandler('bg-spawn-ship');
+
+    const result = parseSessionResult(await handler({}, { repo: 'owner/repo', issueNumber: 42 }));
+    const spawnCall = parseBackgroundSpawnCall();
+
+    expect(result.sessionId).toEqual(expect.any(String));
+    expect(spawnCall.sessionId).toBe(result.sessionId);
+    expect(spawnCall.command).toBe('ship');
+    expect(spawnCall.repo).toBe('owner/repo');
+    expect(spawnCall.commandName).toBe('shipper');
+    expect(spawnCall.cwd).toBe('/tmp/repo');
+    expect(spawnCall.args).toEqual(['ship', '42', '--mode', 'headless']);
+    expect(spawnCall.meta).toEqual({ issueNumber: 42 });
+    expect(state.ptySpawnMock).not.toHaveBeenCalled();
+  });
+
+  it('prefers settings.local.json over settings.json when resolving the init agent', async () => {
+    await loadHandlers();
+    const repoPath = mkdtempSync(join(tmpdir(), 'shipper-desktop-init-'));
+    mkdirSync(join(repoPath, '.shipper'), { recursive: true });
+    writeFileSync(
+      join(repoPath, '.shipper', 'settings.json'),
+      JSON.stringify({ commands: { default: { agent: 'claude' } } }),
+      'utf8'
+    );
+    writeFileSync(
+      join(repoPath, '.shipper', 'settings.local.json'),
+      JSON.stringify({ commands: { default: { agent: 'codex' } } }),
+      'utf8'
+    );
+    state.ensureRepoCloneMock.mockResolvedValueOnce(repoPath);
+    const handler = getHandler('bg-spawn-init');
+
+    const result = parseSessionResult(await handler({}, { repo: 'owner/repo' }));
+    const spawnCall = parseBackgroundSpawnCall();
+
+    expect(spawnCall.sessionId).toBe(result.sessionId);
+    expect(spawnCall.command).toBe('init');
+    expect(spawnCall.args).toEqual(['init', '--agent', 'codex']);
+    expect(spawnCall.cwd).toBe(repoPath);
+
+    rmSync(repoPath, { recursive: true, force: true });
+  });
+
+  it('falls back to legacy settings keys and then to claude for init', async () => {
+    await loadHandlers();
+    const repoPath = mkdtempSync(join(tmpdir(), 'shipper-desktop-init-'));
+    mkdirSync(join(repoPath, '.shipper'), { recursive: true });
+    writeFileSync(
+      join(repoPath, '.shipper', 'settings.json'),
+      JSON.stringify({ agents: { default: 'codex' } }),
+      'utf8'
+    );
+    state.ensureRepoCloneMock.mockResolvedValueOnce(repoPath);
+    const initHandler = getHandler('bg-spawn-init');
+
+    await initHandler({}, { repo: 'owner/repo' });
+    const legacySpawnCall = parseBackgroundSpawnCall();
+
+    expect(legacySpawnCall.command).toBe('init');
+    expect(legacySpawnCall.args).toEqual(['init', '--agent', 'codex']);
+
+    const emptyRepoPath = mkdtempSync(join(tmpdir(), 'shipper-desktop-init-empty-'));
+    state.ensureRepoCloneMock.mockResolvedValueOnce(emptyRepoPath);
+    await initHandler({}, { repo: 'owner/repo' });
+    const defaultSpawnCall = parseBackgroundSpawnCall(1);
+
+    expect(defaultSpawnCall.command).toBe('init');
+    expect(defaultSpawnCall.args).toEqual(['init', '--agent', 'claude']);
+
+    rmSync(repoPath, { recursive: true, force: true });
+    rmSync(emptyRepoPath, { recursive: true, force: true });
+  });
+
+  it('destroys both the PTY and background managers when the window closes', async () => {
+    await loadHandlers();
+
+    state.browserWindowEventHandlers.get('close')?.();
+
+    expect(state.ptyDestroyAllMock).toHaveBeenCalledTimes(1);
+    expect(state.backgroundDestroyAllMock).toHaveBeenCalledTimes(1);
+  });
+
   it('acquires the issue lock before spawning a groom PTY', async () => {
     await loadHandlers();
     const handler = getHandler('pty-spawn-shipper-groom');
@@ -429,5 +601,14 @@ describe('desktop IPC locking', () => {
       error: 'Issue #42 is locked by another shipper instance.',
     });
     expect(state.executeResetMock).not.toHaveBeenCalled();
+  });
+
+  it('still registers groom on the PTY path with lock acquisition intact', async () => {
+    await loadHandlers();
+
+    expect(state.handlers.has('pty-spawn-shipper-groom')).toBe(true);
+    expect(state.handlers.has('bg-spawn-new')).toBe(true);
+    expect(state.handlers.has('bg-spawn-ship')).toBe(true);
+    expect(state.handlers.has('bg-spawn-init')).toBe(true);
   });
 });

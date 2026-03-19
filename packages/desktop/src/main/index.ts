@@ -30,6 +30,7 @@ import {
 } from '@dnsquared/shipper-core';
 
 import { PtyManager } from './pty-manager.js';
+import { BackgroundManager } from './background-manager.js';
 
 interface AppConfig {
   repos: string[];
@@ -57,10 +58,6 @@ interface SpawnPtyPayload {
   rows: number;
 }
 
-interface SpawnShipperNewPayload extends SpawnPtyPayload {
-  request: string;
-}
-
 interface SpawnShipperGroomPayload extends SpawnPtyPayload {
   issueNumber: number;
 }
@@ -68,6 +65,22 @@ interface SpawnShipperGroomPayload extends SpawnPtyPayload {
 interface AdoptIssuePayload {
   repo: string;
   issueNumber: number;
+}
+
+interface SpawnBackgroundCommandPayload {
+  repo: string;
+}
+
+interface SpawnBackgroundNewPayload extends SpawnBackgroundCommandPayload {
+  request: string;
+}
+
+interface SpawnBackgroundShipPayload extends SpawnBackgroundCommandPayload {
+  issueNumber: number;
+}
+
+interface SessionIdPayload {
+  sessionId: string;
 }
 
 interface ResetIssuePayload extends AdoptIssuePayload {
@@ -101,8 +114,16 @@ interface RawResetIssueData {
   labels: { name: string }[];
 }
 
+interface RawCreatedIssueData {
+  number: number;
+  title: string;
+  url: string;
+  createdAt: string;
+}
+
 const defaultConfig: AppConfig = { repos: [], activeRepo: '' };
 const ptyManager = new PtyManager();
+const backgroundManager = new BackgroundManager();
 const repoPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const preloadPath = fileURLToPath(new URL('../preload/index.cjs', import.meta.url));
 const rendererPath = fileURLToPath(new URL('../renderer/index.html', import.meta.url));
@@ -194,22 +215,6 @@ function parseSpawnPtyPayload(value: unknown): SpawnPtyPayload | null {
   };
 }
 
-function parseSpawnShipperNewPayload(value: unknown): SpawnShipperNewPayload | null {
-  if (typeof value !== 'object' || value === null || !('request' in value)) {
-    return null;
-  }
-
-  const payload = parseSpawnPtyPayload(value);
-  if (payload === null || typeof value.request !== 'string') {
-    return null;
-  }
-
-  return {
-    ...payload,
-    request: value.request,
-  };
-}
-
 function parseSpawnShipperGroomPayload(value: unknown): SpawnShipperGroomPayload | null {
   if (typeof value !== 'object' || value === null || !('issueNumber' in value)) {
     return null;
@@ -244,6 +249,66 @@ function parseAdoptIssuePayload(value: unknown): AdoptIssuePayload | null {
   return {
     repo,
     issueNumber: value.issueNumber,
+  };
+}
+
+function parseSpawnBackgroundCommandPayload(value: unknown): SpawnBackgroundCommandPayload | null {
+  if (typeof value !== 'object' || value === null || !('repo' in value)) {
+    return null;
+  }
+
+  const repo = parseRepo(value.repo);
+  if (repo === null) {
+    return null;
+  }
+
+  return { repo };
+}
+
+function parseSpawnBackgroundNewPayload(value: unknown): SpawnBackgroundNewPayload | null {
+  if (typeof value !== 'object' || value === null || !('request' in value)) {
+    return null;
+  }
+
+  const payload = parseSpawnBackgroundCommandPayload(value);
+  if (payload === null || typeof value.request !== 'string') {
+    return null;
+  }
+
+  return {
+    ...payload,
+    request: value.request,
+  };
+}
+
+function parseSpawnBackgroundShipPayload(value: unknown): SpawnBackgroundShipPayload | null {
+  if (typeof value !== 'object' || value === null || !('issueNumber' in value)) {
+    return null;
+  }
+
+  const payload = parseSpawnBackgroundCommandPayload(value);
+  if (payload === null || !isPositiveInteger(value.issueNumber)) {
+    return null;
+  }
+
+  return {
+    ...payload,
+    issueNumber: value.issueNumber,
+  };
+}
+
+function parseSessionIdPayload(value: unknown): SessionIdPayload | null {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('sessionId' in value) ||
+    typeof value.sessionId !== 'string'
+  ) {
+    return null;
+  }
+
+  return {
+    sessionId: value.sessionId,
   };
 }
 
@@ -291,6 +356,118 @@ function parseIssueListJson(repo: string, json: string): RawListIssueData[] {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function readConfiguredAgentFromSettings(filepath: string): 'claude' | 'codex' | undefined {
+  try {
+    const data = JSON.parse(readFileSync(filepath, 'utf8')) as Record<string, unknown>;
+    const commands = isPlainObject(data.commands) ? data.commands : undefined;
+    const commandDefault = isPlainObject(commands?.default) ? commands.default : undefined;
+    const agents = isPlainObject(data.agents) ? data.agents : undefined;
+
+    const configuredAgent =
+      typeof commandDefault?.agent === 'string'
+        ? commandDefault.agent
+        : typeof agents?.default === 'string'
+          ? agents.default
+          : typeof data.agent === 'string'
+            ? data.agent
+            : undefined;
+
+    return configuredAgent === 'claude' || configuredAgent === 'codex'
+      ? configuredAgent
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveInitAgent(repoPath: string): 'claude' | 'codex' {
+  const localAgent = readConfiguredAgentFromSettings(
+    join(repoPath, '.shipper', 'settings.local.json')
+  );
+  if (localAgent) {
+    return localAgent;
+  }
+
+  const storedAgent = readConfiguredAgentFromSettings(join(repoPath, '.shipper', 'settings.json'));
+  return storedAgent ?? 'claude';
+}
+
+function getRepoSlug(repo: string): string {
+  return repo.replaceAll('/', '-');
+}
+
+function createDesktopNewLogFile(repo: string): string {
+  const sessionsDir = join(app.getPath('home'), '.shipper', 'sessions', getRepoSlug(repo));
+  mkdirSync(sessionsDir, { recursive: true, mode: 0o700 });
+  return join(sessionsDir, `desktop-${randomUUID()}.jsonl`);
+}
+
+function parseCreatedIssueList(repo: string, json: string): RawCreatedIssueData[] {
+  try {
+    const parsed = JSON.parse(json) as unknown;
+    if (!Array.isArray(parsed)) {
+      throw new Error('GitHub CLI returned an invalid issue list.');
+    }
+
+    return parsed.map((entry) => {
+      if (
+        !isPlainObject(entry) ||
+        typeof entry.number !== 'number' ||
+        typeof entry.title !== 'string' ||
+        typeof entry.url !== 'string' ||
+        typeof entry.createdAt !== 'string'
+      ) {
+        throw new Error('GitHub CLI returned an invalid created issue payload.');
+      }
+
+      return {
+        number: entry.number,
+        title: entry.title,
+        url: entry.url,
+        createdAt: entry.createdAt,
+      };
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to parse created issue metadata for ${repo}: ${message}`);
+  }
+}
+
+async function resolveCreatedIssueMeta(
+  repo: string,
+  spawnedAt: number | null
+): Promise<{ issueNumber?: number; issueUrl?: string }> {
+  if (spawnedAt === null) {
+    return {};
+  }
+
+  try {
+    const result = await gh([
+      'issue',
+      'list',
+      '-R',
+      repo,
+      '--label',
+      'shipper:new',
+      '--state',
+      'open',
+      '--json',
+      'number,title,url,createdAt',
+      '--limit',
+      '20',
+    ]);
+    const issues = parseCreatedIssueList(repo, result.stdout);
+    const spawnedAtIso = new Date(spawnedAt).toISOString();
+    const match = issues
+      .filter((issue) => issue.createdAt >= spawnedAtIso)
+      .sort((left, right) => right.number - left.number)[0];
+
+    return match ? { issueNumber: match.number, issueUrl: match.url } : {};
+  } catch {
+    return {};
+  }
 }
 
 function parseResetIssueJson(repo: string, issueNumber: number, json: string): RawResetIssueData {
@@ -491,9 +668,11 @@ function createWindow(): BrowserWindow {
   });
 
   ptyManager.setWindow(window);
+  backgroundManager.setWindow(window);
 
   window.on('close', () => {
     ptyManager.destroyAll();
+    backgroundManager.destroyAll();
   });
 
   window.once('ready-to-show', () => {
@@ -713,30 +892,6 @@ function registerIpcHandlers(): void {
     writeConfig(parsedConfig.config);
   });
 
-  ipcMain.handle('pty-spawn-shipper-new', async (_event, payload: unknown) => {
-    const parsedPayload = parseSpawnShipperNewPayload(payload);
-    if (parsedPayload === null) {
-      throw new Error('Invalid pty-spawn-shipper-new payload.');
-    }
-
-    const repoPath = await ensureRepoClone(parsedPayload.repo);
-
-    const cmd = await buildPromptCommand('new', {
-      userInput: parsedPayload.request,
-      repo: parsedPayload.repo,
-      mode: 'interactive',
-    });
-
-    const sessionId = randomUUID();
-    ptyManager.spawn(sessionId, cmd.command, cmd.args, {
-      cols: parsedPayload.cols,
-      rows: parsedPayload.rows,
-      cwd: cmd.cwd ?? repoPath,
-    });
-
-    return { sessionId };
-  });
-
   ipcMain.handle('pty-spawn-shipper-groom', async (_event, payload: unknown) => {
     const parsedPayload = parseSpawnShipperGroomPayload(payload);
     if (parsedPayload === null) {
@@ -794,40 +949,90 @@ function registerIpcHandlers(): void {
     }
   });
 
-  ipcMain.handle('pty-spawn-shipper-ship', async (_event, payload: unknown) => {
-    const parsedPayload = parseSpawnShipperGroomPayload(payload);
+  ipcMain.handle('bg-spawn-new', async (_event, payload: unknown) => {
+    const parsedPayload = parseSpawnBackgroundNewPayload(payload);
     if (parsedPayload === null) {
-      throw new Error('Invalid pty-spawn-shipper-ship payload.');
+      throw new Error('Invalid bg-spawn-new payload.');
     }
 
     const repoPath = await ensureRepoClone(parsedPayload.repo);
-
+    const logFile = createDesktopNewLogFile(parsedPayload.repo);
     const sessionId = randomUUID();
-    ptyManager.spawn(sessionId, 'shipper', ['ship', String(parsedPayload.issueNumber)], {
-      cols: parsedPayload.cols,
-      rows: parsedPayload.rows,
-      cwd: repoPath,
-    });
 
-    return { sessionId };
+    return backgroundManager.spawn({
+      sessionId,
+      command: 'new',
+      repo: parsedPayload.repo,
+      commandName: 'shipper',
+      args: ['new', parsedPayload.request, '--mode', 'headless', '--log-file', logFile],
+      cwd: repoPath,
+      logFile,
+      meta: {
+        request: parsedPayload.request,
+        logFile,
+      },
+      onComplete: async (session) => resolveCreatedIssueMeta(parsedPayload.repo, session.spawnedAt),
+    });
   });
 
-  ipcMain.handle('pty-spawn-shipper-init', async (_event, payload: unknown) => {
-    const parsedPayload = parseSpawnPtyPayload(payload);
+  ipcMain.handle('bg-spawn-ship', async (_event, payload: unknown) => {
+    const parsedPayload = parseSpawnBackgroundShipPayload(payload);
     if (parsedPayload === null) {
-      throw new Error('Invalid pty-spawn-shipper-init payload.');
+      throw new Error('Invalid bg-spawn-ship payload.');
     }
 
     const repoPath = await ensureRepoClone(parsedPayload.repo);
-
     const sessionId = randomUUID();
-    ptyManager.spawn(sessionId, 'shipper', ['init'], {
-      cols: parsedPayload.cols,
-      rows: parsedPayload.rows,
+
+    return backgroundManager.spawn({
+      sessionId,
+      command: 'ship',
+      repo: parsedPayload.repo,
+      commandName: 'shipper',
+      args: ['ship', String(parsedPayload.issueNumber), '--mode', 'headless'],
+      cwd: repoPath,
+      meta: {
+        issueNumber: parsedPayload.issueNumber,
+      },
+    });
+  });
+
+  ipcMain.handle('bg-spawn-init', async (_event, payload: unknown) => {
+    const parsedPayload = parseSpawnBackgroundCommandPayload(payload);
+    if (parsedPayload === null) {
+      throw new Error('Invalid bg-spawn-init payload.');
+    }
+
+    const repoPath = await ensureRepoClone(parsedPayload.repo);
+    const agent = resolveInitAgent(repoPath);
+    const sessionId = randomUUID();
+
+    return backgroundManager.spawn({
+      sessionId,
+      command: 'init',
+      repo: parsedPayload.repo,
+      commandName: 'shipper',
+      args: ['init', '--agent', agent],
       cwd: repoPath,
     });
+  });
 
-    return { sessionId };
+  ipcMain.handle('bg-kill', (_event, payload: unknown) => {
+    const parsedPayload = parseSessionIdPayload(payload);
+    if (parsedPayload === null) {
+      throw new Error('Invalid bg-kill payload.');
+    }
+
+    backgroundManager.kill(parsedPayload.sessionId);
+  });
+
+  ipcMain.handle('bg-get-output', (_event, payload: unknown) => {
+    const parsedPayload = parseSessionIdPayload(payload);
+    if (parsedPayload === null) {
+      throw new Error('Invalid bg-get-output payload.');
+    }
+
+    return backgroundManager.getOutput(parsedPayload.sessionId);
   });
 
   ipcMain.handle('adopt-issue', async (_event, payload: unknown) => {
