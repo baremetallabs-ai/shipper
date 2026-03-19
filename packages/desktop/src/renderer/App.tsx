@@ -20,8 +20,8 @@ import {
 import type { ListIssueItem, WorkflowStage } from '@dnsquared/shipper-core';
 
 import { AdoptDialog } from './components/adopt-dialog.js';
+import { ActionQueueDrawer } from './components/action-queue-drawer.js';
 import { BackgroundLogViewer } from './components/background-log-viewer.js';
-import { BackgroundStatusIndicator } from './components/background-status-indicator.js';
 import { BackgroundToastRegion } from './components/background-toast-region.js';
 import { CloseNotPlannedDialog } from './components/close-not-planned-dialog.js';
 import { NewIssueDialog } from './components/new-issue-dialog.js';
@@ -683,6 +683,7 @@ export default function App(): JSX.Element {
   const [sessions, setSessions] = useState<TerminalSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [pendingCloseSessionId, setPendingCloseSessionId] = useState<string | null>(null);
+  const [actionQueueOpen, setActionQueueOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [dragSource, setDragSource] = useState<{
     issue: ListIssueItem;
@@ -946,6 +947,11 @@ export default function App(): JSX.Element {
       existingIndex >= 0
         ? currentCommands.map((command, index) => (index === existingIndex ? nextCommand : command))
         : [...currentCommands, nextCommand];
+
+    if (existingIndex < 0) {
+      setActionQueueOpen(true);
+    }
+
     const postEventCommands =
       event.status === 'complete'
         ? nextCommands.filter((command) => command.id !== event.sessionId)
@@ -1561,6 +1567,19 @@ export default function App(): JSX.Element {
     setDrawerOpen((current) => !current);
   }
 
+  function handleToggleActionQueue(): void {
+    setActionQueueOpen((current) => !current);
+  }
+
+  function handleDismissBackground(sessionId: string): void {
+    backgroundCommandsRef.current = backgroundCommandsRef.current.filter(
+      (command) => command.id !== sessionId
+    );
+    setBackgroundCommands((currentCommands) =>
+      currentCommands.filter((command) => command.id !== sessionId)
+    );
+  }
+
   async function handleCancelBackground(sessionId: string): Promise<void> {
     try {
       await window.shipperAPI.killBackground(sessionId);
@@ -1873,6 +1892,30 @@ export default function App(): JSX.Element {
       </Dialog>
 
       <div className="flex min-h-0 flex-1">
+        <ActionQueueDrawer
+          open={actionQueueOpen}
+          onToggle={handleToggleActionQueue}
+          commands={visibleBackgroundCommands.map((command) => ({
+            id: command.id,
+            command: command.command,
+            status: command.status,
+            title: command.title,
+            detail: command.detail,
+            canCancel: command.status === 'queued' || command.status === 'running',
+            canShowLogs:
+              command.command === 'new'
+                ? Boolean(command.logFile)
+                : command.output.length > 0 || command.status !== 'queued',
+            cancelled: command.cancelled,
+          }))}
+          onCancel={(sessionId) => {
+            void handleCancelBackground(sessionId);
+          }}
+          onShowLogs={(sessionId) => {
+            void handleShowBackgroundLogs(sessionId);
+          }}
+          onDismiss={handleDismissBackground}
+        />
         <div ref={contentPaneRef} tabIndex={-1} className="min-w-0 flex-1 overflow-y-auto">
           <header
             className={cn(
@@ -1887,28 +1930,6 @@ export default function App(): JSX.Element {
                 </p>
                 <h1 className="text-2xl font-semibold tracking-tight">Pipeline</h1>
               </div>
-              <BackgroundStatusIndicator
-                commands={visibleBackgroundCommands.map((command) => ({
-                  id: command.id,
-                  command: command.command,
-                  status: command.status,
-                  title: command.title,
-                  detail: command.detail,
-                  canCancel: command.status === 'queued' || command.status === 'running',
-                  canShowLogs:
-                    command.command === 'new'
-                      ? Boolean(command.logFile)
-                      : command.output.length > 0 || command.status !== 'queued',
-                  cancelled: command.cancelled,
-                }))}
-                onCancel={(sessionId) => {
-                  void handleCancelBackground(sessionId);
-                }}
-                onShowLogs={(sessionId) => {
-                  void handleShowBackgroundLogs(sessionId);
-                }}
-                className="md:justify-start"
-              />
             </div>
             {repos.length > 0 ? (
               <RepoTabBar
