@@ -856,6 +856,9 @@ async function shipOneIssue(
       printSummary(results, logStream);
       return { success: true };
     });
+    if (isAutoChildRun) {
+      return result;
+    }
     return await attachIssueTotalTokens(repo, issueStr, issueStartTime, result);
   } finally {
     try {
