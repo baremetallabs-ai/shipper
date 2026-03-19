@@ -695,6 +695,9 @@ export interface CreateWorktreeOpts {
 export async function createWorktree(opts: CreateWorktreeOpts): Promise<string> {
   const wtPath = getWorktreePath(opts.repoRoot, opts.branch);
 
+  // Prune stale worktree registrations whose directories no longer exist
+  await execAsync('git', ['worktree', 'prune'], { cwd: opts.repoRoot });
+
   try {
     await access(wtPath);
     // Clean up stale worktree from a previous crashed run
