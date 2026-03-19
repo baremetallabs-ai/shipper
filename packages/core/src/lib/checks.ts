@@ -2,7 +2,6 @@ import { gh } from './gh.js';
 
 export interface FailedStep {
   name: string;
-  logSnippet: string;
 }
 
 export interface PRChecksLine {
@@ -89,12 +88,8 @@ export async function enrichFailedChecks(
         String(job.databaseId),
         '--log-failed',
       ]);
-      const stepLogs = parseStepLogs(logOutput);
-      const fallbackSnippet = lastNLines(logOutput, 50);
-
       check.failedSteps = failedSteps.map((step) => ({
         name: step.name,
-        logSnippet: lastNLines(stepLogs.get(step.name) ?? fallbackSnippet, 50),
       }));
       const logDumpName = createLogDumpName(check.name, job.databaseId, logDumps);
       logDumps.set(logDumpName, logOutput);
@@ -159,35 +154,4 @@ function createLogDumpName(
   }
 
   return `${databaseIdName}-${suffix}`;
-}
-
-function parseStepLogs(logOutput: string): Map<string, string> {
-  const stepLogs = new Map<string, string>();
-
-  for (const line of logOutput.split('\n')) {
-    if (!line) {
-      continue;
-    }
-
-    const firstTab = line.indexOf('\t');
-    const secondTab = line.indexOf('\t', firstTab + 1);
-    if (firstTab === -1 || secondTab === -1) {
-      continue;
-    }
-
-    const stepName = line.slice(firstTab + 1, secondTab);
-    const content = line.slice(secondTab + 1);
-    const existing = stepLogs.get(stepName);
-    stepLogs.set(stepName, existing ? `${existing}\n${content}` : content);
-  }
-
-  return stepLogs;
-}
-
-function lastNLines(text: string, n: number): string {
-  if (!text) {
-    return '';
-  }
-
-  return text.split('\n').slice(-n).join('\n');
 }

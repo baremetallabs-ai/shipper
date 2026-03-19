@@ -411,7 +411,6 @@ describe('prRemediateCommand', () => {
       firstFailedCheck.failedSteps = [
         {
           name: 'lint',
-          logSnippet: 'line 1\nline 2',
         },
       ];
       return Promise.resolve(new Map([['build-lint-ubuntu', 'full failed log']]));

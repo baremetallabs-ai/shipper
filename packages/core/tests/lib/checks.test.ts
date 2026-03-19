@@ -177,22 +177,7 @@ describe('enrichFailedChecks', () => {
     const logDumps = await enrichFailedChecks(repo, failedChecks);
 
     expect(execFileMock).toHaveBeenCalledTimes(2);
-    expect(failedChecks[0]?.failedSteps).toEqual([
-      {
-        name: 'lint',
-        logSnippet: Array.from({ length: 50 }, (_, index) => {
-          const lineNumber = index + 11;
-          return `2026-03-16T18:00:${String(lineNumber).padStart(2, '0')}Z line ${lineNumber}`;
-        }).join('\n'),
-      },
-      {
-        name: 'test',
-        logSnippet: Array.from({ length: 50 }, (_, index) => {
-          const lineNumber = index + 6;
-          return `2026-03-16T18:00:${String(lineNumber).padStart(2, '0')}Z line ${lineNumber}`;
-        }).join('\n'),
-      },
-    ]);
+    expect(failedChecks[0]?.failedSteps).toEqual([{ name: 'lint' }, { name: 'test' }]);
     expect(logDumps).toEqual(new Map([['build-lint-ubuntu', fullLog]]));
   });
 
@@ -361,14 +346,7 @@ describe('enrichFailedChecks', () => {
 
     const logDumps = await enrichFailedChecks(repo, failedChecks);
 
-    expect(failedChecks[0]?.failedSteps).toEqual([
-      {
-        name: 'lint',
-        logSnippet: Array.from({ length: 50 }, (_, index) => `fallback line ${index + 11}`).join(
-          '\n'
-        ),
-      },
-    ]);
+    expect(failedChecks[0]?.failedSteps).toEqual([{ name: 'lint' }]);
     expect(logDumps).toEqual(new Map([['build', fullLog]]));
   });
 

@@ -24,16 +24,18 @@ The next user message contains the current issue and PR context. Treat that plus
 - For a normal remediation pass, start by reading these pass artifacts that Shipper created for you:
   - `.shipper/input/review-threads.json`
   - `.shipper/input/ci-status.json`
+  - `.shipper/input/ci-log-*.txt` (one file per failed CI job — contains the **full** job log, not a snippet)
   - `.shipper/input/pr-diff.patch`
   - `.shipper/input/pass-info.json`
 - `pass-info.json` tells you which remediation pass this is. You are on pass `N` of `5`. Focus on forward progress from the current state, not a full reimplementation.
+- When CI has failures, **always read the full `ci-log-*.txt` files** before diagnosing. The `ci-status.json` summary alone is not sufficient — the root cause is often only visible in the full log output (e.g., runtime errors, build failures, or screenshot/artifact references).
 - Previous passes may already have handled some feedback. Use the current thread history to avoid repeating replies.
 - If appended user input contains merge-conflict context, resolve those files first. The `.shipper/input/` files may be stale or temporarily unavailable during that sync step, so do not fail just because they are missing in a conflict-resolution-only invocation. Stage the resolved files with `git add`, create a commit only if the repository requires it during conflict resolution, and stop there. Do not attempt transport commands yourself.
 
 ## Phase 1: Orient
 
 1. Read the issue and PR context from the appended message.
-2. If you are not in a conflict-resolution-only invocation, read the four `.shipper/input/` files.
+2. If you are not in a conflict-resolution-only invocation, read the `.shipper/input/` files listed above (including any `ci-log-*.txt` files).
 3. Determine what is currently actionable in this pass:
    - CI or test failures that the branch can fix locally
    - unresolved reviewer feedback in `review-threads.json`
