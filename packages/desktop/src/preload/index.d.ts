@@ -48,6 +48,31 @@ interface PtyExitEvent {
   exitCode: number | null;
 }
 
+type BackgroundCommand = 'new' | 'ship' | 'init';
+type BackgroundStatus = 'queued' | 'running' | 'complete' | 'failed';
+
+interface BackgroundStatusMeta {
+  issueNumber?: number;
+  issueUrl?: string;
+  logFile?: string;
+  request?: string;
+  cancelled?: boolean;
+}
+
+interface BackgroundStatusEvent {
+  sessionId: string;
+  command: BackgroundCommand;
+  repo: string;
+  status: BackgroundStatus;
+  exitCode?: number | null;
+  meta?: BackgroundStatusMeta;
+}
+
+interface BackgroundOutputEvent {
+  sessionId: string;
+  data: string;
+}
+
 interface ShipperAPI {
   checkPrerequisites: () => Promise<{
     ghInstalled: CheckResult;
@@ -74,30 +99,24 @@ interface ShipperAPI {
     targetStage: WorkflowStage
   ) => Promise<{ ok: true } | { ok: false; error: string }>;
 
-  spawnShipperNew: (
-    request: string,
-    repo: string,
-    cols: number,
-    rows: number
-  ) => Promise<{ sessionId: string }>;
   spawnShipperGroom: (
     issueNumber: number,
     repo: string,
     cols: number,
     rows: number
   ) => Promise<{ sessionId: string }>;
-  spawnShipperShip: (
-    issueNumber: number,
-    repo: string,
-    cols: number,
-    rows: number
-  ) => Promise<{ sessionId: string }>;
-  spawnShipperInit: (repo: string, cols: number, rows: number) => Promise<{ sessionId: string }>;
+  spawnBackgroundNew: (request: string, repo: string) => Promise<{ sessionId: string }>;
+  spawnBackgroundShip: (issueNumber: number, repo: string) => Promise<{ sessionId: string }>;
+  spawnBackgroundInit: (repo: string) => Promise<{ sessionId: string }>;
+  killBackground: (sessionId: string) => Promise<void>;
+  getBackgroundOutput: (sessionId: string) => Promise<string>;
   ptyWrite: (sessionId: string, data: string) => Promise<void>;
   ptyResize: (sessionId: string, cols: number, rows: number) => Promise<void>;
   ptyKill: (sessionId: string) => Promise<void>;
   onPtyOutput: (callback: (data: PtyOutputEvent) => void) => () => void;
   onPtyExit: (callback: (data: PtyExitEvent) => void) => () => void;
+  onBackgroundStatus: (callback: (data: BackgroundStatusEvent) => void) => () => void;
+  onBackgroundOutput: (callback: (data: BackgroundOutputEvent) => void) => () => void;
 }
 
 declare global {
