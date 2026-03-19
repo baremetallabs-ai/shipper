@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -13,6 +13,8 @@ const execFileMock =
     ) => void
   >();
 
+const mockHomeDir = vi.hoisted(() => ({ value: '/home/user' }));
+
 vi.mock('node:child_process', async () => {
   const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
   return {
@@ -25,11 +27,20 @@ vi.mock('node:child_process', async () => {
 
 vi.mock('node:os', async () => {
   const actual = await vi.importActual<typeof import('node:os')>('node:os');
-  return { ...actual, homedir: () => '/home/user' };
+  return { ...actual, homedir: () => mockHomeDir.value };
 });
 
-const { getSessionDir, getSessionPaths, resolveSessionRepo, writeSessionMeta } =
-  await import('../../src/lib/session.js');
+const {
+  aggregateSessionUsage,
+  getSessionDir,
+  getSessionPaths,
+  resolveSessionRepo,
+  writeSessionMeta,
+} = await import('../../src/lib/session.js');
+
+afterEach(() => {
+  mockHomeDir.value = '/home/user';
+});
 
 describe('getSessionDir', () => {
   it('places sessions under ~/.shipper/sessions/<owner-repo>', () => {
@@ -150,6 +161,12 @@ describe('writeSessionMeta', () => {
         timestamp: '2026-03-15T23:25:12.345Z',
         exitCode: 0,
         logFile: '/tmp/308-implement.jsonl',
+        usage: {
+          inputTokens: 45,
+          outputTokens: 12,
+          cacheReadTokens: 8,
+          cacheWriteTokens: 2,
+        },
       });
 
       const contents = readFileSync(metaFile, 'utf-8');
@@ -163,9 +180,216 @@ describe('writeSessionMeta', () => {
         timestamp: '2026-03-15T23:25:12.345Z',
         exitCode: 0,
         logFile: '/tmp/308-implement.jsonl',
+        usage: {
+          inputTokens: 45,
+          outputTokens: 12,
+          cacheReadTokens: 8,
+          cacheWriteTokens: 2,
+        },
       });
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }
   });
 });
+
+describe('aggregateSessionUsage', () => {
+  it('returns undefined when the session directory does not exist', async () => {
+    mockHomeDir.value = mkdtempSync(path.join(tmpdir(), 'session-home-'));
+
+    try {
+      await expect(
+        aggregateSessionUsage('owner/repo', '308', new Date('2026-03-15T00:00:00.000Z'))
+      ).resolves.toBeUndefined();
+    } finally {
+      rmSync(mockHomeDir.value, { recursive: true, force: true });
+    }
+  });
+
+  it('aggregates matching usage from multiple stage sidecars', async () => {
+    const tempHome = mkdtempSync(path.join(tmpdir(), 'session-home-'));
+    mockHomeDir.value = tempHome;
+    const sessionDir = getSessionDir('owner-repo');
+    const since = new Date('2026-03-15T00:00:00.000Z');
+
+    try {
+      writeSessionMetaSync(
+        path.join(sessionDir, '308-implement.meta.json'),
+        buildMeta({
+          issue: '308',
+          timestamp: '2026-03-15T01:00:00.000Z',
+          usage: {
+            inputTokens: 10,
+            outputTokens: 3,
+            cacheReadTokens: 4,
+            cacheWriteTokens: 1,
+          },
+        })
+      );
+      writeSessionMetaSync(
+        path.join(sessionDir, '308-pr-open.meta.json'),
+        buildMeta({
+          issue: '308',
+          timestamp: '2026-03-15T02:00:00.000Z',
+          usage: {
+            inputTokens: 8,
+            outputTokens: 5,
+            cacheReadTokens: 2,
+            cacheWriteTokens: 0,
+          },
+        })
+      );
+
+      await expect(aggregateSessionUsage('owner/repo', '308', since)).resolves.toEqual({
+        inputTokens: 18,
+        outputTokens: 8,
+        cacheReadTokens: 6,
+        cacheWriteTokens: 1,
+      });
+    } finally {
+      rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it('filters by issue number and lower-bound timestamp', async () => {
+    const tempHome = mkdtempSync(path.join(tmpdir(), 'session-home-'));
+    mockHomeDir.value = tempHome;
+    const sessionDir = getSessionDir('owner-repo');
+
+    try {
+      writeSessionMetaSync(
+        path.join(sessionDir, '307-implement.meta.json'),
+        buildMeta({
+          issue: '307',
+          timestamp: '2026-03-15T02:00:00.000Z',
+          usage: {
+            inputTokens: 100,
+            outputTokens: 50,
+            cacheReadTokens: 25,
+            cacheWriteTokens: 10,
+          },
+        })
+      );
+      writeSessionMetaSync(
+        path.join(sessionDir, '308-old.meta.json'),
+        buildMeta({
+          issue: '308',
+          timestamp: '2026-03-14T23:59:59.000Z',
+          usage: {
+            inputTokens: 40,
+            outputTokens: 10,
+            cacheReadTokens: 5,
+            cacheWriteTokens: 2,
+          },
+        })
+      );
+      writeSessionMetaSync(
+        path.join(sessionDir, '308-current.meta.json'),
+        buildMeta({
+          issue: '308',
+          timestamp: '2026-03-15T03:00:00.000Z',
+          usage: {
+            inputTokens: 4,
+            outputTokens: 2,
+            cacheReadTokens: 1,
+            cacheWriteTokens: 0,
+          },
+        })
+      );
+
+      await expect(
+        aggregateSessionUsage('owner/repo', '308', new Date('2026-03-15T00:00:00.000Z'))
+      ).resolves.toEqual({
+        inputTokens: 4,
+        outputTokens: 2,
+        cacheReadTokens: 1,
+        cacheWriteTokens: 0,
+      });
+    } finally {
+      rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it('skips older sidecars without usage and malformed or unreadable metadata', async () => {
+    const tempHome = mkdtempSync(path.join(tmpdir(), 'session-home-'));
+    mockHomeDir.value = tempHome;
+    const sessionDir = getSessionDir('owner-repo');
+
+    try {
+      writeSessionMetaSync(
+        path.join(sessionDir, '308-without-usage.meta.json'),
+        buildMeta({
+          issue: '308',
+          timestamp: '2026-03-15T01:00:00.000Z',
+          usage: undefined,
+        })
+      );
+      writeSessionMetaSync(
+        path.join(sessionDir, '308-valid.meta.json'),
+        buildMeta({
+          issue: '308',
+          timestamp: '2026-03-15T02:00:00.000Z',
+          usage: {
+            inputTokens: 7,
+            outputTokens: 4,
+            cacheReadTokens: 3,
+            cacheWriteTokens: 1,
+          },
+        })
+      );
+      writeFileSync(path.join(sessionDir, '308-malformed.meta.json'), '{not valid json', 'utf-8');
+      writeSessionMetaSync(path.join(sessionDir, '308-invalid-usage.meta.json'), {
+        ...buildMeta({
+          issue: '308',
+          timestamp: '2026-03-15T03:00:00.000Z',
+          usage: {
+            inputTokens: 9,
+            outputTokens: 2,
+            cacheReadTokens: 1,
+            cacheWriteTokens: 0,
+          },
+        }),
+        usage: {
+          inputTokens: 'bad',
+          outputTokens: 2,
+          cacheReadTokens: 1,
+          cacheWriteTokens: 0,
+        },
+      });
+      mkdirSync(path.join(sessionDir, '308-unreadable.meta.json'), { recursive: true });
+
+      await expect(
+        aggregateSessionUsage('owner/repo', '308', new Date('2026-03-15T00:00:00.000Z'))
+      ).resolves.toEqual({
+        inputTokens: 7,
+        outputTokens: 4,
+        cacheReadTokens: 3,
+        cacheWriteTokens: 1,
+      });
+    } finally {
+      rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+});
+
+function writeSessionMetaSync(metaFile: string, meta: Record<string, unknown>): void {
+  mkdirSync(path.dirname(metaFile), { recursive: true });
+  writeFileSync(metaFile, `${JSON.stringify(meta, null, 2)}\n`, 'utf-8');
+}
+
+function buildMeta(overrides: {
+  issue: string;
+  timestamp: string;
+  usage?: Record<string, unknown>;
+}): Record<string, unknown> {
+  return {
+    repo: 'owner/repo',
+    issue: overrides.issue,
+    stage: 'implement',
+    agent: 'claude',
+    model: 'opus',
+    timestamp: overrides.timestamp,
+    exitCode: 0,
+    ...(overrides.usage ? { usage: overrides.usage } : {}),
+  };
+}

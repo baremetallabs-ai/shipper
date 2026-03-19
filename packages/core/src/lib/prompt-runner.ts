@@ -14,6 +14,7 @@ import {
   type AgentName,
   type CommandMode,
 } from './settings.js';
+import { formatUsageLine, parseAgentUsage, type TokenUsage } from './usage.js';
 
 export interface RunPromptOpts {
   userInput?: string;
@@ -35,7 +36,14 @@ export interface PromptCommand {
 }
 
 const CODEX_HEADLESS_CONFIG = 'sandbox_workspace_write.network_access=true';
-const CODEX_HEADLESS_ARGS = ['exec', '--full-auto', '-c', CODEX_HEADLESS_CONFIG] as const;
+const CODEX_HEADLESS_JSON_ARG = '--json';
+const CODEX_HEADLESS_ARGS = [
+  'exec',
+  '--full-auto',
+  CODEX_HEADLESS_JSON_ARG,
+  '-c',
+  CODEX_HEADLESS_CONFIG,
+] as const;
 const GH_MUTATION_PATTERNS = [
   /gh\s+issue\s+edit\b/,
   /gh\s+issue\s+comment\b/,
@@ -390,6 +398,19 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
       timeoutMs,
       logFile: spawnLogFile,
     });
+    let usage: TokenUsage | undefined;
+
+    if (effectiveMode === 'headless' && spawnLogFile) {
+      try {
+        usage = await parseAgentUsage(agent, spawnLogFile);
+      } catch {
+        usage = undefined;
+      }
+
+      if (usage) {
+        console.log(formatUsageLine(usage));
+      }
+    }
 
     if (metaFile && logFile && sessionTimestamp) {
       try {
@@ -402,6 +423,7 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
           timestamp: sessionTimestamp.toISOString(),
           exitCode,
           logFile: spawnLogFile,
+          usage,
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -428,9 +450,15 @@ function normalizeCodexHeadlessArgs(args: string[]): void {
     args.splice(execIdx + 1, 0, '--full-auto');
   }
 
-  if (findCodexSandboxConfigIndex(args) === -1) {
+  if (!args.includes(CODEX_HEADLESS_JSON_ARG)) {
     const fullAutoIdx = args.indexOf('--full-auto');
     const insertIdx = fullAutoIdx === -1 ? execIdx + 1 : fullAutoIdx + 1;
+    args.splice(insertIdx, 0, CODEX_HEADLESS_JSON_ARG);
+  }
+
+  if (findCodexSandboxConfigIndex(args) === -1) {
+    const jsonIdx = args.indexOf(CODEX_HEADLESS_JSON_ARG);
+    const insertIdx = jsonIdx === -1 ? execIdx + 1 : jsonIdx + 1;
     args.splice(insertIdx, 0, '-c', CODEX_HEADLESS_CONFIG);
   }
 }
@@ -444,6 +472,11 @@ function stripCodexHeadlessArgs(args: string[]): void {
   const fullAutoIdx = args.indexOf('--full-auto');
   if (fullAutoIdx !== -1) {
     args.splice(fullAutoIdx, 1);
+  }
+
+  const jsonIdx = args.indexOf(CODEX_HEADLESS_JSON_ARG);
+  if (jsonIdx !== -1) {
+    args.splice(jsonIdx, 1);
   }
 
   const configIdx = findCodexSandboxConfigIndex(args);

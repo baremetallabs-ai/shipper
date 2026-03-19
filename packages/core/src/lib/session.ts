@@ -1,7 +1,8 @@
 import { execFile } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import type { TokenUsage } from './usage.js';
 const UNLINKED_REPO = '_unlinked';
 
 export interface SessionMeta {
@@ -13,6 +14,7 @@ export interface SessionMeta {
   timestamp: string;
   exitCode: number;
   logFile?: string;
+  usage?: TokenUsage;
 }
 
 export interface SessionRepoInfo {
@@ -75,6 +77,65 @@ export async function writeSessionMeta(metaFile: string, meta: SessionMeta): Pro
   await writeFile(metaFile, `${JSON.stringify(meta, null, 2)}\n`, 'utf-8');
 }
 
+export async function aggregateSessionUsage(
+  repo: string,
+  issue: string,
+  since: Date
+): Promise<TokenUsage | undefined> {
+  let entries: string[];
+  try {
+    entries = await readdir(getSessionDir(toRepoSlug(repo)));
+  } catch {
+    return undefined;
+  }
+
+  let total: TokenUsage | undefined;
+
+  for (const entry of entries) {
+    if (!entry.endsWith('.meta.json')) {
+      continue;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(
+        await readFile(path.join(getSessionDir(toRepoSlug(repo)), entry), 'utf-8')
+      );
+    } catch {
+      continue;
+    }
+
+    if (!isSessionMeta(parsed)) {
+      continue;
+    }
+
+    if (parsed.issue !== issue) {
+      continue;
+    }
+
+    const timestamp = new Date(parsed.timestamp);
+    if (Number.isNaN(timestamp.getTime()) || timestamp < since) {
+      continue;
+    }
+
+    const usage = parseUsage(parsed.usage);
+    if (!usage) {
+      continue;
+    }
+
+    total = total
+      ? {
+          inputTokens: total.inputTokens + usage.inputTokens,
+          outputTokens: total.outputTokens + usage.outputTokens,
+          cacheReadTokens: total.cacheReadTokens + usage.cacheReadTokens,
+          cacheWriteTokens: total.cacheWriteTokens + usage.cacheWriteTokens,
+        }
+      : { ...usage };
+  }
+
+  return total;
+}
+
 function parseRepoFromRemote(remote: string): string | undefined {
   const match = remote.trim().match(/[:/]([^/]+\/[^/]+?)(?:\.git)?$/);
   return match?.[1];
@@ -94,6 +155,49 @@ function getRemoteUrl(cwd?: string): Promise<string> {
 
 function toRepoSlug(repo: string): string {
   return repo.replaceAll('/', '-');
+}
+
+function isSessionMeta(value: unknown): value is SessionMeta {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'issue' in value &&
+    typeof value.issue === 'string' &&
+    'timestamp' in value &&
+    typeof value.timestamp === 'string'
+  );
+}
+
+function parseUsage(value: unknown): TokenUsage | undefined {
+  if (typeof value !== 'object' || value === null) {
+    return undefined;
+  }
+
+  const usage = value as Record<string, unknown>;
+  const inputTokens = usage.inputTokens;
+  const outputTokens = usage.outputTokens;
+  const cacheReadTokens = usage.cacheReadTokens;
+  const cacheWriteTokens = usage.cacheWriteTokens;
+
+  if (
+    !isFiniteNumber(inputTokens) ||
+    !isFiniteNumber(outputTokens) ||
+    !isFiniteNumber(cacheReadTokens) ||
+    !isFiniteNumber(cacheWriteTokens)
+  ) {
+    return undefined;
+  }
+
+  return {
+    inputTokens,
+    outputTokens,
+    cacheReadTokens,
+    cacheWriteTokens,
+  };
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
 }
 
 function toErrorMessage(error: unknown): string {
