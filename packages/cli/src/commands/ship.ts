@@ -1303,6 +1303,7 @@ export function printUnblockSummary(attempts: UnblockAttempt[], homeDir = homedi
   console.log('  Ref              Issue                                          Outcome');
   const finalByIssue = new Map<number, UnblockAttempt>();
   for (const a of attempts) {
+    finalByIssue.delete(a.issue);
     finalByIssue.set(a.issue, a);
   }
 
