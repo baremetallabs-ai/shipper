@@ -2,11 +2,16 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { mockRunPrompt } = vi.hoisted(() => ({
   mockRunPrompt:
-    vi.fn<(name: string, opts: { userInput: string; mode?: string }) => Promise<number>>(),
+    vi.fn<
+      (
+        name: string,
+        opts: { userInput: string; mode?: string; logFile?: string }
+      ) => Promise<number>
+    >(),
 }));
 
 vi.mock('@dnsquared/shipper-core', () => ({
-  runPrompt: (name: string, opts: { userInput: string; mode?: string }) =>
+  runPrompt: (name: string, opts: { userInput: string; mode?: string; logFile?: string }) =>
     mockRunPrompt(name, opts),
 }));
 
@@ -49,6 +54,18 @@ describe('newCommand', () => {
       mode: undefined,
     });
     expect(process.env.SHIPPER_HEADLESS).toBeUndefined();
+  });
+
+  it('forwards a log file path to runPrompt unchanged', async () => {
+    await expect(
+      newCommand(['my', 'request'], { logFile: '/tmp/example.jsonl', mode: 'headless' })
+    ).rejects.toThrow('process.exit:0');
+
+    expect(mockRunPrompt).toHaveBeenCalledWith('new', {
+      userInput: 'my request',
+      mode: 'headless',
+      logFile: '/tmp/example.jsonl',
+    });
   });
 
   it('exits with the existing usage error when the request is empty', async () => {

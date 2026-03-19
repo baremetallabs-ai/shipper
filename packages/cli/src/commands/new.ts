@@ -2,7 +2,7 @@ import { runPrompt, type AgentName, type CommandMode } from '@dnsquared/shipper-
 
 export async function newCommand(
   requestWords: string[],
-  options: { mode?: CommandMode; agent?: AgentName; model?: string } = {}
+  options: { mode?: CommandMode; agent?: AgentName; model?: string; logFile?: string } = {}
 ): Promise<void> {
   const request = requestWords.join(' ').trim();
   if (!request) {
@@ -16,6 +16,7 @@ export async function newCommand(
     mode: options.mode,
     agent: options.agent,
     model: options.model,
+    logFile: options.logFile,
   });
   process.exit(exitCode);
 }
