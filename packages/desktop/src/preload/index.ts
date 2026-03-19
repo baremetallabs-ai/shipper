@@ -56,6 +56,8 @@ const shipperAPI = {
     ipcRenderer.invoke('scan-reset', { repo, issueNumber, targetStage }),
   executeReset: (repo: string, issueNumber: number, targetStage: WorkflowStage) =>
     ipcRenderer.invoke('execute-reset', { repo, issueNumber, targetStage }),
+  closeNotPlanned: (repo: string, issueNumber: number) =>
+    ipcRenderer.invoke('close-not-planned', { repo, issueNumber }),
 
   spawnShipperGroom: (issueNumber: number, repo: string, cols: number, rows: number) =>
     ipcRenderer.invoke('pty-spawn-shipper-groom', { issueNumber, repo, cols, rows }),
