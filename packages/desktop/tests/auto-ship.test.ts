@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   BLOCKED_LABEL,
+  FAILED_LABEL,
   GROOMED_LABEL,
   IMPLEMENTED_LABEL,
   LOCKED_LABEL,
@@ -71,31 +72,33 @@ describe('selectNextAutoShipIssue', () => {
     expect(selectNextAutoShipIssue(issues, new Set(), new Set())?.number).toBe(21);
   });
 
-  it('excludes blocked, locked, active, and skipped issues', () => {
+  it('excludes blocked, failed, locked, active, and skipped issues', () => {
     const issues = [
       createIssue(30, [PR_OPEN_LABEL, BLOCKED_LABEL]),
-      createIssue(31, [PR_REVIEWED_LABEL, LOCKED_LABEL]),
-      createIssue(32, [IMPLEMENTED_LABEL]),
-      createIssue(33, [PLANNED_LABEL]),
-      createIssue(34, [GROOMED_LABEL]),
+      createIssue(31, [PR_REVIEWED_LABEL, FAILED_LABEL]),
+      createIssue(32, [PR_REVIEWED_LABEL, LOCKED_LABEL]),
+      createIssue(33, [IMPLEMENTED_LABEL]),
+      createIssue(34, [PLANNED_LABEL]),
+      createIssue(35, [GROOMED_LABEL]),
     ];
 
-    const activeIssueNumbers = new Set([32]);
-    const skippedIssueNumbers = new Set([33]);
+    const activeIssueNumbers = new Set([33]);
+    const skippedIssueNumbers = new Set([34]);
 
     expect(selectNextAutoShipIssue(issues, activeIssueNumbers, skippedIssueNumbers)?.number).toBe(
-      34
+      35
     );
   });
 
   it('returns null when no eligible issues remain', () => {
     const issues = [
       createIssue(40, [PR_REVIEWED_LABEL, BLOCKED_LABEL]),
-      createIssue(41, [PR_OPEN_LABEL, LOCKED_LABEL]),
-      createIssue(42, [IMPLEMENTED_LABEL]),
+      createIssue(41, [PR_OPEN_LABEL, FAILED_LABEL]),
+      createIssue(42, [PR_OPEN_LABEL, LOCKED_LABEL]),
+      createIssue(43, [IMPLEMENTED_LABEL]),
     ];
 
-    expect(selectNextAutoShipIssue(issues, new Set([42]), new Set())).toBeNull();
+    expect(selectNextAutoShipIssue(issues, new Set([43]), new Set())).toBeNull();
   });
 });
 
