@@ -27,14 +27,11 @@ export function NewIssueDialog({
   const [request, setRequest] = useState('');
   const [selectedRepo, setSelectedRepo] = useState(activeRepo);
   const formRef = useRef<HTMLFormElement>(null);
-  const wasOpenRef = useRef(open);
 
   useEffect(() => {
-    if (open && !wasOpenRef.current) {
+    if (!open) {
       setSelectedRepo(activeRepo);
     }
-
-    wasOpenRef.current = open;
   }, [activeRepo, open]);
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>): void {
