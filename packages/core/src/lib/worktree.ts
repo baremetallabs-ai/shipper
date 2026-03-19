@@ -17,6 +17,7 @@ interface CommandOpts {
   cwd?: string;
   env?: typeof process.env;
   maxBuffer?: number;
+  shell?: boolean;
 }
 
 interface CommandResult {
@@ -72,6 +73,7 @@ function spawnAsync(command: string, args: string[], opts: CommandOpts = {}): Pr
     const child = spawn(command, args, {
       cwd: opts.cwd,
       env: { ...process.env, ...opts.env },
+      shell: opts.shell,
       stdio: 'inherit',
     });
 
@@ -283,6 +285,21 @@ async function fetchOriginOrThrow(opts: WorktreeGitOpts): Promise<void> {
   }
 }
 
+async function runPostRebaseInstall(cwd: string): Promise<void> {
+  const { installCommand } = getSettings();
+  if (!installCommand) {
+    return;
+  }
+
+  try {
+    await spawnAsync(installCommand, [], { cwd, shell: true });
+  } catch (error) {
+    throw new Error(
+      `Post-rebase install failed after the rebase completed: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
 function getPushArgs(pushMode: WorktreeGitOpts['pushMode'], forcePushBranch?: string): string[] {
   return pushMode === 'new-branch'
     ? ['push', '-u', 'origin', 'HEAD']
@@ -433,6 +450,7 @@ export async function syncWorktree(
     { cwd: opts.wtPath }
   );
   if (initialRebase.code === 0) {
+    await runPostRebaseInstall(opts.wtPath);
     return;
   }
 
@@ -457,6 +475,7 @@ export async function syncWorktree(
       env: { GIT_EDITOR: 'true' },
     });
     if (continueResult.code === 0) {
+      await runPostRebaseInstall(opts.wtPath);
       return;
     }
 
@@ -475,6 +494,7 @@ export async function syncWorktree(
     const nextConflictContext = await buildConflictContext(opts.wtPath, continueError);
     if (!nextConflictContext) {
       if (await isRebaseComplete(opts.wtPath)) {
+        await runPostRebaseInstall(opts.wtPath);
         return;
       }
 
@@ -629,6 +649,7 @@ export async function withGitTransport(
         env: { GIT_EDITOR: 'true' },
       });
       if (continueResult.code === 0) {
+        await runPostRebaseInstall(opts.wtPath);
         return await pushWithRetry(opts, runAgent);
       }
 
@@ -650,6 +671,7 @@ export async function withGitTransport(
         // step and (if it was the last step) finishes the rebase entirely. Detect
         // this by checking whether the rebase state directories still exist.
         if (await isRebaseComplete(opts.wtPath)) {
+          await runPostRebaseInstall(opts.wtPath);
           return await pushWithRetry(opts, runAgent);
         }
 
@@ -669,6 +691,8 @@ export async function withGitTransport(
       conflictContext = nextConflictContext;
     }
   }
+
+  await runPostRebaseInstall(opts.wtPath);
 
   const agentCode = await runAgent();
   if (agentCode !== 0) {
