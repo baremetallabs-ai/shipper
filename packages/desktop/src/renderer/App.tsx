@@ -1552,6 +1552,9 @@ export default function App(): JSX.Element {
       title: 'Failed to close issue',
       description: error,
     });
+    if (activeRepo) {
+      void loadIssues(activeRepo);
+    }
   }
 
   function handleToggleDrawer(): void {
