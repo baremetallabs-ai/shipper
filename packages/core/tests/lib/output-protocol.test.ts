@@ -530,6 +530,30 @@ describe('output protocol helpers', () => {
     expect(ghMock).not.toHaveBeenCalled();
   });
 
+  it('rejects pr_open accepts without a pr_spec before any gh side effects', async () => {
+    const outputDir = path.join(tempDir, PROTOCOL_OUTPUT_DIR);
+    await mkdir(outputDir, { recursive: true });
+    await writeFile(
+      path.join(outputDir, 'result.json'),
+      JSON.stringify({
+        verdict: 'accept',
+        comment: '.shipper/output/comment-248.md',
+      }),
+      'utf-8'
+    );
+    await writeFile(path.join(outputDir, 'comment-248.md'), 'summary', 'utf-8');
+
+    await expect(
+      processResult({
+        repo: 'owner/repo',
+        issueNumber: '248',
+        stage: 'pr_open',
+        cwd: tempDir,
+      })
+    ).rejects.toThrow('pr_open accept requires a pr_spec in result.json');
+    expect(ghMock).not.toHaveBeenCalled();
+  });
+
   it('processes review submission before posting the comment and changing labels', async () => {
     const outputDir = path.join(tempDir, PROTOCOL_OUTPUT_DIR);
     const payloadPath = path.join(outputDir, 'review-payload-248.json');
@@ -615,6 +639,31 @@ describe('output protocol helpers', () => {
       '--remove-label',
       'shipper:pr-open',
     ]);
+  });
+
+  it('rejects pr_review accepts without a review_payload before any gh side effects', async () => {
+    const outputDir = path.join(tempDir, PROTOCOL_OUTPUT_DIR);
+    await mkdir(outputDir, { recursive: true });
+    await writeFile(
+      path.join(outputDir, 'result.json'),
+      JSON.stringify({
+        verdict: 'accept',
+        comment: '.shipper/output/comment-248.md',
+      }),
+      'utf-8'
+    );
+    await writeFile(path.join(outputDir, 'comment-248.md'), 'summary', 'utf-8');
+
+    await expect(
+      processResult({
+        repo: 'owner/repo',
+        issueNumber: '248',
+        stage: 'pr_review',
+        cwd: tempDir,
+        prNumber: '77',
+      })
+    ).rejects.toThrow('pr_review accept requires a review_payload in result.json');
+    expect(ghMock).not.toHaveBeenCalled();
   });
 
   it('does not attempt gh operations when result.json is missing', async () => {
