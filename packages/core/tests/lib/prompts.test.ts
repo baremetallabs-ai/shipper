@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 describe('groom prompts', () => {
-  it.each(['claude', 'codex'])(
+  it.each(['claude', 'codex', 'copilot'])(
     'documents priority choices and label reconciliation for %s',
     (agent) => {
       const prompt = readFileSync(
@@ -21,7 +21,7 @@ describe('groom prompts', () => {
     }
   );
 
-  it.each(['claude', 'codex'])(
+  it.each(['claude', 'codex', 'copilot'])(
     'documents duplicate detection and short-circuit handling for %s',
     (agent) => {
       const prompt = readFileSync(
@@ -44,7 +44,7 @@ describe('groom prompts', () => {
 });
 
 describe('pr_open prompts', () => {
-  it.each(['claude', 'codex'])(
+  it.each(['claude', 'codex', 'copilot'])(
     'write PR protocol artifacts and avoid direct GitHub commands for %s',
     (agent) => {
       const prompt = readFileSync(
@@ -66,7 +66,7 @@ describe('pr_open prompts', () => {
 });
 
 describe('pr_review prompts', () => {
-  it.each(['claude', 'codex'])(
+  it.each(['claude', 'codex', 'copilot'])(
     'read pre-flight review context and avoid direct GitHub commands for %s',
     (agent) => {
       const prompt = readFileSync(
@@ -90,7 +90,7 @@ describe('pr_review prompts', () => {
 });
 
 describe('pr_remediate prompts', () => {
-  it.each(['claude', 'codex'])(
+  it.each(['claude', 'codex', 'copilot'])(
     'read remediation pass context and avoid direct platform commands for %s',
     (agent) => {
       const prompt = readFileSync(

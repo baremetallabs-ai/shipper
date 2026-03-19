@@ -407,13 +407,12 @@ describe('agentTimeoutMinutes', () => {
 });
 
 describe('resolveAgent', () => {
-  it('returns the per-step agent override when configured', async () => {
+  it('returns copilot from commands.default when configured', async () => {
     readFileMock.mockImplementation((p: string) => {
       if (p === settingsPath) {
         return JSON.stringify({
           commands: {
-            default: { agent: 'claude' },
-            implement: { agent: 'codex' },
+            default: { agent: 'copilot' },
           },
         });
       }
@@ -423,7 +422,26 @@ describe('resolveAgent', () => {
     const { loadSettings, resolveAgent } = await loadModule();
     await loadSettings();
 
-    expect(resolveAgent('implement')).toBe('codex');
+    expect(resolveAgent('implement')).toBe('copilot');
+  });
+
+  it('returns the per-step agent override when configured', async () => {
+    readFileMock.mockImplementation((p: string) => {
+      if (p === settingsPath) {
+        return JSON.stringify({
+          commands: {
+            default: { agent: 'claude' },
+            implement: { agent: 'copilot' },
+          },
+        });
+      }
+      throw enoent(p);
+    });
+
+    const { loadSettings, resolveAgent } = await loadModule();
+    await loadSettings();
+
+    expect(resolveAgent('implement')).toBe('copilot');
     expect(resolveAgent('groom')).toBe('claude');
   });
 
@@ -442,7 +460,9 @@ describe('resolveAgent', () => {
 
     const { loadSettings, resolveAgent } = await loadModule();
     await loadSettings();
-    expect(() => resolveAgent('implement')).toThrow('Invalid agent "vim" for step "implement"');
+    expect(() => resolveAgent('implement')).toThrow(
+      'Invalid agent "vim" for step "implement". Must be "claude", "codex", or "copilot".'
+    );
   });
 
   it('returns the override when provided', async () => {
@@ -458,7 +478,7 @@ describe('resolveAgent', () => {
     const { loadSettings, resolveAgent } = await loadModule();
     await loadSettings();
 
-    expect(resolveAgent('groom', 'codex')).toBe('codex');
+    expect(resolveAgent('groom', 'copilot')).toBe('copilot');
     expect(resolveAgent('groom')).toBe('claude');
   });
 
@@ -475,7 +495,9 @@ describe('resolveAgent', () => {
     const { loadSettings, resolveAgent } = await loadModule();
     await loadSettings();
 
-    expect(() => resolveAgent('groom')).toThrow('Invalid agent "vim" for step "groom"');
+    expect(() => resolveAgent('groom')).toThrow(
+      'Invalid agent "vim" for step "groom". Must be "claude", "codex", or "copilot".'
+    );
   });
 });
 

@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { createWriteStream, readFileSync, statSync } from 'node:fs';
 import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -43,6 +43,12 @@ const CODEX_HEADLESS_ARGS = [
   CODEX_HEADLESS_JSON_ARG,
   '-c',
   CODEX_HEADLESS_CONFIG,
+] as const;
+const COPILOT_HEADLESS_FLAGS = [
+  '--autopilot',
+  '--allow-all-tools',
+  '--allow-all-urls',
+  '--no-ask-user',
 ] as const;
 const GH_MUTATION_PATTERNS = [
   /gh\s+issue\s+edit\b/,
@@ -209,6 +215,16 @@ async function resolvePromptCommand(
   effectiveMode: CommandMode
 ): Promise<{ agent: AgentName; args: string[]; promptBody: string }> {
   const agent = resolveAgent(name, opts.agent);
+  if (agent === 'copilot') {
+    try {
+      execFileSync('which', ['copilot'], { stdio: 'ignore' });
+    } catch {
+      throw new Error(
+        'copilot binary not found on PATH.\n' +
+          'Install the GitHub Copilot CLI: https://docs.github.com/copilot/cli'
+      );
+    }
+  }
   const model = resolveModel(name, opts.model);
   const promptPath = path.resolve('.shipper', 'prompts', agent, `${name}.md`);
 
@@ -267,7 +283,7 @@ async function resolvePromptCommand(
       const pIdx = args.indexOf('-p');
       if (pIdx !== -1) args.splice(pIdx, 1);
     }
-  } else {
+  } else if (agent === 'codex') {
     if (effectiveMode === 'headless') {
       normalizeCodexHeadlessArgs(args);
     } else if (effectiveMode === 'interactive') {
@@ -286,20 +302,28 @@ async function resolvePromptCommand(
         args.splice(insertIdx, 0, ...addDirArgs);
       }
     }
+  } else {
+    if (effectiveMode === 'headless') {
+      normalizeCopilotHeadlessArgs(args);
+    } else if (effectiveMode === 'interactive') {
+      stripCopilotHeadlessArgs(args);
+    }
   }
 
   if (model) {
-    if (agent === 'claude') {
-      args.push('--model', model);
-    } else {
+    if (agent === 'codex') {
       const execIdx = args.indexOf('exec');
       const insertIdx = execIdx === -1 ? 0 : execIdx;
       args.splice(insertIdx, 0, '-m', model);
+    } else {
+      args.push('--model', model);
     }
   }
 
   if (agent === 'claude') {
     args.push('--append-system-prompt', promptBody);
+  } else if (agent === 'copilot') {
+    args.push('-p', promptBody);
   } else {
     args.push(promptBody);
   }
@@ -330,13 +354,13 @@ async function resolvePromptCommand(
 
   const userMessage = messageParts.join('\n\n---\n\n');
   if (userMessage) {
-    if (agent === 'codex') {
+    if (agent === 'claude') {
+      args.push(userMessage);
+    } else {
       const promptIdx = args.indexOf(promptBody);
       if (promptIdx !== -1) {
         args[promptIdx] = promptBody + '\n\n---\n\n' + userMessage;
       }
-    } else {
-      args.push(userMessage);
     }
   }
 
@@ -485,6 +509,22 @@ function stripCodexHeadlessArgs(args: string[]): void {
   }
 }
 
+function normalizeCopilotHeadlessArgs(args: string[]): void {
+  for (const flag of COPILOT_HEADLESS_FLAGS) {
+    if (!args.includes(flag)) {
+      args.push(flag);
+    }
+  }
+}
+
+function stripCopilotHeadlessArgs(args: string[]): void {
+  for (let i = args.length - 1; i >= 0; i--) {
+    if (COPILOT_HEADLESS_FLAGS.includes(args[i] as (typeof COPILOT_HEADLESS_FLAGS)[number])) {
+      args.splice(i, 1);
+    }
+  }
+}
+
 function findCodexSandboxConfigIndex(args: string[]): number {
   for (let i = 0; i < args.length - 1; i++) {
     if (args[i] === '-c' && args[i + 1] === CODEX_HEADLESS_CONFIG) {
@@ -495,7 +535,7 @@ function findCodexSandboxConfigIndex(args: string[]): number {
 }
 
 function getEffectiveModel(agent: AgentName, args: string[]): string | undefined {
-  const flag = agent === 'claude' ? '--model' : '-m';
+  const flag = agent === 'codex' ? '-m' : '--model';
 
   for (let i = args.length - 2; i >= 0; i--) {
     if (args[i] === flag) {

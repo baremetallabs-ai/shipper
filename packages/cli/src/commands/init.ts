@@ -29,7 +29,7 @@ function getErrorStderr(err: unknown): string {
     : '';
 }
 
-const VALID_AGENTS = ['claude', 'codex'] as const;
+const VALID_AGENTS = ['claude', 'codex', 'copilot'] as const;
 const UNSAFE_COMMAND_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -120,7 +120,7 @@ export async function initCommand(options: { agent?: string }) {
     } else {
       const rl = createInterface({ input: process.stdin, output: process.stdout });
       const answer = await rl.question(
-        'Which coding agent do you use? [Claude Code / Codex CLI] (default: Claude Code): '
+        'Which coding agent do you use? [Claude Code / Codex CLI / Copilot CLI] (default: Claude Code): '
       );
       rl.close();
       const trimmed = answer.trim().toLowerCase();
@@ -128,9 +128,15 @@ export async function initCommand(options: { agent?: string }) {
         agent = 'claude';
       } else if (trimmed === 'codex cli' || trimmed === 'codex') {
         agent = 'codex';
+      } else if (
+        trimmed === 'copilot cli' ||
+        trimmed === 'copilot' ||
+        trimmed === 'github copilot'
+      ) {
+        agent = 'copilot';
       } else {
         console.error(
-          `Error: Unrecognized agent "${answer.trim()}". Expected "Claude Code" or "Codex CLI".`
+          `Error: Unrecognized agent "${answer.trim()}". Expected "Claude Code", "Codex CLI", or "Copilot CLI".`
         );
         process.exit(1);
         return;
@@ -274,7 +280,7 @@ export async function initCommand(options: { agent?: string }) {
   const mergedDefaultCommand = isPlainObject(mergedCommands.default) ? mergedCommands.default : {};
   merged.commands = {
     ...mergedCommands,
-    default: { ...mergedDefaultCommand, agent: agent as 'claude' | 'codex' },
+    default: { ...mergedDefaultCommand, agent: agent as 'claude' | 'codex' | 'copilot' },
   };
   delete merged.agent;
   delete merged.agents;

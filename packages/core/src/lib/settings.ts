@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-export type AgentName = 'claude' | 'codex';
+export type AgentName = 'claude' | 'codex' | 'copilot';
 export type CommandMode = 'headless' | 'interactive' | 'default';
 
 export interface PrReviewWait {
@@ -160,9 +160,13 @@ export function resolveAgent(step: string, override?: AgentName): AgentName {
   }
   const s = getSettings();
   const configuredAgent: unknown = s.commands[step]?.agent ?? s.commands.default.agent;
-  if (configuredAgent !== 'claude' && configuredAgent !== 'codex') {
+  if (
+    configuredAgent !== 'claude' &&
+    configuredAgent !== 'codex' &&
+    configuredAgent !== 'copilot'
+  ) {
     throw new Error(
-      `Invalid agent "${String(configuredAgent)}" for step "${step}". Must be "claude" or "codex".`
+      `Invalid agent "${String(configuredAgent)}" for step "${step}". Must be "claude", "codex", or "copilot".`
     );
   }
   return configuredAgent;
