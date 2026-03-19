@@ -122,7 +122,7 @@ describe('newCommand', () => {
     expect(errorMock).toHaveBeenCalledWith(
       'Error: A request is required when running in headless mode.'
     );
-    expect(errorMock).toHaveBeenCalledWith('Usage: shipper new <request> --mode headless');
+    expect(errorMock).toHaveBeenCalledWith('Usage: shipper new <request...> --mode headless');
     expect(mockRunPrompt).not.toHaveBeenCalled();
   });
 
@@ -135,13 +135,12 @@ describe('newCommand', () => {
     expect(errorMock).toHaveBeenCalledWith(
       'Error: A request is required when running in headless mode.'
     );
-    expect(errorMock).toHaveBeenCalledWith('Usage: shipper new <request> --mode headless');
+    expect(errorMock).toHaveBeenCalledWith('Usage: shipper new <request...> --mode headless');
     expect(mockRunPrompt).not.toHaveBeenCalled();
   });
 
   it('returns immediately after exiting on bare headless mode when process.exit is mocked', async () => {
-    exitMock.mockRestore();
-    const exitReturnSpy = vi.spyOn(process, 'exit').mockImplementation(((_code?: number) => {
+    exitMock.mockImplementation(((_code?: number) => {
       return undefined as never;
     }) as typeof process.exit);
 
@@ -150,10 +149,8 @@ describe('newCommand', () => {
     expect(errorMock).toHaveBeenCalledWith(
       'Error: A request is required when running in headless mode.'
     );
-    expect(errorMock).toHaveBeenCalledWith('Usage: shipper new <request> --mode headless');
+    expect(errorMock).toHaveBeenCalledWith('Usage: shipper new <request...> --mode headless');
     expect(mockRunPrompt).not.toHaveBeenCalled();
-
-    exitReturnSpy.mockRestore();
   });
 
   it('forwards codex without injecting a starter user message', async () => {

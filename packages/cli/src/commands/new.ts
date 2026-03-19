@@ -9,7 +9,7 @@ export async function newCommand(
     const effectiveMode = resolveMode('new', options.mode);
     if (effectiveMode === 'headless') {
       console.error('Error: A request is required when running in headless mode.');
-      console.error('Usage: shipper new <request> --mode headless');
+      console.error('Usage: shipper new <request...> --mode headless');
       process.exit(1);
       return;
     }

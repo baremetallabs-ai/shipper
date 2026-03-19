@@ -134,7 +134,7 @@ addModelOption(
     addModeOption(
       program
         .command('new')
-        .description('Create a new issue from a request')
+        .description('Create a new issue interactively or from a request')
         .argument('[request...]', 'your idea for the new issue')
         .option('--log-file <path>', 'write agent output to a specific log file')
         .action(
