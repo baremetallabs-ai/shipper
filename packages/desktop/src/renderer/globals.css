@@ -141,6 +141,24 @@
     font-family: 'SFMono-Regular', 'SF Mono', 'Cascadia Code', 'JetBrains Mono', monospace;
   }
 
+  @keyframes shipping-pulse {
+    0%,
+    100% {
+      border-color: var(--primary);
+      opacity: 1;
+    }
+
+    50% {
+      border-color: var(--ring);
+      opacity: 0.85;
+    }
+  }
+
+  .shipping-active {
+    animation: shipping-pulse 2s ease-in-out infinite;
+    border-color: var(--primary);
+  }
+
   .nautical-wave-border {
     position: relative;
   }

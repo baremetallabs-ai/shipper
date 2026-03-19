@@ -1,6 +1,6 @@
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import type { DragEvent, JSX } from 'react';
-import { ChevronLeft, ChevronRight, EllipsisVertical, LoaderCircle } from 'lucide-react';
+import { ChevronLeft, ChevronRight, EllipsisVertical, LoaderCircle, Square } from 'lucide-react';
 
 import {
   BLOCKED_LABEL,
@@ -366,6 +366,8 @@ interface IssueCardProps {
   isResetting?: boolean;
   onShip?: (issueNumber: number) => void;
   shipDisabled?: boolean;
+  shippingStatus?: 'queued' | 'running';
+  onStopShip?: () => void;
   draggable?: boolean;
   onDragStart?: (e: DragEvent) => void;
   onDragEnd?: () => void;
@@ -380,15 +382,18 @@ function IssueCard({
   isResetting = false,
   onShip,
   shipDisabled = false,
+  shippingStatus,
+  onStopShip,
   draggable,
   onDragStart,
   onDragEnd,
 }: IssueCardProps): JSX.Element {
   const isBlocked = issue.labels.includes(BLOCKED_LABEL);
   const isLocked = issue.labels.includes(LOCKED_LABEL);
-  const isGroomDisabled = groomDisabled || isBlocked || isLocked;
-  const showOverflowMenu = onResetSelect !== undefined && resetTargets.length > 0;
-  const isShipDisabled = shipDisabled || isBlocked || isLocked;
+  const isShipping = !!shippingStatus;
+  const isGroomDisabled = groomDisabled || isBlocked || isLocked || isShipping;
+  const showOverflowMenu = !isShipping && onResetSelect !== undefined && resetTargets.length > 0;
+  const isShipDisabled = shipDisabled || isBlocked || isLocked || isShipping;
 
   return (
     <article
@@ -398,6 +403,7 @@ function IssueCard({
       className={cn(
         'relative space-y-3 rounded-sm border border-border bg-background px-4 py-4 transition-opacity',
         isResetting && 'opacity-70',
+        shippingStatus === 'running' && 'shipping-active',
         draggable && 'cursor-grab'
       )}
     >
@@ -435,6 +441,18 @@ function IssueCard({
               </DropdownMenuSub>
             </DropdownMenuContent>
           </DropdownMenu>
+        ) : null}
+        {!showOverflowMenu && isShipping && onStopShip ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-7 text-muted-foreground hover:text-destructive"
+            aria-label={`Stop shipping #${issue.number}`}
+            onClick={onStopShip}
+          >
+            <Square className="size-3.5 fill-current" />
+          </Button>
         ) : null}
       </div>
       <h4 className="text-sm font-semibold leading-snug text-foreground">{issue.title}</h4>
@@ -578,6 +596,19 @@ export default function App(): JSX.Element {
       columnMap: nextColumnMap,
     };
   }, [issues]);
+  const shippingCommands = new Map<number, BackgroundCommandState>();
+
+  for (const command of backgroundCommands) {
+    if (
+      command.command === 'ship' &&
+      command.repo === activeRepo &&
+      command.issueNumber !== undefined &&
+      (command.status === 'queued' || command.status === 'running') &&
+      !command.cancelled
+    ) {
+      shippingCommands.set(command.issueNumber, command);
+    }
+  }
 
   function clearIssueState(): void {
     requestVersionRef.current += 1;
@@ -1844,6 +1875,11 @@ export default function App(): JSX.Element {
                                 {stageIssues.length > 0 ? (
                                   stageIssues.map((issue) => {
                                     const resetTargets = getResetTargets(issue.labels);
+                                    const shippingCmd = shippingCommands.get(issue.number);
+                                    const shippingStatus = shippingCmd?.status as
+                                      | 'queued'
+                                      | 'running'
+                                      | undefined;
 
                                     return (
                                       <IssueCard
@@ -1859,8 +1895,18 @@ export default function App(): JSX.Element {
                                             ? (issueNumber) => void handleShipperShip(issueNumber)
                                             : undefined
                                         }
-                                        shipDisabled={!canFetch || !hasActiveRepo}
-                                        draggable={!resettingIssues.has(issue.number)}
+                                        shipDisabled={
+                                          !!shippingStatus || !canFetch || !hasActiveRepo
+                                        }
+                                        shippingStatus={shippingStatus}
+                                        onStopShip={
+                                          shippingCmd
+                                            ? () => void handleCancelBackground(shippingCmd.id)
+                                            : undefined
+                                        }
+                                        draggable={
+                                          !resettingIssues.has(issue.number) && !shippingStatus
+                                        }
                                         onDragStart={(e) => {
                                           e.dataTransfer.effectAllowed = 'move';
                                           setDragSource({ issue, columnIndex });
