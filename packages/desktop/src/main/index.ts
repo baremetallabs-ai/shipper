@@ -35,6 +35,7 @@ import { BackgroundManager } from './background-manager.js';
 interface AppConfig {
   repos: string[];
   activeRepo: string;
+  autoMergeRepos: string[];
 }
 
 interface ParseConfigResult {
@@ -77,6 +78,7 @@ interface SpawnBackgroundNewPayload extends SpawnBackgroundCommandPayload {
 
 interface SpawnBackgroundShipPayload extends SpawnBackgroundCommandPayload {
   issueNumber: number;
+  merge: boolean;
 }
 
 interface SessionIdPayload {
@@ -121,7 +123,7 @@ interface RawCreatedIssueData {
   createdAt: string;
 }
 
-const defaultConfig: AppConfig = { repos: [], activeRepo: '' };
+const defaultConfig: AppConfig = { repos: [], activeRepo: '', autoMergeRepos: [] };
 const ptyManager = new PtyManager();
 const backgroundManager = new BackgroundManager();
 const repoPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
@@ -154,6 +156,7 @@ function readConfig(): AppConfig {
       const migratedConfig: AppConfig = {
         repos: [legacyRepo],
         activeRepo: legacyRepo,
+        autoMergeRepos: [],
       };
       writeConfig(migratedConfig);
       return migratedConfig;
@@ -294,6 +297,7 @@ function parseSpawnBackgroundShipPayload(value: unknown): SpawnBackgroundShipPay
   return {
     ...payload,
     issueNumber: value.issueNumber,
+    merge: 'merge' in value && typeof value.merge === 'boolean' ? value.merge : false,
   };
 }
 
@@ -612,29 +616,79 @@ function parseConfig(value: unknown): ParseConfigResult | null {
     repos.push(parsedRepo);
   }
 
+  const repoByKey = new Map(repos.map((repo) => [toRepoKey(repo), repo]));
+
   if (typeof value.activeRepo !== 'string') {
     return null;
   }
 
   if (repos.length === 0) {
+    const hasAutoMergeRepos =
+      'autoMergeRepos' in value &&
+      Array.isArray(value.autoMergeRepos) &&
+      value.autoMergeRepos.length > 0;
     return {
-      config: { repos, activeRepo: '' },
-      changed: changed || value.activeRepo.trim().length > 0,
+      config: { repos, activeRepo: '', autoMergeRepos: [] },
+      changed:
+        changed ||
+        value.activeRepo.trim().length > 0 ||
+        !('autoMergeRepos' in value) ||
+        !Array.isArray(value.autoMergeRepos) ||
+        hasAutoMergeRepos,
     };
   }
 
   const fallbackActiveRepo = repos[0];
   if (fallbackActiveRepo === undefined) {
     return {
-      config: { repos: [], activeRepo: '' },
+      config: { repos: [], activeRepo: '', autoMergeRepos: [] },
       changed: true,
     };
+  }
+
+  const autoMergeRepos: string[] = [];
+  const seenAutoMergeRepos = new Set<string>();
+  const rawAutoMergeRepos =
+    'autoMergeRepos' in value && Array.isArray(value.autoMergeRepos) ? value.autoMergeRepos : null;
+
+  if (rawAutoMergeRepos === null) {
+    changed = true;
+  } else {
+    for (const repo of rawAutoMergeRepos) {
+      const parsedRepo = parseRepo(repo);
+      if (parsedRepo === null) {
+        changed = true;
+        continue;
+      }
+
+      if (repo !== parsedRepo) {
+        changed = true;
+      }
+
+      const repoKey = toRepoKey(parsedRepo);
+      const matchingRepo = repoByKey.get(repoKey);
+      if (matchingRepo === undefined) {
+        changed = true;
+        continue;
+      }
+
+      if (seenAutoMergeRepos.has(repoKey)) {
+        changed = true;
+        continue;
+      }
+
+      seenAutoMergeRepos.add(repoKey);
+      if (matchingRepo !== parsedRepo) {
+        changed = true;
+      }
+      autoMergeRepos.push(matchingRepo);
+    }
   }
 
   const parsedActiveRepo = parseRepo(value.activeRepo);
   if (parsedActiveRepo === null) {
     return {
-      config: { repos, activeRepo: fallbackActiveRepo },
+      config: { repos, activeRepo: fallbackActiveRepo, autoMergeRepos },
       changed: true,
     };
   }
@@ -642,13 +696,13 @@ function parseConfig(value: unknown): ParseConfigResult | null {
   const matchingActiveRepo = repos.find((repo) => toRepoKey(repo) === toRepoKey(parsedActiveRepo));
   if (matchingActiveRepo === undefined) {
     return {
-      config: { repos, activeRepo: fallbackActiveRepo },
+      config: { repos, activeRepo: fallbackActiveRepo, autoMergeRepos },
       changed: true,
     };
   }
 
   return {
-    config: { repos, activeRepo: matchingActiveRepo },
+    config: { repos, activeRepo: matchingActiveRepo, autoMergeRepos },
     changed: changed || value.activeRepo !== matchingActiveRepo,
   };
 }
@@ -1081,16 +1135,21 @@ function registerIpcHandlers(): void {
 
     const repoPath = await ensureRepoClone(parsedPayload.repo);
     const sessionId = randomUUID();
+    const args = ['ship', String(parsedPayload.issueNumber), '--mode', 'headless'];
+    if (parsedPayload.merge) {
+      args.push('--merge');
+    }
 
     return backgroundManager.spawn({
       sessionId,
       command: 'ship',
       repo: parsedPayload.repo,
       commandName: 'shipper',
-      args: ['ship', String(parsedPayload.issueNumber), '--mode', 'headless'],
+      args,
       cwd: repoPath,
       meta: {
         issueNumber: parsedPayload.issueNumber,
+        merge: parsedPayload.merge,
       },
     });
   });

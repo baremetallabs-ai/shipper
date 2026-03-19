@@ -10,6 +10,7 @@ export type BackgroundStatus = 'queued' | 'running' | 'complete' | 'failed';
 
 export interface BackgroundSessionMeta {
   issueNumber?: number;
+  merge?: boolean;
   issueUrl?: string;
   logFile?: string;
   request?: string;

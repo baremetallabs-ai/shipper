@@ -1,9 +1,10 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 type IpcHandler = (event: unknown, payload: unknown) => unknown;
+const mockUserDataPath = '/tmp/shipper-desktop-tests';
 
 const state = vi.hoisted(() => ({
   handlers: new Map<string, IpcHandler>(),
@@ -197,7 +198,7 @@ async function loadHandlers(): Promise<Map<string, IpcHandler>> {
     state.handlers.set(channel, handler);
   });
   state.appWhenReadyMock.mockResolvedValue(undefined);
-  state.appGetPathMock.mockImplementation(() => '/tmp/shipper-desktop-tests');
+  state.appGetPathMock.mockImplementation(() => mockUserDataPath);
   state.browserWindowGetAllWindowsMock.mockReturnValue([]);
   state.browserWindowLoadUrlMock.mockResolvedValue(undefined);
   state.browserWindowLoadFileMock.mockResolvedValue(undefined);
@@ -277,6 +278,7 @@ function parseBackgroundSpawnCall(index = 0): Record<string, unknown> {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  rmSync(mockUserDataPath, { recursive: true, force: true });
 });
 
 afterEach(() => {
@@ -284,6 +286,7 @@ afterEach(() => {
   state.handlers.clear();
   state.exitCallbacks.clear();
   state.browserWindowEventHandlers.clear();
+  rmSync(mockUserDataPath, { recursive: true, force: true });
 });
 
 describe('desktop IPC locking', () => {
@@ -323,7 +326,27 @@ describe('desktop IPC locking', () => {
     expect(state.ptySpawnMock).not.toHaveBeenCalled();
   });
 
-  it('spawns `ship` through the background manager instead of PTY', async () => {
+  it('spawns `ship` through the background manager with `--merge` when requested', async () => {
+    await loadHandlers();
+    const handler = getHandler('bg-spawn-ship');
+
+    const result = parseSessionResult(
+      await handler({}, { repo: 'owner/repo', issueNumber: 42, merge: true })
+    );
+    const spawnCall = parseBackgroundSpawnCall();
+
+    expect(result.sessionId).toEqual(expect.any(String));
+    expect(spawnCall.sessionId).toBe(result.sessionId);
+    expect(spawnCall.command).toBe('ship');
+    expect(spawnCall.repo).toBe('owner/repo');
+    expect(spawnCall.commandName).toBe('shipper');
+    expect(spawnCall.cwd).toBe('/tmp/repo');
+    expect(spawnCall.args).toEqual(['ship', '42', '--mode', 'headless', '--merge']);
+    expect(spawnCall.meta).toEqual({ issueNumber: 42, merge: true });
+    expect(state.ptySpawnMock).not.toHaveBeenCalled();
+  });
+
+  it('spawns `ship` without `--merge` when the payload omits merge', async () => {
     await loadHandlers();
     const handler = getHandler('bg-spawn-ship');
 
@@ -337,8 +360,84 @@ describe('desktop IPC locking', () => {
     expect(spawnCall.commandName).toBe('shipper');
     expect(spawnCall.cwd).toBe('/tmp/repo');
     expect(spawnCall.args).toEqual(['ship', '42', '--mode', 'headless']);
-    expect(spawnCall.meta).toEqual({ issueNumber: 42 });
+    expect(spawnCall.meta).toEqual({ issueNumber: 42, merge: false });
     expect(state.ptySpawnMock).not.toHaveBeenCalled();
+  });
+
+  it('defaults missing auto-merge repos to an empty array on get-config', async () => {
+    await loadHandlers();
+    mkdirSync(mockUserDataPath, { recursive: true });
+    writeFileSync(
+      join(mockUserDataPath, 'config.json'),
+      JSON.stringify({
+        repos: ['owner/repo'],
+        activeRepo: 'owner/repo',
+      }),
+      'utf8'
+    );
+
+    const handler = getHandler('get-config');
+    const result = await handler({}, undefined);
+    const savedConfig: unknown = JSON.parse(
+      readFileSync(join(mockUserDataPath, 'config.json'), 'utf8')
+    );
+
+    expect(result).toEqual({
+      repos: ['owner/repo'],
+      activeRepo: 'owner/repo',
+      autoMergeRepos: [],
+    });
+    expect(savedConfig).toEqual(result);
+  });
+
+  it('normalizes auto-merge repos on get-config and writes corrections back to disk', async () => {
+    await loadHandlers();
+    mkdirSync(mockUserDataPath, { recursive: true });
+    writeFileSync(
+      join(mockUserDataPath, 'config.json'),
+      JSON.stringify({
+        repos: ['owner/repo', 'owner/other'],
+        activeRepo: 'owner/repo',
+        autoMergeRepos: ['owner/repo', ' owner/repo ', 'OWNER/OTHER', 'owner/missing', 42],
+      }),
+      'utf8'
+    );
+
+    const handler = getHandler('get-config');
+    const result = await handler({}, undefined);
+    const savedConfig: unknown = JSON.parse(
+      readFileSync(join(mockUserDataPath, 'config.json'), 'utf8')
+    );
+
+    expect(result).toEqual({
+      repos: ['owner/repo', 'owner/other'],
+      activeRepo: 'owner/repo',
+      autoMergeRepos: ['owner/repo', 'owner/other'],
+    });
+    expect(savedConfig).toEqual(result);
+  });
+
+  it('persists auto-merge repos through set-config', async () => {
+    await loadHandlers();
+    const handler = getHandler('set-config');
+
+    await handler(
+      {},
+      {
+        repos: ['owner/repo'],
+        activeRepo: 'owner/repo',
+        autoMergeRepos: ['owner/repo'],
+      }
+    );
+
+    const savedConfig: unknown = JSON.parse(
+      readFileSync(join(mockUserDataPath, 'config.json'), 'utf8')
+    );
+    expect(savedConfig).toEqual({
+      repos: ['owner/repo'],
+      activeRepo: 'owner/repo',
+      autoMergeRepos: ['owner/repo'],
+    });
   });
 
   it('prefers settings.local.json over settings.json when resolving the init agent', async () => {

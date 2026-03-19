@@ -4,6 +4,7 @@ import type { WorkflowStage } from '@dnsquared/shipper-core';
 interface ConfigPayload {
   repos: string[];
   activeRepo: string;
+  autoMergeRepos: string[];
 }
 
 interface PtyOutputEvent {
@@ -22,6 +23,7 @@ type BackgroundStatus = 'queued' | 'running' | 'complete' | 'failed';
 
 interface BackgroundStatusMeta {
   issueNumber?: number;
+  merge?: boolean;
   issueUrl?: string;
   logFile?: string;
   request?: string;
@@ -67,8 +69,8 @@ const shipperAPI = {
     ipcRenderer.invoke('pty-spawn-shipper-groom', { issueNumber, repo, cols, rows }),
   spawnBackgroundNew: (request: string, repo: string) =>
     ipcRenderer.invoke('bg-spawn-new', { request, repo }),
-  spawnBackgroundShip: (issueNumber: number, repo: string) =>
-    ipcRenderer.invoke('bg-spawn-ship', { issueNumber, repo }),
+  spawnBackgroundShip: (issueNumber: number, repo: string, merge: boolean) =>
+    ipcRenderer.invoke('bg-spawn-ship', { issueNumber, repo, merge }),
   spawnBackgroundInit: (repo: string) => ipcRenderer.invoke('bg-spawn-init', { repo }),
   killBackground: (sessionId: string) => ipcRenderer.invoke('bg-kill', { sessionId }),
   getBackgroundOutput: (sessionId: string) => ipcRenderer.invoke('bg-get-output', { sessionId }),
