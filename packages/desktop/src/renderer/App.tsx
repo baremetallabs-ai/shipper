@@ -114,6 +114,12 @@ interface BackgroundCommandState {
   cancelled: boolean;
 }
 
+type ActiveShippingCommand = BackgroundCommandState & {
+  command: 'ship';
+  status: 'queued' | 'running';
+  issueNumber: number;
+};
+
 interface BackgroundToastItem {
   id: string;
   sessionId: string;
@@ -262,6 +268,19 @@ function getBackgroundRetryPayload(
     case 'init':
       return { command, repo };
   }
+}
+
+function isActiveShippingCommand(
+  command: BackgroundCommandState,
+  activeRepo: string | null
+): command is ActiveShippingCommand {
+  return (
+    command.command === 'ship' &&
+    command.repo === activeRepo &&
+    command.issueNumber !== undefined &&
+    (command.status === 'queued' || command.status === 'running') &&
+    !command.cancelled
+  );
 }
 
 function getBackgroundLogTitle(
@@ -596,16 +615,10 @@ export default function App(): JSX.Element {
       columnMap: nextColumnMap,
     };
   }, [issues]);
-  const shippingCommands = new Map<number, BackgroundCommandState>();
+  const shippingCommands = new Map<number, ActiveShippingCommand>();
 
   for (const command of backgroundCommands) {
-    if (
-      command.command === 'ship' &&
-      command.repo === activeRepo &&
-      command.issueNumber !== undefined &&
-      (command.status === 'queued' || command.status === 'running') &&
-      !command.cancelled
-    ) {
+    if (isActiveShippingCommand(command, activeRepo)) {
       shippingCommands.set(command.issueNumber, command);
     }
   }
@@ -1876,10 +1889,7 @@ export default function App(): JSX.Element {
                                   stageIssues.map((issue) => {
                                     const resetTargets = getResetTargets(issue.labels);
                                     const shippingCmd = shippingCommands.get(issue.number);
-                                    const shippingStatus = shippingCmd?.status as
-                                      | 'queued'
-                                      | 'running'
-                                      | undefined;
+                                    const shippingStatus = shippingCmd?.status;
 
                                     return (
                                       <IssueCard
