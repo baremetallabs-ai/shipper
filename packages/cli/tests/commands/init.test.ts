@@ -183,12 +183,7 @@ beforeEach(() => {
   existsSyncMock.mockReset();
   chmodSyncMock.mockReset();
   mockGh.mockReset();
-  mockGh.mockImplementation((args: string[]) => {
-    if (args[0] === 'repo' && args[1] === 'view') {
-      return Promise.resolve({ stdout: 'main\n', stderr: '' });
-    }
-    return Promise.resolve({ stdout: '', stderr: '' });
-  });
+  mockGh.mockResolvedValue({ stdout: '', stderr: '' });
   mockExecFileAsync.mockReset();
   mockExecFileAsync.mockImplementation((cmd: string, args: string[]) => {
     if (cmd === 'git' && args[0] === 'branch' && args[1] === '--show-current') {
@@ -570,7 +565,32 @@ describe('initCommand agent selection', () => {
 });
 
 describe('initCommand commit and push', () => {
-  it('untracks tracked output and input files before the normal staging flow', async () => {
+  it('writes files and syncs labels without git add, commit, or push by default', async () => {
+    await initCommand({ agent: 'claude' });
+
+    const labelCalls = mockGh.mock.calls.filter((call) => call[0][0] === 'label');
+    expect(labelCalls).toHaveLength(expectedLabels.length);
+    expect(mockExecFileAsync).toHaveBeenCalledWith('git', [
+      'ls-files',
+      '--',
+      '.shipper/output/',
+      '.shipper/input/',
+    ]);
+    expect(mockExecFileAsync).not.toHaveBeenCalledWith('git', ['add', '--', '.shipper/']);
+    expect(mockExecFileAsync).not.toHaveBeenCalledWith('git', expect.arrayContaining(['commit']));
+    expect(mockExecFileAsync).not.toHaveBeenCalledWith('git', expect.arrayContaining(['push']));
+    expect(mockExecFileAsync).not.toHaveBeenCalledWith('git', ['branch', '--show-current'], {
+      encoding: 'utf-8',
+    });
+    expect(mockGh.mock.calls.some((call) => call[0][0] === 'repo' && call[0][1] === 'view')).toBe(
+      false
+    );
+    expect(console.log).toHaveBeenCalledWith(
+      "Tip: run 'git add .shipper/ && git commit' to commit your changes, then push to your default branch."
+    );
+  });
+
+  it('untracks tracked output and input files before the autocommit and push flow', async () => {
     mockExecFileAsync.mockImplementation((cmd: string, args: string[]) => {
       if (cmd === 'git' && args[0] === 'ls-files') {
         return Promise.resolve({
@@ -578,9 +598,6 @@ describe('initCommand commit and push', () => {
             '.shipper/output/result.json\r\n.shipper/input/example.txt\r\n.shipper/output/.gitkeep\r\n',
           stderr: '',
         });
-      }
-      if (cmd === 'git' && args[0] === 'branch' && args[1] === '--show-current') {
-        return Promise.resolve({ stdout: 'main\n', stderr: '' });
       }
       if (cmd === 'git' && args[0] === 'diff' && args[1] === '--cached' && args[2] === '--quiet') {
         return Promise.reject(new Error('exit code 1'));
@@ -596,10 +613,13 @@ describe('initCommand commit and push', () => {
           stderr: '',
         });
       }
+      if (cmd === 'git' && args[0] === 'branch' && args[1] === '--show-current') {
+        return Promise.resolve({ stdout: 'feature/init\n', stderr: '' });
+      }
       return Promise.resolve({ stdout: '', stderr: '' });
     });
 
-    await initCommand({ agent: 'claude' });
+    await initCommand({ agent: 'claude', autocommit: true, push: true });
 
     expect(mockExecFileAsync).toHaveBeenCalledWith('git', [
       'rm',
@@ -613,14 +633,6 @@ describe('initCommand commit and push', () => {
     expect(console.log).toHaveBeenCalledWith(
       'These files were tracked by git but should be gitignored. Commit the changes to complete the fix.'
     );
-    expect(
-      (console.log as ReturnType<typeof vi.fn>).mock.calls.filter(
-        ([message]) =>
-          message ===
-          'These files were tracked by git but should be gitignored. Commit the changes to complete the fix.'
-      )
-    ).toHaveLength(1);
-
     expect(
       (console.log as ReturnType<typeof vi.fn>).mock.calls.filter(
         ([message]) => typeof message === 'string' && message.endsWith('.gitkeep')
@@ -649,18 +661,12 @@ describe('initCommand commit and push', () => {
       '-m',
       'chore: initialize shipper',
     ]);
-    expect(mockExecFileAsync).toHaveBeenCalledWith('git', ['push', 'origin', 'main']);
+    expect(mockExecFileAsync).toHaveBeenCalledWith('git', ['push', 'origin', 'feature/init']);
   });
 
   it('does not log or untrack anything when no tracked output or input files exist', async () => {
     mockExecFileAsync.mockImplementation((cmd: string, args: string[]) => {
       if (cmd === 'git' && args[0] === 'ls-files') {
-        return Promise.resolve({ stdout: '', stderr: '' });
-      }
-      if (cmd === 'git' && args[0] === 'branch' && args[1] === '--show-current') {
-        return Promise.resolve({ stdout: 'main\n', stderr: '' });
-      }
-      if (cmd === 'git' && args[0] === 'diff' && args[1] === '--cached' && args[2] === '--quiet') {
         return Promise.resolve({ stdout: '', stderr: '' });
       }
       return Promise.resolve({ stdout: '', stderr: '' });
@@ -683,12 +689,6 @@ describe('initCommand commit and push', () => {
       if (cmd === 'git' && args[0] === 'ls-files') {
         return Promise.reject(new Error('git failed'));
       }
-      if (cmd === 'git' && args[0] === 'branch' && args[1] === '--show-current') {
-        return Promise.resolve({ stdout: 'main\n', stderr: '' });
-      }
-      if (cmd === 'git' && args[0] === 'diff' && args[1] === '--cached' && args[2] === '--quiet') {
-        return Promise.resolve({ stdout: '', stderr: '' });
-      }
       return Promise.resolve({ stdout: '', stderr: '' });
     });
 
@@ -704,8 +704,11 @@ describe('initCommand commit and push', () => {
       'git',
       expect.arrayContaining(['rm', '--cached'])
     );
-    expect(mockExecFileAsync).toHaveBeenCalledWith('git', ['add', '--', '.shipper/']);
+    expect(mockExecFileAsync).not.toHaveBeenCalledWith('git', ['add', '--', '.shipper/']);
     expect(console.log).not.toHaveBeenCalledWith(expect.stringContaining('Untracked:'));
+    expect(console.log).toHaveBeenCalledWith(
+      "Tip: run 'git add .shipper/ && git commit' to commit your changes, then push to your default branch."
+    );
   });
 
   it('warns and keeps the normal commit path when git rm --cached fails', async () => {
@@ -719,16 +722,13 @@ describe('initCommand commit and push', () => {
         });
         return Promise.reject(err);
       }
-      if (cmd === 'git' && args[0] === 'branch' && args[1] === '--show-current') {
-        return Promise.resolve({ stdout: 'main\n', stderr: '' });
-      }
       if (cmd === 'git' && args[0] === 'diff' && args[1] === '--cached' && args[2] === '--quiet') {
         return Promise.reject(new Error('exit code 1'));
       }
       return Promise.resolve({ stdout: '', stderr: '' });
     });
 
-    await initCommand({ agent: 'claude' });
+    await initCommand({ agent: 'claude', autocommit: true });
 
     expect(console.error).toHaveBeenCalledWith(
       expect.stringContaining(
@@ -749,27 +749,16 @@ describe('initCommand commit and push', () => {
     ]);
   });
 
-  it('stages, commits, and pushes .shipper/ files on happy path', async () => {
+  it('stages and commits without pushing when autocommit is enabled', async () => {
     mockExecFileAsync.mockImplementation((cmd: string, args: string[]) => {
-      if (cmd === 'git' && args[0] === 'branch' && args[1] === '--show-current') {
-        return Promise.resolve({ stdout: 'main\n', stderr: '' });
-      }
       if (cmd === 'git' && args[0] === 'diff' && args[1] === '--cached' && args[2] === '--quiet') {
         return Promise.reject(new Error('exit code 1'));
       }
       return Promise.resolve({ stdout: '', stderr: '' });
     });
 
-    await initCommand({ agent: 'claude' });
+    await initCommand({ agent: 'claude', autocommit: true });
 
-    expect(mockGh).toHaveBeenCalledWith([
-      'repo',
-      'view',
-      '--json',
-      'defaultBranchRef',
-      '-q',
-      '.defaultBranchRef.name',
-    ]);
     expect(mockExecFileAsync).toHaveBeenCalledWith('git', ['add', '--', '.shipper/']);
     expect(mockExecFileAsync).toHaveBeenCalledWith('git', [
       'commit',
@@ -778,79 +767,109 @@ describe('initCommand commit and push', () => {
       '--',
       '.shipper/',
     ]);
-    expect(mockExecFileAsync).toHaveBeenCalledWith('git', ['config', 'branch.main.remote'], {
+    expect(mockExecFileAsync).not.toHaveBeenCalledWith('git', ['branch', '--show-current'], {
       encoding: 'utf-8',
     });
-    expect(mockExecFileAsync).toHaveBeenCalledWith('git', ['push', 'origin', 'main']);
-    expect(console.log).toHaveBeenCalledWith('Committed and pushed .shipper/ files to main');
+    expect(mockExecFileAsync).not.toHaveBeenCalledWith('git', expect.arrayContaining(['push']));
+    expect(console.log).toHaveBeenCalledWith('Committed .shipper/ files.');
   });
 
-  it('uses the configured remote instead of origin', async () => {
+  it('stages, commits, and pushes the current branch when autocommit and push are enabled', async () => {
     mockExecFileAsync.mockImplementation((cmd: string, args: string[]) => {
-      if (cmd === 'git' && args[0] === 'branch' && args[1] === '--show-current') {
-        return Promise.resolve({ stdout: 'main\n', stderr: '' });
-      }
       if (cmd === 'git' && args[0] === 'diff' && args[1] === '--cached' && args[2] === '--quiet') {
         return Promise.reject(new Error('exit code 1'));
       }
-      if (cmd === 'git' && args[0] === 'config' && args[1] === 'branch.main.remote') {
+      if (cmd === 'git' && args[0] === 'branch' && args[1] === '--show-current') {
+        return Promise.resolve({ stdout: 'feature/init\n', stderr: '' });
+      }
+      return Promise.resolve({ stdout: '', stderr: '' });
+    });
+
+    await initCommand({ agent: 'claude', autocommit: true, push: true });
+
+    expect(mockExecFileAsync).toHaveBeenCalledWith('git', [
+      'commit',
+      '-m',
+      'chore: initialize shipper',
+      '--',
+      '.shipper/',
+    ]);
+    expect(mockExecFileAsync).toHaveBeenCalledWith(
+      'git',
+      ['config', 'branch.feature/init.remote'],
+      {
+        encoding: 'utf-8',
+      }
+    );
+    expect(mockExecFileAsync).toHaveBeenCalledWith('git', ['push', 'origin', 'feature/init']);
+    expect(console.log).toHaveBeenCalledWith(
+      'Committed and pushed .shipper/ files to feature/init'
+    );
+  });
+
+  it('uses the configured remote instead of origin on the push path', async () => {
+    mockExecFileAsync.mockImplementation((cmd: string, args: string[]) => {
+      if (cmd === 'git' && args[0] === 'diff' && args[1] === '--cached' && args[2] === '--quiet') {
+        return Promise.reject(new Error('exit code 1'));
+      }
+      if (cmd === 'git' && args[0] === 'branch' && args[1] === '--show-current') {
+        return Promise.resolve({ stdout: 'feature/init\n', stderr: '' });
+      }
+      if (cmd === 'git' && args[0] === 'config' && args[1] === 'branch.feature/init.remote') {
         return Promise.resolve({ stdout: 'upstream\n', stderr: '' });
       }
       return Promise.resolve({ stdout: '', stderr: '' });
     });
 
-    await initCommand({ agent: 'claude' });
+    await initCommand({ agent: 'claude', autocommit: true, push: true });
 
-    expect(mockExecFileAsync).toHaveBeenCalledWith('git', ['push', 'upstream', 'main']);
+    expect(mockExecFileAsync).toHaveBeenCalledWith('git', ['push', 'upstream', 'feature/init']);
   });
 
-  it('skips commit and push when .shipper/ files are unchanged', async () => {
-    await initCommand({ agent: 'claude' });
+  it('errors when push is requested without autocommit', async () => {
+    await initCommand({ agent: 'claude', push: true });
+
+    expect(console.error).toHaveBeenCalledWith('Error: --push requires --autocommit.');
+    expect(exitMock).toHaveBeenCalledWith(1);
+    expect(mockExecFileAsync).not.toHaveBeenCalled();
+  });
+
+  it('skips commit and push when .shipper/ files are unchanged under autocommit', async () => {
+    await initCommand({ agent: 'claude', autocommit: true });
 
     expect(mockExecFileAsync).toHaveBeenCalledWith('git', ['add', '--', '.shipper/']);
     expect(mockExecFileAsync).not.toHaveBeenCalledWith('git', expect.arrayContaining(['commit']));
     expect(mockExecFileAsync).not.toHaveBeenCalledWith('git', expect.arrayContaining(['push']));
-    expect(console.log).toHaveBeenCalledWith('.shipper/ files are unchanged — nothing to push.');
+    expect(console.log).toHaveBeenCalledWith('.shipper/ files are unchanged — nothing to commit.');
   });
 
-  it('errors and exits when on wrong branch', async () => {
+  it('errors and exits on detached HEAD only for the push path', async () => {
     mockExecFileAsync.mockImplementation((cmd: string, args: string[]) => {
-      if (cmd === 'git' && args[0] === 'branch' && args[1] === '--show-current') {
-        return Promise.resolve({ stdout: 'feature-x\n', stderr: '' });
+      if (cmd === 'git' && args[0] === 'diff' && args[1] === '--cached' && args[2] === '--quiet') {
+        return Promise.reject(new Error('exit code 1'));
       }
-      return Promise.resolve({ stdout: '', stderr: '' });
-    });
-
-    await initCommand({ agent: 'claude' });
-
-    expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('must be run from the default branch (main)')
-    );
-    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('You are on: feature-x'));
-    expect(exitMock).toHaveBeenCalledWith(1);
-  });
-
-  it('errors and exits on detached HEAD', async () => {
-    mockExecFileAsync.mockImplementation((cmd: string, args: string[]) => {
       if (cmd === 'git' && args[0] === 'branch' && args[1] === '--show-current') {
         return Promise.resolve({ stdout: '\n', stderr: '' });
       }
       return Promise.resolve({ stdout: '', stderr: '' });
     });
 
-    await initCommand({ agent: 'claude' });
+    await initCommand({ agent: 'claude', autocommit: true, push: true });
 
-    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('(detached HEAD)'));
+    expect(console.error).toHaveBeenCalledWith(
+      'Error: Failed to push from detached HEAD.\nCheck out a branch and retry with --push.'
+    );
     expect(exitMock).toHaveBeenCalledWith(1);
+    expect(mockExecFileAsync).not.toHaveBeenCalledWith('git', expect.arrayContaining(['push']));
   });
 
   it('reports error with stderr when push fails', async () => {
     mockExecFileAsync.mockImplementation((cmd: string, args: string[]) => {
-      if (cmd === 'git' && args[0] === 'branch' && args[1] === '--show-current') {
-        return Promise.resolve({ stdout: 'main\n', stderr: '' });
-      }
       if (cmd === 'git' && args[0] === 'diff' && args[1] === '--cached' && args[2] === '--quiet') {
         return Promise.reject(new Error('exit code 1'));
+      }
+      if (cmd === 'git' && args[0] === 'branch' && args[1] === '--show-current') {
+        return Promise.resolve({ stdout: 'feature/init\n', stderr: '' });
       }
       if (cmd === 'git' && args[0] === 'push') {
         const err = Object.assign(new Error('push failed'), {
@@ -861,13 +880,14 @@ describe('initCommand commit and push', () => {
       return Promise.resolve({ stdout: '', stderr: '' });
     });
 
-    await initCommand({ agent: 'claude' });
+    await initCommand({ agent: 'claude', autocommit: true, push: true });
 
-    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('Failed to push to main'));
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to push to feature/init')
+    );
     expect(console.error).toHaveBeenCalledWith(expect.stringContaining('protected branch'));
     expect(console.error).toHaveBeenCalledWith(expect.stringContaining('branch protection rules'));
     expect(exitMock).toHaveBeenCalledWith(1);
-    // Commit was called before push
     expect(mockExecFileAsync).toHaveBeenCalledWith('git', [
       'commit',
       '-m',
@@ -879,11 +899,11 @@ describe('initCommand commit and push', () => {
 
   it('does not roll back labels when push fails', async () => {
     mockExecFileAsync.mockImplementation((cmd: string, args: string[]) => {
-      if (cmd === 'git' && args[0] === 'branch' && args[1] === '--show-current') {
-        return Promise.resolve({ stdout: 'main\n', stderr: '' });
-      }
       if (cmd === 'git' && args[0] === 'diff' && args[1] === '--cached' && args[2] === '--quiet') {
         return Promise.reject(new Error('exit code 1'));
+      }
+      if (cmd === 'git' && args[0] === 'branch' && args[1] === '--show-current') {
+        return Promise.resolve({ stdout: 'feature/init\n', stderr: '' });
       }
       if (cmd === 'git' && args[0] === 'push') {
         return Promise.reject(new Error('push failed'));
@@ -891,7 +911,7 @@ describe('initCommand commit and push', () => {
       return Promise.resolve({ stdout: '', stderr: '' });
     });
 
-    await initCommand({ agent: 'claude' });
+    await initCommand({ agent: 'claude', autocommit: true, push: true });
 
     const labelCalls = mockGh.mock.calls.filter((call) => call[0][0] === 'label');
     expect(labelCalls).toHaveLength(expectedLabels.length);
