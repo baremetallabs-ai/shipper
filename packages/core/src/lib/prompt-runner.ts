@@ -217,12 +217,17 @@ async function resolvePromptCommand(
   const agent = resolveAgent(name, opts.agent);
   if (agent === 'copilot') {
     try {
-      execFileSync('which', ['copilot'], { stdio: 'ignore' });
-    } catch {
-      throw new Error(
-        'copilot binary not found on PATH.\n' +
-          'Install the GitHub Copilot CLI: https://docs.github.com/copilot/cli'
-      );
+      execFileSync('copilot', ['--version'], { stdio: 'ignore' });
+    } catch (err) {
+      const error = asError(err) as Error & { code?: string | number };
+      if (error.code === 'ENOENT') {
+        throw new Error(
+          'copilot binary not found on PATH.\n' +
+            'Install the GitHub Copilot CLI: https://docs.github.com/copilot/cli'
+        );
+      }
+
+      throw error;
     }
   }
   const model = resolveModel(name, opts.model);
@@ -269,44 +274,54 @@ async function resolvePromptCommand(
 
   const args = [...frontmatter.args];
 
-  if (agent === 'claude') {
-    if (effectiveMode === 'headless' && !args.includes('-p')) {
-      args.unshift('-p');
-    }
-    if (effectiveMode === 'headless' && !args.includes('--verbose')) {
-      args.push('--verbose');
-    }
-    if (effectiveMode === 'headless' && !args.includes('--output-format')) {
-      args.push('--output-format', 'stream-json');
-    }
-    if (effectiveMode === 'interactive') {
-      const pIdx = args.indexOf('-p');
-      if (pIdx !== -1) args.splice(pIdx, 1);
-    }
-  } else if (agent === 'codex') {
-    if (effectiveMode === 'headless') {
-      normalizeCodexHeadlessArgs(args);
-    } else if (effectiveMode === 'interactive') {
-      stripCodexHeadlessArgs(args);
-    }
-
-    if (opts.cwd) {
-      const worktreeDirs = resolveWorktreeGitDir(opts.cwd);
-      if (worktreeDirs) {
-        const execIdx = args.indexOf('exec');
-        const insertIdx = execIdx === -1 ? 0 : execIdx;
-        const addDirArgs = ['--add-dir', worktreeDirs.gitDir];
-        if (worktreeDirs.commonDir) {
-          addDirArgs.push('--add-dir', worktreeDirs.commonDir);
-        }
-        args.splice(insertIdx, 0, ...addDirArgs);
+  switch (agent) {
+    case 'claude': {
+      if (effectiveMode === 'headless' && !args.includes('-p')) {
+        args.unshift('-p');
       }
+      if (effectiveMode === 'headless' && !args.includes('--verbose')) {
+        args.push('--verbose');
+      }
+      if (effectiveMode === 'headless' && !args.includes('--output-format')) {
+        args.push('--output-format', 'stream-json');
+      }
+      if (effectiveMode === 'interactive') {
+        const pIdx = args.indexOf('-p');
+        if (pIdx !== -1) args.splice(pIdx, 1);
+      }
+      break;
     }
-  } else {
-    if (effectiveMode === 'headless') {
-      normalizeCopilotHeadlessArgs(args);
-    } else if (effectiveMode === 'interactive') {
-      stripCopilotHeadlessArgs(args);
+    case 'codex': {
+      if (effectiveMode === 'headless') {
+        normalizeCodexHeadlessArgs(args);
+      } else if (effectiveMode === 'interactive') {
+        stripCodexHeadlessArgs(args);
+      }
+
+      if (opts.cwd) {
+        const worktreeDirs = resolveWorktreeGitDir(opts.cwd);
+        if (worktreeDirs) {
+          const execIdx = args.indexOf('exec');
+          const insertIdx = execIdx === -1 ? 0 : execIdx;
+          const addDirArgs = ['--add-dir', worktreeDirs.gitDir];
+          if (worktreeDirs.commonDir) {
+            addDirArgs.push('--add-dir', worktreeDirs.commonDir);
+          }
+          args.splice(insertIdx, 0, ...addDirArgs);
+        }
+      }
+      break;
+    }
+    case 'copilot':
+      if (effectiveMode === 'headless') {
+        normalizeCopilotHeadlessArgs(args);
+      } else if (effectiveMode === 'interactive') {
+        stripCopilotHeadlessArgs(args);
+      }
+      break;
+    default: {
+      const exhaustiveCheck: never = agent;
+      throw new Error(`Unsupported agent: ${String(exhaustiveCheck)}`);
     }
   }
 

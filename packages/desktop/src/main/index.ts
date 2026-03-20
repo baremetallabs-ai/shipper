@@ -362,7 +362,9 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function readConfiguredAgentFromSettings(filepath: string): 'claude' | 'codex' | undefined {
+function readConfiguredAgentFromSettings(
+  filepath: string
+): 'claude' | 'codex' | 'copilot' | undefined {
   try {
     const data = JSON.parse(readFileSync(filepath, 'utf8')) as Record<string, unknown>;
     const commands = isPlainObject(data.commands) ? data.commands : undefined;
@@ -378,7 +380,9 @@ function readConfiguredAgentFromSettings(filepath: string): 'claude' | 'codex' |
             ? data.agent
             : undefined;
 
-    return configuredAgent === 'claude' || configuredAgent === 'codex'
+    return configuredAgent === 'claude' ||
+      configuredAgent === 'codex' ||
+      configuredAgent === 'copilot'
       ? configuredAgent
       : undefined;
   } catch {
@@ -386,7 +390,7 @@ function readConfiguredAgentFromSettings(filepath: string): 'claude' | 'codex' |
   }
 }
 
-function resolveInitAgent(repoPath: string): 'claude' | 'codex' {
+function resolveInitAgent(repoPath: string): 'claude' | 'codex' | 'copilot' {
   const localAgent = readConfiguredAgentFromSettings(
     join(repoPath, '.shipper', 'settings.local.json')
   );
