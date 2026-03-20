@@ -42,13 +42,20 @@ export function BackgroundLogViewer({
       return;
     }
 
-    void navigator.clipboard.writeText(content);
-    setCopied(true);
     clearCopiedTimeout();
-    resetCopiedTimeoutRef.current = window.setTimeout(() => {
-      setCopied(false);
-      resetCopiedTimeoutRef.current = null;
-    }, 2000);
+    void navigator.clipboard
+      .writeText(content)
+      .then(() => {
+        setCopied(true);
+        resetCopiedTimeoutRef.current = window.setTimeout(() => {
+          setCopied(false);
+          resetCopiedTimeoutRef.current = null;
+        }, 2000);
+      })
+      .catch((error: unknown) => {
+        setCopied(false);
+        console.error('Failed to copy logs to clipboard.', error);
+      });
   }
 
   useEffect(() => {
