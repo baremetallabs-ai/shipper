@@ -87,6 +87,36 @@ function queueExecResult(opts: { code?: number; stdout?: string; stderr?: string
   );
 }
 
+function queueExecProcessError(opts: {
+  message: string;
+  code?: string;
+  stdout?: string;
+  stderr?: string;
+}): void {
+  const { message, code = 'ERR_CHILD_PROCESS', stdout = '', stderr = '' } = opts;
+  execFileMock.mockImplementationOnce(
+    (
+      _command: string,
+      _args: string[],
+      _execOpts: unknown,
+      callback: (error: Error | null, stdout: string, stderr: string) => void
+    ) => {
+      globalThis.queueMicrotask(() => {
+        const error = new Error(message) as Error & {
+          code?: string;
+          stdout?: string;
+          stderr?: string;
+        };
+        error.code = code;
+        error.stdout = stdout;
+        error.stderr = stderr;
+        callback(error, stdout, stderr);
+      });
+      return {} as object;
+    }
+  );
+}
+
 function queueCleanBeforePush(): void {
   queueExecResult();
   queueExecResult();
@@ -115,7 +145,7 @@ function expectInstallExec(callIndex: number): void {
   expect(execFileMock.mock.calls[callIndex]?.[2]).toMatchObject({
     cwd: '/tmp/wt',
     shell: true,
-    maxBuffer: 10 * 1024 * 1024,
+    maxBuffer: Number.POSITIVE_INFINITY,
   });
 }
 
@@ -308,6 +338,42 @@ describe('syncWorktree', () => {
     expectFetchSpawn();
     expectInstallExec(1);
     expectInstallExec(2);
+    expect(gitArgsFromExecCalls()).toEqual([['rebase', '--autostash', 'origin/main']]);
+  });
+
+  it('passes message-only install process failures to the remediation callback', async () => {
+    getSettingsMock.mockReturnValue({ installCommand: 'npm ci' });
+    queueSpawnExit();
+    queueExecResult();
+    queueExecProcessError({
+      message: 'stdout maxBuffer length exceeded',
+      code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER',
+    });
+    const resolveConflicts = vi.fn();
+    const remediateInstallError = vi.fn().mockResolvedValue(9);
+
+    await expect(
+      syncWorktree(
+        {
+          wtPath: '/tmp/wt',
+          repoRoot: '/tmp/repo',
+          baseBranch: 'main',
+          pushMode: 'force-with-lease',
+        },
+        resolveConflicts,
+        remediateInstallError
+      )
+    ).rejects.toThrow(
+      'Git transport failed in /tmp/wt for repo /tmp/repo: Install remediation agent exited with code 9'
+    );
+
+    expect(resolveConflicts).not.toHaveBeenCalled();
+    expect(remediateInstallError).toHaveBeenCalledWith(
+      'npm ci exited with code 1:\nstdout maxBuffer length exceeded'
+    );
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expectFetchSpawn();
+    expectInstallExec(1);
     expect(gitArgsFromExecCalls()).toEqual([['rebase', '--autostash', 'origin/main']]);
   });
 
