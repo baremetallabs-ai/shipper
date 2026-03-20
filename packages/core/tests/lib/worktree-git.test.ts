@@ -912,7 +912,7 @@ describe('withGitTransport', () => {
     queueSpawnExit();
     queueExecResult();
     queueCleanBeforePush();
-    queueExecResult({ code: 1, stderr: 'pre-push hook failed', stdout: 'npm run lint' });
+    queueExecResult({ code: 1, stderr: 'non-fast-forward', stdout: 'remote rejected' });
     queueSpawnExit();
     queueExecResult({ stdout: 'feature/retry\n' });
     queueExecResult({ stdout: 'abc123\n' });
@@ -933,8 +933,11 @@ describe('withGitTransport', () => {
       )
     ).resolves.toBe(0);
 
-    expect(runAgent).toHaveBeenCalledTimes(1);
-    expect(runAgent).toHaveBeenCalledWith();
+    expect(runAgent).toHaveBeenCalledTimes(2);
+    expect(runAgent.mock.calls).toEqual([
+      [],
+      [undefined, 'git push -u origin HEAD exited with code 1:\nnon-fast-forward\nremote rejected'],
+    ]);
     expect(gitArgsFromSpawnCalls()).toEqual([
       ['fetch', 'origin'],
       ['fetch', 'origin'],
@@ -977,7 +980,11 @@ describe('withGitTransport', () => {
       )
     ).resolves.toBe(0);
 
-    expect(runAgent).toHaveBeenCalledTimes(1);
+    expect(runAgent).toHaveBeenCalledTimes(2);
+    expect(runAgent.mock.calls).toEqual([
+      [],
+      [undefined, 'git push -u origin HEAD exited with code 1:\ntemporary push failure'],
+    ]);
     expect(gitArgsFromSpawnCalls()).toEqual([
       ['fetch', 'origin'],
       ['fetch', 'origin'],
@@ -1027,7 +1034,7 @@ describe('withGitTransport', () => {
       )
     ).resolves.toBe(0);
 
-    expect(runAgent).toHaveBeenCalledTimes(2);
+    expect(runAgent).toHaveBeenCalledTimes(3);
     expect(runAgent.mock.calls[0]).toEqual([]);
     expect(runAgent.mock.calls[1]?.[0]).toEqual({
       files: ['src/conflict.ts'],
@@ -1039,6 +1046,10 @@ describe('withGitTransport', () => {
       ],
       continueError: undefined,
     });
+    expect(runAgent.mock.calls[2]).toEqual([
+      undefined,
+      'git push --force-with-lease origin HEAD:refs/heads/feature/retry exited with code 1:\nnon-fast-forward',
+    ]);
     expect(gitArgsFromSpawnCalls()).toEqual([
       ['fetch', 'origin'],
       ['fetch', 'origin'],
@@ -1138,7 +1149,7 @@ describe('withGitTransport', () => {
       )
     ).resolves.toBe(0);
 
-    expect(runAgent).toHaveBeenCalledTimes(3);
+    expect(runAgent).toHaveBeenCalledTimes(4);
     expect(runAgent.mock.calls[2]?.[0]).toEqual({
       files: ['src/conflict.ts'],
       conflicts: [
@@ -1149,6 +1160,10 @@ describe('withGitTransport', () => {
       ],
       continueError: 'still conflicted after continue',
     });
+    expect(runAgent.mock.calls[3]).toEqual([
+      undefined,
+      'git push --force-with-lease origin HEAD:refs/heads/feature/retry exited with code 1:\nnon-fast-forward',
+    ]);
     expect(gitArgsFromExecCalls()).toEqual([
       ['rebase', '--autostash', 'origin/main'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
@@ -1253,22 +1268,22 @@ describe('withGitTransport', () => {
     queueSpawnExit();
     queueExecResult();
     queueCleanBeforePush();
-    queueExecResult({ code: 1, stderr: 'pre-push hook failed', stdout: 'attempt 1' });
+    queueExecResult({ code: 1, stderr: 'non-fast-forward', stdout: 'attempt 1' });
     queueSpawnExit();
     queueExecResult({ stdout: 'feature/retry\n' });
     queueExecResult({ code: 1, stderr: 'fatal: Needed a single revision' });
     queueCleanBeforePush();
-    queueExecResult({ code: 1, stderr: 'pre-push hook failed', stdout: 'attempt 2' });
+    queueExecResult({ code: 1, stderr: 'non-fast-forward', stdout: 'attempt 2' });
     queueSpawnExit();
     queueExecResult({ stdout: 'feature/retry\n' });
     queueExecResult({ code: 1, stderr: 'fatal: Needed a single revision' });
     queueCleanBeforePush();
-    queueExecResult({ code: 1, stderr: 'pre-push hook failed', stdout: 'attempt 3' });
+    queueExecResult({ code: 1, stderr: 'non-fast-forward', stdout: 'attempt 3' });
     queueSpawnExit();
     queueExecResult({ stdout: 'feature/retry\n' });
     queueExecResult({ code: 1, stderr: 'fatal: Needed a single revision' });
     queueCleanBeforePush();
-    queueExecResult({ code: 1, stderr: 'pre-push hook failed', stdout: 'attempt 4' });
+    queueExecResult({ code: 1, stderr: 'non-fast-forward', stdout: 'attempt 4' });
     const runAgent = vi.fn().mockResolvedValue(0);
 
     await expect(
@@ -1282,10 +1297,15 @@ describe('withGitTransport', () => {
         runAgent
       )
     ).rejects.toThrow(
-      'Push failed after 3 retry attempts.\ngit push -u origin HEAD exited with code 1:\npre-push hook failed\nattempt 4'
+      'Push failed after 3 retry attempts.\ngit push -u origin HEAD exited with code 1:\nnon-fast-forward\nattempt 4'
     );
 
-    expect(runAgent).toHaveBeenCalledTimes(1);
+    expect(runAgent.mock.calls).toEqual([
+      [],
+      [undefined, 'git push -u origin HEAD exited with code 1:\nnon-fast-forward\nattempt 1'],
+      [undefined, 'git push -u origin HEAD exited with code 1:\nnon-fast-forward\nattempt 2'],
+      [undefined, 'git push -u origin HEAD exited with code 1:\nnon-fast-forward\nattempt 3'],
+    ]);
     expect(gitArgsFromSpawnCalls()).toEqual([
       ['fetch', 'origin'],
       ['fetch', 'origin'],
@@ -1312,6 +1332,172 @@ describe('withGitTransport', () => {
       ['checkout', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '-u', 'origin', 'HEAD'],
+    ]);
+  });
+
+  it('skips fetch/rebase recovery for recognized hook failures and retries the original push args', async () => {
+    queueSpawnExit();
+    queueExecResult();
+    queueCleanBeforePush();
+    queueExecResult({
+      code: 1,
+      stderr: 'husky - pre-push hook exited with code 1',
+      stdout: 'npm run lint',
+    });
+    queueCleanBeforePush();
+    queueExecResult();
+    const runAgent = vi.fn().mockResolvedValue(0);
+
+    await expect(
+      withGitTransport(
+        {
+          wtPath: '/tmp/wt',
+          repoRoot: '/tmp/repo',
+          baseBranch: 'main',
+          pushMode: 'new-branch',
+        },
+        runAgent
+      )
+    ).resolves.toBe(0);
+
+    expect(runAgent.mock.calls).toEqual([
+      [],
+      [
+        undefined,
+        'git push -u origin HEAD exited with code 1:\nhusky - pre-push hook exited with code 1\nnpm run lint',
+      ],
+    ]);
+    expect(gitArgsFromSpawnCalls()).toEqual([['fetch', 'origin']]);
+    expect(gitArgsFromExecCalls()).toEqual([
+      ['rebase', '--autostash', 'origin/main'],
+      ['checkout', '--', '.'],
+      ['clean', '-fd', '--exclude=.shipper'],
+      ['push', '-u', 'origin', 'HEAD'],
+      ['checkout', '--', '.'],
+      ['clean', '-fd', '--exclude=.shipper'],
+      ['push', '-u', 'origin', 'HEAD'],
+    ]);
+  });
+
+  it('continues retrying push after push-error remediation returns a non-zero exit code', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      queueSpawnExit();
+      queueExecResult();
+      queueCleanBeforePush();
+      queueExecResult({
+        code: 1,
+        stderr: 'simple-git-hooks pre-push failed',
+        stdout: 'npm test',
+      });
+      queueCleanBeforePush();
+      queueExecResult();
+      const runAgent = vi.fn().mockResolvedValueOnce(0).mockResolvedValueOnce(17);
+
+      await expect(
+        withGitTransport(
+          {
+            wtPath: '/tmp/wt',
+            repoRoot: '/tmp/repo',
+            baseBranch: 'main',
+            pushMode: 'new-branch',
+          },
+          runAgent
+        )
+      ).resolves.toBe(0);
+
+      expect(runAgent.mock.calls).toEqual([
+        [],
+        [
+          undefined,
+          'git push -u origin HEAD exited with code 1:\nsimple-git-hooks pre-push failed\nnpm test',
+        ],
+      ]);
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        'Agent exited with code 17 while handling push failure; retrying.'
+      );
+      expect(gitArgsFromSpawnCalls()).toEqual([['fetch', 'origin']]);
+      expect(gitArgsFromExecCalls()).toEqual([
+        ['rebase', '--autostash', 'origin/main'],
+        ['checkout', '--', '.'],
+        ['clean', '-fd', '--exclude=.shipper'],
+        ['push', '-u', 'origin', 'HEAD'],
+        ['checkout', '--', '.'],
+        ['clean', '-fd', '--exclude=.shipper'],
+        ['push', '-u', 'origin', 'HEAD'],
+      ]);
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it('shares the push retry budget across hook and non-hook remediation attempts', async () => {
+    queueSpawnExit();
+    queueExecResult();
+    queueExecResult({ stdout: 'feature/retry\n' });
+    queueCleanBeforePush();
+    queueExecResult({ code: 1, stderr: 'lefthook pre-push failed', stdout: 'attempt 1' });
+    queueCleanBeforePush();
+    queueExecResult({ code: 1, stderr: 'non-fast-forward', stdout: 'attempt 2' });
+    queueSpawnExit();
+    queueExecResult({ stdout: 'feature/retry\n' });
+    queueExecResult({ code: 1, stderr: 'fatal: Needed a single revision' });
+    queueCleanBeforePush();
+    queueExecResult({ code: 1, stderr: 'overcommit pre-push failed', stdout: 'attempt 3' });
+    queueCleanBeforePush();
+    queueExecResult({ code: 1, stderr: 'non-fast-forward', stdout: 'attempt 4' });
+    const runAgent = vi.fn().mockResolvedValue(0);
+
+    await expect(
+      withGitTransport(
+        {
+          wtPath: '/tmp/wt',
+          repoRoot: '/tmp/repo',
+          baseBranch: 'main',
+          pushMode: 'force-with-lease',
+        },
+        runAgent
+      )
+    ).rejects.toThrow(
+      'Push failed after 3 retry attempts.\ngit push --force-with-lease origin HEAD:refs/heads/feature/retry exited with code 1:\nnon-fast-forward\nattempt 4'
+    );
+
+    expect(runAgent.mock.calls).toEqual([
+      [],
+      [
+        undefined,
+        'git push --force-with-lease origin HEAD:refs/heads/feature/retry exited with code 1:\nlefthook pre-push failed\nattempt 1',
+      ],
+      [
+        undefined,
+        'git push --force-with-lease origin HEAD:refs/heads/feature/retry exited with code 1:\nnon-fast-forward\nattempt 2',
+      ],
+      [
+        undefined,
+        'git push --force-with-lease origin HEAD:refs/heads/feature/retry exited with code 1:\novercommit pre-push failed\nattempt 3',
+      ],
+    ]);
+    expect(gitArgsFromSpawnCalls()).toEqual([
+      ['fetch', 'origin'],
+      ['fetch', 'origin'],
+    ]);
+    expect(gitArgsFromExecCalls()).toEqual([
+      ['rebase', '--autostash', 'origin/main'],
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['checkout', '--', '.'],
+      ['clean', '-fd', '--exclude=.shipper'],
+      ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
+      ['checkout', '--', '.'],
+      ['clean', '-fd', '--exclude=.shipper'],
+      ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-parse', '--verify', 'origin/feature/retry'],
+      ['checkout', '--', '.'],
+      ['clean', '-fd', '--exclude=.shipper'],
+      ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
+      ['checkout', '--', '.'],
+      ['clean', '-fd', '--exclude=.shipper'],
+      ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
     ]);
   });
 
