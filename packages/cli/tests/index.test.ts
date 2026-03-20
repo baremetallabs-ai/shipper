@@ -36,6 +36,7 @@ vi.mock('../src/commands/setup.js', () => ({ setupCommand: vi.fn() }));
 import { shipCommand } from '../src/commands/ship.js';
 import { nextCommand } from '../src/commands/next.js';
 import { ejectCommand } from '../src/commands/eject.js';
+import { initCommand } from '../src/commands/init.js';
 import { newCommand } from '../src/commands/new.js';
 import { priorityCommand } from '../src/commands/priority.js';
 import { groomCommand } from '../src/commands/groom.js';
@@ -52,6 +53,7 @@ import {
 const mockShipCommand = vi.mocked(shipCommand);
 const mockNextCommand = vi.mocked(nextCommand);
 const mockEjectCommand = vi.mocked(ejectCommand);
+const mockInitCommand = vi.mocked(initCommand);
 const mockNewCommand = vi.mocked(newCommand);
 const mockPriorityCommand = vi.mocked(priorityCommand);
 const mockGroomCommand = vi.mocked(groomCommand);
@@ -120,6 +122,7 @@ describe('shipper-cli', () => {
 
     it('shows --mode, --model, and --log-file on new help and removes --headless from new', async () => {
       const newHelp = await renderHelp(['new', '--help']);
+      const initHelp = await renderHelp(['init', '--help']);
       const setupHelp = await renderHelp(['setup', '--help']);
 
       expect(newHelp).toContain('Usage: shipper new [options] [request...]');
@@ -130,11 +133,60 @@ describe('shipper-cli', () => {
       expect(newHelp).toContain('--model <model>');
       expect(newHelp).toContain('--log-file <path>');
       expect(newHelp).not.toContain('--headless');
+      expect(initHelp).toContain('--autocommit');
+      expect(initHelp).toContain('stage and commit .shipper/ after writing files');
+      expect(initHelp).toContain('--push');
+      expect(initHelp).toContain('push the commit to the remote (requires --autocommit)');
       expect(setupHelp).toContain('--mode <mode>');
       expect(setupHelp).toContain('agent to use: claude, codex, or copilot');
       expect(setupHelp).toContain('--model <model>');
       expect(mockNewCommand).not.toHaveBeenCalled();
       expect(mockSetupCommand).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('init command wiring', () => {
+    const originalArgv = [...process.argv];
+
+    beforeEach(() => {
+      vi.resetModules();
+      mockInitCommand.mockReset();
+      mockRunPreflight.mockClear();
+      mockWarnTrackedOutputFiles.mockClear();
+      mockLoadSettings.mockClear();
+      mockGetRepoNwo.mockClear();
+    });
+
+    afterEach(() => {
+      process.argv = [...originalArgv];
+    });
+
+    async function importEntrypoint() {
+      await import('../src/index.ts');
+    }
+
+    it('forwards init options and skips preflight helpers', async () => {
+      process.argv = [
+        'node',
+        'src/index.ts',
+        'init',
+        '--agent',
+        'claude',
+        '--autocommit',
+        '--push',
+      ];
+
+      await importEntrypoint();
+
+      expect(mockInitCommand).toHaveBeenCalledWith({
+        agent: 'claude',
+        autocommit: true,
+        push: true,
+      });
+      expect(mockLoadSettings).not.toHaveBeenCalled();
+      expect(mockGetRepoNwo).not.toHaveBeenCalled();
+      expect(mockRunPreflight).not.toHaveBeenCalled();
+      expect(mockWarnTrackedOutputFiles).not.toHaveBeenCalled();
     });
   });
 

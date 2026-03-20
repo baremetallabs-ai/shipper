@@ -89,7 +89,11 @@ function parseGitPathList(output: string): string[] {
     .filter(Boolean);
 }
 
-export async function initCommand(options: { agent?: string }) {
+export async function initCommand(options: {
+  agent?: string;
+  autocommit?: boolean;
+  push?: boolean;
+}) {
   // Check prerequisites
   const ok = await runPrereqChecks([
     checkGitRepo,
@@ -99,6 +103,12 @@ export async function initCommand(options: { agent?: string }) {
   ]);
   if (!ok) {
     process.exit(1);
+  }
+
+  if (options.push && !options.autocommit) {
+    console.error('Error: --push requires --autocommit.');
+    process.exit(1);
+    return;
   }
 
   // Resolve agent selection
@@ -334,96 +344,100 @@ export async function initCommand(options: { agent?: string }) {
   }
   console.log(`Synced ${LABELS.length} labels`);
 
-  // Resolve the default branch name
-  const { stdout: branchOut } = await gh([
-    'repo',
-    'view',
-    '--json',
-    'defaultBranchRef',
-    '-q',
-    '.defaultBranchRef.name',
-  ]);
-  const defaultBranch = branchOut.trim();
-
-  // Validate the current branch
-  const { stdout: currentOut } = await execFileAsync('git', ['branch', '--show-current'], {
-    encoding: 'utf-8',
-  });
-  const currentBranch = currentOut.trim();
-
-  if (currentBranch !== defaultBranch) {
-    console.error(
-      `Error: shipper init must be run from the default branch (${defaultBranch}).\n` +
-        `You are on: ${currentBranch || '(detached HEAD)'}\n` +
-        `Switch with: git checkout ${defaultBranch}`
+  if (!options.autocommit) {
+    console.log(
+      "Tip: run 'git add .shipper/ && git commit' to commit your changes, then push to your default branch."
     );
-    process.exit(1);
-  }
-
-  // Stage, check for changes, commit, and push
-  await execFileAsync('git', ['add', '--', '.shipper/']);
-
-  let hasChanges = false;
-  try {
-    await execFileAsync('git', ['diff', '--cached', '--quiet', '--', '.shipper/']);
-  } catch {
-    hasChanges = true;
-  }
-
-  if (!hasChanges) {
-    console.log('.shipper/ files are unchanged — nothing to push.');
   } else {
-    if (removedTrackedArtifactPaths.length > 0) {
-      const { stdout: stagedPathsOut } = await execFileAsync(
-        'git',
-        ['diff', '--cached', '--name-only', '-z'],
-        {
-          encoding: 'utf-8',
-        }
-      );
-      const stagedPaths = stagedPathsOut.split('\0').filter(Boolean);
-      const nonShipperStagedPaths = stagedPaths.filter((file) => !file.startsWith('.shipper/'));
-      if (nonShipperStagedPaths.length > 0) {
-        throw new Error(
-          'shipper init found staged changes outside .shipper while untracking tracked artifacts. Commit or unstage them first, then rerun shipper init.'
-        );
-      }
+    // Stage, check for changes, commit, and optionally push
+    await execFileAsync('git', ['add', '--', '.shipper/']);
 
-      await execFileAsync('git', ['commit', '-m', 'chore: initialize shipper']);
-    } else {
-      await execFileAsync('git', ['commit', '-m', 'chore: initialize shipper', '--', '.shipper/']);
-    }
-
-    // Resolve the push remote from branch config, falling back to 'origin'
-    let remote = 'origin';
+    let hasChanges = false;
     try {
-      const { stdout: remoteOut } = await execFileAsync(
-        'git',
-        ['config', `branch.${defaultBranch}.remote`],
-        { encoding: 'utf-8' }
-      );
-      if (remoteOut.trim()) {
-        remote = remoteOut.trim();
-      }
+      await execFileAsync('git', ['diff', '--cached', '--quiet', '--', '.shipper/']);
     } catch {
-      // No branch remote configured — fall back to 'origin'
+      hasChanges = true;
     }
 
-    try {
-      await execFileAsync('git', ['push', remote, defaultBranch]);
-    } catch (err) {
-      const stderr = getErrorStderr(err);
-      console.error(
-        `Error: Failed to push to ${defaultBranch}.` +
-          (stderr ? `\n${stderr}` : '') +
-          '\n\nThis may be due to branch protection rules.' +
-          `\nPush manually with: git push ${remote} ${defaultBranch}` +
-          '\nOr adjust your branch protection settings.'
-      );
-      process.exit(1);
-    }
+    if (!hasChanges) {
+      console.log('.shipper/ files are unchanged — nothing to commit.');
+    } else {
+      if (removedTrackedArtifactPaths.length > 0) {
+        const { stdout: stagedPathsOut } = await execFileAsync(
+          'git',
+          ['diff', '--cached', '--name-only', '-z'],
+          {
+            encoding: 'utf-8',
+          }
+        );
+        const stagedPaths = stagedPathsOut.split('\0').filter(Boolean);
+        const nonShipperStagedPaths = stagedPaths.filter((file) => !file.startsWith('.shipper/'));
+        if (nonShipperStagedPaths.length > 0) {
+          throw new Error(
+            'shipper init found staged changes outside .shipper while untracking tracked artifacts. Commit or unstage them first, then rerun shipper init.'
+          );
+        }
 
-    console.log(`Committed and pushed .shipper/ files to ${defaultBranch}`);
+        await execFileAsync('git', ['commit', '-m', 'chore: initialize shipper']);
+      } else {
+        await execFileAsync('git', [
+          'commit',
+          '-m',
+          'chore: initialize shipper',
+          '--',
+          '.shipper/',
+        ]);
+      }
+
+      if (!options.push) {
+        console.log('Committed .shipper/ files.');
+      } else {
+        const { stdout: currentOut } = await execFileAsync('git', ['branch', '--show-current'], {
+          encoding: 'utf-8',
+        });
+        const currentBranch = currentOut.trim();
+
+        if (!currentBranch) {
+          console.error(
+            'Error: Failed to push from detached HEAD.\nCheck out a branch and retry with --push.'
+          );
+          process.exit(1);
+          return;
+        }
+
+        // Resolve the push remote from branch config, falling back to 'origin'
+        let remote = 'origin';
+        try {
+          const { stdout: remoteOut } = await execFileAsync(
+            'git',
+            ['config', `branch.${currentBranch}.remote`],
+            { encoding: 'utf-8' }
+          );
+          if (remoteOut.trim()) {
+            remote = remoteOut.trim();
+          }
+        } catch {
+          // No branch remote configured — fall back to 'origin'
+        }
+
+        try {
+          await execFileAsync('git', ['push', remote, currentBranch]);
+        } catch (err) {
+          const stderr = getErrorStderr(err);
+          console.error(
+            `Error: Failed to push to ${currentBranch}.` +
+              (stderr ? `\n${stderr}` : '') +
+              '\n\nThis may be due to branch protection rules.' +
+              `\nPush manually with: git push ${remote} ${currentBranch}` +
+              '\nOr adjust your branch protection settings.'
+          );
+          process.exit(1);
+          return;
+        }
+
+        console.log(`Committed and pushed .shipper/ files to ${currentBranch}`);
+      }
+    }
   }
 
   // Check if .shipper is gitignored or tracked

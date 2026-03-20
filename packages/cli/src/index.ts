@@ -120,8 +120,10 @@ program
   .command('init')
   .description('Initialize shipper in the current repository')
   .option('--agent <name>', 'coding agent to use (claude, codex, or copilot)')
+  .option('--autocommit', 'stage and commit .shipper/ after writing files')
+  .option('--push', 'push the commit to the remote (requires --autocommit)')
   .action(
-    wrapAction(async (options: { agent?: string }) => {
+    wrapAction(async (options: { agent?: string; autocommit?: boolean; push?: boolean }) => {
       await initCommand(options);
     })
   );
