@@ -97,7 +97,7 @@ function gitArgsFromSpawnCalls(): string[][] {
 }
 
 function gitArgsFromExecCalls(): string[][] {
-  return execFileMock.mock.calls.map(([, args]) => args);
+  return execFileMock.mock.calls.filter(([command]) => command === 'git').map(([, args]) => args);
 }
 
 function expectFetchSpawn(callIndex = 0): void {
@@ -109,13 +109,13 @@ function expectFetchSpawn(callIndex = 0): void {
   });
 }
 
-function expectInstallSpawn(callIndex: number): void {
-  expect(spawnMock.mock.calls[callIndex]?.[0]).toBe('npm ci');
-  expect(spawnMock.mock.calls[callIndex]?.[1]).toEqual([]);
-  expect(spawnMock.mock.calls[callIndex]?.[2]).toMatchObject({
+function expectInstallExec(callIndex: number): void {
+  expect(execFileMock.mock.calls[callIndex]?.[0]).toBe('npm ci');
+  expect(execFileMock.mock.calls[callIndex]?.[1]).toEqual([]);
+  expect(execFileMock.mock.calls[callIndex]?.[2]).toMatchObject({
     cwd: '/tmp/wt',
     shell: true,
-    stdio: 'inherit',
+    maxBuffer: 10 * 1024 * 1024,
   });
 }
 
@@ -135,7 +135,7 @@ describe('syncWorktree', () => {
     getSettingsMock.mockReturnValue({ installCommand: 'npm ci' });
     queueSpawnExit();
     queueExecResult();
-    queueSpawnExit();
+    queueExecResult();
     const resolveConflicts = vi.fn();
 
     await expect(
@@ -151,9 +151,9 @@ describe('syncWorktree', () => {
     ).resolves.toBeUndefined();
 
     expect(resolveConflicts).not.toHaveBeenCalled();
-    expect(spawnMock).toHaveBeenCalledTimes(2);
+    expect(spawnMock).toHaveBeenCalledTimes(1);
     expectFetchSpawn();
-    expectInstallSpawn(1);
+    expectInstallExec(1);
     expect(gitArgsFromExecCalls()).toEqual([['rebase', '--autostash', 'origin/main']]);
   });
 
@@ -172,7 +172,7 @@ describe('syncWorktree', () => {
         ['<<<<<<< HEAD', 'left', '=======', 'right', '>>>>>>> origin/main'].join('\n')
       );
     queueExecResult();
-    queueSpawnExit();
+    queueExecResult();
     const resolveConflicts = vi.fn().mockResolvedValue(0);
 
     await expect(
@@ -202,9 +202,9 @@ describe('syncWorktree', () => {
       ],
       continueError: undefined,
     });
-    expect(spawnMock).toHaveBeenCalledTimes(2);
+    expect(spawnMock).toHaveBeenCalledTimes(1);
     expectFetchSpawn();
-    expectInstallSpawn(1);
+    expectInstallExec(3);
     expect(gitArgsFromExecCalls()).toEqual([
       ['rebase', '--autostash', 'origin/main'],
       ['diff', '--name-only', '--diff-filter=U'],
@@ -223,7 +223,7 @@ describe('syncWorktree', () => {
     queueExecResult({ code: 1, stderr: 'No changes - did you forget to use git add?' });
     queueExecResult({ stdout: '' });
     queueExecResult({ stdout: '.git\n' });
-    queueSpawnExit();
+    queueExecResult();
     const resolveConflicts = vi.fn().mockResolvedValue(0);
 
     await expect(
@@ -239,9 +239,9 @@ describe('syncWorktree', () => {
     ).resolves.toBeUndefined();
 
     expect(resolveConflicts).toHaveBeenCalledTimes(1);
-    expect(spawnMock).toHaveBeenCalledTimes(2);
+    expect(spawnMock).toHaveBeenCalledTimes(1);
     expectFetchSpawn();
-    expectInstallSpawn(1);
+    expectInstallExec(5);
     expect(gitArgsFromExecCalls()).toEqual([
       ['rebase', '--autostash', 'origin/main'],
       ['diff', '--name-only', '--diff-filter=U'],
@@ -255,6 +255,7 @@ describe('syncWorktree', () => {
     queueSpawnExit();
     queueExecResult();
     const resolveConflicts = vi.fn();
+    const remediateInstallError = vi.fn();
 
     await expect(
       syncWorktree(
@@ -264,21 +265,137 @@ describe('syncWorktree', () => {
           baseBranch: 'main',
           pushMode: 'force-with-lease',
         },
-        resolveConflicts
+        resolveConflicts,
+        remediateInstallError
       )
     ).resolves.toBeUndefined();
 
     expect(resolveConflicts).not.toHaveBeenCalled();
+    expect(remediateInstallError).not.toHaveBeenCalled();
     expect(spawnMock).toHaveBeenCalledTimes(1);
     expectFetchSpawn();
     expect(gitArgsFromExecCalls()).toEqual([['rebase', '--autostash', 'origin/main']]);
   });
 
-  it('throws when the post-rebase install fails', async () => {
+  it('passes install failure output to the remediation callback and retries successfully', async () => {
     getSettingsMock.mockReturnValue({ installCommand: 'npm ci' });
     queueSpawnExit();
     queueExecResult();
-    queueSpawnExit(1);
+    queueExecResult({ code: 1, stderr: 'lock mismatch', stdout: 'npm notice' });
+    queueExecResult();
+    const resolveConflicts = vi.fn();
+    const remediateInstallError = vi.fn().mockResolvedValue(0);
+
+    await expect(
+      syncWorktree(
+        {
+          wtPath: '/tmp/wt',
+          repoRoot: '/tmp/repo',
+          baseBranch: 'main',
+          pushMode: 'force-with-lease',
+        },
+        resolveConflicts,
+        remediateInstallError
+      )
+    ).resolves.toBeUndefined();
+
+    expect(resolveConflicts).not.toHaveBeenCalled();
+    expect(remediateInstallError).toHaveBeenCalledTimes(1);
+    expect(remediateInstallError).toHaveBeenCalledWith(
+      'npm ci exited with code 1:\nlock mismatch\nnpm notice'
+    );
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expectFetchSpawn();
+    expectInstallExec(1);
+    expectInstallExec(2);
+    expect(gitArgsFromExecCalls()).toEqual([['rebase', '--autostash', 'origin/main']]);
+  });
+
+  it('throws when the install remediation callback exits non-zero', async () => {
+    getSettingsMock.mockReturnValue({ installCommand: 'npm ci' });
+    queueSpawnExit();
+    queueExecResult();
+    queueExecResult({ code: 1, stderr: 'lock mismatch' });
+    const resolveConflicts = vi.fn();
+    const remediateInstallError = vi.fn().mockResolvedValue(9);
+
+    await expect(
+      syncWorktree(
+        {
+          wtPath: '/tmp/wt',
+          repoRoot: '/tmp/repo',
+          baseBranch: 'main',
+          pushMode: 'force-with-lease',
+        },
+        resolveConflicts,
+        remediateInstallError
+      )
+    ).rejects.toThrow(
+      'Git transport failed in /tmp/wt for repo /tmp/repo: Install remediation agent exited with code 9'
+    );
+
+    expect(resolveConflicts).not.toHaveBeenCalled();
+    expect(remediateInstallError).toHaveBeenCalledWith('npm ci exited with code 1:\nlock mismatch');
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expectFetchSpawn();
+    expectInstallExec(1);
+    expect(gitArgsFromExecCalls()).toEqual([['rebase', '--autostash', 'origin/main']]);
+  });
+
+  it('throws after three unsuccessful install remediation attempts with the final output', async () => {
+    getSettingsMock.mockReturnValue({ installCommand: 'npm ci' });
+    queueSpawnExit();
+    queueExecResult();
+    queueExecResult({ code: 1, stderr: 'attempt 1 stderr', stdout: 'attempt 1 stdout' });
+    queueExecResult({ code: 1, stderr: 'attempt 2 stderr', stdout: 'attempt 2 stdout' });
+    queueExecResult({ code: 1, stderr: 'attempt 3 stderr', stdout: 'attempt 3 stdout' });
+    queueExecResult({ code: 1, stderr: 'attempt 4 stderr', stdout: 'attempt 4 stdout' });
+    const resolveConflicts = vi.fn();
+    const remediateInstallError = vi.fn().mockResolvedValue(0);
+
+    await expect(
+      syncWorktree(
+        {
+          wtPath: '/tmp/wt',
+          repoRoot: '/tmp/repo',
+          baseBranch: 'main',
+          pushMode: 'force-with-lease',
+        },
+        resolveConflicts,
+        remediateInstallError
+      )
+    ).rejects.toThrow(
+      'Post-rebase install failed after 3 remediation attempts:\nnpm ci exited with code 1:\nattempt 4 stderr\nattempt 4 stdout'
+    );
+
+    expect(resolveConflicts).not.toHaveBeenCalled();
+    expect(remediateInstallError).toHaveBeenCalledTimes(3);
+    expect(remediateInstallError).toHaveBeenNthCalledWith(
+      1,
+      'npm ci exited with code 1:\nattempt 1 stderr\nattempt 1 stdout'
+    );
+    expect(remediateInstallError).toHaveBeenNthCalledWith(
+      2,
+      'npm ci exited with code 1:\nattempt 2 stderr\nattempt 2 stdout'
+    );
+    expect(remediateInstallError).toHaveBeenNthCalledWith(
+      3,
+      'npm ci exited with code 1:\nattempt 3 stderr\nattempt 3 stdout'
+    );
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expectFetchSpawn();
+    expectInstallExec(1);
+    expectInstallExec(2);
+    expectInstallExec(3);
+    expectInstallExec(4);
+    expect(gitArgsFromExecCalls()).toEqual([['rebase', '--autostash', 'origin/main']]);
+  });
+
+  it('throws on the first install failure when no remediation callback is provided', async () => {
+    getSettingsMock.mockReturnValue({ installCommand: 'npm ci' });
+    queueSpawnExit();
+    queueExecResult();
+    queueExecResult({ code: 1, stderr: 'lock mismatch', stdout: 'npm notice' });
     const resolveConflicts = vi.fn();
 
     await expect(
@@ -292,13 +409,13 @@ describe('syncWorktree', () => {
         resolveConflicts
       )
     ).rejects.toThrow(
-      'Post-rebase install failed after the rebase completed: npm ci exited with code 1'
+      'Post-rebase install failed:\nnpm ci exited with code 1:\nlock mismatch\nnpm notice'
     );
 
     expect(resolveConflicts).not.toHaveBeenCalled();
-    expect(spawnMock).toHaveBeenCalledTimes(2);
+    expect(spawnMock).toHaveBeenCalledTimes(1);
     expectFetchSpawn();
-    expectInstallSpawn(1);
+    expectInstallExec(1);
     expect(gitArgsFromExecCalls()).toEqual([['rebase', '--autostash', 'origin/main']]);
   });
 });
@@ -565,7 +682,7 @@ describe('withGitTransport', () => {
     getSettingsMock.mockReturnValue({ installCommand: 'npm ci' });
     queueSpawnExit();
     queueExecResult();
-    queueSpawnExit();
+    queueExecResult();
     queueCleanBeforePush();
     queueExecResult();
     const runAgent = vi.fn().mockResolvedValue(0);
@@ -583,10 +700,10 @@ describe('withGitTransport', () => {
     ).resolves.toBe(0);
 
     expect(runAgent).toHaveBeenCalledWith();
-    expect(spawnMock).toHaveBeenCalledTimes(2);
+    expect(spawnMock).toHaveBeenCalledTimes(1);
     expectFetchSpawn();
-    expectInstallSpawn(1);
-    expect(spawnMock.mock.invocationCallOrder[1]).toBeLessThan(
+    expectInstallExec(1);
+    expect(execFileMock.mock.invocationCallOrder[1]).toBeLessThan(
       runAgent.mock.invocationCallOrder[0] ?? Infinity
     );
     expect(gitArgsFromExecCalls()).toEqual([
@@ -595,7 +712,7 @@ describe('withGitTransport', () => {
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '-u', 'origin', 'HEAD'],
     ]);
-    expect(execFileMock.mock.calls[3]?.[2]).toMatchObject({
+    expect(execFileMock.mock.calls[4]?.[2]).toMatchObject({
       cwd: '/tmp/wt',
       maxBuffer: 10 * 1024 * 1024,
     });
@@ -677,7 +794,7 @@ describe('withGitTransport', () => {
       );
     queueExecResult();
     queueExecResult();
-    queueSpawnExit();
+    queueExecResult();
     queueExecResult({ stdout: 'feature/retry\n' });
     queueCleanBeforePush();
     queueExecResult();
@@ -710,9 +827,9 @@ describe('withGitTransport', () => {
       ],
       continueError: undefined,
     });
-    expect(spawnMock).toHaveBeenCalledTimes(2);
+    expect(spawnMock).toHaveBeenCalledTimes(1);
     expectFetchSpawn();
-    expectInstallSpawn(1);
+    expectInstallExec(4);
     expect(gitArgsFromExecCalls()).toEqual([
       ['rebase', '--autostash', 'origin/main'],
       ['diff', '--name-only', '--diff-filter=U'],
@@ -1264,7 +1381,7 @@ describe('withGitTransport', () => {
     // git rev-parse --git-dir for isRebaseComplete
     queueExecResult({ stdout: '.git\n' });
     // accessMock rejects by default (ENOENT) → no rebase dirs → rebase complete
-    queueSpawnExit();
+    queueExecResult();
     // push (via execAsync, not spawnAsync)
     queueExecResult({ stdout: 'feature/retry\n' });
     queueCleanBeforePush();
@@ -1283,9 +1400,9 @@ describe('withGitTransport', () => {
 
     expect(code).toBe(0);
     expect(runAgent).toHaveBeenCalledTimes(1);
-    expect(spawnMock).toHaveBeenCalledTimes(2);
+    expect(spawnMock).toHaveBeenCalledTimes(1);
     expectFetchSpawn();
-    expectInstallSpawn(1);
+    expectInstallExec(6);
     expect(gitArgsFromExecCalls()).toEqual([
       ['rebase', '--autostash', 'origin/main'],
       ['diff', '--name-only', '--diff-filter=U'],
@@ -1300,11 +1417,87 @@ describe('withGitTransport', () => {
     ]);
   });
 
-  it('throws when the post-rebase install fails before the agent runs', async () => {
+  it('passes install failure output to the agent, retries, and continues before push', async () => {
     getSettingsMock.mockReturnValue({ installCommand: 'npm ci' });
     queueSpawnExit();
     queueExecResult();
-    queueSpawnExit(1);
+    queueExecResult({ code: 1, stderr: 'lock mismatch', stdout: 'npm notice' });
+    queueExecResult();
+    queueCleanBeforePush();
+    queueExecResult();
+    const runAgent = vi.fn().mockResolvedValueOnce(0).mockResolvedValueOnce(0);
+
+    await expect(
+      withGitTransport(
+        {
+          wtPath: '/tmp/wt',
+          repoRoot: '/tmp/repo',
+          baseBranch: 'main',
+          pushMode: 'new-branch',
+        },
+        runAgent
+      )
+    ).resolves.toBe(0);
+
+    expect(runAgent).toHaveBeenCalledTimes(2);
+    expect(runAgent).toHaveBeenNthCalledWith(
+      1,
+      undefined,
+      undefined,
+      'npm ci exited with code 1:\nlock mismatch\nnpm notice'
+    );
+    expect(runAgent).toHaveBeenNthCalledWith(2);
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expectFetchSpawn();
+    expectInstallExec(1);
+    expectInstallExec(2);
+    expect(gitArgsFromExecCalls()).toEqual([
+      ['rebase', '--autostash', 'origin/main'],
+      ['checkout', '--', '.'],
+      ['clean', '-fd', '--exclude=.shipper'],
+      ['push', '-u', 'origin', 'HEAD'],
+    ]);
+  });
+
+  it('returns the install remediation agent exit code before the main agent runs', async () => {
+    getSettingsMock.mockReturnValue({ installCommand: 'npm ci' });
+    queueSpawnExit();
+    queueExecResult();
+    queueExecResult({ code: 1, stderr: 'lock mismatch' });
+    const runAgent = vi.fn().mockResolvedValue(7);
+
+    await expect(
+      withGitTransport(
+        {
+          wtPath: '/tmp/wt',
+          repoRoot: '/tmp/repo',
+          baseBranch: 'main',
+          pushMode: 'new-branch',
+        },
+        runAgent
+      )
+    ).resolves.toBe(7);
+
+    expect(runAgent).toHaveBeenCalledTimes(1);
+    expect(runAgent).toHaveBeenCalledWith(
+      undefined,
+      undefined,
+      'npm ci exited with code 1:\nlock mismatch'
+    );
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expectFetchSpawn();
+    expectInstallExec(1);
+    expect(gitArgsFromExecCalls()).toEqual([['rebase', '--autostash', 'origin/main']]);
+  });
+
+  it('throws after three unsuccessful install remediation attempts with the final output', async () => {
+    getSettingsMock.mockReturnValue({ installCommand: 'npm ci' });
+    queueSpawnExit();
+    queueExecResult();
+    queueExecResult({ code: 1, stderr: 'attempt 1 stderr', stdout: 'attempt 1 stdout' });
+    queueExecResult({ code: 1, stderr: 'attempt 2 stderr', stdout: 'attempt 2 stdout' });
+    queueExecResult({ code: 1, stderr: 'attempt 3 stderr', stdout: 'attempt 3 stdout' });
+    queueExecResult({ code: 1, stderr: 'attempt 4 stderr', stdout: 'attempt 4 stdout' });
     const runAgent = vi.fn().mockResolvedValue(0);
 
     await expect(
@@ -1318,13 +1511,34 @@ describe('withGitTransport', () => {
         runAgent
       )
     ).rejects.toThrow(
-      'Post-rebase install failed after the rebase completed: npm ci exited with code 1'
+      'Post-rebase install failed after 3 remediation attempts:\nnpm ci exited with code 1:\nattempt 4 stderr\nattempt 4 stdout'
     );
 
-    expect(runAgent).not.toHaveBeenCalled();
-    expect(spawnMock).toHaveBeenCalledTimes(2);
+    expect(runAgent).toHaveBeenCalledTimes(3);
+    expect(runAgent).toHaveBeenNthCalledWith(
+      1,
+      undefined,
+      undefined,
+      'npm ci exited with code 1:\nattempt 1 stderr\nattempt 1 stdout'
+    );
+    expect(runAgent).toHaveBeenNthCalledWith(
+      2,
+      undefined,
+      undefined,
+      'npm ci exited with code 1:\nattempt 2 stderr\nattempt 2 stdout'
+    );
+    expect(runAgent).toHaveBeenNthCalledWith(
+      3,
+      undefined,
+      undefined,
+      'npm ci exited with code 1:\nattempt 3 stderr\nattempt 3 stdout'
+    );
+    expect(spawnMock).toHaveBeenCalledTimes(1);
     expectFetchSpawn();
-    expectInstallSpawn(1);
+    expectInstallExec(1);
+    expectInstallExec(2);
+    expectInstallExec(3);
+    expectInstallExec(4);
     expect(gitArgsFromExecCalls()).toEqual([['rebase', '--autostash', 'origin/main']]);
   });
 

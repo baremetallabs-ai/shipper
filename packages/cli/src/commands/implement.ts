@@ -41,7 +41,7 @@ export async function implementCommand(
           await scrubOutputDir(wtPath);
           const transportCode = await withGitTransport(
             { wtPath, repoRoot, baseBranch, pushMode: 'new-branch' },
-            (conflictContext, pushError) => {
+            (conflictContext, pushError, installError) => {
               return runPrompt('implement', {
                 repo,
                 issueRef: issue,
@@ -51,7 +51,7 @@ export async function implementCommand(
                 model,
                 userInput: conflictContext
                   ? formatConflictContext(conflictContext)
-                  : (pushError ?? undefined),
+                  : (pushError ?? installError ?? undefined),
               });
             }
           );
@@ -64,7 +64,7 @@ export async function implementCommand(
             retry: (userInput) =>
               withGitTransport(
                 { wtPath, repoRoot, baseBranch, pushMode: 'new-branch' },
-                (conflictContext, pushError) =>
+                (conflictContext, pushError, installError) =>
                   runPrompt('implement', {
                     repo,
                     issueRef: issue,
@@ -74,7 +74,7 @@ export async function implementCommand(
                     model,
                     userInput: conflictContext
                       ? formatConflictContext(conflictContext)
-                      : (pushError ?? userInput),
+                      : (pushError ?? installError ?? userInput),
                   })
               ),
           });

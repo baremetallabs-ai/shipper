@@ -346,18 +346,33 @@ export async function prRemediateCommand(
             await preflight(wtPath, repo, prRef, pass, MAX_REMEDIATION_PASSES);
 
             try {
-              await syncWorktree(gitOpts, async (conflictContext) => {
-                return await runPrompt('pr_remediate', {
-                  repo,
-                  issueRef: issueNumber,
-                  prRef,
-                  cwd: wtPath,
-                  mode,
-                  agent,
-                  model,
-                  userInput: formatConflictContext(conflictContext),
-                });
-              });
+              await syncWorktree(
+                gitOpts,
+                async (conflictContext) => {
+                  return await runPrompt('pr_remediate', {
+                    repo,
+                    issueRef: issueNumber,
+                    prRef,
+                    cwd: wtPath,
+                    mode,
+                    agent,
+                    model,
+                    userInput: formatConflictContext(conflictContext),
+                  });
+                },
+                async (installError) => {
+                  return await runPrompt('pr_remediate', {
+                    repo,
+                    issueRef: issueNumber,
+                    prRef,
+                    cwd: wtPath,
+                    mode,
+                    agent,
+                    model,
+                    userInput: installError,
+                  });
+                }
+              );
             } catch (error) {
               const detail = error instanceof Error ? error.message : String(error);
               await handleAgentCrash(repo, issueNumber, 'pr_remediate', detail);

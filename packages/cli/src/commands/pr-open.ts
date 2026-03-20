@@ -45,7 +45,7 @@ export async function prOpenCommand(
           await scrubOutputDir(wtPath);
           const transportCode = await withGitTransport(
             { wtPath, repoRoot, baseBranch, pushMode: 'force-with-lease' },
-            (conflictContext, pushError) => {
+            (conflictContext, pushError, installError) => {
               return runPrompt('pr_open', {
                 repo,
                 issueRef: issue,
@@ -56,7 +56,7 @@ export async function prOpenCommand(
                 model,
                 userInput: conflictContext
                   ? formatConflictContext(conflictContext)
-                  : (pushError ?? undefined),
+                  : (pushError ?? installError ?? undefined),
               });
             }
           );
@@ -69,7 +69,7 @@ export async function prOpenCommand(
             retry: (userInput) =>
               withGitTransport(
                 { wtPath, repoRoot, baseBranch, pushMode: 'force-with-lease' },
-                (conflictContext, pushError) =>
+                (conflictContext, pushError, installError) =>
                   runPrompt('pr_open', {
                     repo,
                     issueRef: issue,
@@ -80,7 +80,7 @@ export async function prOpenCommand(
                     model,
                     userInput: conflictContext
                       ? formatConflictContext(conflictContext)
-                      : (pushError ?? userInput),
+                      : (pushError ?? installError ?? userInput),
                   })
               ),
           });
