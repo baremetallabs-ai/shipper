@@ -10,6 +10,7 @@ const WORKTREES_DIR = path.join(homedir(), '.shipper', 'worktrees');
 const execFileAsync = promisify(execFile);
 const MAX_REBASE_ATTEMPTS = 3;
 const MAX_PUSH_ATTEMPTS = 3;
+const INSTALL_OUTPUT_MAX_BUFFER = Number.POSITIVE_INFINITY;
 const PUSH_OUTPUT_MAX_BUFFER = 10 * 1024 * 1024;
 const CONFLICT_BLOCK_PATTERN = /^<{7}.*$\n[\s\S]*?^={7}$\n[\s\S]*?^>{7}.*(?:\n|$)?/gm;
 
@@ -111,9 +112,12 @@ async function execAsync(
 
         if (error instanceof Error) {
           const execError = error as ExecFileError;
+          const capturedStdout = stdout || execError.stdout || '';
+          const capturedStderr = stderr || execError.stderr || '';
           resolve({
-            stdout: stdout || execError.stdout || '',
-            stderr: stderr || execError.stderr || '',
+            stdout: capturedStdout,
+            stderr:
+              capturedStderr || (typeof execError.code === 'number' ? '' : execError.message || ''),
             code: typeof execError.code === 'number' ? execError.code : 1,
           });
           return;
@@ -300,7 +304,7 @@ async function runPostRebaseInstall(cwd: string): Promise<string | undefined> {
   const result = await execAsync(installCommand, [], {
     cwd,
     shell: true,
-    maxBuffer: 10 * 1024 * 1024,
+    maxBuffer: INSTALL_OUTPUT_MAX_BUFFER,
   });
   if (result.code === 0) {
     return undefined;
