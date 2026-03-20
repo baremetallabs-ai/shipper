@@ -103,6 +103,7 @@ export async function initCommand(options: {
   ]);
   if (!ok) {
     process.exit(1);
+    return;
   }
 
   if (options.push && !options.autocommit) {
@@ -278,6 +279,7 @@ export async function initCommand(options: {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`Error: Malformed JSON in ${settingsPath}: ${message}`);
       process.exit(1);
+      return;
     }
   }
 
