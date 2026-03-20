@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { mockGh, mockExecFileAsync } = vi.hoisted(() => ({
+const { mockGh, mockExecFileAsync, mockRunPrereqChecks } = vi.hoisted(() => ({
   mockGh: vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>(),
   mockExecFileAsync:
     vi.fn<
@@ -11,6 +11,7 @@ const { mockGh, mockExecFileAsync } = vi.hoisted(() => ({
         opts?: Record<string, unknown>
       ) => Promise<{ stdout: string; stderr: string }>
     >(),
+  mockRunPrereqChecks: vi.fn<(checks: unknown[]) => boolean>(),
 }));
 
 const { canonicalLabels } = vi.hoisted(() => ({
@@ -107,7 +108,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   SETTING_DESCRIPTIONS: {},
   CLI_VERSION: '1.2.3',
   readmeTemplate: '# Test README content',
-  runPrereqChecks: () => true,
+  runPrereqChecks: (checks: unknown[]) => mockRunPrereqChecks(checks),
   checkGitRepo: vi.fn(),
   checkGhInstalled: vi.fn(),
   checkGhAuth: vi.fn(),
@@ -185,6 +186,8 @@ beforeEach(() => {
   mockGh.mockReset();
   mockGh.mockResolvedValue({ stdout: '', stderr: '' });
   mockExecFileAsync.mockReset();
+  mockRunPrereqChecks.mockReset();
+  mockRunPrereqChecks.mockReturnValue(true);
   mockExecFileAsync.mockImplementation((cmd: string, args: string[]) => {
     if (cmd === 'git' && args[0] === 'branch' && args[1] === '--show-current') {
       return Promise.resolve({ stdout: 'main\n', stderr: '' });
@@ -402,6 +405,10 @@ describe('initCommand settings', () => {
     });
     await initCommand({ agent: 'claude' });
     expect(exitMock).toHaveBeenCalledWith(1);
+    expect(findWriteCall(settingsPath)).toBeUndefined();
+    expect(findWriteCall(path.resolve('.shipper', 'README.md'))).toBeUndefined();
+    expect(mockGh).not.toHaveBeenCalled();
+    expect(mockExecFileAsync).not.toHaveBeenCalledWith('git', ['add', '--', '.shipper/']);
   });
 });
 
@@ -565,6 +572,17 @@ describe('initCommand agent selection', () => {
 });
 
 describe('initCommand commit and push', () => {
+  it('stops immediately when prerequisite checks fail', async () => {
+    mockRunPrereqChecks.mockReturnValue(false);
+
+    await initCommand({ agent: 'claude' });
+
+    expect(exitMock).toHaveBeenCalledWith(1);
+    expect(writeFileSyncMock).not.toHaveBeenCalled();
+    expect(mockExecFileAsync).not.toHaveBeenCalled();
+    expect(mockGh).not.toHaveBeenCalled();
+  });
+
   it('writes files and syncs labels without git add, commit, or push by default', async () => {
     await initCommand({ agent: 'claude' });
 
