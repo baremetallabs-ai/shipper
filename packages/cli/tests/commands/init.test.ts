@@ -878,6 +878,7 @@ describe('initCommand commit and push', () => {
       'Error: Failed to push from detached HEAD.\nCheck out a branch and retry with --push.'
     );
     expect(exitMock).toHaveBeenCalledWith(1);
+    expect(mockExecFileAsync).not.toHaveBeenCalledWith('git', expect.arrayContaining(['commit']));
     expect(mockExecFileAsync).not.toHaveBeenCalledWith('git', expect.arrayContaining(['push']));
   });
 

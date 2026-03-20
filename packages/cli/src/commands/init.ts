@@ -364,6 +364,22 @@ export async function initCommand(options: {
     if (!hasChanges) {
       console.log('.shipper/ files are unchanged — nothing to commit.');
     } else {
+      let currentBranch = '';
+      if (options.push) {
+        const { stdout: currentOut } = await execFileAsync('git', ['branch', '--show-current'], {
+          encoding: 'utf-8',
+        });
+        currentBranch = currentOut.trim();
+
+        if (!currentBranch) {
+          console.error(
+            'Error: Failed to push from detached HEAD.\nCheck out a branch and retry with --push.'
+          );
+          process.exit(1);
+          return;
+        }
+      }
+
       if (removedTrackedArtifactPaths.length > 0) {
         const { stdout: stagedPathsOut } = await execFileAsync(
           'git',
@@ -394,25 +410,14 @@ export async function initCommand(options: {
       if (!options.push) {
         console.log('Committed .shipper/ files.');
       } else {
-        const { stdout: currentOut } = await execFileAsync('git', ['branch', '--show-current'], {
-          encoding: 'utf-8',
-        });
-        const currentBranch = currentOut.trim();
-
-        if (!currentBranch) {
-          console.error(
-            'Error: Failed to push from detached HEAD.\nCheck out a branch and retry with --push.'
-          );
-          process.exit(1);
-          return;
-        }
+        const pushBranch = currentBranch;
 
         // Resolve the push remote from branch config, falling back to 'origin'
         let remote = 'origin';
         try {
           const { stdout: remoteOut } = await execFileAsync(
             'git',
-            ['config', `branch.${currentBranch}.remote`],
+            ['config', `branch.${pushBranch}.remote`],
             { encoding: 'utf-8' }
           );
           if (remoteOut.trim()) {
@@ -423,21 +428,21 @@ export async function initCommand(options: {
         }
 
         try {
-          await execFileAsync('git', ['push', remote, currentBranch]);
+          await execFileAsync('git', ['push', remote, pushBranch]);
         } catch (err) {
           const stderr = getErrorStderr(err);
           console.error(
-            `Error: Failed to push to ${currentBranch}.` +
+            `Error: Failed to push to ${pushBranch}.` +
               (stderr ? `\n${stderr}` : '') +
               '\n\nThis may be due to branch protection rules.' +
-              `\nPush manually with: git push ${remote} ${currentBranch}` +
+              `\nPush manually with: git push ${remote} ${pushBranch}` +
               '\nOr adjust your branch protection settings.'
           );
           process.exit(1);
           return;
         }
 
-        console.log(`Committed and pushed .shipper/ files to ${currentBranch}`);
+        console.log(`Committed and pushed .shipper/ files to ${pushBranch}`);
       }
     }
   }
