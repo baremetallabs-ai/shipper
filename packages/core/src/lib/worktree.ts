@@ -188,6 +188,10 @@ async function buildConflictContext(
   return { files, conflicts, continueError };
 }
 
+async function stageResolvedFiles(wtPath: string): Promise<void> {
+  await execAsync('git', ['add', '-u'], { cwd: wtPath });
+}
+
 function getRetryFailureText(result: CommandResult): string {
   const output = [result.stderr.trim(), result.stdout.trim()].filter(Boolean).join('\n');
   return output || `git rebase --continue exited with code ${result.code}`;
@@ -385,6 +389,7 @@ async function pushWithRetry(
             return agentCode;
           }
 
+          await stageResolvedFiles(opts.wtPath);
           const continueResult = await execAsync('git', ['rebase', '--continue'], {
             cwd: opts.wtPath,
             env: { GIT_EDITOR: 'true' },
@@ -644,6 +649,7 @@ export async function withGitTransport(
         return agentCode;
       }
 
+      await stageResolvedFiles(opts.wtPath);
       const continueResult = await execAsync('git', ['rebase', '--continue'], {
         cwd: opts.wtPath,
         env: { GIT_EDITOR: 'true' },

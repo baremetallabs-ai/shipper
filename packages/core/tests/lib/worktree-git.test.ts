@@ -676,6 +676,7 @@ describe('withGitTransport', () => {
         ['<<<<<<< HEAD', 'left', '=======', 'right', '>>>>>>> origin/main'].join('\n')
       );
     queueExecResult();
+    queueExecResult();
     queueSpawnExit();
     queueExecResult({ stdout: 'feature/retry\n' });
     queueCleanBeforePush();
@@ -715,6 +716,7 @@ describe('withGitTransport', () => {
     expect(gitArgsFromExecCalls()).toEqual([
       ['rebase', '--autostash', 'origin/main'],
       ['diff', '--name-only', '--diff-filter=U'],
+      ['add', '-u'],
       ['rebase', '--continue'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['checkout', '--', '.'],
@@ -825,6 +827,7 @@ describe('withGitTransport', () => {
       ['<<<<<<< HEAD', 'ours', '=======', 'theirs', '>>>>>>> origin/feature/retry'].join('\n')
     );
     queueExecResult();
+    queueExecResult();
     queueCleanBeforePush();
     queueExecResult();
     const runAgent = vi.fn().mockResolvedValue(0);
@@ -867,6 +870,7 @@ describe('withGitTransport', () => {
       ['rev-parse', '--verify', 'origin/feature/retry'],
       ['rebase', '--autostash', 'origin/feature/retry'],
       ['diff', '--name-only', '--diff-filter=U'],
+      ['add', '-u'],
       ['rebase', '--continue'],
       ['checkout', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
@@ -925,6 +929,7 @@ describe('withGitTransport', () => {
     readFileMock.mockResolvedValueOnce(
       ['<<<<<<< HEAD', 'old', '=======', 'new', '>>>>>>> origin/feature/retry'].join('\n')
     );
+    queueExecResult();
     queueExecResult({ code: 1, stderr: 'still conflicted after continue' });
     queueExecResult({ stdout: 'src/conflict.ts\n' });
     readFileMock.mockResolvedValueOnce(
@@ -932,6 +937,7 @@ describe('withGitTransport', () => {
         '\n'
       )
     );
+    queueExecResult();
     queueExecResult();
     queueCleanBeforePush();
     queueExecResult();
@@ -970,8 +976,10 @@ describe('withGitTransport', () => {
       ['rev-parse', '--verify', 'origin/feature/retry'],
       ['rebase', '--autostash', 'origin/feature/retry'],
       ['diff', '--name-only', '--diff-filter=U'],
+      ['add', '-u'],
       ['rebase', '--continue'],
       ['diff', '--name-only', '--diff-filter=U'],
+      ['add', '-u'],
       ['rebase', '--continue'],
       ['checkout', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
@@ -1160,10 +1168,13 @@ describe('withGitTransport', () => {
     readFileMock.mockResolvedValue(
       ['<<<<<<< HEAD', 'old', '=======', 'new', '>>>>>>> origin/main'].join('\n')
     );
+    queueExecResult();
     queueExecResult({ code: 1, stderr: 'continue failed once' });
     queueExecResult({ stdout: 'src/conflict.ts\n' });
+    queueExecResult();
     queueExecResult({ code: 1, stderr: 'continue failed twice' });
     queueExecResult({ stdout: 'src/conflict.ts\n' });
+    queueExecResult();
     queueExecResult({ code: 1, stderr: 'continue failed thrice' });
     queueSpawnExit();
     const runAgent = vi.fn().mockResolvedValue(0);
@@ -1190,10 +1201,13 @@ describe('withGitTransport', () => {
     expect(gitArgsFromExecCalls()).toEqual([
       ['rebase', '--autostash', 'origin/main'],
       ['diff', '--name-only', '--diff-filter=U'],
+      ['add', '-u'],
       ['rebase', '--continue'],
       ['diff', '--name-only', '--diff-filter=U'],
+      ['add', '-u'],
       ['rebase', '--continue'],
       ['diff', '--name-only', '--diff-filter=U'],
+      ['add', '-u'],
       ['rebase', '--continue'],
     ]);
   });
@@ -1205,6 +1219,7 @@ describe('withGitTransport', () => {
     readFileMock.mockResolvedValueOnce(
       ['<<<<<<< HEAD', 'old', '=======', 'new', '>>>>>>> origin/main'].join('\n')
     );
+    queueExecResult();
     queueExecResult({ code: 1, stderr: 'No changes - did you forget to use git add?' });
     queueExecResult({ stdout: '' });
     // git rev-parse --git-dir for isRebaseComplete
@@ -1240,6 +1255,8 @@ describe('withGitTransport', () => {
     readFileMock.mockResolvedValueOnce(
       ['<<<<<<< HEAD', 'old', '=======', 'new', '>>>>>>> origin/main'].join('\n')
     );
+    // git add -u (stageResolvedFiles)
+    queueExecResult();
     // rebase --continue fails (agent already committed)
     queueExecResult({ code: 1, stderr: 'No changes - did you forget to use git add?' });
     // listConflictedFiles returns empty
@@ -1272,6 +1289,7 @@ describe('withGitTransport', () => {
     expect(gitArgsFromExecCalls()).toEqual([
       ['rebase', '--autostash', 'origin/main'],
       ['diff', '--name-only', '--diff-filter=U'],
+      ['add', '-u'],
       ['rebase', '--continue'],
       ['diff', '--name-only', '--diff-filter=U'],
       ['rev-parse', '--git-dir'],
@@ -1317,10 +1335,13 @@ describe('withGitTransport', () => {
     readFileMock.mockResolvedValue(
       ['<<<<<<< HEAD', 'old', '=======', 'new', '>>>>>>> origin/main'].join('\n')
     );
+    queueExecResult();
     queueExecResult({ code: 1, stderr: 'continue failed once' });
     queueExecResult({ stdout: 'src/conflict.ts\n' });
+    queueExecResult();
     queueExecResult({ code: 1, stderr: 'continue failed twice' });
     queueExecResult({ stdout: 'src/conflict.ts\n' });
+    queueExecResult();
     queueExecResult({ code: 1, stderr: 'continue failed thrice' });
     queueSpawnExit(1);
     const runAgent = vi.fn().mockResolvedValue(0);
