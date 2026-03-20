@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 
 vi.mock('@dnsquared/shipper-core', () => ({
   runPreflight: vi.fn(),
+  warnTrackedOutputFiles: vi.fn(),
   loadSettings: vi.fn(),
   CLI_VERSION: '0.1.0-test',
   checkVersionFreshness: vi.fn(),
@@ -41,7 +42,12 @@ import { groomCommand } from '../src/commands/groom.js';
 import { prReviewCommand } from '../src/commands/pr-review.js';
 import { setupCommand } from '../src/commands/setup.js';
 import { unlockCommand } from '../src/commands/unlock.js';
-import { runPreflight, loadSettings, getRepoNwo } from '@dnsquared/shipper-core';
+import {
+  runPreflight,
+  warnTrackedOutputFiles,
+  loadSettings,
+  getRepoNwo,
+} from '@dnsquared/shipper-core';
 
 const mockShipCommand = vi.mocked(shipCommand);
 const mockNextCommand = vi.mocked(nextCommand);
@@ -53,6 +59,7 @@ const mockPrReviewCommand = vi.mocked(prReviewCommand);
 const mockSetupCommand = vi.mocked(setupCommand);
 const mockUnlockCommand = vi.mocked(unlockCommand);
 const mockRunPreflight = vi.mocked(runPreflight);
+const mockWarnTrackedOutputFiles = vi.mocked(warnTrackedOutputFiles);
 const mockLoadSettings = vi.mocked(loadSettings);
 const mockGetRepoNwo = vi.mocked(getRepoNwo);
 
@@ -70,6 +77,7 @@ describe('shipper-cli', () => {
         .spyOn(process.stdout, 'write')
         .mockImplementation((() => true) as typeof process.stdout.write);
       mockRunPreflight.mockClear();
+      mockWarnTrackedOutputFiles.mockClear();
       mockLoadSettings.mockClear();
       mockGetRepoNwo.mockClear();
       mockNewCommand.mockClear();
@@ -134,6 +142,7 @@ describe('shipper-cli', () => {
       vi.resetModules();
       mockEjectCommand.mockReset();
       mockRunPreflight.mockClear();
+      mockWarnTrackedOutputFiles.mockClear();
       mockLoadSettings.mockClear();
       mockGetRepoNwo.mockClear();
     });
@@ -165,6 +174,7 @@ describe('shipper-cli', () => {
       vi.resetModules();
       mockPriorityCommand.mockReset();
       mockRunPreflight.mockClear();
+      mockWarnTrackedOutputFiles.mockClear();
       mockLoadSettings.mockClear();
       mockGetRepoNwo.mockClear();
     });
@@ -205,6 +215,7 @@ describe('shipper-cli', () => {
       mockPrReviewCommand.mockReset();
       mockSetupCommand.mockReset();
       mockRunPreflight.mockClear();
+      mockWarnTrackedOutputFiles.mockClear();
       mockLoadSettings.mockClear();
       mockGetRepoNwo.mockClear();
       exitSpy.mockClear();
@@ -334,6 +345,7 @@ describe('shipper-cli', () => {
       vi.resetModules();
       mockUnlockCommand.mockReset();
       mockRunPreflight.mockClear();
+      mockWarnTrackedOutputFiles.mockClear();
       mockLoadSettings.mockClear();
       mockGetRepoNwo.mockClear();
     });
@@ -371,6 +383,66 @@ describe('shipper-cli', () => {
         undefined,
         expect.objectContaining({ stale: true })
       );
+    });
+  });
+
+  describe('tracked artifact warning wiring', () => {
+    const originalArgv = [...process.argv];
+
+    beforeEach(() => {
+      vi.resetModules();
+      mockRunPreflight.mockClear();
+      mockWarnTrackedOutputFiles.mockClear();
+      mockLoadSettings.mockClear();
+      mockGetRepoNwo.mockClear();
+      mockGroomCommand.mockReset();
+      mockPrReviewCommand.mockReset();
+      mockNextCommand.mockReset();
+      mockPriorityCommand.mockReset();
+    });
+
+    afterEach(() => {
+      process.argv = [...originalArgv];
+    });
+
+    async function importEntrypoint() {
+      await import('../src/index.ts');
+    }
+
+    it('warns for direct stage commands', async () => {
+      process.argv = ['node', 'src/index.ts', 'design', '42'];
+
+      await importEntrypoint();
+
+      expect(mockRunPreflight).toHaveBeenCalledWith('owner/repo');
+      expect(mockWarnTrackedOutputFiles).toHaveBeenCalledTimes(1);
+    });
+
+    it('warns for nested PR stage commands', async () => {
+      process.argv = ['node', 'src/index.ts', 'pr', 'review', '7'];
+
+      await importEntrypoint();
+
+      expect(mockRunPreflight).toHaveBeenCalledWith('owner/repo');
+      expect(mockWarnTrackedOutputFiles).toHaveBeenCalledTimes(1);
+    });
+
+    it('warns for dispatcher commands', async () => {
+      process.argv = ['node', 'src/index.ts', 'next', '42'];
+
+      await importEntrypoint();
+
+      expect(mockRunPreflight).toHaveBeenCalledWith('owner/repo');
+      expect(mockWarnTrackedOutputFiles).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not warn for non-stage commands', async () => {
+      process.argv = ['node', 'src/index.ts', 'priority', '42', 'high'];
+
+      await importEntrypoint();
+
+      expect(mockRunPreflight).toHaveBeenCalledWith('owner/repo');
+      expect(mockWarnTrackedOutputFiles).not.toHaveBeenCalled();
     });
   });
 

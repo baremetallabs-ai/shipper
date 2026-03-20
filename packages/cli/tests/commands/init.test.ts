@@ -546,6 +546,185 @@ describe('initCommand agent selection', () => {
 });
 
 describe('initCommand commit and push', () => {
+  it('untracks tracked output and input files before the normal staging flow', async () => {
+    mockExecFileAsync.mockImplementation((cmd: string, args: string[]) => {
+      if (cmd === 'git' && args[0] === 'ls-files') {
+        return Promise.resolve({
+          stdout:
+            '.shipper/output/result.json\r\n.shipper/input/example.txt\r\n.shipper/output/.gitkeep\r\n',
+          stderr: '',
+        });
+      }
+      if (cmd === 'git' && args[0] === 'branch' && args[1] === '--show-current') {
+        return Promise.resolve({ stdout: 'main\n', stderr: '' });
+      }
+      if (cmd === 'git' && args[0] === 'diff' && args[1] === '--cached' && args[2] === '--quiet') {
+        return Promise.reject(new Error('exit code 1'));
+      }
+      if (
+        cmd === 'git' &&
+        args[0] === 'diff' &&
+        args[1] === '--cached' &&
+        args[2] === '--name-only'
+      ) {
+        return Promise.resolve({
+          stdout: '.shipper/output/result.json\0.shipper/input/example.txt\0',
+          stderr: '',
+        });
+      }
+      return Promise.resolve({ stdout: '', stderr: '' });
+    });
+
+    await initCommand({ agent: 'claude' });
+
+    expect(mockExecFileAsync).toHaveBeenCalledWith('git', [
+      'rm',
+      '--cached',
+      '--',
+      '.shipper/output/result.json',
+      '.shipper/input/example.txt',
+    ]);
+    expect(console.log).toHaveBeenCalledWith('Untracked: .shipper/output/result.json');
+    expect(console.log).toHaveBeenCalledWith('Untracked: .shipper/input/example.txt');
+    expect(console.log).toHaveBeenCalledWith(
+      'These files were tracked by git but should be gitignored. Commit the changes to complete the fix.'
+    );
+    expect(
+      (console.log as ReturnType<typeof vi.fn>).mock.calls.filter(
+        ([message]) =>
+          message ===
+          'These files were tracked by git but should be gitignored. Commit the changes to complete the fix.'
+      )
+    ).toHaveLength(1);
+
+    expect(
+      (console.log as ReturnType<typeof vi.fn>).mock.calls.filter(
+        ([message]) => typeof message === 'string' && message.endsWith('.gitkeep')
+      )
+    ).toHaveLength(0);
+
+    const rmCallOrder = mockExecFileAsync.mock.calls.findIndex(
+      ([cmd, args]) => cmd === 'git' && args[0] === 'rm'
+    );
+    const addCallOrder = mockExecFileAsync.mock.calls.findIndex(
+      ([cmd, args]) => cmd === 'git' && args[0] === 'add'
+    );
+    expect(rmCallOrder).toBeGreaterThanOrEqual(0);
+    expect(addCallOrder).toBeGreaterThan(rmCallOrder);
+
+    expect(mockExecFileAsync).toHaveBeenCalledWith('git', ['add', '--', '.shipper/']);
+    expect(mockExecFileAsync).toHaveBeenCalledWith(
+      'git',
+      ['diff', '--cached', '--name-only', '-z'],
+      {
+        encoding: 'utf-8',
+      }
+    );
+    expect(mockExecFileAsync).toHaveBeenCalledWith('git', [
+      'commit',
+      '-m',
+      'chore: initialize shipper',
+    ]);
+    expect(mockExecFileAsync).toHaveBeenCalledWith('git', ['push', 'origin', 'main']);
+  });
+
+  it('does not log or untrack anything when no tracked output or input files exist', async () => {
+    mockExecFileAsync.mockImplementation((cmd: string, args: string[]) => {
+      if (cmd === 'git' && args[0] === 'ls-files') {
+        return Promise.resolve({ stdout: '', stderr: '' });
+      }
+      if (cmd === 'git' && args[0] === 'branch' && args[1] === '--show-current') {
+        return Promise.resolve({ stdout: 'main\n', stderr: '' });
+      }
+      if (cmd === 'git' && args[0] === 'diff' && args[1] === '--cached' && args[2] === '--quiet') {
+        return Promise.resolve({ stdout: '', stderr: '' });
+      }
+      return Promise.resolve({ stdout: '', stderr: '' });
+    });
+
+    await initCommand({ agent: 'claude' });
+
+    expect(mockExecFileAsync).not.toHaveBeenCalledWith(
+      'git',
+      expect.arrayContaining(['rm', '--cached'])
+    );
+    expect(console.log).not.toHaveBeenCalledWith(expect.stringContaining('Untracked:'));
+    expect(console.log).not.toHaveBeenCalledWith(
+      'These files were tracked by git but should be gitignored. Commit the changes to complete the fix.'
+    );
+  });
+
+  it('continues init when tracked-file cleanup cannot query git', async () => {
+    mockExecFileAsync.mockImplementation((cmd: string, args: string[]) => {
+      if (cmd === 'git' && args[0] === 'ls-files') {
+        return Promise.reject(new Error('git failed'));
+      }
+      if (cmd === 'git' && args[0] === 'branch' && args[1] === '--show-current') {
+        return Promise.resolve({ stdout: 'main\n', stderr: '' });
+      }
+      if (cmd === 'git' && args[0] === 'diff' && args[1] === '--cached' && args[2] === '--quiet') {
+        return Promise.resolve({ stdout: '', stderr: '' });
+      }
+      return Promise.resolve({ stdout: '', stderr: '' });
+    });
+
+    await initCommand({ agent: 'claude' });
+
+    expect(mockExecFileAsync).toHaveBeenCalledWith('git', [
+      'ls-files',
+      '--',
+      '.shipper/output/',
+      '.shipper/input/',
+    ]);
+    expect(mockExecFileAsync).not.toHaveBeenCalledWith(
+      'git',
+      expect.arrayContaining(['rm', '--cached'])
+    );
+    expect(mockExecFileAsync).toHaveBeenCalledWith('git', ['add', '--', '.shipper/']);
+    expect(console.log).not.toHaveBeenCalledWith(expect.stringContaining('Untracked:'));
+  });
+
+  it('warns and keeps the normal commit path when git rm --cached fails', async () => {
+    mockExecFileAsync.mockImplementation((cmd: string, args: string[]) => {
+      if (cmd === 'git' && args[0] === 'ls-files') {
+        return Promise.resolve({ stdout: '.shipper/output/result.json\n', stderr: '' });
+      }
+      if (cmd === 'git' && args[0] === 'rm') {
+        const err = Object.assign(new Error('rm failed'), {
+          stderr: 'git rm failed',
+        });
+        return Promise.reject(err);
+      }
+      if (cmd === 'git' && args[0] === 'branch' && args[1] === '--show-current') {
+        return Promise.resolve({ stdout: 'main\n', stderr: '' });
+      }
+      if (cmd === 'git' && args[0] === 'diff' && args[1] === '--cached' && args[2] === '--quiet') {
+        return Promise.reject(new Error('exit code 1'));
+      }
+      return Promise.resolve({ stdout: '', stderr: '' });
+    });
+
+    await initCommand({ agent: 'claude' });
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'Warning: Failed to untrack tracked files under .shipper/output/ and .shipper/input.'
+      )
+    );
+    expect(mockExecFileAsync).toHaveBeenCalledWith('git', [
+      'commit',
+      '-m',
+      'chore: initialize shipper',
+      '--',
+      '.shipper/',
+    ]);
+    expect(mockExecFileAsync).not.toHaveBeenCalledWith('git', [
+      'commit',
+      '-m',
+      'chore: initialize shipper',
+    ]);
+  });
+
   it('stages, commits, and pushes .shipper/ files on happy path', async () => {
     mockExecFileAsync.mockImplementation((cmd: string, args: string[]) => {
       if (cmd === 'git' && args[0] === 'branch' && args[1] === '--show-current') {
