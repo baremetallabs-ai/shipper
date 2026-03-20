@@ -406,6 +406,9 @@ async function pushWithRetry(
       return 0;
     }
 
+    const pushOutput = [pushResult.stderr.trim(), pushResult.stdout.trim()]
+      .filter(Boolean)
+      .join('\n');
     const pushError = formatCommandFailure('git', pushArgs, pushResult);
     if (retries === MAX_PUSH_ATTEMPTS) {
       throw formatTransportError(
@@ -414,7 +417,7 @@ async function pushWithRetry(
       );
     }
 
-    if (!HOOK_FAILURE_PATTERN.test(pushError)) {
+    if (!HOOK_FAILURE_PATTERN.test(pushOutput)) {
       await fetchOriginOrThrow(opts);
 
       const currentBranch = await getCurrentBranch(opts);
