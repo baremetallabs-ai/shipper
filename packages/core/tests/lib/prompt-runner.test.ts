@@ -328,7 +328,7 @@ describe('runPrompt', () => {
 
     await expect(runPrompt('test', {})).resolves.toBe(0);
 
-    expect(execFileSyncMock).toHaveBeenCalledWith('which', ['copilot'], { stdio: 'ignore' });
+    expect(execFileSyncMock).toHaveBeenCalledWith('copilot', ['--version'], { stdio: 'ignore' });
     expect(spawnedArgs()).toEqual(['-p', 'prompt body']);
   });
 
@@ -1228,7 +1228,7 @@ describe('worktree --add-dir', () => {
     resolveAgentMock.mockReturnValue('copilot');
     readFileMock.mockResolvedValueOnce(makePrompt('copilot'));
     execFileSyncMock.mockImplementationOnce(() => {
-      throw new Error('not found');
+      throw Object.assign(new Error('not found'), { code: 'ENOENT' });
     });
     const errorMock = vi.spyOn(console, 'error').mockImplementation(() => {});
 
@@ -1245,12 +1245,27 @@ describe('worktree --add-dir', () => {
     resolveAgentMock.mockReturnValue('copilot');
     readFileMock.mockResolvedValueOnce(makePrompt('copilot'));
     execFileSyncMock.mockImplementationOnce(() => {
-      throw new Error('not found');
+      throw Object.assign(new Error('not found'), { code: 'ENOENT' });
     });
 
     await expect(buildPromptCommand('test', {})).rejects.toThrow(
       'copilot binary not found on PATH.\nInstall the GitHub Copilot CLI: https://docs.github.com/copilot/cli'
     );
+  });
+
+  it('surfaces non-ENOENT copilot preflight errors without masking them as missing binaries', async () => {
+    resolveAgentMock.mockReturnValue('copilot');
+    readFileMock.mockResolvedValueOnce(makePrompt('copilot'));
+    execFileSyncMock.mockImplementationOnce(() => {
+      throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+    });
+    const errorMock = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await expect(runPrompt('test', {})).resolves.toBe(1);
+
+    expect(errorMock).toHaveBeenCalledWith('Error: permission denied');
+    expect(spawnMock).not.toHaveBeenCalled();
+    errorMock.mockRestore();
   });
 });
 

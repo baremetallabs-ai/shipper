@@ -471,6 +471,29 @@ describe('desktop IPC locking', () => {
     rmSync(repoPath, { recursive: true, force: true });
   });
 
+  it('uses copilot from settings.json when resolving the init agent', async () => {
+    await loadHandlers();
+    const repoPath = mkdtempSync(join(tmpdir(), 'shipper-desktop-init-'));
+    mkdirSync(join(repoPath, '.shipper'), { recursive: true });
+    writeFileSync(
+      join(repoPath, '.shipper', 'settings.json'),
+      JSON.stringify({ commands: { default: { agent: 'copilot' } } }),
+      'utf8'
+    );
+    state.ensureRepoCloneMock.mockResolvedValueOnce(repoPath);
+    const handler = getHandler('bg-spawn-init');
+
+    const result = parseSessionResult(await handler({}, { repo: 'owner/repo' }));
+    const spawnCall = parseBackgroundSpawnCall();
+
+    expect(spawnCall.sessionId).toBe(result.sessionId);
+    expect(spawnCall.command).toBe('init');
+    expect(spawnCall.args).toEqual(['init', '--agent', 'copilot']);
+    expect(spawnCall.cwd).toBe(repoPath);
+
+    rmSync(repoPath, { recursive: true, force: true });
+  });
+
   it('falls back to legacy settings keys and then to claude for init', async () => {
     await loadHandlers();
     const repoPath = mkdtempSync(join(tmpdir(), 'shipper-desktop-init-'));
