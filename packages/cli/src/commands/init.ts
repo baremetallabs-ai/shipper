@@ -82,6 +82,13 @@ function getStoredAgent(): string | undefined {
   return undefined;
 }
 
+function parseGitPathList(output: string): string[] {
+  return output
+    .split(/\r?\n/)
+    .map((file) => file.trim())
+    .filter(Boolean);
+}
+
 export async function initCommand(options: { agent?: string }) {
   // Check prerequisites
   const ok = await runPrereqChecks([
@@ -158,6 +165,38 @@ export async function initCommand(options: { agent?: string }) {
     '!output/.gitkeep',
   ];
   writeFileSync(gitignorePath, `${gitignoreEntries.join('\n')}\n`);
+
+  let removedTrackedArtifactPaths: string[] = [];
+  try {
+    const { stdout } = await execFileAsync('git', [
+      'ls-files',
+      '--',
+      '.shipper/output/',
+      '.shipper/input/',
+    ]);
+    const trackedFiles = parseGitPathList(stdout).filter((file) => !file.endsWith('.gitkeep'));
+
+    if (trackedFiles.length > 0) {
+      try {
+        await execFileAsync('git', ['rm', '--cached', '--', ...trackedFiles]);
+        removedTrackedArtifactPaths = trackedFiles;
+        for (const file of trackedFiles) {
+          console.log(`Untracked: ${file}`);
+        }
+        console.log(
+          'These files were tracked by git but should be gitignored. Commit the changes to complete the fix.'
+        );
+      } catch (err) {
+        const stderr = getErrorStderr(err);
+        console.error(
+          'Warning: Failed to untrack tracked files under .shipper/output/ and .shipper/input.' +
+            (stderr ? `\n${stderr}` : '')
+        );
+      }
+    }
+  } catch {
+    // Not in a git repo or git ls-files failed — skip best-effort cleanup.
+  }
 
   // Write settings.json (merge with existing if present)
   const settingsPath = path.resolve('.shipper', 'settings.json');
@@ -328,7 +367,26 @@ export async function initCommand(options: { agent?: string }) {
   if (!hasChanges) {
     console.log('.shipper/ files are unchanged — nothing to push.');
   } else {
-    await execFileAsync('git', ['commit', '-m', 'chore: initialize shipper', '--', '.shipper/']);
+    if (removedTrackedArtifactPaths.length > 0) {
+      const { stdout: stagedPathsOut } = await execFileAsync(
+        'git',
+        ['diff', '--cached', '--name-only', '-z'],
+        {
+          encoding: 'utf-8',
+        }
+      );
+      const stagedPaths = stagedPathsOut.split('\0').filter(Boolean);
+      const nonShipperStagedPaths = stagedPaths.filter((file) => !file.startsWith('.shipper/'));
+      if (nonShipperStagedPaths.length > 0) {
+        throw new Error(
+          'shipper init found staged changes outside .shipper while untracking tracked artifacts. Commit or unstage them first, then rerun shipper init.'
+        );
+      }
+
+      await execFileAsync('git', ['commit', '-m', 'chore: initialize shipper']);
+    } else {
+      await execFileAsync('git', ['commit', '-m', 'chore: initialize shipper', '--', '.shipper/']);
+    }
 
     // Resolve the push remote from branch config, falling back to 'origin'
     let remote = 'origin';

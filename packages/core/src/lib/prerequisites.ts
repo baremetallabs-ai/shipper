@@ -8,6 +8,13 @@ import { STAGE_LABEL_NAMES } from './labels.js';
 
 const execFileAsync = promisify(execFile);
 
+function parseTrackedArtifactPaths(output: string): string[] {
+  return output
+    .split(/\r?\n/)
+    .map((file) => file.trim())
+    .filter((file) => file.length > 0 && !file.endsWith('.gitkeep'));
+}
+
 interface CheckResult {
   ok: boolean;
   message: string;
@@ -102,6 +109,25 @@ export async function checkLabels(repo?: string): Promise<CheckResult> {
     return { ok: false, message: `Missing label(s): ${missing.join(', ')}` };
   } catch {
     return { ok: false, message: 'Could not check labels (gh label list failed)' };
+  }
+}
+
+export async function warnTrackedOutputFiles(): Promise<void> {
+  try {
+    const { stdout } = await execFileAsync('git', [
+      'ls-files',
+      '--',
+      '.shipper/output/',
+      '.shipper/input/',
+    ]);
+
+    for (const file of parseTrackedArtifactPaths(stdout)) {
+      process.stderr.write(
+        `⚠ ${file} is tracked by git but should be gitignored. Run 'shipper init' and commit the result to fix this.\n`
+      );
+    }
+  } catch {
+    // Not in a git repo or git ls-files failed — skip warning.
   }
 }
 

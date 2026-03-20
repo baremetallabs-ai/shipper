@@ -4,6 +4,7 @@ import { runPreflight } from '@dnsquared/shipper-core';
 import { getRepoNwo } from '@dnsquared/shipper-core';
 import { loadSettings, type AgentName, type CommandMode } from '@dnsquared/shipper-core';
 import { CLI_VERSION, checkVersionFreshness } from '@dnsquared/shipper-core';
+import { warnTrackedOutputFiles } from '@dnsquared/shipper-core';
 import { initCommand } from './commands/init.js';
 import { newCommand } from './commands/new.js';
 import { adoptCommand, adoptAllCommand } from './commands/adopt.js';
@@ -27,6 +28,18 @@ import { setupCommand } from './commands/setup.js';
 
 const program = new Command();
 let resolvedRepo: string | undefined;
+const STAGE_COMMAND_NAMES = new Set([
+  'groom',
+  'design',
+  'plan',
+  'implement',
+  'open',
+  'review',
+  'remediate',
+  'unblock',
+  'next',
+  'ship',
+]);
 
 function addModeOption(command: Command): Command {
   return command.addOption(
@@ -93,6 +106,9 @@ program.hook(
     checkVersionFreshness();
     resolvedRepo = await getRepoNwo();
     await runPreflight(resolvedRepo);
+    if (STAGE_COMMAND_NAMES.has(actionCommand.name())) {
+      await warnTrackedOutputFiles();
+    }
   })
 );
 
