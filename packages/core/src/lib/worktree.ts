@@ -101,6 +101,7 @@ async function execAsync(
         cwd: opts.cwd,
         env: { ...process.env, ...opts.env },
         maxBuffer: opts.maxBuffer,
+        shell: opts.shell,
       },
       (error, stdout, stderr) => {
         if (!error) {
@@ -125,11 +126,12 @@ async function execAsync(
 }
 
 function formatCommandFailure(command: string, args: string[], result: CommandResult): string {
+  const commandText = args.length > 0 ? `${command} ${args.join(' ')}` : command;
   const output = [result.stderr.trim(), result.stdout.trim()].filter(Boolean).join('\n');
   if (!output) {
-    return `${command} ${args.join(' ')} exited with code ${result.code}`;
+    return `${commandText} exited with code ${result.code}`;
   }
-  return `${command} ${args.join(' ')} exited with code ${result.code}:\n${output}`;
+  return `${commandText} exited with code ${result.code}:\n${output}`;
 }
 
 function formatTransportError(opts: WorktreeGitOpts, detail: string): Error {
@@ -289,19 +291,52 @@ async function fetchOriginOrThrow(opts: WorktreeGitOpts): Promise<void> {
   }
 }
 
-async function runPostRebaseInstall(cwd: string): Promise<void> {
+async function runPostRebaseInstall(cwd: string): Promise<string | undefined> {
   const { installCommand } = getSettings();
   if (!installCommand) {
-    return;
+    return undefined;
   }
 
-  try {
-    await spawnAsync(installCommand, [], { cwd, shell: true });
-  } catch (error) {
-    throw new Error(
-      `Post-rebase install failed after the rebase completed: ${error instanceof Error ? error.message : String(error)}`
-    );
+  const result = await execAsync(installCommand, [], {
+    cwd,
+    shell: true,
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  if (result.code === 0) {
+    return undefined;
   }
+
+  return formatCommandFailure(installCommand, [], result);
+}
+
+async function installWithRemediation(
+  cwd: string,
+  remediate?: (installError: string) => Promise<number>
+): Promise<number | undefined> {
+  let installError = await runPostRebaseInstall(cwd);
+  if (!installError) {
+    return undefined;
+  }
+
+  if (!remediate) {
+    throw new Error(`Post-rebase install failed:\n${installError}`);
+  }
+
+  for (let attempt = 1; attempt <= MAX_REBASE_ATTEMPTS; attempt++) {
+    const agentCode = await remediate(installError);
+    if (agentCode !== 0) {
+      return agentCode;
+    }
+
+    installError = await runPostRebaseInstall(cwd);
+    if (!installError) {
+      return undefined;
+    }
+  }
+
+  throw new Error(
+    `Post-rebase install failed after ${MAX_REBASE_ATTEMPTS} remediation attempts:\n${installError}`
+  );
 }
 
 function getPushArgs(pushMode: WorktreeGitOpts['pushMode'], forcePushBranch?: string): string[] {
@@ -346,7 +381,11 @@ async function pushWorktreeBranch(
 
 async function pushWithRetry(
   opts: WorktreeGitOpts,
-  runAgent: (conflictContext?: ConflictContext, pushError?: string) => Promise<number>
+  runAgent: (
+    conflictContext?: ConflictContext,
+    pushError?: string,
+    installError?: string
+  ) => Promise<number>
 ): Promise<number> {
   let retries = 0;
   let pushMode = opts.pushMode;
@@ -445,7 +484,8 @@ async function pushWithRetry(
 
 export async function syncWorktree(
   opts: WorktreeGitOpts,
-  resolveConflicts: (conflictContext: ConflictContext) => Promise<number>
+  resolveConflicts: (conflictContext: ConflictContext) => Promise<number>,
+  remediateInstallError?: (installError: string) => Promise<number>
 ): Promise<void> {
   await spawnAsync('git', ['fetch', 'origin'], { cwd: opts.wtPath });
 
@@ -455,7 +495,10 @@ export async function syncWorktree(
     { cwd: opts.wtPath }
   );
   if (initialRebase.code === 0) {
-    await runPostRebaseInstall(opts.wtPath);
+    const installCode = await installWithRemediation(opts.wtPath, remediateInstallError);
+    if (installCode !== undefined) {
+      throw formatTransportError(opts, `Install remediation agent exited with code ${installCode}`);
+    }
     return;
   }
 
@@ -480,7 +523,13 @@ export async function syncWorktree(
       env: { GIT_EDITOR: 'true' },
     });
     if (continueResult.code === 0) {
-      await runPostRebaseInstall(opts.wtPath);
+      const installCode = await installWithRemediation(opts.wtPath, remediateInstallError);
+      if (installCode !== undefined) {
+        throw formatTransportError(
+          opts,
+          `Install remediation agent exited with code ${installCode}`
+        );
+      }
       return;
     }
 
@@ -499,7 +548,13 @@ export async function syncWorktree(
     const nextConflictContext = await buildConflictContext(opts.wtPath, continueError);
     if (!nextConflictContext) {
       if (await isRebaseComplete(opts.wtPath)) {
-        await runPostRebaseInstall(opts.wtPath);
+        const installCode = await installWithRemediation(opts.wtPath, remediateInstallError);
+        if (installCode !== undefined) {
+          throw formatTransportError(
+            opts,
+            `Install remediation agent exited with code ${installCode}`
+          );
+        }
         return;
       }
 
@@ -625,7 +680,11 @@ export function formatConflictContext(conflictContext: ConflictContext): string 
 
 export async function withGitTransport(
   opts: WorktreeGitOpts,
-  runAgent: (conflictContext?: ConflictContext, pushError?: string) => Promise<number>
+  runAgent: (
+    conflictContext?: ConflictContext,
+    pushError?: string,
+    installError?: string
+  ) => Promise<number>
 ): Promise<number> {
   await spawnAsync('git', ['fetch', 'origin'], { cwd: opts.wtPath });
 
@@ -655,7 +714,13 @@ export async function withGitTransport(
         env: { GIT_EDITOR: 'true' },
       });
       if (continueResult.code === 0) {
-        await runPostRebaseInstall(opts.wtPath);
+        const installCode = await installWithRemediation(opts.wtPath, (installError) =>
+          runAgent(undefined, undefined, installError)
+        );
+        if (installCode !== undefined) {
+          console.error(`Agent exited with code ${installCode} — skipping push.`);
+          return installCode;
+        }
         return await pushWithRetry(opts, runAgent);
       }
 
@@ -677,7 +742,13 @@ export async function withGitTransport(
         // step and (if it was the last step) finishes the rebase entirely. Detect
         // this by checking whether the rebase state directories still exist.
         if (await isRebaseComplete(opts.wtPath)) {
-          await runPostRebaseInstall(opts.wtPath);
+          const installCode = await installWithRemediation(opts.wtPath, (installError) =>
+            runAgent(undefined, undefined, installError)
+          );
+          if (installCode !== undefined) {
+            console.error(`Agent exited with code ${installCode} — skipping push.`);
+            return installCode;
+          }
           return await pushWithRetry(opts, runAgent);
         }
 
@@ -698,7 +769,13 @@ export async function withGitTransport(
     }
   }
 
-  await runPostRebaseInstall(opts.wtPath);
+  const installCode = await installWithRemediation(opts.wtPath, (installError) =>
+    runAgent(undefined, undefined, installError)
+  );
+  if (installCode !== undefined) {
+    console.error(`Agent exited with code ${installCode} — skipping push.`);
+    return installCode;
+  }
 
   const agentCode = await runAgent();
   if (agentCode !== 0) {
