@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 type IpcHandler = (event: unknown, payload: unknown) => unknown;
-const mockUserDataPath = '/tmp/shipper-desktop-tests';
+let mockUserDataPath = '';
 
 const state = vi.hoisted(() => ({
   handlers: new Map<string, IpcHandler>(),
@@ -278,7 +278,7 @@ function parseBackgroundSpawnCall(index = 0): Record<string, unknown> {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  rmSync(mockUserDataPath, { recursive: true, force: true });
+  mockUserDataPath = mkdtempSync(join(tmpdir(), 'shipper-desktop-tests-'));
 });
 
 afterEach(() => {
@@ -286,7 +286,10 @@ afterEach(() => {
   state.handlers.clear();
   state.exitCallbacks.clear();
   state.browserWindowEventHandlers.clear();
-  rmSync(mockUserDataPath, { recursive: true, force: true });
+  if (mockUserDataPath) {
+    rmSync(mockUserDataPath, { recursive: true, force: true });
+    mockUserDataPath = '';
+  }
 });
 
 describe('desktop IPC locking', () => {

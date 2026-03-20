@@ -700,6 +700,7 @@ export default function App(): JSX.Element {
   const [backgroundCommands, setBackgroundCommands] = useState<BackgroundCommandState[]>([]);
   const [toasts, setToasts] = useState<BackgroundToastItem[]>([]);
   const [autoShipRepos, setAutoShipRepos] = useState<Set<string>>(new Set());
+  const [isSavingAutoMerge, setIsSavingAutoMerge] = useState(false);
   const [logViewer, setLogViewer] = useState<BackgroundLogViewerState>({
     open: false,
     sessionId: null,
@@ -724,6 +725,7 @@ export default function App(): JSX.Element {
   const backgroundCommandsRef = useRef<BackgroundCommandState[]>([]);
   const autoShipFailuresRef = useRef<Map<string, number>>(new Map());
   const autoShipSkippedRef = useRef<Map<string, Set<number>>>(new Map());
+  const autoMergeSaveInFlightRef = useRef(false);
   const sessionsRef = useRef<TerminalSession[]>([]);
   const activeSessionIdRef = useRef<string | null>(null);
   const lastOutputAtBySessionRef = useRef<Map<string, number>>(new Map());
@@ -843,6 +845,13 @@ export default function App(): JSX.Element {
   }
 
   async function handleToggleAutoMerge(repo: string): Promise<void> {
+    if (autoMergeSaveInFlightRef.current) {
+      return;
+    }
+
+    autoMergeSaveInFlightRef.current = true;
+    setIsSavingAutoMerge(true);
+
     const nextAutoMergeRepos = new Set(autoMergeRepos);
     if (nextAutoMergeRepos.has(repo)) {
       nextAutoMergeRepos.delete(repo);
@@ -856,6 +865,9 @@ export default function App(): JSX.Element {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setFetchError(`Failed to save auto-merge preference: ${message}`);
+    } finally {
+      autoMergeSaveInFlightRef.current = false;
+      setIsSavingAutoMerge(false);
     }
   }
 
@@ -1075,6 +1087,14 @@ export default function App(): JSX.Element {
           description: 'The background command was stopped before it finished.',
         });
       } else {
+        const retryPayload = getBackgroundRetryPayload(
+          event.command,
+          event.repo,
+          request,
+          issueNumber,
+          merge
+        );
+
         pushToast({
           id: event.sessionId,
           sessionId: event.sessionId,
@@ -1085,22 +1105,8 @@ export default function App(): JSX.Element {
             (event.exitCode === null || event.exitCode === undefined
               ? 'The background command exited unsuccessfully.'
               : `The command exited with code ${event.exitCode}.`),
-          retryable: getBackgroundRetryPayload(
-            event.command,
-            event.repo,
-            request,
-            issueNumber,
-            merge
-          )
-            ? true
-            : false,
-          retryPayload: getBackgroundRetryPayload(
-            event.command,
-            event.repo,
-            request,
-            issueNumber,
-            merge
-          ),
+          retryable: retryPayload !== undefined,
+          retryPayload,
         });
       }
 
@@ -2288,7 +2294,7 @@ export default function App(): JSX.Element {
 
                           void handleToggleAutoMerge(activeRepo);
                         }}
-                        disabled={!canFetch || !hasActiveRepo}
+                        disabled={!canFetch || !hasActiveRepo || isSavingAutoMerge}
                       >
                         Auto-merge
                       </Button>
