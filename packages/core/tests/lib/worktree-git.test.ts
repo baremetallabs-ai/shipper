@@ -1431,6 +1431,78 @@ describe('withGitTransport', () => {
     }
   });
 
+  it('does not treat hook keywords in the branch name as hook failures', async () => {
+    queueSpawnExit();
+    queueExecResult();
+    queueExecResult({ stdout: 'shipper/456-feed-pre-push-hook-failures-back-to-the-agent-inst\n' });
+    queueCleanBeforePush();
+    queueExecResult({ code: 1, stderr: 'non-fast-forward', stdout: 'attempt 1' });
+    queueSpawnExit();
+    queueExecResult({ stdout: 'shipper/456-feed-pre-push-hook-failures-back-to-the-agent-inst\n' });
+    queueExecResult({
+      stdout: 'abc123\n',
+    });
+    queueExecResult();
+    queueCleanBeforePush();
+    queueExecResult();
+    const runAgent = vi.fn().mockResolvedValue(0);
+
+    await expect(
+      withGitTransport(
+        {
+          wtPath: '/tmp/wt',
+          repoRoot: '/tmp/repo',
+          baseBranch: 'main',
+          pushMode: 'force-with-lease',
+        },
+        runAgent
+      )
+    ).resolves.toBe(0);
+
+    expect(runAgent.mock.calls).toEqual([
+      [],
+      [
+        undefined,
+        'git push --force-with-lease origin HEAD:refs/heads/shipper/456-feed-pre-push-hook-failures-back-to-the-agent-inst exited with code 1:\nnon-fast-forward\nattempt 1',
+      ],
+    ]);
+    expect(gitArgsFromSpawnCalls()).toEqual([
+      ['fetch', 'origin'],
+      ['fetch', 'origin'],
+    ]);
+    expect(gitArgsFromExecCalls()).toEqual([
+      ['rebase', '--autostash', 'origin/main'],
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['checkout', '--', '.'],
+      ['clean', '-fd', '--exclude=.shipper'],
+      [
+        'push',
+        '--force-with-lease',
+        'origin',
+        'HEAD:refs/heads/shipper/456-feed-pre-push-hook-failures-back-to-the-agent-inst',
+      ],
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      [
+        'rev-parse',
+        '--verify',
+        'origin/shipper/456-feed-pre-push-hook-failures-back-to-the-agent-inst',
+      ],
+      [
+        'rebase',
+        '--autostash',
+        'origin/shipper/456-feed-pre-push-hook-failures-back-to-the-agent-inst',
+      ],
+      ['checkout', '--', '.'],
+      ['clean', '-fd', '--exclude=.shipper'],
+      [
+        'push',
+        '--force-with-lease',
+        'origin',
+        'HEAD:refs/heads/shipper/456-feed-pre-push-hook-failures-back-to-the-agent-inst',
+      ],
+    ]);
+  });
+
   it('shares the push retry budget across hook and non-hook remediation attempts', async () => {
     queueSpawnExit();
     queueExecResult();
