@@ -509,7 +509,7 @@ describe('pushWorktree', () => {
     ).resolves.toBeUndefined();
 
     expect(gitArgsFromExecCalls()).toEqual([
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '-u', 'origin', 'HEAD'],
     ]);
@@ -535,7 +535,7 @@ describe('pushWorktree', () => {
       })
     ).rejects.toThrow('Failed to clean tracked files before push');
 
-    expect(gitArgsFromExecCalls()).toEqual([['checkout', '--', '.']]);
+    expect(gitArgsFromExecCalls()).toEqual([['checkout', 'HEAD', '--', '.']]);
   });
 
   it('aborts before push when git clean -fd --exclude=.shipper fails', async () => {
@@ -552,7 +552,7 @@ describe('pushWorktree', () => {
     ).rejects.toThrow('Failed to remove untracked files before push');
 
     expect(gitArgsFromExecCalls()).toEqual([
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
     ]);
   });
@@ -577,13 +577,13 @@ describe('pushWorktree', () => {
     ).resolves.toBeUndefined();
 
     expect(gitArgsFromExecCalls()).toEqual([
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '-u', 'origin', 'HEAD'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
       ['rebase', '--autostash', 'origin/feature/retry'],
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
     ]);
@@ -609,12 +609,12 @@ describe('pushWorktree', () => {
     ).resolves.toBeUndefined();
 
     expect(gitArgsFromExecCalls()).toEqual([
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '-u', 'origin', 'HEAD'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '-u', 'origin', 'HEAD'],
     ]);
@@ -665,7 +665,7 @@ describe('pushWorktree', () => {
 
     expect(gitArgsFromExecCalls()).toEqual([
       ['rev-parse', '--abbrev-ref', 'HEAD'],
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
     ]);
@@ -705,22 +705,22 @@ describe('pushWorktree', () => {
 
     expect(gitArgsFromExecCalls()).toEqual([
       ['rev-parse', '--abbrev-ref', 'HEAD'],
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
     ]);
@@ -774,7 +774,7 @@ describe('withGitTransport', () => {
     );
     expect(gitArgsFromExecCalls()).toEqual([
       ['rebase', '--autostash', 'origin/main'],
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '-u', 'origin', 'HEAD'],
     ]);
@@ -808,7 +808,7 @@ describe('withGitTransport', () => {
     expect(gitArgsFromSpawnCalls()).toEqual([['fetch', 'origin']]);
     expect(gitArgsFromExecCalls()).toEqual([
       ['rebase', '--autostash', 'origin/main'],
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '-u', 'origin', 'HEAD'],
     ]);
@@ -838,7 +838,7 @@ describe('withGitTransport', () => {
     expectFetchSpawn();
     expect(gitArgsFromExecCalls()).toEqual([
       ['rebase', '--autostash', 'origin/main'],
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '-u', 'origin', 'HEAD'],
     ]);
@@ -902,7 +902,7 @@ describe('withGitTransport', () => {
       ['add', '-u'],
       ['rebase', '--continue'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
     ]);
@@ -944,13 +944,13 @@ describe('withGitTransport', () => {
     ]);
     expect(gitArgsFromExecCalls()).toEqual([
       ['rebase', '--autostash', 'origin/main'],
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '-u', 'origin', 'HEAD'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
       ['rebase', '--autostash', 'origin/feature/retry'],
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
     ]);
@@ -991,12 +991,12 @@ describe('withGitTransport', () => {
     ]);
     expect(gitArgsFromExecCalls()).toEqual([
       ['rebase', '--autostash', 'origin/main'],
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '-u', 'origin', 'HEAD'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '-u', 'origin', 'HEAD'],
     ]);
@@ -1057,7 +1057,7 @@ describe('withGitTransport', () => {
     expect(gitArgsFromExecCalls()).toEqual([
       ['rebase', '--autostash', 'origin/main'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
@@ -1066,7 +1066,7 @@ describe('withGitTransport', () => {
       ['diff', '--name-only', '--diff-filter=U'],
       ['add', '-u'],
       ['rebase', '--continue'],
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
     ]);
@@ -1167,7 +1167,7 @@ describe('withGitTransport', () => {
     expect(gitArgsFromExecCalls()).toEqual([
       ['rebase', '--autostash', 'origin/main'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
@@ -1179,7 +1179,7 @@ describe('withGitTransport', () => {
       ['diff', '--name-only', '--diff-filter=U'],
       ['add', '-u'],
       ['rebase', '--continue'],
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
     ]);
@@ -1219,7 +1219,7 @@ describe('withGitTransport', () => {
     ]);
     expect(gitArgsFromExecCalls()).toEqual([
       ['rebase', '--autostash', 'origin/main'],
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '-u', 'origin', 'HEAD'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
@@ -1258,7 +1258,7 @@ describe('withGitTransport', () => {
     expect(gitArgsFromExecCalls()).toEqual([
       ['rebase', '--autostash', 'origin/main'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
     ]);
@@ -1314,22 +1314,22 @@ describe('withGitTransport', () => {
     ]);
     expect(gitArgsFromExecCalls()).toEqual([
       ['rebase', '--autostash', 'origin/main'],
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '-u', 'origin', 'HEAD'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '-u', 'origin', 'HEAD'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '-u', 'origin', 'HEAD'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '-u', 'origin', 'HEAD'],
     ]);
@@ -1370,10 +1370,10 @@ describe('withGitTransport', () => {
     expect(gitArgsFromSpawnCalls()).toEqual([['fetch', 'origin']]);
     expect(gitArgsFromExecCalls()).toEqual([
       ['rebase', '--autostash', 'origin/main'],
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '-u', 'origin', 'HEAD'],
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '-u', 'origin', 'HEAD'],
     ]);
@@ -1419,10 +1419,10 @@ describe('withGitTransport', () => {
       expect(gitArgsFromSpawnCalls()).toEqual([['fetch', 'origin']]);
       expect(gitArgsFromExecCalls()).toEqual([
         ['rebase', '--autostash', 'origin/main'],
-        ['checkout', '--', '.'],
+        ['checkout', 'HEAD', '--', '.'],
         ['clean', '-fd', '--exclude=.shipper'],
         ['push', '-u', 'origin', 'HEAD'],
-        ['checkout', '--', '.'],
+        ['checkout', 'HEAD', '--', '.'],
         ['clean', '-fd', '--exclude=.shipper'],
         ['push', '-u', 'origin', 'HEAD'],
       ]);
@@ -1473,7 +1473,7 @@ describe('withGitTransport', () => {
     expect(gitArgsFromExecCalls()).toEqual([
       ['rebase', '--autostash', 'origin/main'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       [
         'push',
@@ -1492,7 +1492,7 @@ describe('withGitTransport', () => {
         '--autostash',
         'origin/shipper/456-feed-pre-push-hook-failures-back-to-the-agent-inst',
       ],
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       [
         'push',
@@ -1556,18 +1556,18 @@ describe('withGitTransport', () => {
     expect(gitArgsFromExecCalls()).toEqual([
       ['rebase', '--autostash', 'origin/main'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
     ]);
@@ -1735,7 +1735,7 @@ describe('withGitTransport', () => {
       ['diff', '--name-only', '--diff-filter=U'],
       ['rev-parse', '--git-dir'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
     ]);
@@ -1777,7 +1777,7 @@ describe('withGitTransport', () => {
     expectInstallExec(2);
     expect(gitArgsFromExecCalls()).toEqual([
       ['rebase', '--autostash', 'origin/main'],
-      ['checkout', '--', '.'],
+      ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '-u', 'origin', 'HEAD'],
     ]);

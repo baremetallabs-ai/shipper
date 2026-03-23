@@ -357,13 +357,13 @@ async function pushWorktreeBranch(
   pushMode: WorktreeGitOpts['pushMode'],
   forcePushBranch?: string
 ): Promise<CommandResult> {
-  const checkoutResult = await execAsync('git', ['checkout', '--', '.'], {
+  const checkoutResult = await execAsync('git', ['checkout', 'HEAD', '--', '.'], {
     cwd: opts.wtPath,
   });
   if (checkoutResult.code !== 0) {
     throw formatTransportError(
       opts,
-      `Failed to clean tracked files before push: ${formatCommandFailure('git', ['checkout', '--', '.'], checkoutResult)}`
+      `Failed to clean tracked files before push: ${formatCommandFailure('git', ['checkout', 'HEAD', '--', '.'], checkoutResult)}`
     );
   }
 
