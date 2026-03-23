@@ -15,6 +15,9 @@ const enrichFailedChecksMock =
 const resolveRefMock = vi.fn();
 const autoSelectPrForStageMock = vi.fn();
 const formatConflictContextMock = vi.fn(() => 'formatted conflict context');
+const truncateLargeInputMock = vi.fn((_: string, text: string, filename: string) =>
+  Promise.resolve(`truncated:${filename}:${text}`)
+);
 const runPromptMock = vi.fn();
 const syncWorktreeMock = vi.fn(() => Promise.resolve());
 const pushWorktreeMock = vi.fn(() => Promise.resolve());
@@ -60,6 +63,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   resolveRef: resolveRefMock,
   autoSelectPrForStage: autoSelectPrForStageMock,
   formatConflictContext: formatConflictContextMock,
+  truncateLargeInput: truncateLargeInputMock,
   runPrompt: runPromptMock,
   syncWorktree: syncWorktreeMock,
   pushWorktree: pushWorktreeMock,
@@ -115,6 +119,7 @@ describe('prRemediateCommand', () => {
     syncWorktreeMock.mockResolvedValue(undefined);
     pushWorktreeMock.mockResolvedValue(undefined);
     setupProtocolDirsMock.mockResolvedValue(undefined);
+    truncateLargeInputMock.mockClear();
     writeContextFileMock.mockResolvedValue(undefined);
     scrubOutputDirMock.mockResolvedValue(undefined);
     retryOnInvalidOutputMock.mockResolvedValue({
@@ -335,6 +340,104 @@ describe('prRemediateCommand', () => {
       add: ['shipper:ready'],
       remove: ['shipper:pr-reviewed'],
     });
+  });
+
+  it('routes sync conflict context through truncateLargeInput', async () => {
+    const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
+
+    await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
+
+    const conflictCallback = syncWorktreeMock.mock.calls[0]?.[1] as
+      | ((conflictContext: unknown) => Promise<number>)
+      | undefined;
+    expect(conflictCallback).toEqual(expect.any(Function));
+
+    runPromptMock.mockClear();
+    await expect(
+      conflictCallback?.({
+        files: ['src/conflict.ts'],
+        conflicts: [
+          {
+            path: 'src/conflict.ts',
+            markers: ['<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> origin/main'],
+          },
+        ],
+      })
+    ).resolves.toBe(0);
+
+    expect(formatConflictContextMock).toHaveBeenCalledWith({
+      files: ['src/conflict.ts'],
+      conflicts: [
+        {
+          path: 'src/conflict.ts',
+          markers: ['<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> origin/main'],
+        },
+      ],
+    });
+    expect(truncateLargeInputMock).toHaveBeenCalledWith(
+      '/tmp/fake-wt',
+      'formatted conflict context',
+      'conflict-context.txt'
+    );
+    expect(runPromptMock).toHaveBeenCalledWith(
+      'pr_remediate',
+      expect.objectContaining({
+        repo,
+        issueRef: '10',
+        prRef: '42',
+        cwd: '/tmp/fake-wt',
+        userInput: 'truncated:conflict-context.txt:formatted conflict context',
+      })
+    );
+  });
+
+  it('routes sync install errors through truncateLargeInput and leaves retry correction input unchanged', async () => {
+    const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
+
+    await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
+
+    const installCallback = syncWorktreeMock.mock.calls[0]?.[2] as
+      | ((installError: string) => Promise<number>)
+      | undefined;
+    const retryCall = retryOnInvalidOutputMock.mock.calls[0]?.[0] as
+      | { retry: (message: string) => Promise<number> }
+      | undefined;
+    expect(installCallback).toEqual(expect.any(Function));
+    expect(retryCall?.retry).toEqual(expect.any(Function));
+
+    runPromptMock.mockClear();
+    await expect(installCallback?.('npm install exited with code 1')).resolves.toBe(0);
+
+    expect(truncateLargeInputMock).toHaveBeenCalledWith(
+      '/tmp/fake-wt',
+      'npm install exited with code 1',
+      'install-error.txt'
+    );
+    expect(runPromptMock).toHaveBeenCalledWith(
+      'pr_remediate',
+      expect.objectContaining({
+        repo,
+        issueRef: '10',
+        prRef: '42',
+        cwd: '/tmp/fake-wt',
+        userInput: 'truncated:install-error.txt:npm install exited with code 1',
+      })
+    );
+
+    runPromptMock.mockClear();
+    const truncateCalls = truncateLargeInputMock.mock.calls.length;
+    await expect(retryCall?.retry('Fix the response shape')).resolves.toBe(0);
+    expect(truncateLargeInputMock.mock.calls.length).toBe(truncateCalls);
+    expect(runPromptMock).toHaveBeenCalledWith(
+      'pr_remediate',
+      expect.objectContaining({
+        repo,
+        issueRef: '10',
+        prRef: '42',
+        cwd: '/tmp/fake-wt',
+        userInput: 'Fix the response shape',
+      })
+    );
   });
 
   it('retries after red CI, refreshes preflight context, and succeeds on a later green pass', async () => {

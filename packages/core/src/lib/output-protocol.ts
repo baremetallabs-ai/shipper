@@ -7,6 +7,11 @@ import { resolveTransition, type LabelTransition, type StageName } from './stage
 
 export const PROTOCOL_INPUT_DIR = path.join('.shipper', 'input');
 export const PROTOCOL_OUTPUT_DIR = path.join('.shipper', 'output');
+const TRUNCATION_THRESHOLD_BYTES = 50_000;
+const TRUNCATION_HEAD_LINES = 50;
+const TRUNCATION_TAIL_LINES = 50;
+const TRUNCATION_HEAD_BYTES = 10_000;
+const TRUNCATION_TAIL_BYTES = 10_000;
 
 type ReviewEvent = 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT';
 type ReviewCommentSide = 'LEFT' | 'RIGHT';
@@ -327,6 +332,58 @@ export async function writeContextFile(
   const filePath = resolveContainedPath(inputDir, filename, 'context filename');
   await mkdir(path.dirname(filePath), { recursive: true });
   await writeFile(filePath, content, 'utf-8');
+}
+
+function truncateByBytes(text: string, maxBytes: number, fromEnd = false): string {
+  if (Buffer.byteLength(text, 'utf-8') <= maxBytes) {
+    return text;
+  }
+
+  let result = fromEnd ? text.slice(-maxBytes) : text.slice(0, maxBytes);
+  while (Buffer.byteLength(result, 'utf-8') > maxBytes) {
+    result = fromEnd ? result.slice(1) : result.slice(0, -1);
+  }
+
+  return result;
+}
+
+export async function truncateLargeInput(
+  cwd: string,
+  text: string,
+  filename: string
+): Promise<string> {
+  if (Buffer.byteLength(text, 'utf-8') <= TRUNCATION_THRESHOLD_BYTES) {
+    return text;
+  }
+
+  await writeContextFile(cwd, filename, text);
+
+  const filePath = path.posix.join(PROTOCOL_INPUT_DIR, filename);
+  const lines = text.split('\n');
+  const headLines = lines.slice(0, TRUNCATION_HEAD_LINES);
+  const tailLines = lines.slice(-TRUNCATION_TAIL_LINES);
+  const omittedLineCount = lines.length - headLines.length - tailLines.length;
+
+  if (omittedLineCount > 0) {
+    return [
+      headLines.join('\n'),
+      `[${omittedLineCount} lines omitted; full output written to ${filePath}]`,
+      tailLines.join('\n'),
+    ].join('\n\n');
+  }
+
+  const head = truncateByBytes(text, TRUNCATION_HEAD_BYTES);
+  const tail = truncateByBytes(text, TRUNCATION_TAIL_BYTES, true);
+  const omittedBytes = Math.max(
+    Buffer.byteLength(text, 'utf-8') -
+      Buffer.byteLength(head, 'utf-8') -
+      Buffer.byteLength(tail, 'utf-8'),
+    0
+  );
+
+  return [head, `[${omittedBytes} bytes omitted; full output written to ${filePath}]`, tail].join(
+    '\n\n'
+  );
 }
 
 export async function executeTransition(

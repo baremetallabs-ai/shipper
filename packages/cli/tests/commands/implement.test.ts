@@ -21,8 +21,14 @@ const retryOnInvalidOutputMock = vi.fn<
 const resolveBaseBranchMock = vi.fn(() => Promise.resolve('main'));
 const runPromptMock = vi.fn(() => Promise.resolve(0));
 const scrubOutputDirMock = vi.fn(() => Promise.resolve());
+const truncateLargeInputMock = vi.fn((_: string, text: string, filename: string) =>
+  Promise.resolve(`truncated:${filename}:${text}`)
+);
 const withGitTransportMock = vi.fn(
-  (_opts: unknown, fn: (conflictContext?: unknown, pushError?: string) => Promise<unknown>) =>
+  (
+    _opts: unknown,
+    fn: (conflictContext?: unknown, pushError?: string, installError?: string) => Promise<unknown>
+  ) =>
     fn({
       files: ['src/conflict.ts'],
       conflicts: [
@@ -55,6 +61,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   resolveBaseBranch: resolveBaseBranchMock,
   runPrompt: runPromptMock,
   scrubOutputDir: scrubOutputDirMock,
+  truncateLargeInput: truncateLargeInputMock,
   withGitTransport: withGitTransportMock,
   withIssueLock: withIssueLockMock,
   withStageHooks: withStageHooksMock,
@@ -107,13 +114,18 @@ describe('implementCommand', () => {
         },
       ],
     });
+    expect(truncateLargeInputMock).toHaveBeenCalledWith(
+      '/tmp/fake-wt',
+      'formatted conflict context',
+      'conflict-context.txt'
+    );
     expect(runPromptMock).toHaveBeenCalledWith(
       'implement',
       expect.objectContaining({
         repo: 'owner/repo',
         issueRef: '239',
         cwd: '/tmp/fake-wt',
-        userInput: 'formatted conflict context',
+        userInput: 'truncated:conflict-context.txt:formatted conflict context',
       })
     );
     const retryCall = retryOnInvalidOutputMock.mock.calls[0]?.[0] as
@@ -132,8 +144,14 @@ describe('implementCommand', () => {
     expect(handleAgentCrashMock).not.toHaveBeenCalled();
 
     withGitTransportMock.mockImplementationOnce(
-      (_opts: unknown, fn: (conflictContext?: unknown, pushError?: string) => Promise<unknown>) =>
-        fn()
+      (
+        _opts: unknown,
+        fn: (
+          conflictContext?: unknown,
+          pushError?: string,
+          installError?: string
+        ) => Promise<unknown>
+      ) => fn()
     );
 
     await expect(retryCall?.retry('Fix result')).resolves.toBe(0);
@@ -155,13 +173,18 @@ describe('implementCommand', () => {
       model: undefined,
       userInput: 'Fix result',
     });
+    expect(truncateLargeInputMock).toHaveBeenCalledTimes(1);
   });
 
-  it('forwards raw push failure text through transport without conflict formatting', async () => {
+  it('routes push failures through truncateLargeInput without conflict formatting', async () => {
     withGitTransportMock.mockImplementationOnce(
       async (
         _opts: unknown,
-        fn: (conflictContext?: unknown, pushError?: string) => Promise<unknown>
+        fn: (
+          conflictContext?: unknown,
+          pushError?: string,
+          installError?: string
+        ) => Promise<unknown>
       ) => fn(undefined, 'git push -u origin HEAD exited with code 1:\npre-push hook failed')
     );
     const { implementCommand } = await import('../../src/commands/implement.js');
@@ -169,13 +192,50 @@ describe('implementCommand', () => {
     await expect(implementCommand('owner/repo', '239')).resolves.toBeUndefined();
 
     expect(formatConflictContextMock).not.toHaveBeenCalled();
+    expect(truncateLargeInputMock).toHaveBeenCalledWith(
+      '/tmp/fake-wt',
+      'git push -u origin HEAD exited with code 1:\npre-push hook failed',
+      'push-error.txt'
+    );
     expect(runPromptMock).toHaveBeenCalledWith(
       'implement',
       expect.objectContaining({
         repo: 'owner/repo',
         issueRef: '239',
         cwd: '/tmp/fake-wt',
-        userInput: 'git push -u origin HEAD exited with code 1:\npre-push hook failed',
+        userInput:
+          'truncated:push-error.txt:git push -u origin HEAD exited with code 1:\npre-push hook failed',
+      })
+    );
+  });
+
+  it('routes install failures through truncateLargeInput', async () => {
+    withGitTransportMock.mockImplementationOnce(
+      async (
+        _opts: unknown,
+        fn: (
+          conflictContext?: unknown,
+          pushError?: string,
+          installError?: string
+        ) => Promise<unknown>
+      ) => fn(undefined, undefined, 'npm install exited with code 1')
+    );
+    const { implementCommand } = await import('../../src/commands/implement.js');
+
+    await expect(implementCommand('owner/repo', '239')).resolves.toBeUndefined();
+
+    expect(truncateLargeInputMock).toHaveBeenCalledWith(
+      '/tmp/fake-wt',
+      'npm install exited with code 1',
+      'install-error.txt'
+    );
+    expect(runPromptMock).toHaveBeenCalledWith(
+      'implement',
+      expect.objectContaining({
+        repo: 'owner/repo',
+        issueRef: '239',
+        cwd: '/tmp/fake-wt',
+        userInput: 'truncated:install-error.txt:npm install exited with code 1',
       })
     );
   });
