@@ -122,6 +122,10 @@ describe('prRemediateCommand', () => {
     truncateLargeInputMock.mockClear();
     writeContextFileMock.mockResolvedValue(undefined);
     scrubOutputDirMock.mockResolvedValue(undefined);
+    readResultFileMock.mockResolvedValue({
+      verdict: 'accept',
+      comment: '.shipper/output/comment-10.md',
+    });
     retryOnInvalidOutputMock.mockResolvedValue({
       verdict: 'accept',
       comment: '.shipper/output/comment-10.md',
@@ -254,11 +258,17 @@ describe('prRemediateCommand', () => {
       events.push('fetchChecks');
       return Promise.resolve(PASS_CHECKS);
     });
-    readResultFileMock.mockResolvedValue({
-      verdict: 'accept',
-      comment: '.shipper/output/comment-10.md',
-      replies: '.shipper/output/replies',
-    });
+    readResultFileMock
+      .mockResolvedValueOnce({
+        verdict: 'accept',
+        comment: '.shipper/output/comment-10.md',
+        replies: '.shipper/output/replies',
+      })
+      .mockResolvedValueOnce({
+        verdict: 'accept',
+        comment: '.shipper/output/comment-11.md',
+        replies: '.shipper/output/replies-updated',
+      });
     pushWithRetryMock.mockImplementation(() => {
       events.push('pushWithRetry');
       return Promise.resolve(0);
@@ -313,7 +323,8 @@ describe('prRemediateCommand', () => {
     expect(writeContextFileMock.mock.invocationCallOrder[3]).toBeLessThan(
       syncWorktreeMock.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY
     );
-    expect(readResultFileMock).toHaveBeenCalledWith('/tmp/fake-wt/.shipper/output');
+    expect(readResultFileMock).toHaveBeenNthCalledWith(1, '/tmp/fake-wt/.shipper/output');
+    expect(readResultFileMock).toHaveBeenNthCalledWith(2, '/tmp/fake-wt/.shipper/output');
     expect(events).toEqual([
       'fetchChecks',
       'pushWithRetry',
@@ -327,13 +338,13 @@ describe('prRemediateCommand', () => {
     expect(postCommentMock).toHaveBeenCalledWith(
       'owner/repo',
       '10',
-      '/tmp/fake-wt/.shipper/output/comment-10.md'
+      '/tmp/fake-wt/.shipper/output/comment-11.md'
     );
     expect(postRepliesMock).toHaveBeenCalledWith(
       'owner/repo',
       '42',
       '/tmp/fake-wt',
-      '.shipper/output/replies'
+      '.shipper/output/replies-updated'
     );
     expect(resolveTransitionMock).toHaveBeenCalledWith('pr_remediate', 'accept');
     expect(executeTransitionMock).toHaveBeenCalledWith('owner/repo', '10', {
@@ -446,15 +457,10 @@ describe('prRemediateCommand', () => {
       fetchCall += 1;
       return Promise.resolve(fetchCall <= 4 ? FAIL_CHECKS : PASS_CHECKS);
     });
-    readResultFileMock
-      .mockResolvedValueOnce({
-        verdict: 'accept',
-        comment: '.shipper/output/comment-10.md',
-      })
-      .mockResolvedValueOnce({
-        verdict: 'accept',
-        comment: '.shipper/output/comment-10.md',
-      });
+    readResultFileMock.mockResolvedValue({
+      verdict: 'accept',
+      comment: '.shipper/output/comment-10.md',
+    });
 
     const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
 
@@ -749,12 +755,18 @@ describe('prRemediateCommand', () => {
     errorSpy.mockRestore();
   });
 
-  it('posts prepared outputs before reporting a push failure crash and stops remediation', async () => {
-    readResultFileMock.mockResolvedValue({
-      verdict: 'accept',
-      comment: '.shipper/output/comment-10.md',
-      replies: '.shipper/output/replies',
-    });
+  it('reloads prepared outputs before reporting a push failure crash and stops remediation', async () => {
+    readResultFileMock
+      .mockResolvedValueOnce({
+        verdict: 'accept',
+        comment: '.shipper/output/comment-10.md',
+        replies: '.shipper/output/replies',
+      })
+      .mockResolvedValueOnce({
+        verdict: 'accept',
+        comment: '.shipper/output/comment-11.md',
+        replies: '.shipper/output/replies-updated',
+      });
     pushWithRetryMock.mockRejectedValue(new Error('fatal: unable to access remote'));
 
     const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
@@ -765,12 +777,12 @@ describe('prRemediateCommand', () => {
       'owner/repo',
       '42',
       '/tmp/fake-wt',
-      '.shipper/output/replies'
+      '.shipper/output/replies-updated'
     );
     expect(postCommentMock).toHaveBeenCalledWith(
       'owner/repo',
       '10',
-      '/tmp/fake-wt/.shipper/output/comment-10.md'
+      '/tmp/fake-wt/.shipper/output/comment-11.md'
     );
     expect(postRepliesMock.mock.invocationCallOrder[0]).toBeLessThan(
       handleAgentCrashMock.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY
