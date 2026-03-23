@@ -285,6 +285,20 @@ async function remoteRefExists(opts: WorktreeGitOpts, targetRef: string): Promis
   return result.code === 0;
 }
 
+async function syncWithRemoteBranch(opts: WorktreeGitOpts): Promise<void> {
+  const currentBranch = await getCurrentBranch(opts);
+  const remoteRef = `origin/${currentBranch}`;
+  if (await remoteRefExists(opts, remoteRef)) {
+    const result = await execAsync('git', ['reset', '--hard', remoteRef], { cwd: opts.wtPath });
+    if (result.code !== 0) {
+      throw formatTransportError(
+        opts,
+        `Failed to sync with remote branch ${remoteRef}.\n${formatCommandFailure('git', ['reset', '--hard', remoteRef], result)}`
+      );
+    }
+  }
+}
+
 async function fetchOriginOrThrow(opts: WorktreeGitOpts): Promise<void> {
   try {
     await spawnAsync('git', ['fetch', 'origin'], { cwd: opts.wtPath });
@@ -503,6 +517,7 @@ export async function syncWorktree(
   remediateInstallError?: (installError: string) => Promise<number>
 ): Promise<void> {
   await spawnAsync('git', ['fetch', 'origin'], { cwd: opts.wtPath });
+  await syncWithRemoteBranch(opts);
 
   const initialRebase = await execAsync(
     'git',
@@ -702,6 +717,7 @@ export async function withGitTransport(
   ) => Promise<number>
 ): Promise<number> {
   await spawnAsync('git', ['fetch', 'origin'], { cwd: opts.wtPath });
+  await syncWithRemoteBranch(opts);
 
   const initialRebase = await execAsync(
     'git',

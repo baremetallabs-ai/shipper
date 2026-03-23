@@ -164,6 +164,8 @@ describe('syncWorktree', () => {
   it('reruns installCommand after a clean rebase before returning', async () => {
     getSettingsMock.mockReturnValue({ installCommand: 'npm ci' });
     queueSpawnExit();
+    queueExecResult({ stdout: 'feature/test-branch\n' }); // getCurrentBranch
+    queueExecResult({ code: 128 }); // remoteRefExists → not found
     queueExecResult();
     queueExecResult();
     const resolveConflicts = vi.fn();
@@ -183,13 +185,19 @@ describe('syncWorktree', () => {
     expect(resolveConflicts).not.toHaveBeenCalled();
     expect(spawnMock).toHaveBeenCalledTimes(1);
     expectFetchSpawn();
-    expectInstallExec(1);
-    expect(gitArgsFromExecCalls()).toEqual([['rebase', '--autostash', 'origin/main']]);
+    expectInstallExec(3);
+    expect(gitArgsFromExecCalls()).toEqual([
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-parse', '--verify', 'origin/feature/test-branch'],
+      ['rebase', '--autostash', 'origin/main'],
+    ]);
   });
 
   it('reruns installCommand after rebase --continue succeeds in conflict resolution', async () => {
     getSettingsMock.mockReturnValue({ installCommand: 'npm ci' });
     queueSpawnExit();
+    queueExecResult({ stdout: 'feature/test-branch\n' }); // getCurrentBranch
+    queueExecResult({ code: 128 }); // remoteRefExists → not found
     queueExecResult({ code: 1, stderr: 'conflict' });
     queueExecResult({ stdout: 'src/conflict.ts\nREADME.md\n' });
     readFileMock
@@ -234,8 +242,10 @@ describe('syncWorktree', () => {
     });
     expect(spawnMock).toHaveBeenCalledTimes(1);
     expectFetchSpawn();
-    expectInstallExec(3);
+    expectInstallExec(5);
     expect(gitArgsFromExecCalls()).toEqual([
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
       ['diff', '--name-only', '--diff-filter=U'],
       ['rebase', '--continue'],
@@ -245,6 +255,8 @@ describe('syncWorktree', () => {
   it('reruns installCommand when rebase --continue reports failure but the rebase is already complete', async () => {
     getSettingsMock.mockReturnValue({ installCommand: 'npm ci' });
     queueSpawnExit();
+    queueExecResult({ stdout: 'feature/test-branch\n' }); // getCurrentBranch
+    queueExecResult({ code: 128 }); // remoteRefExists → not found
     queueExecResult({ code: 1, stderr: 'merge conflict' });
     queueExecResult({ stdout: 'src/conflict.ts\n' });
     readFileMock.mockResolvedValueOnce(
@@ -271,8 +283,10 @@ describe('syncWorktree', () => {
     expect(resolveConflicts).toHaveBeenCalledTimes(1);
     expect(spawnMock).toHaveBeenCalledTimes(1);
     expectFetchSpawn();
-    expectInstallExec(5);
+    expectInstallExec(7);
     expect(gitArgsFromExecCalls()).toEqual([
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
       ['diff', '--name-only', '--diff-filter=U'],
       ['rebase', '--continue'],
@@ -283,6 +297,8 @@ describe('syncWorktree', () => {
 
   it('skips the post-rebase install when no installCommand is configured', async () => {
     queueSpawnExit();
+    queueExecResult({ stdout: 'feature/test-branch\n' }); // getCurrentBranch
+    queueExecResult({ code: 128 }); // remoteRefExists → not found
     queueExecResult();
     const resolveConflicts = vi.fn();
     const remediateInstallError = vi.fn();
@@ -304,12 +320,18 @@ describe('syncWorktree', () => {
     expect(remediateInstallError).not.toHaveBeenCalled();
     expect(spawnMock).toHaveBeenCalledTimes(1);
     expectFetchSpawn();
-    expect(gitArgsFromExecCalls()).toEqual([['rebase', '--autostash', 'origin/main']]);
+    expect(gitArgsFromExecCalls()).toEqual([
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-parse', '--verify', 'origin/feature/test-branch'],
+      ['rebase', '--autostash', 'origin/main'],
+    ]);
   });
 
   it('passes install failure output to the remediation callback and retries successfully', async () => {
     getSettingsMock.mockReturnValue({ installCommand: 'npm ci' });
     queueSpawnExit();
+    queueExecResult({ stdout: 'feature/test-branch\n' }); // getCurrentBranch
+    queueExecResult({ code: 128 }); // remoteRefExists → not found
     queueExecResult();
     queueExecResult({ code: 1, stderr: 'lock mismatch', stdout: 'npm notice' });
     queueExecResult();
@@ -336,14 +358,20 @@ describe('syncWorktree', () => {
     );
     expect(spawnMock).toHaveBeenCalledTimes(1);
     expectFetchSpawn();
-    expectInstallExec(1);
-    expectInstallExec(2);
-    expect(gitArgsFromExecCalls()).toEqual([['rebase', '--autostash', 'origin/main']]);
+    expectInstallExec(3);
+    expectInstallExec(4);
+    expect(gitArgsFromExecCalls()).toEqual([
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-parse', '--verify', 'origin/feature/test-branch'],
+      ['rebase', '--autostash', 'origin/main'],
+    ]);
   });
 
   it('passes message-only install process failures to the remediation callback', async () => {
     getSettingsMock.mockReturnValue({ installCommand: 'npm ci' });
     queueSpawnExit();
+    queueExecResult({ stdout: 'feature/test-branch\n' }); // getCurrentBranch
+    queueExecResult({ code: 128 }); // remoteRefExists → not found
     queueExecResult();
     queueExecProcessError({
       message: 'stdout maxBuffer length exceeded',
@@ -373,13 +401,19 @@ describe('syncWorktree', () => {
     );
     expect(spawnMock).toHaveBeenCalledTimes(1);
     expectFetchSpawn();
-    expectInstallExec(1);
-    expect(gitArgsFromExecCalls()).toEqual([['rebase', '--autostash', 'origin/main']]);
+    expectInstallExec(3);
+    expect(gitArgsFromExecCalls()).toEqual([
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-parse', '--verify', 'origin/feature/test-branch'],
+      ['rebase', '--autostash', 'origin/main'],
+    ]);
   });
 
   it('throws when the install remediation callback exits non-zero', async () => {
     getSettingsMock.mockReturnValue({ installCommand: 'npm ci' });
     queueSpawnExit();
+    queueExecResult({ stdout: 'feature/test-branch\n' }); // getCurrentBranch
+    queueExecResult({ code: 128 }); // remoteRefExists → not found
     queueExecResult();
     queueExecResult({ code: 1, stderr: 'lock mismatch' });
     const resolveConflicts = vi.fn();
@@ -404,13 +438,19 @@ describe('syncWorktree', () => {
     expect(remediateInstallError).toHaveBeenCalledWith('npm ci exited with code 1:\nlock mismatch');
     expect(spawnMock).toHaveBeenCalledTimes(1);
     expectFetchSpawn();
-    expectInstallExec(1);
-    expect(gitArgsFromExecCalls()).toEqual([['rebase', '--autostash', 'origin/main']]);
+    expectInstallExec(3);
+    expect(gitArgsFromExecCalls()).toEqual([
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-parse', '--verify', 'origin/feature/test-branch'],
+      ['rebase', '--autostash', 'origin/main'],
+    ]);
   });
 
   it('throws after three unsuccessful install remediation attempts with the final output', async () => {
     getSettingsMock.mockReturnValue({ installCommand: 'npm ci' });
     queueSpawnExit();
+    queueExecResult({ stdout: 'feature/test-branch\n' }); // getCurrentBranch
+    queueExecResult({ code: 128 }); // remoteRefExists → not found
     queueExecResult();
     queueExecResult({ code: 1, stderr: 'attempt 1 stderr', stdout: 'attempt 1 stdout' });
     queueExecResult({ code: 1, stderr: 'attempt 2 stderr', stdout: 'attempt 2 stdout' });
@@ -450,16 +490,22 @@ describe('syncWorktree', () => {
     );
     expect(spawnMock).toHaveBeenCalledTimes(1);
     expectFetchSpawn();
-    expectInstallExec(1);
-    expectInstallExec(2);
     expectInstallExec(3);
     expectInstallExec(4);
-    expect(gitArgsFromExecCalls()).toEqual([['rebase', '--autostash', 'origin/main']]);
+    expectInstallExec(5);
+    expectInstallExec(6);
+    expect(gitArgsFromExecCalls()).toEqual([
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-parse', '--verify', 'origin/feature/test-branch'],
+      ['rebase', '--autostash', 'origin/main'],
+    ]);
   });
 
   it('throws on the first install failure when no remediation callback is provided', async () => {
     getSettingsMock.mockReturnValue({ installCommand: 'npm ci' });
     queueSpawnExit();
+    queueExecResult({ stdout: 'feature/test-branch\n' }); // getCurrentBranch
+    queueExecResult({ code: 128 }); // remoteRefExists → not found
     queueExecResult();
     queueExecResult({ code: 1, stderr: 'lock mismatch', stdout: 'npm notice' });
     const resolveConflicts = vi.fn();
@@ -481,8 +527,65 @@ describe('syncWorktree', () => {
     expect(resolveConflicts).not.toHaveBeenCalled();
     expect(spawnMock).toHaveBeenCalledTimes(1);
     expectFetchSpawn();
-    expectInstallExec(1);
-    expect(gitArgsFromExecCalls()).toEqual([['rebase', '--autostash', 'origin/main']]);
+    expectInstallExec(3);
+    expect(gitArgsFromExecCalls()).toEqual([
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-parse', '--verify', 'origin/feature/test-branch'],
+      ['rebase', '--autostash', 'origin/main'],
+    ]);
+  });
+
+  it('resets to remote branch before rebasing when origin/{currentBranch} exists', async () => {
+    queueSpawnExit(); // fetch origin
+    queueExecResult({ stdout: 'feature/my-branch\n' }); // getCurrentBranch
+    queueExecResult({ stdout: 'abc123\n' }); // remoteRefExists → found
+    queueExecResult(); // reset --hard origin/feature/my-branch
+    queueExecResult(); // rebase --autostash origin/main
+    const resolveConflicts = vi.fn();
+
+    await expect(
+      syncWorktree(
+        {
+          wtPath: '/tmp/wt',
+          repoRoot: '/tmp/repo',
+          baseBranch: 'main',
+          pushMode: 'force-with-lease',
+        },
+        resolveConflicts
+      )
+    ).resolves.toBeUndefined();
+
+    expect(resolveConflicts).not.toHaveBeenCalled();
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expectFetchSpawn();
+    expect(gitArgsFromExecCalls()).toEqual([
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-parse', '--verify', 'origin/feature/my-branch'],
+      ['reset', '--hard', 'origin/feature/my-branch'],
+      ['rebase', '--autostash', 'origin/main'],
+    ]);
+  });
+
+  it('throws when reset to remote branch fails', async () => {
+    queueSpawnExit(); // fetch origin
+    queueExecResult({ stdout: 'feature/my-branch\n' }); // getCurrentBranch
+    queueExecResult({ stdout: 'abc123\n' }); // remoteRefExists → found
+    queueExecResult({ code: 1, stderr: 'error: could not reset' }); // reset --hard fails
+    const resolveConflicts = vi.fn();
+
+    await expect(
+      syncWorktree(
+        {
+          wtPath: '/tmp/wt',
+          repoRoot: '/tmp/repo',
+          baseBranch: 'main',
+          pushMode: 'force-with-lease',
+        },
+        resolveConflicts
+      )
+    ).rejects.toThrow('Failed to sync with remote branch origin/feature/my-branch');
+
+    expect(resolveConflicts).not.toHaveBeenCalled();
   });
 });
 
@@ -747,6 +850,8 @@ describe('withGitTransport', () => {
   it('reruns installCommand after a clean rebase before the first agent invocation', async () => {
     getSettingsMock.mockReturnValue({ installCommand: 'npm ci' });
     queueSpawnExit();
+    queueExecResult({ stdout: 'feature/test-branch\n' }); // getCurrentBranch
+    queueExecResult({ code: 128 }); // remoteRefExists
     queueExecResult();
     queueExecResult();
     queueCleanBeforePush();
@@ -768,17 +873,19 @@ describe('withGitTransport', () => {
     expect(runAgent).toHaveBeenCalledWith();
     expect(spawnMock).toHaveBeenCalledTimes(1);
     expectFetchSpawn();
-    expectInstallExec(1);
-    expect(execFileMock.mock.invocationCallOrder[1]).toBeLessThan(
+    expectInstallExec(3);
+    expect(execFileMock.mock.invocationCallOrder[3]).toBeLessThan(
       runAgent.mock.invocationCallOrder[0] ?? Infinity
     );
     expect(gitArgsFromExecCalls()).toEqual([
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
       ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '-u', 'origin', 'HEAD'],
     ]);
-    expect(execFileMock.mock.calls[4]?.[2]).toMatchObject({
+    expect(execFileMock.mock.calls[6]?.[2]).toMatchObject({
       cwd: '/tmp/wt',
       maxBuffer: 10 * 1024 * 1024,
     });
@@ -786,6 +893,8 @@ describe('withGitTransport', () => {
 
   it('still pushes after a clean rebase when the initial agent exit code is non-zero', async () => {
     queueSpawnExit();
+    queueExecResult({ stdout: 'feature/test-branch\n' }); // getCurrentBranch
+    queueExecResult({ code: 128 }); // remoteRefExists
     queueExecResult();
     queueCleanBeforePush();
     queueExecResult();
@@ -807,6 +916,8 @@ describe('withGitTransport', () => {
     expect(runAgent).toHaveBeenCalledWith();
     expect(gitArgsFromSpawnCalls()).toEqual([['fetch', 'origin']]);
     expect(gitArgsFromExecCalls()).toEqual([
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
       ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
@@ -816,6 +927,8 @@ describe('withGitTransport', () => {
 
   it('skips the post-rebase install when no installCommand is configured', async () => {
     queueSpawnExit();
+    queueExecResult({ stdout: 'feature/test-branch\n' }); // getCurrentBranch
+    queueExecResult({ code: 128 }); // remoteRefExists
     queueExecResult();
     queueCleanBeforePush();
     queueExecResult();
@@ -837,6 +950,8 @@ describe('withGitTransport', () => {
     expect(spawnMock).toHaveBeenCalledTimes(1);
     expectFetchSpawn();
     expect(gitArgsFromExecCalls()).toEqual([
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
       ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
@@ -847,6 +962,8 @@ describe('withGitTransport', () => {
   it('reruns installCommand after rebase --continue succeeds before push resumes', async () => {
     getSettingsMock.mockReturnValue({ installCommand: 'npm ci' });
     queueSpawnExit();
+    queueExecResult({ stdout: 'feature/test-branch\n' }); // getCurrentBranch
+    queueExecResult({ code: 128 }); // remoteRefExists
     queueExecResult({ code: 1, stderr: 'conflict' });
     queueExecResult({ stdout: 'src/conflict.ts\nREADME.md\n' });
     readFileMock
@@ -895,8 +1012,10 @@ describe('withGitTransport', () => {
     });
     expect(spawnMock).toHaveBeenCalledTimes(1);
     expectFetchSpawn();
-    expectInstallExec(4);
+    expectInstallExec(6);
     expect(gitArgsFromExecCalls()).toEqual([
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
       ['diff', '--name-only', '--diff-filter=U'],
       ['add', '-u'],
@@ -910,6 +1029,8 @@ describe('withGitTransport', () => {
 
   it('fetches, rebases onto the remote feature branch, and force-pushes after a failed new-branch push', async () => {
     queueSpawnExit();
+    queueExecResult({ stdout: 'feature/test-branch\n' }); // getCurrentBranch
+    queueExecResult({ code: 128 }); // remoteRefExists
     queueExecResult();
     queueCleanBeforePush();
     queueExecResult({ code: 1, stderr: 'non-fast-forward', stdout: 'remote rejected' });
@@ -943,6 +1064,8 @@ describe('withGitTransport', () => {
       ['fetch', 'origin'],
     ]);
     expect(gitArgsFromExecCalls()).toEqual([
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
       ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
@@ -958,6 +1081,8 @@ describe('withGitTransport', () => {
 
   it('skips the recovery rebase and retries the original push args when the remote branch does not exist', async () => {
     queueSpawnExit();
+    queueExecResult({ stdout: 'feature/test-branch\n' }); // getCurrentBranch
+    queueExecResult({ code: 128 }); // remoteRefExists
     queueExecResult();
     queueCleanBeforePush();
     queueExecResult({ code: 1, stderr: 'temporary push failure' });
@@ -990,6 +1115,8 @@ describe('withGitTransport', () => {
       ['fetch', 'origin'],
     ]);
     expect(gitArgsFromExecCalls()).toEqual([
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
       ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
@@ -1004,6 +1131,8 @@ describe('withGitTransport', () => {
 
   it('re-enters conflict resolution when the recovery rebase hits conflicts', async () => {
     queueSpawnExit();
+    queueExecResult({ stdout: 'feature/test-branch\n' }); // getCurrentBranch
+    queueExecResult({ code: 128 }); // remoteRefExists
     queueExecResult();
     queueExecResult({ stdout: 'feature/retry\n' });
     queueCleanBeforePush();
@@ -1055,6 +1184,8 @@ describe('withGitTransport', () => {
       ['fetch', 'origin'],
     ]);
     expect(gitArgsFromExecCalls()).toEqual([
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['checkout', 'HEAD', '--', '.'],
@@ -1074,6 +1205,8 @@ describe('withGitTransport', () => {
 
   it('passes conflicts without inline markers through to the agent', async () => {
     queueSpawnExit();
+    queueExecResult({ stdout: 'feature/test-branch\n' }); // getCurrentBranch
+    queueExecResult({ code: 128 }); // remoteRefExists
     queueExecResult({ code: 1, stderr: 'merge conflict' });
     queueExecResult({ stdout: 'assets/logo.png\ndeleted.txt\n' });
     readFileMock
@@ -1111,6 +1244,8 @@ describe('withGitTransport', () => {
 
   it('feeds a failed recovery rebase --continue error into the next retry context', async () => {
     queueSpawnExit();
+    queueExecResult({ stdout: 'feature/test-branch\n' }); // getCurrentBranch
+    queueExecResult({ code: 128 }); // remoteRefExists
     queueExecResult();
     queueExecResult({ stdout: 'feature/retry\n' });
     queueCleanBeforePush();
@@ -1165,6 +1300,8 @@ describe('withGitTransport', () => {
       'git push --force-with-lease origin HEAD:refs/heads/feature/retry exited with code 1:\nnon-fast-forward',
     ]);
     expect(gitArgsFromExecCalls()).toEqual([
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['checkout', 'HEAD', '--', '.'],
@@ -1187,6 +1324,8 @@ describe('withGitTransport', () => {
 
   it('returns the recovery conflict-resolution agent exit code without retrying push again', async () => {
     queueSpawnExit();
+    queueExecResult({ stdout: 'feature/test-branch\n' }); // getCurrentBranch
+    queueExecResult({ code: 128 }); // remoteRefExists
     queueExecResult();
     queueCleanBeforePush();
     queueExecResult({ code: 1, stderr: 'non-fast-forward' });
@@ -1218,6 +1357,8 @@ describe('withGitTransport', () => {
       ['fetch', 'origin'],
     ]);
     expect(gitArgsFromExecCalls()).toEqual([
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
       ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
@@ -1231,6 +1372,8 @@ describe('withGitTransport', () => {
 
   it('surfaces recovery fetch failures immediately as transport errors', async () => {
     queueSpawnExit();
+    queueExecResult({ stdout: 'feature/test-branch\n' }); // getCurrentBranch
+    queueExecResult({ code: 128 }); // remoteRefExists
     queueExecResult();
     queueExecResult({ stdout: 'feature/retry\n' });
     queueCleanBeforePush();
@@ -1256,6 +1399,8 @@ describe('withGitTransport', () => {
       ['fetch', 'origin'],
     ]);
     expect(gitArgsFromExecCalls()).toEqual([
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['checkout', 'HEAD', '--', '.'],
@@ -1266,6 +1411,8 @@ describe('withGitTransport', () => {
 
   it('throws the final captured push failure after exhausting push retries', async () => {
     queueSpawnExit();
+    queueExecResult({ stdout: 'feature/test-branch\n' }); // getCurrentBranch
+    queueExecResult({ code: 128 }); // remoteRefExists
     queueExecResult();
     queueCleanBeforePush();
     queueExecResult({ code: 1, stderr: 'non-fast-forward', stdout: 'attempt 1' });
@@ -1313,6 +1460,8 @@ describe('withGitTransport', () => {
       ['fetch', 'origin'],
     ]);
     expect(gitArgsFromExecCalls()).toEqual([
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
       ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
@@ -1337,6 +1486,8 @@ describe('withGitTransport', () => {
 
   it('skips fetch/rebase recovery for recognized hook failures and retries the original push args', async () => {
     queueSpawnExit();
+    queueExecResult({ stdout: 'feature/test-branch\n' }); // getCurrentBranch
+    queueExecResult({ code: 128 }); // remoteRefExists
     queueExecResult();
     queueCleanBeforePush();
     queueExecResult({
@@ -1369,6 +1520,8 @@ describe('withGitTransport', () => {
     ]);
     expect(gitArgsFromSpawnCalls()).toEqual([['fetch', 'origin']]);
     expect(gitArgsFromExecCalls()).toEqual([
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
       ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
@@ -1383,6 +1536,8 @@ describe('withGitTransport', () => {
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       queueSpawnExit();
+      queueExecResult({ stdout: 'feature/test-branch\n' }); // getCurrentBranch
+      queueExecResult({ code: 128 }); // remoteRefExists
       queueExecResult();
       queueCleanBeforePush();
       queueExecResult({
@@ -1418,6 +1573,8 @@ describe('withGitTransport', () => {
       );
       expect(gitArgsFromSpawnCalls()).toEqual([['fetch', 'origin']]);
       expect(gitArgsFromExecCalls()).toEqual([
+        ['rev-parse', '--abbrev-ref', 'HEAD'],
+        ['rev-parse', '--verify', 'origin/feature/test-branch'],
         ['rebase', '--autostash', 'origin/main'],
         ['checkout', 'HEAD', '--', '.'],
         ['clean', '-fd', '--exclude=.shipper'],
@@ -1433,6 +1590,8 @@ describe('withGitTransport', () => {
 
   it('does not treat hook keywords in the branch name as hook failures', async () => {
     queueSpawnExit();
+    queueExecResult({ stdout: 'feature/test-branch\n' }); // getCurrentBranch
+    queueExecResult({ code: 128 }); // remoteRefExists
     queueExecResult();
     queueExecResult({ stdout: 'shipper/456-feed-pre-push-hook-failures-back-to-the-agent-inst\n' });
     queueCleanBeforePush();
@@ -1471,6 +1630,8 @@ describe('withGitTransport', () => {
       ['fetch', 'origin'],
     ]);
     expect(gitArgsFromExecCalls()).toEqual([
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['checkout', 'HEAD', '--', '.'],
@@ -1505,6 +1666,8 @@ describe('withGitTransport', () => {
 
   it('shares the push retry budget across hook and non-hook remediation attempts', async () => {
     queueSpawnExit();
+    queueExecResult({ stdout: 'feature/test-branch\n' }); // getCurrentBranch
+    queueExecResult({ code: 128 }); // remoteRefExists
     queueExecResult();
     queueExecResult({ stdout: 'feature/retry\n' });
     queueCleanBeforePush();
@@ -1554,6 +1717,8 @@ describe('withGitTransport', () => {
       ['fetch', 'origin'],
     ]);
     expect(gitArgsFromExecCalls()).toEqual([
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['checkout', 'HEAD', '--', '.'],
@@ -1575,6 +1740,8 @@ describe('withGitTransport', () => {
 
   it('returns the agent exit code without continuing the rebase or pushing when conflict resolution fails', async () => {
     queueSpawnExit();
+    queueExecResult({ stdout: 'feature/test-branch\n' }); // getCurrentBranch
+    queueExecResult({ code: 128 }); // remoteRefExists
     queueExecResult({ code: 1, stderr: 'merge conflict' });
     queueExecResult({ stdout: 'src/conflict.ts\n' });
     readFileMock.mockResolvedValueOnce(
@@ -1597,6 +1764,8 @@ describe('withGitTransport', () => {
     expect(runAgent).toHaveBeenCalledTimes(1);
     expect(gitArgsFromSpawnCalls()).toEqual([['fetch', 'origin']]);
     expect(gitArgsFromExecCalls()).toEqual([
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
       ['diff', '--name-only', '--diff-filter=U'],
     ]);
@@ -1604,6 +1773,8 @@ describe('withGitTransport', () => {
 
   it('aborts the rebase after three failed conflict-resolution attempts', async () => {
     queueSpawnExit();
+    queueExecResult({ stdout: 'feature/test-branch\n' }); // getCurrentBranch
+    queueExecResult({ code: 128 }); // remoteRefExists
     queueExecResult({ code: 1, stderr: 'merge conflict' });
     queueExecResult({ stdout: 'src/conflict.ts\n' });
     readFileMock.mockResolvedValue(
@@ -1640,6 +1811,8 @@ describe('withGitTransport', () => {
       ['rebase', '--abort'],
     ]);
     expect(gitArgsFromExecCalls()).toEqual([
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
       ['diff', '--name-only', '--diff-filter=U'],
       ['add', '-u'],
@@ -1655,6 +1828,8 @@ describe('withGitTransport', () => {
 
   it('aborts the rebase before throwing when rebase --continue fails without unresolved files and rebase is still in progress', async () => {
     queueSpawnExit();
+    queueExecResult({ stdout: 'feature/test-branch\n' }); // getCurrentBranch
+    queueExecResult({ code: 128 }); // remoteRefExists
     queueExecResult({ code: 1, stderr: 'merge conflict' });
     queueExecResult({ stdout: 'src/conflict.ts\n' });
     readFileMock.mockResolvedValueOnce(
@@ -1691,6 +1866,8 @@ describe('withGitTransport', () => {
   it('recovers and pushes when agent commits during rebase and completes it', async () => {
     getSettingsMock.mockReturnValue({ installCommand: 'npm ci' });
     queueSpawnExit();
+    queueExecResult({ stdout: 'feature/test-branch\n' }); // getCurrentBranch
+    queueExecResult({ code: 128 }); // remoteRefExists
     queueExecResult({ code: 1, stderr: 'merge conflict' });
     queueExecResult({ stdout: 'src/conflict.ts\n' });
     readFileMock.mockResolvedValueOnce(
@@ -1726,8 +1903,10 @@ describe('withGitTransport', () => {
     expect(runAgent).toHaveBeenCalledTimes(1);
     expect(spawnMock).toHaveBeenCalledTimes(1);
     expectFetchSpawn();
-    expectInstallExec(6);
+    expectInstallExec(8);
     expect(gitArgsFromExecCalls()).toEqual([
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
       ['diff', '--name-only', '--diff-filter=U'],
       ['add', '-u'],
@@ -1744,6 +1923,8 @@ describe('withGitTransport', () => {
   it('passes install failure output to the agent, retries, and continues before push', async () => {
     getSettingsMock.mockReturnValue({ installCommand: 'npm ci' });
     queueSpawnExit();
+    queueExecResult({ stdout: 'feature/test-branch\n' }); // getCurrentBranch
+    queueExecResult({ code: 128 }); // remoteRefExists
     queueExecResult();
     queueExecResult({ code: 1, stderr: 'lock mismatch', stdout: 'npm notice' });
     queueExecResult();
@@ -1773,9 +1954,11 @@ describe('withGitTransport', () => {
     expect(runAgent).toHaveBeenNthCalledWith(2);
     expect(spawnMock).toHaveBeenCalledTimes(1);
     expectFetchSpawn();
-    expectInstallExec(1);
-    expectInstallExec(2);
+    expectInstallExec(3);
+    expectInstallExec(4);
     expect(gitArgsFromExecCalls()).toEqual([
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
       ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
@@ -1786,6 +1969,8 @@ describe('withGitTransport', () => {
   it('returns the install remediation agent exit code before the main agent runs', async () => {
     getSettingsMock.mockReturnValue({ installCommand: 'npm ci' });
     queueSpawnExit();
+    queueExecResult({ stdout: 'feature/test-branch\n' }); // getCurrentBranch
+    queueExecResult({ code: 128 }); // remoteRefExists
     queueExecResult();
     queueExecResult({ code: 1, stderr: 'lock mismatch' });
     const runAgent = vi.fn().mockResolvedValue(7);
@@ -1810,13 +1995,19 @@ describe('withGitTransport', () => {
     );
     expect(spawnMock).toHaveBeenCalledTimes(1);
     expectFetchSpawn();
-    expectInstallExec(1);
-    expect(gitArgsFromExecCalls()).toEqual([['rebase', '--autostash', 'origin/main']]);
+    expectInstallExec(3);
+    expect(gitArgsFromExecCalls()).toEqual([
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-parse', '--verify', 'origin/feature/test-branch'],
+      ['rebase', '--autostash', 'origin/main'],
+    ]);
   });
 
   it('throws after three unsuccessful install remediation attempts with the final output', async () => {
     getSettingsMock.mockReturnValue({ installCommand: 'npm ci' });
     queueSpawnExit();
+    queueExecResult({ stdout: 'feature/test-branch\n' }); // getCurrentBranch
+    queueExecResult({ code: 128 }); // remoteRefExists
     queueExecResult();
     queueExecResult({ code: 1, stderr: 'attempt 1 stderr', stdout: 'attempt 1 stdout' });
     queueExecResult({ code: 1, stderr: 'attempt 2 stderr', stdout: 'attempt 2 stdout' });
@@ -1859,15 +2050,21 @@ describe('withGitTransport', () => {
     );
     expect(spawnMock).toHaveBeenCalledTimes(1);
     expectFetchSpawn();
-    expectInstallExec(1);
-    expectInstallExec(2);
     expectInstallExec(3);
     expectInstallExec(4);
-    expect(gitArgsFromExecCalls()).toEqual([['rebase', '--autostash', 'origin/main']]);
+    expectInstallExec(5);
+    expectInstallExec(6);
+    expect(gitArgsFromExecCalls()).toEqual([
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-parse', '--verify', 'origin/feature/test-branch'],
+      ['rebase', '--autostash', 'origin/main'],
+    ]);
   });
 
   it('preserves the transport failure when rebase abort also fails', async () => {
     queueSpawnExit();
+    queueExecResult({ stdout: 'feature/test-branch\n' }); // getCurrentBranch
+    queueExecResult({ code: 128 }); // remoteRefExists
     queueExecResult({ code: 1, stderr: 'merge conflict' });
     queueExecResult({ stdout: 'src/conflict.ts\n' });
     readFileMock.mockResolvedValue(
@@ -1897,6 +2094,64 @@ describe('withGitTransport', () => {
     ).rejects.toThrow(
       'Could not complete rebase onto origin/main after 3 conflict resolution attempts.\ncontinue failed thrice\nA best-effort git rebase --abort also failed: git exited with code 1'
     );
+  });
+
+  it('resets to remote branch before rebasing when origin/{currentBranch} exists', async () => {
+    queueSpawnExit(); // fetch origin
+    queueExecResult({ stdout: 'feature/my-branch\n' }); // getCurrentBranch
+    queueExecResult({ stdout: 'abc123\n' }); // remoteRefExists → found
+    queueExecResult(); // reset --hard origin/feature/my-branch
+    queueExecResult(); // rebase --autostash origin/main
+    queueCleanBeforePush();
+    queueExecResult(); // push
+    const runAgent = vi.fn().mockResolvedValue(0);
+
+    await expect(
+      withGitTransport(
+        {
+          wtPath: '/tmp/wt',
+          repoRoot: '/tmp/repo',
+          baseBranch: 'main',
+          pushMode: 'new-branch',
+        },
+        runAgent
+      )
+    ).resolves.toBe(0);
+
+    expect(runAgent).toHaveBeenCalledWith();
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expectFetchSpawn();
+    expect(gitArgsFromExecCalls()).toEqual([
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-parse', '--verify', 'origin/feature/my-branch'],
+      ['reset', '--hard', 'origin/feature/my-branch'],
+      ['rebase', '--autostash', 'origin/main'],
+      ['checkout', 'HEAD', '--', '.'],
+      ['clean', '-fd', '--exclude=.shipper'],
+      ['push', '-u', 'origin', 'HEAD'],
+    ]);
+  });
+
+  it('throws when reset to remote branch fails', async () => {
+    queueSpawnExit(); // fetch origin
+    queueExecResult({ stdout: 'feature/my-branch\n' }); // getCurrentBranch
+    queueExecResult({ stdout: 'abc123\n' }); // remoteRefExists → found
+    queueExecResult({ code: 1, stderr: 'error: could not reset' }); // reset --hard fails
+    const runAgent = vi.fn();
+
+    await expect(
+      withGitTransport(
+        {
+          wtPath: '/tmp/wt',
+          repoRoot: '/tmp/repo',
+          baseBranch: 'main',
+          pushMode: 'new-branch',
+        },
+        runAgent
+      )
+    ).rejects.toThrow('Failed to sync with remote branch origin/feature/my-branch');
+
+    expect(runAgent).not.toHaveBeenCalled();
   });
 });
 
