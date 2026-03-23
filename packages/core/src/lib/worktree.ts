@@ -289,11 +289,12 @@ async function syncWithRemoteBranch(opts: WorktreeGitOpts): Promise<void> {
   const currentBranch = await getCurrentBranch(opts);
   const remoteRef = `origin/${currentBranch}`;
   if (await remoteRefExists(opts, remoteRef)) {
-    const result = await execAsync('git', ['reset', '--hard', remoteRef], { cwd: opts.wtPath });
+    const args = ['reset', '--hard', remoteRef];
+    const result = await execAsync('git', args, { cwd: opts.wtPath });
     if (result.code !== 0) {
       throw formatTransportError(
         opts,
-        `Failed to sync with remote branch ${remoteRef}.\n${formatCommandFailure('git', ['reset', '--hard', remoteRef], result)}`
+        `Failed to sync with remote branch ${remoteRef}.\n${formatCommandFailure('git', args, result)}`
       );
     }
   }
