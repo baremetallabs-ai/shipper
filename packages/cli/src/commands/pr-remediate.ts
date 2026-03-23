@@ -418,9 +418,11 @@ export async function prRemediateCommand(
               return 1;
             }
 
+            const outputDir = path.resolve(wtPath, PROTOCOL_OUTPUT_DIR);
+
             let result: Awaited<ReturnType<typeof readResultFile>>;
             try {
-              result = await readResultFile(path.resolve(wtPath, PROTOCOL_OUTPUT_DIR));
+              result = await readResultFile(outputDir);
             } catch (error) {
               const detail = error instanceof Error ? error.message : String(error);
               await handleAgentCrash(repo, issueNumber, 'pr_remediate', detail);
@@ -436,6 +438,18 @@ export async function prRemediateCommand(
               });
               return 0;
             }
+
+            const readLatestPostingResult = async () => {
+              try {
+                return await readResultFile(outputDir);
+              } catch (error) {
+                const detail = error instanceof Error ? error.message : String(error);
+                console.warn(
+                  `Failed to refresh pr_remediate result after push retry; using previously validated output: ${detail}`
+                );
+                return result;
+              }
+            };
 
             try {
               const pushCode = await pushWithRetry(
@@ -460,8 +474,9 @@ export async function prRemediateCommand(
               }
             } catch (error) {
               const detail = error instanceof Error ? error.message : String(error);
+              const postingResult = await readLatestPostingResult();
               try {
-                await postReplies(repo, prRef, wtPath, result.replies);
+                await postReplies(repo, prRef, wtPath, postingResult.replies);
               } catch (postRepliesError) {
                 console.warn(
                   `Failed to post replies during push failure handling: ${
@@ -473,7 +488,7 @@ export async function prRemediateCommand(
                 // Best-effort: still attempt the main comment and crash report.
               }
               try {
-                await postComment(repo, issueNumber, commentPath);
+                await postComment(repo, issueNumber, path.resolve(wtPath, postingResult.comment));
               } catch (postCommentError) {
                 console.warn(
                   `Failed to post comment during push failure handling: ${
@@ -493,8 +508,9 @@ export async function prRemediateCommand(
               );
               return 1;
             }
-            await postReplies(repo, prRef, wtPath, result.replies);
-            await postComment(repo, issueNumber, commentPath);
+            const postingResult = await readLatestPostingResult();
+            await postReplies(repo, prRef, wtPath, postingResult.replies);
+            await postComment(repo, issueNumber, path.resolve(wtPath, postingResult.comment));
 
             await waitForChecks(repo, prRef, CI_WAIT_TIMEOUT_MINUTES);
             const checks = await fetchChecks(repo, prRef);
