@@ -209,9 +209,19 @@ async function readPrSpec(
 
   if (bodyFile !== undefined) {
     try {
-      resolveOutputPath(cwd, bodyFile, 'PR body path');
+      const bodyPath = resolveOutputPath(cwd, bodyFile, 'PR body path');
+      await readFile(bodyPath, 'utf-8');
     } catch (error) {
-      errors.push(error instanceof Error ? error.message : String(error));
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        error.code === 'ENOENT'
+      ) {
+        errors.push(`PR body path does not exist: ${path.resolve(cwd, bodyFile)}`);
+      } else {
+        errors.push(error instanceof Error ? error.message : String(error));
+      }
     }
   }
 
@@ -464,33 +474,48 @@ export async function submitReviewPayload(
   await gh(['api', `repos/${repo}/pulls/${prNumber}/reviews`, '--method', 'POST', '--input', abs]);
 }
 
+export async function validateStageOutput(cwd: string, stage: StageName): Promise<ResultJson> {
+  const result = await readResultFile(path.resolve(cwd, PROTOCOL_OUTPUT_DIR));
+
+  if (result.pr_spec && stage !== 'pr_open') {
+    throw new Error(`result.pr_spec is only supported for the pr_open stage (got ${stage})`);
+  }
+
+  if (result.review_payload && stage !== 'pr_review') {
+    throw new Error(
+      `result.review_payload is only supported for the pr_review stage (got ${stage})`
+    );
+  }
+
+  if (result.verdict === 'accept' && stage === 'pr_open' && !result.pr_spec) {
+    throw new Error('pr_open accept requires a pr_spec in result.json');
+  }
+
+  if (result.verdict === 'accept' && stage === 'pr_review' && !result.review_payload) {
+    throw new Error('pr_review accept requires a review_payload in result.json');
+  }
+
+  if (result.pr_spec) {
+    await readPrSpec(cwd, result.pr_spec);
+  }
+
+  if (result.review_payload) {
+    await readReviewPayload(cwd, result.review_payload);
+  }
+
+  return result;
+}
+
 export async function processResult(opts: {
   repo: string;
   issueNumber: string;
   stage: StageName;
   cwd: string;
+  result: ResultJson;
   prNumber?: string;
 }): Promise<ResultJson> {
-  const result = await readResultFile(path.resolve(opts.cwd, PROTOCOL_OUTPUT_DIR));
+  const { result } = opts;
   const commentPath = resolveOutputPath(opts.cwd, result.comment, 'comment path');
-
-  if (result.pr_spec && opts.stage !== 'pr_open') {
-    throw new Error(`result.pr_spec is only supported for the pr_open stage (got ${opts.stage})`);
-  }
-
-  if (result.review_payload && opts.stage !== 'pr_review') {
-    throw new Error(
-      `result.review_payload is only supported for the pr_review stage (got ${opts.stage})`
-    );
-  }
-
-  if (result.verdict === 'accept' && opts.stage === 'pr_open' && !result.pr_spec) {
-    throw new Error('pr_open accept requires a pr_spec in result.json');
-  }
-
-  if (result.verdict === 'accept' && opts.stage === 'pr_review' && !result.review_payload) {
-    throw new Error('pr_review accept requires a review_payload in result.json');
-  }
 
   if (result.verdict === 'accept' && result.pr_spec) {
     await createPrFromSpec(opts.repo, opts.cwd, result.pr_spec);
@@ -515,18 +540,18 @@ export async function processResult(opts: {
 
 export async function retryOnInvalidOutput(opts: {
   cwd: string;
+  stage: StageName;
   retry: (correctionMessage: string) => Promise<number>;
-}): Promise<void> {
-  const outputDir = path.resolve(opts.cwd, PROTOCOL_OUTPUT_DIR);
-
+}): Promise<ResultJson> {
   try {
-    await readResultFile(outputDir);
+    return await validateStageOutput(opts.cwd, opts.stage);
   } catch (error) {
     const errors =
       error instanceof ResultValidationError
         ? error.errors
         : [error instanceof Error ? error.message : String(error)];
     await opts.retry(formatCorrectionMessage(errors));
+    return await validateStageOutput(opts.cwd, opts.stage);
   }
 }
 

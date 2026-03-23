@@ -5,15 +5,18 @@ const getBranchForPRMock = vi.fn(() => Promise.resolve('shipper/10-feature'));
 const getRepoRootMock = vi.fn(() => Promise.resolve('/tmp/fake-repo'));
 const ghMock = vi.fn();
 const handleAgentCrashMock = vi.fn(() => Promise.resolve());
-const processResultMock = vi.fn(() =>
-  Promise.resolve({
-    verdict: 'accept',
-    comment: '.shipper/output/comment-10.md',
-  })
-);
+const validatedResult = {
+  verdict: 'accept' as const,
+  comment: '.shipper/output/comment-10.md',
+};
+const processResultMock = vi.fn(() => Promise.resolve(validatedResult));
 const retryOnInvalidOutputMock = vi.fn<
-  (opts: { cwd: string; retry: (message: string) => Promise<number> }) => Promise<void>
->(() => Promise.resolve());
+  (opts: {
+    cwd: string;
+    stage: string;
+    retry: (message: string) => Promise<number>;
+  }) => Promise<typeof validatedResult>
+>(() => Promise.resolve(validatedResult));
 const resolveRefMock = vi.fn(() => Promise.resolve({ prNumber: '42', issueNumber: '10' }));
 const runPromptMock = vi.fn(() => Promise.resolve(0));
 const scrubOutputDirMock = vi.fn(() => Promise.resolve());
@@ -48,6 +51,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
 
 describe('prReviewCommand', () => {
   let exitSpy: ReturnType<typeof vi.spyOn>;
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -63,11 +67,13 @@ describe('prReviewCommand', () => {
     exitSpy = vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
       throw new Error(`exit:${code}`);
     });
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
   afterEach(() => {
     process.exitCode = undefined;
     exitSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
   });
 
   it('writes review context and processes results inside the PR head-branch worktree', async () => {
@@ -137,15 +143,17 @@ describe('prReviewCommand', () => {
       model: undefined,
     });
     const retryCall = retryOnInvalidOutputMock.mock.calls[0]?.[0] as
-      | { cwd: string; retry: (message: string) => Promise<number> }
+      | { cwd: string; stage: string; retry: (message: string) => Promise<number> }
       | undefined;
     expect(retryCall?.cwd).toBe('/tmp/fake-wt');
+    expect(retryCall?.stage).toBe('pr_review');
     expect(retryCall?.retry).toEqual(expect.any(Function));
     expect(processResultMock).toHaveBeenCalledWith({
       repo,
       issueNumber: '10',
       stage: 'pr_review',
       cwd: '/tmp/fake-wt',
+      result: validatedResult,
       prNumber: '42',
     });
     expect(handleAgentCrashMock).not.toHaveBeenCalled();
@@ -177,6 +185,7 @@ describe('prReviewCommand', () => {
       'pr_review',
       'Missing result.json'
     );
+    expect(consoleErrorSpy).toHaveBeenCalledWith('Missing result.json');
     expect(process.exitCode).toBe(1);
   });
 

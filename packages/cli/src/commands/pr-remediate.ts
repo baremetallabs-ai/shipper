@@ -392,6 +392,7 @@ export async function prRemediateCommand(
             });
             await retryOnInvalidOutput({
               cwd: wtPath,
+              stage: 'pr_remediate',
               retry: (userInput) =>
                 runPrompt('pr_remediate', {
                   repo,

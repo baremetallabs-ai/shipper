@@ -3,15 +3,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const fetchIssueMock = vi.fn();
 const ghMock = vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>();
 const handleAgentCrashMock = vi.fn(() => Promise.resolve());
-const processResultMock = vi.fn(() =>
-  Promise.resolve({
-    verdict: 'accept',
-    comment: '.shipper/output/comment-250.md',
-  })
-);
+const validatedResult = {
+  verdict: 'accept' as const,
+  comment: '.shipper/output/comment-250.md',
+};
+const processResultMock = vi.fn(() => Promise.resolve(validatedResult));
 const retryOnInvalidOutputMock = vi.fn<
-  (opts: { cwd: string; retry: (message: string) => Promise<number> }) => Promise<void>
->(() => Promise.resolve());
+  (opts: {
+    cwd: string;
+    stage: string;
+    retry: (message: string) => Promise<number>;
+  }) => Promise<typeof validatedResult>
+>(() => Promise.resolve(validatedResult));
 const runPromptMock = vi.fn(() => Promise.resolve(0));
 const scrubOutputDirMock = vi.fn(() => Promise.resolve());
 const setupProtocolDirsMock = vi.fn(() => Promise.resolve());
@@ -191,6 +194,7 @@ describe('prepareUnblockContext', () => {
 
 describe('unblockCommand', () => {
   let exitSpy: ReturnType<typeof vi.spyOn>;
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -198,11 +202,13 @@ describe('unblockCommand', () => {
     exitSpy = vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
       throw new Error(`exit:${code}`);
     });
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
   afterEach(() => {
     process.exitCode = undefined;
     exitSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
   });
 
   it('scrubs output, prepares dependency context, and processes protocol results', async () => {
@@ -247,15 +253,17 @@ describe('unblockCommand', () => {
       model: undefined,
     });
     const retryCall = retryOnInvalidOutputMock.mock.calls[0]?.[0] as
-      | { cwd: string; retry: (message: string) => Promise<number> }
+      | { cwd: string; stage: string; retry: (message: string) => Promise<number> }
       | undefined;
     expect(retryCall?.cwd).toBe(cwd);
+    expect(retryCall?.stage).toBe('unblock');
     expect(retryCall?.retry).toEqual(expect.any(Function));
     expect(processResultMock).toHaveBeenCalledWith({
       repo: 'owner/repo',
       issueNumber: '250',
       stage: 'unblock',
       cwd,
+      result: validatedResult,
     });
     expect(handleAgentCrashMock).not.toHaveBeenCalled();
     expect(process.exitCode).toBeUndefined();
@@ -285,6 +293,7 @@ describe('unblockCommand', () => {
       'unblock',
       'Invalid result.json'
     );
+    expect(consoleErrorSpy).toHaveBeenCalledWith('Invalid result.json');
     expect(process.exitCode).toBe(1);
   });
 });

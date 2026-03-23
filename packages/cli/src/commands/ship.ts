@@ -1133,23 +1133,24 @@ async function attemptUnblock(
     await scrubOutputDir(cwd);
     await prepareUnblockContext(repo, issueStr, cwd);
     await runPrompt('unblock', { repo, issueRef: issueStr, agent, model, logFile });
-
-    await retryOnInvalidOutput({
-      cwd,
-      retry: (userInput) =>
-        runPrompt('unblock', { repo, issueRef: issueStr, agent, model, logFile, userInput }),
-    });
-
     try {
+      const validatedResult = await retryOnInvalidOutput({
+        cwd,
+        stage: 'unblock',
+        retry: (userInput) =>
+          runPrompt('unblock', { repo, issueRef: issueStr, agent, model, logFile, userInput }),
+      });
       const result = await processResult({
         repo,
         issueNumber: issueStr,
         stage: 'unblock',
         cwd,
+        result: validatedResult,
       });
       return result.verdict === 'accept';
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
+      console.error(detail);
       await handleAgentCrash(repo, issueStr, 'unblock', detail);
       return false;
     }

@@ -85,31 +85,33 @@ export async function prReviewCommand(
             agent,
             model,
           });
-          await retryOnInvalidOutput({
-            cwd: wtPath,
-            retry: (userInput) =>
-              runPrompt('pr_review', {
-                repo,
-                issueRef: issueNumber,
-                prRef: pr,
-                cwd: wtPath,
-                mode,
-                agent,
-                model,
-                userInput,
-              }),
-          });
-
           try {
+            const result = await retryOnInvalidOutput({
+              cwd: wtPath,
+              stage: 'pr_review',
+              retry: (userInput) =>
+                runPrompt('pr_review', {
+                  repo,
+                  issueRef: issueNumber,
+                  prRef: pr,
+                  cwd: wtPath,
+                  mode,
+                  agent,
+                  model,
+                  userInput,
+                }),
+            });
             await processResult({
               repo,
               issueNumber,
               stage: 'pr_review',
               cwd: wtPath,
+              result,
               prNumber: pr,
             });
           } catch (error) {
             const detail = error instanceof Error ? error.message : String(error);
+            console.error(detail);
             await handleAgentCrash(repo, issueNumber, 'pr_review', detail);
             process.exitCode = 1;
           }

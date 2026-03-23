@@ -142,8 +142,11 @@ vi.mock('@dnsquared/shipper-core', () => ({
     });
   }),
   retryOnInvalidOutput: vi.fn<
-    (opts: { cwd: string; retry: (msg: string) => Promise<number> }) => Promise<void>
-  >(() => Promise.resolve()),
+    (opts: { cwd: string; stage: string; retry: (msg: string) => Promise<number> }) => Promise<{
+      verdict: 'accept';
+      comment: string;
+    }>
+  >(() => Promise.resolve({ verdict: 'accept', comment: '.shipper/output/comment-7.md' })),
   totalTokens: vi.fn((usage: { inputTokens: number; outputTokens: number }) => {
     return usage.inputTokens + usage.outputTokens;
   }),
@@ -2493,7 +2496,7 @@ describe('shipCommand parallel auto runner', () => {
     expect(unblockOpts).toBeDefined();
     expect(String(unblockOpts?.logFile)).toMatch(/unblock-7-\d{8}T\d{6}\.log$/);
     expect(mockRetryOnInvalidOutput).toHaveBeenCalledWith(
-      expect.objectContaining({ cwd: process.cwd() })
+      expect.objectContaining({ cwd: process.cwd(), stage: 'unblock' })
     );
     expect(mockPrepareUnblockContext).toHaveBeenCalledWith(repo, '7', process.cwd());
     expect(mockProcessResult).toHaveBeenCalledWith({
@@ -2501,6 +2504,7 @@ describe('shipCommand parallel auto runner', () => {
       issueNumber: '7',
       stage: 'unblock',
       cwd: process.cwd(),
+      result: { verdict: 'accept', comment: '.shipper/output/comment-7.md' },
     });
   });
 
@@ -2681,18 +2685,21 @@ describe('shipCommand parallel auto runner', () => {
       return { stdout: '[]', stderr: '' };
     });
     mockProcessResult.mockRejectedValueOnce(new Error('Missing result.json'));
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     await shipCommand(repo, undefined, { auto: true, merge: false, parallel: 1 });
 
     // retryOnInvalidOutput should be called before processResult
     expect(mockRetryOnInvalidOutput).toHaveBeenCalledWith(
-      expect.objectContaining({ cwd: process.cwd() })
+      expect.objectContaining({ cwd: process.cwd(), stage: 'unblock' })
     );
 
     const output = getConsoleOutput(logSpy);
     expect(output).toContain('still blocked');
+    expect(errorSpy).toHaveBeenCalledWith('Missing result.json');
     expect(mockHandleAgentCrash).toHaveBeenCalledWith(repo, '7', 'unblock', 'Missing result.json');
 
+    errorSpy.mockRestore();
     logSpy.mockRestore();
   });
 
@@ -2722,6 +2729,7 @@ describe('shipCommand parallel auto runner', () => {
     // Simulate retryOnInvalidOutput invoking the retry callback
     mockRetryOnInvalidOutput.mockImplementationOnce(async (opts) => {
       await opts.retry('Fix: missing comment field in result.json');
+      return { verdict: 'accept', comment: '.shipper/output/comment-7.md' };
     });
 
     await shipCommand(repo, undefined, { auto: true, merge: false, parallel: 1 });

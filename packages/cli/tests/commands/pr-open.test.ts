@@ -6,15 +6,18 @@ const formatConflictContextMock = vi.fn(() => 'formatted conflict context');
 const getRepoRootMock = vi.fn(() => Promise.resolve('/tmp/fake-repo'));
 const getSettingsMock = vi.fn(() => ({ defaultBaseBranch: 'main' }));
 const handleAgentCrashMock = vi.fn(() => Promise.resolve());
-const processResultMock = vi.fn(() =>
-  Promise.resolve({
-    verdict: 'accept',
-    comment: '.shipper/output/comment-239.md',
-  })
-);
+const validatedResult = {
+  verdict: 'accept' as const,
+  comment: '.shipper/output/comment-239.md',
+};
+const processResultMock = vi.fn(() => Promise.resolve(validatedResult));
 const retryOnInvalidOutputMock = vi.fn<
-  (opts: { cwd: string; retry: (message: string) => Promise<number> }) => Promise<void>
->(() => Promise.resolve());
+  (opts: {
+    cwd: string;
+    stage: string;
+    retry: (message: string) => Promise<number>;
+  }) => Promise<typeof validatedResult>
+>(() => Promise.resolve(validatedResult));
 const resolveBaseBranchMock = vi.fn(() => Promise.resolve('release/2026'));
 const resolveRefMock = vi.fn(() => Promise.resolve({ issueNumber: '239' }));
 const runPromptMock = vi.fn(() => Promise.resolve(0));
@@ -62,6 +65,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
 
 describe('prOpenCommand', () => {
   let exitSpy: ReturnType<typeof vi.spyOn>;
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -69,11 +73,13 @@ describe('prOpenCommand', () => {
     exitSpy = vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
       throw new Error(`exit:${code}`);
     });
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
   afterEach(() => {
     process.exitCode = undefined;
     exitSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
   });
 
   it('routes the resolved base branch through transport and forwards conflict context', async () => {
@@ -107,15 +113,17 @@ describe('prOpenCommand', () => {
       })
     );
     const retryCall = retryOnInvalidOutputMock.mock.calls[0]?.[0] as
-      | { cwd: string; retry: (message: string) => Promise<number> }
+      | { cwd: string; stage: string; retry: (message: string) => Promise<number> }
       | undefined;
     expect(retryCall?.cwd).toBe('/tmp/fake-wt');
+    expect(retryCall?.stage).toBe('pr_open');
     expect(retryCall?.retry).toEqual(expect.any(Function));
     expect(processResultMock).toHaveBeenCalledWith({
       repo: 'owner/repo',
       issueNumber: '239',
       stage: 'pr_open',
       cwd: '/tmp/fake-wt',
+      result: validatedResult,
     });
     expect(handleAgentCrashMock).not.toHaveBeenCalled();
 
@@ -181,6 +189,7 @@ describe('prOpenCommand', () => {
       'pr_open',
       'Missing result.json'
     );
+    expect(consoleErrorSpy).toHaveBeenCalledWith('Missing result.json');
     expect(process.exitCode).toBe(1);
   });
 

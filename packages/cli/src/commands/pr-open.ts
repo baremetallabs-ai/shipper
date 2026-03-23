@@ -64,30 +64,38 @@ export async function prOpenCommand(
             process.exitCode = transportCode;
             return;
           }
-          await retryOnInvalidOutput({
-            cwd: wtPath,
-            retry: (userInput) =>
-              withGitTransport(
-                { wtPath, repoRoot, baseBranch, pushMode: 'force-with-lease' },
-                (conflictContext, pushError, installError) =>
-                  runPrompt('pr_open', {
-                    repo,
-                    issueRef: issue,
-                    cwd: wtPath,
-                    baseBranch,
-                    mode,
-                    agent,
-                    model,
-                    userInput: conflictContext
-                      ? formatConflictContext(conflictContext)
-                      : (pushError ?? installError ?? userInput),
-                  })
-              ),
-          });
           try {
-            await processResult({ repo, issueNumber: issue, stage: 'pr_open', cwd: wtPath });
+            const result = await retryOnInvalidOutput({
+              cwd: wtPath,
+              stage: 'pr_open',
+              retry: (userInput) =>
+                withGitTransport(
+                  { wtPath, repoRoot, baseBranch, pushMode: 'force-with-lease' },
+                  (conflictContext, pushError, installError) =>
+                    runPrompt('pr_open', {
+                      repo,
+                      issueRef: issue,
+                      cwd: wtPath,
+                      baseBranch,
+                      mode,
+                      agent,
+                      model,
+                      userInput: conflictContext
+                        ? formatConflictContext(conflictContext)
+                        : (pushError ?? installError ?? userInput),
+                    })
+                ),
+            });
+            await processResult({
+              repo,
+              issueNumber: issue,
+              stage: 'pr_open',
+              cwd: wtPath,
+              result,
+            });
           } catch (error) {
             const detail = error instanceof Error ? error.message : String(error);
+            console.error(detail);
             await handleAgentCrash(repo, issue, 'pr_open', detail);
             process.exitCode = 1;
             return;
