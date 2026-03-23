@@ -580,55 +580,59 @@ describe('prRemediateCommand', () => {
     );
   });
 
-  it('delegates reject verdicts to processResult and never pushes', async () => {
+  it.each(['reject', 'fail'] as const)(
+    'delegates %s verdicts to processResult and never pushes',
+    async (verdict) => {
+      fetchChecksMock.mockResolvedValue(PASS_CHECKS);
+      const result: ResultJson = {
+        verdict,
+        comment: '.shipper/output/comment-10.md',
+      };
+      retryOnInvalidOutputMock.mockResolvedValue(result);
+
+      const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
+
+      await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
+
+      expect(pushWithRetryMock).not.toHaveBeenCalled();
+      expect(postRepliesMock).not.toHaveBeenCalled();
+      expect(postCommentMock).not.toHaveBeenCalled();
+      expect(executeTransitionMock).not.toHaveBeenCalled();
+      expect(resolveTransitionMock).not.toHaveBeenCalled();
+      expect(processResultMock).toHaveBeenCalledWith({
+        repo: 'owner/repo',
+        issueNumber: '10',
+        stage: 'pr_remediate',
+        cwd: '/tmp/fake-wt',
+        result,
+      });
+    }
+  );
+
+  it('handles reject/fail processResult failures as agent crashes with stderr', async () => {
     fetchChecksMock.mockResolvedValue(PASS_CHECKS);
-    const rejectResult: ResultJson = {
+    retryOnInvalidOutputMock.mockResolvedValue({
       verdict: 'reject',
       comment: '.shipper/output/comment-10.md',
-    };
-    retryOnInvalidOutputMock.mockResolvedValue(rejectResult);
+    });
+    processResultMock.mockRejectedValue(new Error('failed to post remediation result'));
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
 
     await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
 
+    expect(errorSpy).toHaveBeenCalledWith('failed to post remediation result');
+    expect(handleAgentCrashMock).toHaveBeenCalledWith(
+      'owner/repo',
+      '10',
+      'pr_remediate',
+      'failed to post remediation result'
+    );
     expect(pushWithRetryMock).not.toHaveBeenCalled();
-    expect(postRepliesMock).not.toHaveBeenCalled();
-    expect(postCommentMock).not.toHaveBeenCalled();
-    expect(executeTransitionMock).not.toHaveBeenCalled();
-    expect(resolveTransitionMock).not.toHaveBeenCalled();
-    expect(processResultMock).toHaveBeenCalledWith({
-      repo: 'owner/repo',
-      issueNumber: '10',
-      stage: 'pr_remediate',
-      cwd: '/tmp/fake-wt',
-      result: rejectResult,
-    });
-  });
+    expect(process.exitCode).toBe(1);
 
-  it('delegates fail verdicts to processResult and never pushes', async () => {
-    fetchChecksMock.mockResolvedValue(PASS_CHECKS);
-    const failResult: ResultJson = {
-      verdict: 'fail',
-      comment: '.shipper/output/comment-10.md',
-    };
-    retryOnInvalidOutputMock.mockResolvedValue(failResult);
-
-    const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
-
-    await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
-
-    expect(pushWithRetryMock).not.toHaveBeenCalled();
-    expect(postRepliesMock).not.toHaveBeenCalled();
-    expect(postCommentMock).not.toHaveBeenCalled();
-    expect(executeTransitionMock).not.toHaveBeenCalled();
-    expect(processResultMock).toHaveBeenCalledWith({
-      repo: 'owner/repo',
-      issueNumber: '10',
-      stage: 'pr_remediate',
-      cwd: '/tmp/fake-wt',
-      result: failResult,
-    });
+    errorSpy.mockRestore();
   });
 
   it('continues the pass when the initial prompt exits non-zero but retry validation succeeds', async () => {
