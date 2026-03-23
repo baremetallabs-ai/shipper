@@ -20,7 +20,7 @@ const truncateLargeInputMock = vi.fn((_: string, text: string, filename: string)
 );
 const runPromptMock = vi.fn();
 const syncWorktreeMock = vi.fn(() => Promise.resolve());
-const pushWorktreeMock = vi.fn(() => Promise.resolve());
+const pushWithRetryMock = vi.fn(() => Promise.resolve(0));
 const withStageHooksMock = vi.fn((_stage: unknown, _env: unknown, fn: () => Promise<unknown>) =>
   fn()
 );
@@ -66,7 +66,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   truncateLargeInput: truncateLargeInputMock,
   runPrompt: runPromptMock,
   syncWorktree: syncWorktreeMock,
-  pushWorktree: pushWorktreeMock,
+  pushWithRetry: pushWithRetryMock,
   withStageHooks: withStageHooksMock,
   withIssueLock: withIssueLockMock,
   withWorktree: withWorktreeMock,
@@ -117,7 +117,7 @@ describe('prRemediateCommand', () => {
     resolveRefMock.mockResolvedValue({ prNumber: '42', issueNumber: '10' });
     runPromptMock.mockResolvedValue(0);
     syncWorktreeMock.mockResolvedValue(undefined);
-    pushWorktreeMock.mockResolvedValue(undefined);
+    pushWithRetryMock.mockResolvedValue(0);
     setupProtocolDirsMock.mockResolvedValue(undefined);
     truncateLargeInputMock.mockClear();
     writeContextFileMock.mockResolvedValue(undefined);
@@ -259,9 +259,9 @@ describe('prRemediateCommand', () => {
       comment: '.shipper/output/comment-10.md',
       replies: '.shipper/output/replies',
     });
-    pushWorktreeMock.mockImplementation(() => {
-      events.push('pushWorktree');
-      return Promise.resolve();
+    pushWithRetryMock.mockImplementation(() => {
+      events.push('pushWithRetry');
+      return Promise.resolve(0);
     });
     postRepliesMock.mockImplementation(() => {
       events.push('postReplies');
@@ -316,7 +316,7 @@ describe('prRemediateCommand', () => {
     expect(readResultFileMock).toHaveBeenCalledWith('/tmp/fake-wt/.shipper/output');
     expect(events).toEqual([
       'fetchChecks',
-      'pushWorktree',
+      'pushWithRetry',
       'postReplies',
       'postComment',
       'fetchChecks',
@@ -464,7 +464,7 @@ describe('prRemediateCommand', () => {
     expect(scrubOutputDirMock).toHaveBeenCalledTimes(2);
     expect(runPromptMock).toHaveBeenCalledTimes(2);
     expect(retryOnInvalidOutputMock).toHaveBeenCalledTimes(2);
-    expect(pushWorktreeMock).toHaveBeenCalledTimes(2);
+    expect(pushWithRetryMock).toHaveBeenCalledTimes(2);
     expect(postCommentMock).toHaveBeenCalledTimes(2);
     expect(postRepliesMock).toHaveBeenCalledTimes(2);
     expect(enrichFailedChecksMock).toHaveBeenNthCalledWith(
@@ -584,7 +584,7 @@ describe('prRemediateCommand', () => {
 
     await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
 
-    expect(pushWorktreeMock).not.toHaveBeenCalled();
+    expect(pushWithRetryMock).not.toHaveBeenCalled();
     expect(postRepliesMock).not.toHaveBeenCalled();
     expect(postCommentMock).toHaveBeenCalledWith(
       'owner/repo',
@@ -612,7 +612,7 @@ describe('prRemediateCommand', () => {
 
     expect(retryOnInvalidOutputMock).toHaveBeenCalledTimes(1);
     expect(handleAgentCrashMock).not.toHaveBeenCalled();
-    expect(pushWorktreeMock).toHaveBeenCalledTimes(1);
+    expect(pushWithRetryMock).toHaveBeenCalledTimes(1);
     expect(postCommentMock).toHaveBeenCalledTimes(1);
     expect(process.exitCode).toBe(0);
   });
@@ -630,7 +630,7 @@ describe('prRemediateCommand', () => {
     await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
 
     expect(syncWorktreeMock).toHaveBeenCalledTimes(5);
-    expect(pushWorktreeMock).toHaveBeenCalledTimes(5);
+    expect(pushWithRetryMock).toHaveBeenCalledTimes(5);
     expect(postCommentMock).toHaveBeenCalledTimes(5);
     expect(executeTransitionMock).not.toHaveBeenCalled();
     expect(errorSpy).toHaveBeenCalledWith('Remediation exhausted 5 passes without green CI.');
@@ -668,6 +668,41 @@ describe('prRemediateCommand', () => {
     expect(scrubOutputDirMock).toHaveBeenCalledTimes(1);
   });
 
+  it('forwards push hook failures to the retry agent as raw userInput', async () => {
+    fetchChecksMock.mockResolvedValue(PASS_CHECKS);
+    readResultFileMock.mockResolvedValue({
+      verdict: 'accept',
+      comment: '.shipper/output/comment-10.md',
+    });
+
+    const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
+
+    await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
+
+    const pushRetryAgent = pushWithRetryMock.mock.calls[0]?.[1] as
+      | ((conflictContext?: unknown, pushError?: string, installError?: string) => Promise<number>)
+      | undefined;
+    expect(pushRetryAgent).toEqual(expect.any(Function));
+    if (!pushRetryAgent) {
+      throw new Error('Expected pushWithRetry to receive a retry callback.');
+    }
+    runPromptMock.mockClear();
+
+    await expect(pushRetryAgent(undefined, 'pre-push hook failed: npm run test')).resolves.toBe(0);
+
+    expect(runPromptMock).toHaveBeenCalledWith('pr_remediate', {
+      repo,
+      issueRef: '10',
+      prRef: '42',
+      cwd: '/tmp/fake-wt',
+      mode: undefined,
+      agent: undefined,
+      model: undefined,
+      userInput: 'pre-push hook failed: npm run test',
+    });
+    expect(formatConflictContextMock).not.toHaveBeenCalled();
+  });
+
   it('handles invalid or missing result files as agent crashes', async () => {
     fetchChecksMock.mockResolvedValue(PASS_CHECKS);
     readResultFileMock.mockRejectedValue(
@@ -685,7 +720,7 @@ describe('prRemediateCommand', () => {
       'Missing result.json at /tmp/fake-wt/.shipper/output/result.json'
     );
     expect(process.exitCode).toBe(1);
-    expect(pushWorktreeMock).not.toHaveBeenCalled();
+    expect(pushWithRetryMock).not.toHaveBeenCalled();
     expect(executeTransitionMock).not.toHaveBeenCalled();
   });
 
@@ -708,7 +743,7 @@ describe('prRemediateCommand', () => {
       'pr_remediate accept requires a pr_spec in result.json'
     );
     expect(readResultFileMock).not.toHaveBeenCalled();
-    expect(pushWorktreeMock).not.toHaveBeenCalled();
+    expect(pushWithRetryMock).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
 
     errorSpy.mockRestore();
@@ -720,7 +755,7 @@ describe('prRemediateCommand', () => {
       comment: '.shipper/output/comment-10.md',
       replies: '.shipper/output/replies',
     });
-    pushWorktreeMock.mockRejectedValue(new Error('fatal: unable to access remote'));
+    pushWithRetryMock.mockRejectedValue(new Error('fatal: unable to access remote'));
 
     const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
 
@@ -754,7 +789,7 @@ describe('prRemediateCommand', () => {
     expect(resolveTransitionMock).not.toHaveBeenCalled();
     expect(executeTransitionMock).not.toHaveBeenCalled();
     expect(syncWorktreeMock).toHaveBeenCalledTimes(1);
-    expect(pushWorktreeMock).toHaveBeenCalledTimes(1);
+    expect(pushWithRetryMock).toHaveBeenCalledTimes(1);
   });
 
   it('still reports a push failure crash when posting prepared outputs also fails', async () => {
@@ -764,7 +799,7 @@ describe('prRemediateCommand', () => {
       comment: '.shipper/output/comment-10.md',
       replies: '.shipper/output/replies',
     });
-    pushWorktreeMock.mockRejectedValue(new Error('fatal: unable to access remote'));
+    pushWithRetryMock.mockRejectedValue(new Error('fatal: unable to access remote'));
     postRepliesMock.mockRejectedValue(new Error('reply post failed'));
     postCommentMock.mockRejectedValue(new Error('comment post failed'));
 
@@ -809,7 +844,7 @@ describe('prRemediateCommand', () => {
     );
     expect(process.exitCode).toBe(1);
     expect(runPromptMock).not.toHaveBeenCalled();
-    expect(pushWorktreeMock).not.toHaveBeenCalled();
+    expect(pushWithRetryMock).not.toHaveBeenCalled();
   });
 
   it('does not transition to ready when no checks have appeared yet', async () => {
@@ -824,7 +859,7 @@ describe('prRemediateCommand', () => {
     await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
 
     expect(syncWorktreeMock).toHaveBeenCalledTimes(5);
-    expect(pushWorktreeMock).toHaveBeenCalledTimes(5);
+    expect(pushWithRetryMock).toHaveBeenCalledTimes(5);
     expect(executeTransitionMock).not.toHaveBeenCalled();
   });
 });

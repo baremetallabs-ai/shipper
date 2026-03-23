@@ -26,7 +26,7 @@ import {
   scrubOutputDir,
   setupProtocolDirs,
   syncWorktree,
-  pushWorktree,
+  pushWithRetry,
   writeContextFile,
 } from '@dnsquared/shipper-core';
 
@@ -438,7 +438,26 @@ export async function prRemediateCommand(
             }
 
             try {
-              await pushWorktree(gitOpts);
+              const pushCode = await pushWithRetry(
+                gitOpts,
+                (conflictContext, pushError, installError) => {
+                  return runPrompt('pr_remediate', {
+                    repo,
+                    issueRef: issueNumber,
+                    prRef,
+                    cwd: wtPath,
+                    mode,
+                    agent,
+                    model,
+                    userInput: conflictContext
+                      ? formatConflictContext(conflictContext)
+                      : (pushError ?? installError ?? undefined),
+                  });
+                }
+              );
+              if (pushCode !== 0) {
+                throw new Error(`Push retry agent exited with code ${pushCode}`);
+              }
             } catch (error) {
               const detail = error instanceof Error ? error.message : String(error);
               try {
