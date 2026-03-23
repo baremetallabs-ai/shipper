@@ -5,7 +5,6 @@ import { fetchChecks, classifyChecks, enrichFailedChecks } from '@dnsquared/ship
 import { autoSelectPrForStage, resolveRef } from '@dnsquared/shipper-core';
 import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
 import { formatConflictContext } from '@dnsquared/shipper-core';
-import { FAILED_LABEL, PR_REVIEWED_LABEL } from '@dnsquared/shipper-core';
 import { gh } from '@dnsquared/shipper-core';
 import { withStageHooks } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
@@ -19,14 +18,14 @@ import {
   handleAgentCrash,
   postComment,
   postReplies,
-  PROTOCOL_OUTPUT_DIR,
-  readResultFile,
+  processResult,
   retryOnInvalidOutput,
   resolveTransition,
   scrubOutputDir,
   setupProtocolDirs,
   syncWorktree,
   pushWithRetry,
+  validateStageOutput,
   writeContextFile,
 } from '@dnsquared/shipper-core';
 
@@ -395,8 +394,10 @@ export async function prRemediateCommand(
               agent,
               model,
             });
+
+            let result: Awaited<ReturnType<typeof retryOnInvalidOutput>>;
             try {
-              await retryOnInvalidOutput({
+              result = await retryOnInvalidOutput({
                 cwd: wtPath,
                 stage: 'pr_remediate',
                 retry: (userInput) =>
@@ -418,30 +419,20 @@ export async function prRemediateCommand(
               return 1;
             }
 
-            const outputDir = path.resolve(wtPath, PROTOCOL_OUTPUT_DIR);
-
-            let result: Awaited<ReturnType<typeof readResultFile>>;
-            try {
-              result = await readResultFile(outputDir);
-            } catch (error) {
-              const detail = error instanceof Error ? error.message : String(error);
-              await handleAgentCrash(repo, issueNumber, 'pr_remediate', detail);
-              return 1;
-            }
-
-            const commentPath = path.resolve(wtPath, result.comment);
             if (result.verdict === 'reject' || result.verdict === 'fail') {
-              await postComment(repo, issueNumber, commentPath);
-              await executeTransition(repo, issueNumber, {
-                add: [FAILED_LABEL],
-                remove: [PR_REVIEWED_LABEL],
+              await processResult({
+                repo,
+                issueNumber,
+                stage: 'pr_remediate',
+                cwd: wtPath,
+                result,
               });
               return 0;
             }
 
             const readLatestPostingResult = async () => {
               try {
-                return await readResultFile(outputDir);
+                return await validateStageOutput(wtPath, 'pr_remediate');
               } catch (error) {
                 const detail = error instanceof Error ? error.message : String(error);
                 console.warn(
@@ -508,6 +499,7 @@ export async function prRemediateCommand(
               );
               return 1;
             }
+
             const postingResult = await readLatestPostingResult();
             await postReplies(repo, prRef, wtPath, postingResult.replies);
             await postComment(repo, issueNumber, path.resolve(wtPath, postingResult.comment));
