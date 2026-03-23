@@ -420,14 +420,21 @@ export async function prRemediateCommand(
             }
 
             if (result.verdict === 'reject' || result.verdict === 'fail') {
-              await processResult({
-                repo,
-                issueNumber,
-                stage: 'pr_remediate',
-                cwd: wtPath,
-                result,
-              });
-              return 0;
+              try {
+                await processResult({
+                  repo,
+                  issueNumber,
+                  stage: 'pr_remediate',
+                  cwd: wtPath,
+                  result,
+                });
+                return 0;
+              } catch (error) {
+                const detail = error instanceof Error ? error.message : String(error);
+                console.error(detail);
+                await handleAgentCrash(repo, issueNumber, 'pr_remediate', detail);
+                return 1;
+              }
             }
 
             const readLatestPostingResult = async () => {
