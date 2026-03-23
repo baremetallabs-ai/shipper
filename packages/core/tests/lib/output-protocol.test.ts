@@ -28,6 +28,7 @@ const {
   scrubOutputDir,
   submitReviewPayload,
   setupProtocolDirs,
+  truncateLargeInput,
   validateStageOutput,
   writeContextFile,
 } = await import('../../src/lib/output-protocol.js');
@@ -157,6 +158,46 @@ describe('output protocol helpers', () => {
     await expect(writeContextFile(tempDir, '../issue-248.md', 'issue snapshot')).rejects.toThrow(
       `context filename must stay within ${path.join(tempDir, PROTOCOL_INPUT_DIR)}`
     );
+  });
+
+  it('returns below-threshold input unchanged without writing a context file', async () => {
+    const text = 'small error output';
+
+    await expect(truncateLargeInput(tempDir, text, 'push-error.txt')).resolves.toBe(text);
+    await expect(
+      readFile(path.join(tempDir, PROTOCOL_INPUT_DIR, 'push-error.txt'), 'utf-8')
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('writes oversized input to .shipper/input and returns a head-tail summary', async () => {
+    const lines = Array.from({ length: 140 }, (_, index) => `${'x'.repeat(400)} line ${index + 1}`);
+    const oversized = lines.join('\n');
+
+    const truncated = await truncateLargeInput(tempDir, oversized, 'install-error.txt');
+
+    await expect(
+      readFile(path.join(tempDir, PROTOCOL_INPUT_DIR, 'install-error.txt'), 'utf-8')
+    ).resolves.toBe(oversized);
+    expect(truncated).toContain('line 1');
+    expect(truncated).toContain('line 50');
+    expect(truncated).toContain('line 91');
+    expect(truncated).toContain('line 140');
+    expect(truncated).toContain(
+      '[40 lines omitted; full output written to .shipper/input/install-error.txt]'
+    );
+  });
+
+  it('avoids duplicating short-but-huge input when truncating inline content', async () => {
+    const oversized = 'A'.repeat(60_000);
+
+    const truncated = await truncateLargeInput(tempDir, oversized, 'conflict-context.txt');
+
+    await expect(
+      readFile(path.join(tempDir, PROTOCOL_INPUT_DIR, 'conflict-context.txt'), 'utf-8')
+    ).resolves.toBe(oversized);
+    expect(truncated).toContain('full output written to .shipper/input/conflict-context.txt');
+    expect(truncated).toContain('bytes omitted');
+    expect(truncated.length).toBeLessThan(oversized.length);
   });
 
   it('posts label transitions with gh issue edit', async () => {

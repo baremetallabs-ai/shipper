@@ -4,6 +4,7 @@ import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
 import { formatConflictContext } from '@dnsquared/shipper-core';
 import { handleAgentCrash, processResult, scrubOutputDir } from '@dnsquared/shipper-core';
 import { retryOnInvalidOutput } from '@dnsquared/shipper-core';
+import { truncateLargeInput } from '@dnsquared/shipper-core';
 import { withStageHooks } from '@dnsquared/shipper-core';
 import { getSettings } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
@@ -43,9 +44,29 @@ export async function prOpenCommand(
         { repoRoot, branch, createBranch: false, issueNumber: issue, stage: 'pr-open' },
         async (wtPath) => {
           await scrubOutputDir(wtPath);
+          const getTransportUserInput = async (
+            conflictContext?: Parameters<typeof formatConflictContext>[0],
+            pushError?: string,
+            installError?: string
+          ): Promise<string | undefined> => {
+            if (conflictContext) {
+              return await truncateLargeInput(
+                wtPath,
+                formatConflictContext(conflictContext),
+                'conflict-context.txt'
+              );
+            }
+            if (pushError) {
+              return await truncateLargeInput(wtPath, pushError, 'push-error.txt');
+            }
+            if (installError) {
+              return await truncateLargeInput(wtPath, installError, 'install-error.txt');
+            }
+            return undefined;
+          };
           const transportCode = await withGitTransport(
             { wtPath, repoRoot, baseBranch, pushMode: 'force-with-lease' },
-            (conflictContext, pushError, installError) => {
+            async (conflictContext, pushError, installError) => {
               return runPrompt('pr_open', {
                 repo,
                 issueRef: issue,
@@ -54,9 +75,7 @@ export async function prOpenCommand(
                 mode,
                 agent,
                 model,
-                userInput: conflictContext
-                  ? formatConflictContext(conflictContext)
-                  : (pushError ?? installError ?? undefined),
+                userInput: await getTransportUserInput(conflictContext, pushError, installError),
               });
             }
           );
@@ -68,10 +87,10 @@ export async function prOpenCommand(
             const result = await retryOnInvalidOutput({
               cwd: wtPath,
               stage: 'pr_open',
-              retry: (userInput) =>
+              retry: async (userInput) =>
                 withGitTransport(
                   { wtPath, repoRoot, baseBranch, pushMode: 'force-with-lease' },
-                  (conflictContext, pushError, installError) =>
+                  async (conflictContext, pushError, installError) =>
                     runPrompt('pr_open', {
                       repo,
                       issueRef: issue,
@@ -80,9 +99,9 @@ export async function prOpenCommand(
                       mode,
                       agent,
                       model,
-                      userInput: conflictContext
-                        ? formatConflictContext(conflictContext)
-                        : (pushError ?? installError ?? userInput),
+                      userInput:
+                        (await getTransportUserInput(conflictContext, pushError, installError)) ??
+                        userInput,
                     })
                 ),
             });

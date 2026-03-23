@@ -420,6 +420,103 @@ describe('runPrompt', () => {
     expect(spawnedArgs()).toEqual(['-p', 'prompt body\n\n---\n\nresolve the merge conflict']);
   });
 
+  it('throws from buildPromptCommand when combined prompt inputs exceed the budget', async () => {
+    const promptBody = 'p'.repeat(60_000);
+    readFileMock.mockResolvedValueOnce(
+      [
+        '---',
+        'cmd: claude',
+        'append-issue: true',
+        'append-pr: true',
+        'append-user-input: true',
+        '---',
+        '',
+        promptBody,
+      ].join('\n')
+    );
+    fetchIssueMock.mockResolvedValueOnce('i'.repeat(60_000));
+    fetchPRMock.mockResolvedValueOnce('r'.repeat(60_000));
+
+    await expect(
+      buildPromptCommand('test', {
+        repo: 'owner/repo',
+        issueRef: '42',
+        prRef: '5',
+        userInput: 'u'.repeat(60_000),
+      })
+    ).rejects.toThrow(/Total prompt input size \(\d+ bytes\) exceeds the 200000-byte budget/);
+  });
+
+  it('returns 1 and does not spawn when the combined prompt inputs exceed the budget', async () => {
+    const promptBody = 'p'.repeat(60_000);
+    readFileMock.mockResolvedValueOnce(
+      [
+        '---',
+        'cmd: claude',
+        'append-issue: true',
+        'append-pr: true',
+        'append-user-input: true',
+        '---',
+        '',
+        promptBody,
+      ].join('\n')
+    );
+    fetchIssueMock.mockResolvedValueOnce('i'.repeat(60_000));
+    fetchPRMock.mockResolvedValueOnce('r'.repeat(60_000));
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await expect(
+      runPrompt('test', {
+        repo: 'owner/repo',
+        issueRef: '42',
+        prRef: '5',
+        userInput: 'u'.repeat(60_000),
+      })
+    ).resolves.toBe(1);
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /Error: Total prompt input size \(\d+ bytes\) exceeds the 200000-byte budget/
+      )
+    );
+    expect(spawnMock).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
+  it('still spawns when combined prompt inputs stay within the budget', async () => {
+    const promptBody = 'p'.repeat(20_000);
+    readFileMock.mockResolvedValueOnce(
+      [
+        '---',
+        'cmd: claude',
+        'append-issue: true',
+        'append-pr: true',
+        'append-user-input: true',
+        '---',
+        '',
+        promptBody,
+      ].join('\n')
+    );
+    fetchIssueMock.mockResolvedValueOnce('i'.repeat(20_000));
+    fetchPRMock.mockResolvedValueOnce('r'.repeat(20_000));
+    mockSpawnResult();
+
+    await expect(
+      runPrompt('test', {
+        repo: 'owner/repo',
+        issueRef: '42',
+        prRef: '5',
+        userInput: 'u'.repeat(20_000),
+      })
+    ).resolves.toBe(0);
+
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expect(spawnedArgs()).toContain(promptBody);
+    expect(spawnedArgs()).toContain(
+      `${'i'.repeat(20_000)}\n\n---\n\n${'r'.repeat(20_000)}\n\n---\n\n${'u'.repeat(20_000)}`
+    );
+  });
+
   it('returns 1 when appended issue or PR context is requested without a repo', async () => {
     readFileMock.mockResolvedValueOnce(
       [

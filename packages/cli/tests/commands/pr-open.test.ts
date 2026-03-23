@@ -22,8 +22,14 @@ const resolveBaseBranchMock = vi.fn(() => Promise.resolve('release/2026'));
 const resolveRefMock = vi.fn(() => Promise.resolve({ issueNumber: '239' }));
 const runPromptMock = vi.fn(() => Promise.resolve(0));
 const scrubOutputDirMock = vi.fn(() => Promise.resolve());
+const truncateLargeInputMock = vi.fn((_: string, text: string, filename: string) =>
+  Promise.resolve(`truncated:${filename}:${text}`)
+);
 const withGitTransportMock = vi.fn(
-  (_opts: unknown, fn: (conflictContext?: unknown, pushError?: string) => Promise<unknown>) =>
+  (
+    _opts: unknown,
+    fn: (conflictContext?: unknown, pushError?: string, installError?: string) => Promise<unknown>
+  ) =>
     fn({
       files: ['src/conflict.ts'],
       conflicts: [
@@ -57,6 +63,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   resolveRef: resolveRefMock,
   runPrompt: runPromptMock,
   scrubOutputDir: scrubOutputDirMock,
+  truncateLargeInput: truncateLargeInputMock,
   withGitTransport: withGitTransportMock,
   withIssueLock: withIssueLockMock,
   withStageHooks: withStageHooksMock,
@@ -102,6 +109,11 @@ describe('prOpenCommand', () => {
       expect.any(Function)
     );
     expect(formatConflictContextMock).toHaveBeenCalled();
+    expect(truncateLargeInputMock).toHaveBeenCalledWith(
+      '/tmp/fake-wt',
+      'formatted conflict context',
+      'conflict-context.txt'
+    );
     expect(runPromptMock).toHaveBeenCalledWith(
       'pr_open',
       expect.objectContaining({
@@ -109,7 +121,7 @@ describe('prOpenCommand', () => {
         issueRef: '239',
         cwd: '/tmp/fake-wt',
         baseBranch: 'release/2026',
-        userInput: 'formatted conflict context',
+        userInput: 'truncated:conflict-context.txt:formatted conflict context',
       })
     );
     const retryCall = retryOnInvalidOutputMock.mock.calls[0]?.[0] as
@@ -128,8 +140,14 @@ describe('prOpenCommand', () => {
     expect(handleAgentCrashMock).not.toHaveBeenCalled();
 
     withGitTransportMock.mockImplementationOnce(
-      (_opts: unknown, fn: (conflictContext?: unknown, pushError?: string) => Promise<unknown>) =>
-        fn()
+      (
+        _opts: unknown,
+        fn: (
+          conflictContext?: unknown,
+          pushError?: string,
+          installError?: string
+        ) => Promise<unknown>
+      ) => fn()
     );
 
     await expect(retryCall?.retry('Fix result')).resolves.toBe(0);
@@ -152,13 +170,18 @@ describe('prOpenCommand', () => {
       model: undefined,
       userInput: 'Fix result',
     });
+    expect(truncateLargeInputMock).toHaveBeenCalledTimes(1);
   });
 
-  it('forwards raw push failure text without conflict formatting', async () => {
+  it('routes push failures through truncateLargeInput without conflict formatting', async () => {
     withGitTransportMock.mockImplementationOnce(
       async (
         _opts: unknown,
-        fn: (conflictContext?: unknown, pushError?: string) => Promise<unknown>
+        fn: (
+          conflictContext?: unknown,
+          pushError?: string,
+          installError?: string
+        ) => Promise<unknown>
       ) => fn(undefined, 'git push --force-with-lease exited with code 1:\npre-push hook failed')
     );
     const { prOpenCommand } = await import('../../src/commands/pr-open.js');
@@ -166,13 +189,50 @@ describe('prOpenCommand', () => {
     await expect(prOpenCommand('owner/repo', '239')).resolves.toBeUndefined();
 
     expect(formatConflictContextMock).not.toHaveBeenCalled();
+    expect(truncateLargeInputMock).toHaveBeenCalledWith(
+      '/tmp/fake-wt',
+      'git push --force-with-lease exited with code 1:\npre-push hook failed',
+      'push-error.txt'
+    );
     expect(runPromptMock).toHaveBeenCalledWith(
       'pr_open',
       expect.objectContaining({
         repo: 'owner/repo',
         issueRef: '239',
         cwd: '/tmp/fake-wt',
-        userInput: 'git push --force-with-lease exited with code 1:\npre-push hook failed',
+        userInput:
+          'truncated:push-error.txt:git push --force-with-lease exited with code 1:\npre-push hook failed',
+      })
+    );
+  });
+
+  it('routes install failures through truncateLargeInput', async () => {
+    withGitTransportMock.mockImplementationOnce(
+      async (
+        _opts: unknown,
+        fn: (
+          conflictContext?: unknown,
+          pushError?: string,
+          installError?: string
+        ) => Promise<unknown>
+      ) => fn(undefined, undefined, 'npm install exited with code 1')
+    );
+    const { prOpenCommand } = await import('../../src/commands/pr-open.js');
+
+    await expect(prOpenCommand('owner/repo', '239')).resolves.toBeUndefined();
+
+    expect(truncateLargeInputMock).toHaveBeenCalledWith(
+      '/tmp/fake-wt',
+      'npm install exited with code 1',
+      'install-error.txt'
+    );
+    expect(runPromptMock).toHaveBeenCalledWith(
+      'pr_open',
+      expect.objectContaining({
+        repo: 'owner/repo',
+        issueRef: '239',
+        cwd: '/tmp/fake-wt',
+        userInput: 'truncated:install-error.txt:npm install exited with code 1',
       })
     );
   });

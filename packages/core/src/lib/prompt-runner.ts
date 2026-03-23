@@ -56,6 +56,7 @@ const GH_MUTATION_PATTERNS = [
   /gh\s+pr\s+create\b/,
   /gh\s+pr\s+review\b/,
 ] as const;
+const MAX_INPUT_BYTES = 200_000;
 const warnedPromptPaths = new Set<string>();
 
 interface WorktreeDirs {
@@ -377,6 +378,13 @@ async function resolvePromptCommand(
         args[promptIdx] = promptBody + '\n\n---\n\n' + userMessage;
       }
     }
+  }
+
+  const totalBytes = args.reduce((sum, arg) => sum + Buffer.byteLength(arg, 'utf-8'), 0);
+  if (totalBytes > MAX_INPUT_BYTES) {
+    throw new Error(
+      `Total prompt input size (${totalBytes} bytes) exceeds the ${MAX_INPUT_BYTES}-byte budget. Reduce input size before calling runPrompt.`
+    );
   }
 
   return { agent, args, promptBody };

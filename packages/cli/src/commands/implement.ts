@@ -5,6 +5,7 @@ import { formatConflictContext } from '@dnsquared/shipper-core';
 import { getSettings, resolveBaseBranch } from '@dnsquared/shipper-core';
 import { handleAgentCrash, processResult, scrubOutputDir } from '@dnsquared/shipper-core';
 import { retryOnInvalidOutput } from '@dnsquared/shipper-core';
+import { truncateLargeInput } from '@dnsquared/shipper-core';
 import { withStageHooks } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
 import { withGitTransport } from '@dnsquared/shipper-core';
@@ -39,9 +40,29 @@ export async function implementCommand(
         { repoRoot, branch, createBranch: true, issueNumber: issue, stage: 'implement' },
         async (wtPath) => {
           await scrubOutputDir(wtPath);
+          const getTransportUserInput = async (
+            conflictContext?: Parameters<typeof formatConflictContext>[0],
+            pushError?: string,
+            installError?: string
+          ): Promise<string | undefined> => {
+            if (conflictContext) {
+              return await truncateLargeInput(
+                wtPath,
+                formatConflictContext(conflictContext),
+                'conflict-context.txt'
+              );
+            }
+            if (pushError) {
+              return await truncateLargeInput(wtPath, pushError, 'push-error.txt');
+            }
+            if (installError) {
+              return await truncateLargeInput(wtPath, installError, 'install-error.txt');
+            }
+            return undefined;
+          };
           const transportCode = await withGitTransport(
             { wtPath, repoRoot, baseBranch, pushMode: 'new-branch' },
-            (conflictContext, pushError, installError) => {
+            async (conflictContext, pushError, installError) => {
               return runPrompt('implement', {
                 repo,
                 issueRef: issue,
@@ -49,9 +70,7 @@ export async function implementCommand(
                 mode,
                 agent,
                 model,
-                userInput: conflictContext
-                  ? formatConflictContext(conflictContext)
-                  : (pushError ?? installError ?? undefined),
+                userInput: await getTransportUserInput(conflictContext, pushError, installError),
               });
             }
           );
@@ -63,10 +82,10 @@ export async function implementCommand(
             const result = await retryOnInvalidOutput({
               cwd: wtPath,
               stage: 'implement',
-              retry: (userInput) =>
+              retry: async (userInput) =>
                 withGitTransport(
                   { wtPath, repoRoot, baseBranch, pushMode: 'new-branch' },
-                  (conflictContext, pushError, installError) =>
+                  async (conflictContext, pushError, installError) =>
                     runPrompt('implement', {
                       repo,
                       issueRef: issue,
@@ -74,9 +93,9 @@ export async function implementCommand(
                       mode,
                       agent,
                       model,
-                      userInput: conflictContext
-                        ? formatConflictContext(conflictContext)
-                        : (pushError ?? installError ?? userInput),
+                      userInput:
+                        (await getTransportUserInput(conflictContext, pushError, installError)) ??
+                        userInput,
                     })
                 ),
             });

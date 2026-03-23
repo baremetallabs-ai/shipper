@@ -11,6 +11,7 @@ import { withStageHooks } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
 import { withWorktree } from '@dnsquared/shipper-core';
 import { runPrompt } from '@dnsquared/shipper-core';
+import { truncateLargeInput } from '@dnsquared/shipper-core';
 import { getSettings } from '@dnsquared/shipper-core';
 import type { PrReviewWait } from '@dnsquared/shipper-core';
 import {
@@ -357,7 +358,11 @@ export async function prRemediateCommand(
                     mode,
                     agent,
                     model,
-                    userInput: formatConflictContext(conflictContext),
+                    userInput: await truncateLargeInput(
+                      wtPath,
+                      formatConflictContext(conflictContext),
+                      'conflict-context.txt'
+                    ),
                   });
                 },
                 async (installError) => {
@@ -369,7 +374,7 @@ export async function prRemediateCommand(
                     mode,
                     agent,
                     model,
-                    userInput: installError,
+                    userInput: await truncateLargeInput(wtPath, installError, 'install-error.txt'),
                   });
                 }
               );
