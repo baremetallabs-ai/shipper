@@ -14,7 +14,13 @@ type MockLogStream = EventEmitter & {
   write: ReturnType<typeof vi.fn>;
 };
 
+type PromptStdin = EventEmitter & {
+  end: ReturnType<typeof vi.fn>;
+  write: ReturnType<typeof vi.fn>;
+};
+
 type PromptChild = EventEmitter & {
+  stdin?: PromptStdin;
   stderr?: EventEmitter;
   stdout?: PromptStdout;
 };
@@ -75,6 +81,13 @@ const resolveModeMock = vi
 const getSettingsMock = vi.fn<() => { agentTimeoutMinutes: number }>().mockReturnValue({
   agentTimeoutMinutes: 60,
 });
+const stdinPipeMock = vi.spyOn(process.stdin, 'pipe').mockImplementation(() => undefined as never);
+const stdinUnpipeMock = vi
+  .spyOn(process.stdin, 'unpipe')
+  .mockImplementation(() => process.stdin as never);
+const stdinPauseMock = vi
+  .spyOn(process.stdin, 'pause')
+  .mockImplementation(() => process.stdin as never);
 
 vi.mock('node:child_process', async () => {
   const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
@@ -167,9 +180,14 @@ function mockSpawnResult(
       },
     }) as PromptStdout;
     const child = new EventEmitter() as PromptChild & {
+      stdin?: PromptStdin;
       stderr?: EventEmitter;
       stdout?: PromptStdout;
     };
+    child.stdin = Object.assign(new EventEmitter(), {
+      end: vi.fn(),
+      write: vi.fn(),
+    }) as PromptStdin;
     child.stdout = stdout;
     globalThis.queueMicrotask(() => {
       if (error) {
@@ -214,6 +232,18 @@ function makePrompt(
 
 function spawnedArgs(): string[] {
   return spawnMock.mock.calls[0]?.[1] ?? [];
+}
+
+function spawnedOptions(): Record<string, unknown> | undefined {
+  return spawnMock.mock.calls[0]?.[2];
+}
+
+function spawnedChild(): PromptChild {
+  const child = spawnMock.mock.results[0]?.value as unknown;
+  if (!(child instanceof EventEmitter)) {
+    throw new Error('Expected spawn to return a child process.');
+  }
+  return child as PromptChild;
 }
 
 function makeTimeoutChild(): PromptChild & {
@@ -319,7 +349,7 @@ describe('runPrompt', () => {
     expect(args).toContain('prompt body');
   });
 
-  it('passes the prompt body with -p for copilot', async () => {
+  it('passes the prompt body through stdin for copilot default mode', async () => {
     resolveAgentMock.mockReturnValue('copilot');
     readFileMock.mockResolvedValueOnce(
       ['---', 'cmd: copilot', '---', '', 'prompt body'].join('\n')
@@ -329,7 +359,14 @@ describe('runPrompt', () => {
     await expect(runPrompt('test', {})).resolves.toBe(0);
 
     expect(execFileSyncMock).toHaveBeenCalledWith('copilot', ['--version'], { stdio: 'ignore' });
-    expect(spawnedArgs()).toEqual(['-p', 'prompt body']);
+    expect(spawnedArgs()).toEqual([]);
+    expect(spawnedOptions()).toMatchObject({
+      stdio: ['pipe', 'inherit', 'inherit'],
+    });
+    expect(spawnedChild().stdin?.write).toHaveBeenCalledWith('prompt body\n');
+    expect(stdinPipeMock).toHaveBeenCalledWith(spawnedChild().stdin);
+    expect(stdinUnpipeMock).toHaveBeenCalledWith(spawnedChild().stdin);
+    expect(stdinPauseMock).toHaveBeenCalled();
   });
 
   it('reads the prompt from the resolved agent subdirectory', async () => {
@@ -417,7 +454,10 @@ describe('runPrompt', () => {
 
     await expect(runPrompt('test', { userInput: 'resolve the merge conflict' })).resolves.toBe(0);
 
-    expect(spawnedArgs()).toEqual(['-p', 'prompt body\n\n---\n\nresolve the merge conflict']);
+    expect(spawnedArgs()).toEqual([]);
+    expect(spawnedChild().stdin?.write).toHaveBeenCalledWith(
+      'prompt body\n\n---\n\nresolve the merge conflict\n'
+    );
   });
 
   it('throws from buildPromptCommand when combined prompt inputs exceed the budget', async () => {
@@ -662,7 +702,8 @@ describe('runPrompt', () => {
 
     await expect(runPrompt('test', { model: 'gpt-5' })).resolves.toBe(0);
 
-    expect(spawnedArgs()).toEqual(['--model', 'gpt-5', '-p', 'prompt body']);
+    expect(spawnedArgs()).toEqual(['--model', 'gpt-5']);
+    expect(spawnedChild().stdin?.write).toHaveBeenCalledWith('prompt body\n');
   });
 
   it('does not add a model flag for copilot when no model is resolved', async () => {
@@ -672,7 +713,8 @@ describe('runPrompt', () => {
 
     await expect(runPrompt('test', {})).resolves.toBe(0);
 
-    expect(spawnedArgs()).toEqual(['-p', 'prompt body']);
+    expect(spawnedArgs()).toEqual([]);
+    expect(spawnedChild().stdin?.write).toHaveBeenCalledWith('prompt body\n');
     expect(spawnedArgs()).not.toContain('--model');
   });
 
@@ -740,11 +782,12 @@ describe('runPrompt', () => {
     ]);
   });
 
-  it('strips copilot headless flags for interactive mode but preserves -p', async () => {
+  it('strips copilot headless flags and -p for interactive mode', async () => {
     resolveAgentMock.mockReturnValue('copilot');
     resolveModeMock.mockReturnValue('interactive');
     readFileMock.mockResolvedValueOnce(
       makePrompt('copilot', [
+        '-p',
         '--autopilot',
         '--allow-all-tools',
         '--allow-all-urls',
@@ -755,7 +798,50 @@ describe('runPrompt', () => {
 
     await runPrompt('test', { mode: 'interactive' });
 
-    expect(spawnedArgs()).toEqual(['-p', 'prompt body']);
+    expect(spawnedArgs()).toEqual([]);
+    expect(spawnedChild().stdin?.write).toHaveBeenCalledWith('prompt body\n');
+  });
+
+  it('strips copilot headless flags for default mode from prompt frontmatter', async () => {
+    resolveAgentMock.mockReturnValue('copilot');
+    resolveModeMock.mockReturnValue('default');
+    readFileMock.mockResolvedValueOnce(
+      makePrompt('copilot', [
+        '--autopilot',
+        '--allow-all-tools',
+        '--allow-all-urls',
+        '--no-ask-user',
+      ])
+    );
+    mockSpawnResult();
+
+    await runPrompt('test', {});
+
+    expect(spawnedArgs()).toEqual([]);
+    expect(spawnedChild().stdin?.write).toHaveBeenCalledWith('prompt body\n');
+  });
+
+  it('returns interactive copilot prompt text as initialInput from buildPromptCommand', async () => {
+    resolveAgentMock.mockReturnValue('copilot');
+    readFileMock.mockResolvedValueOnce(
+      [
+        '---',
+        'cmd: copilot',
+        'args:',
+        '  - --autopilot',
+        'append-user-input: true',
+        '---',
+        '',
+        'prompt body',
+      ].join('\n')
+    );
+
+    await expect(buildPromptCommand('test', { userInput: 'extra context' })).resolves.toEqual({
+      command: 'copilot',
+      args: [],
+      cwd: undefined,
+      initialInput: 'prompt body\n\n---\n\nextra context',
+    });
   });
 
   it('captures headless stdout to a session log and writes metadata after exit', async () => {

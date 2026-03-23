@@ -216,6 +216,7 @@ async function loadHandlers(): Promise<Map<string, IpcHandler>> {
     command: 'codex',
     args: ['groom', '42'],
     cwd: '/tmp/repo',
+    initialInput: undefined,
   });
   state.scanArtifactsMock.mockResolvedValue({
     targetStage: 'groomed',
@@ -559,6 +560,7 @@ describe('desktop IPC locking', () => {
         cols: 120,
         rows: 40,
         cwd: '/tmp/repo',
+        initialInput: undefined,
       })
     );
     expect(state.acquireIssueLockMock.mock.invocationCallOrder[0]).toBeLessThan(
@@ -591,6 +593,39 @@ describe('desktop IPC locking', () => {
     state.exitCallbacks.get(result.sessionId)?.();
 
     expect(state.releaseIssueLockMock).toHaveBeenCalledWith('owner/repo', '42');
+  });
+
+  it('forwards initialInput from buildPromptCommand into PTY spawn', async () => {
+    await loadHandlers();
+    state.buildPromptCommandMock.mockResolvedValueOnce({
+      command: 'copilot',
+      args: ['--model', 'gpt-5'],
+      cwd: '/tmp/repo',
+      initialInput: 'seed prompt',
+    });
+    const handler = getHandler('pty-spawn-shipper-groom');
+
+    await handler(
+      {},
+      {
+        repo: 'owner/repo',
+        issueNumber: 42,
+        cols: 120,
+        rows: 40,
+      }
+    );
+
+    expect(state.ptySpawnMock).toHaveBeenCalledWith(
+      expect.any(String),
+      'copilot',
+      ['--model', 'gpt-5'],
+      expect.objectContaining({
+        cols: 120,
+        rows: 40,
+        cwd: '/tmp/repo',
+        initialInput: 'seed prompt',
+      })
+    );
   });
 
   it('does not start groom when lock acquisition fails', async () => {

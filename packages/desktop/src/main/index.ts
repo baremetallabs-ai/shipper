@@ -1093,6 +1093,7 @@ function registerIpcHandlers(): void {
         cols: parsedPayload.cols,
         rows: parsedPayload.rows,
         cwd: cmd.cwd ?? repoPath,
+        initialInput: cmd.initialInput,
       });
       ptyManager.onSessionExit(sessionId, () => {
         void releaseLock();
