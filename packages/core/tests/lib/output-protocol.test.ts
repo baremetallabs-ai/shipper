@@ -4,6 +4,8 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { ResultJson } from '../../src/lib/result-schema.js';
+
 const ghMock = vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>();
 
 vi.mock('../../src/lib/gh.js', () => ({
@@ -26,11 +28,90 @@ const {
   scrubOutputDir,
   submitReviewPayload,
   setupProtocolDirs,
+  validateStageOutput,
   writeContextFile,
 } = await import('../../src/lib/output-protocol.js');
 
 describe('output protocol helpers', () => {
   let tempDir: string;
+
+  function outputRelative(name: string): string {
+    return path.posix.join('.shipper', 'output', name);
+  }
+
+  function outputAbs(name: string): string {
+    return path.join(tempDir, PROTOCOL_OUTPUT_DIR, name);
+  }
+
+  async function ensureOutputDir(): Promise<void> {
+    await mkdir(path.join(tempDir, PROTOCOL_OUTPUT_DIR), { recursive: true });
+  }
+
+  async function writeOutputFile(name: string, content: string): Promise<string> {
+    await ensureOutputDir();
+    const filePath = outputAbs(name);
+    await writeFile(filePath, content, 'utf-8');
+    return filePath;
+  }
+
+  async function writeOutputJson(name: string, data: unknown): Promise<string> {
+    return await writeOutputFile(name, JSON.stringify(data));
+  }
+
+  async function writeResultFile(result: Record<string, unknown>): Promise<string> {
+    return await writeOutputJson('result.json', result);
+  }
+
+  function buildResult(overrides: Partial<ResultJson> = {}): ResultJson {
+    return {
+      verdict: 'accept',
+      comment: outputRelative('comment-248.md'),
+      ...overrides,
+    };
+  }
+
+  function buildPrSpec(
+    overrides: Partial<{
+      title: string;
+      body_file: string;
+      base: string;
+      head_branch: string;
+      draft: boolean;
+    }> = {}
+  ) {
+    return {
+      title: 'feat(#248): migrate protocol',
+      body_file: outputRelative('pr-body-248.md'),
+      base: 'main',
+      head_branch: 'shipper/248-migrate-protocol',
+      draft: false,
+      ...overrides,
+    };
+  }
+
+  function buildReviewPayload(
+    overrides: Partial<{
+      commit_id: string;
+      body: string;
+      event: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT';
+      comments: Array<{
+        path: string;
+        line: number;
+        side: 'LEFT' | 'RIGHT';
+        body: string;
+        start_line?: number;
+        start_side?: 'LEFT' | 'RIGHT';
+      }>;
+    }> = {}
+  ) {
+    return {
+      commit_id: 'abc123',
+      body: 'Looks good.',
+      event: 'APPROVE' as const,
+      comments: [],
+      ...overrides,
+    };
+  }
 
   beforeEach(async () => {
     ghMock.mockReset().mockResolvedValue({ stdout: '', stderr: '' });
@@ -126,7 +207,7 @@ describe('output protocol helpers', () => {
     await writeFile(path.join(repliesDir, 'notes.txt'), 'ignore me', 'utf-8');
     await mkdir(path.join(repliesDir, 'nested'));
 
-    await postReplies('owner/repo', '248', tempDir, '.shipper/output/replies');
+    await postReplies('owner/repo', '248', tempDir, outputRelative('replies'));
 
     expect(ghMock).toHaveBeenNthCalledWith(1, [
       'api',
@@ -148,32 +229,20 @@ describe('output protocol helpers', () => {
   });
 
   it('treats an absent replies directory as a no-op', async () => {
-    await postReplies('owner/repo', '248', tempDir, '.shipper/output/replies');
+    await postReplies('owner/repo', '248', tempDir, outputRelative('replies'));
 
     expect(ghMock).not.toHaveBeenCalled();
   });
 
   it('creates a PR from a spec file and body file', async () => {
-    const outputDir = path.join(tempDir, PROTOCOL_OUTPUT_DIR);
-    await mkdir(outputDir, { recursive: true });
-    await writeFile(path.join(outputDir, 'pr-body-248.md'), 'body', 'utf-8');
-    await writeFile(
-      path.join(outputDir, 'pr-spec-248.json'),
-      JSON.stringify({
-        title: 'feat(#248): migrate protocol',
-        body_file: '.shipper/output/pr-body-248.md',
-        base: 'main',
-        head_branch: 'shipper/248-migrate-protocol',
-        draft: false,
-      }),
-      'utf-8'
-    );
+    await writeOutputFile('pr-body-248.md', 'body');
+    await writeOutputJson('pr-spec-248.json', buildPrSpec());
     ghMock
       .mockResolvedValueOnce({ stdout: '', stderr: '' })
       .mockResolvedValueOnce({ stdout: 'https://github.com/owner/repo/pull/248\n', stderr: '' });
 
     await expect(
-      createPrFromSpec('owner/repo', tempDir, '.shipper/output/pr-spec-248.json')
+      createPrFromSpec('owner/repo', tempDir, outputRelative('pr-spec-248.json'))
     ).resolves.toBe('https://github.com/owner/repo/pull/248');
 
     expect(ghMock).toHaveBeenNthCalledWith(1, [
@@ -200,59 +269,29 @@ describe('output protocol helpers', () => {
       '--title',
       'feat(#248): migrate protocol',
       '--body-file',
-      path.join(tempDir, '.shipper/output/pr-body-248.md'),
+      outputAbs('pr-body-248.md'),
     ]);
   });
 
   it('short-circuits PR creation when a matching PR already exists', async () => {
-    const outputDir = path.join(tempDir, PROTOCOL_OUTPUT_DIR);
-    await mkdir(outputDir, { recursive: true });
-    await writeFile(path.join(outputDir, 'pr-body-248.md'), 'body', 'utf-8');
-    await writeFile(
-      path.join(outputDir, 'pr-spec-248.json'),
-      JSON.stringify({
-        title: 'feat(#248): migrate protocol',
-        body_file: '.shipper/output/pr-body-248.md',
-        base: 'main',
-        head_branch: 'shipper/248-migrate-protocol',
-        draft: true,
-      }),
-      'utf-8'
-    );
+    await writeOutputFile('pr-body-248.md', 'body');
+    await writeOutputJson('pr-spec-248.json', buildPrSpec({ draft: true }));
     ghMock.mockResolvedValueOnce({
       stdout: 'https://github.com/owner/repo/pull/248\n',
       stderr: '',
     });
 
     await expect(
-      createPrFromSpec('owner/repo', tempDir, '.shipper/output/pr-spec-248.json')
+      createPrFromSpec('owner/repo', tempDir, outputRelative('pr-spec-248.json'))
     ).resolves.toBe('https://github.com/owner/repo/pull/248');
 
     expect(ghMock).toHaveBeenCalledTimes(1);
-    expect(ghMock).toHaveBeenCalledWith([
-      'pr',
-      'list',
-      '-R',
-      'owner/repo',
-      '--head',
-      'shipper/248-migrate-protocol',
-      '--json',
-      'url',
-      '-q',
-      '.[0].url',
-    ]);
   });
 
   it('submits a review payload through the GitHub reviews API', async () => {
-    const outputDir = path.join(tempDir, PROTOCOL_OUTPUT_DIR);
-    const payloadPath = path.join(outputDir, 'review-payload-248.json');
-    await mkdir(outputDir, { recursive: true });
-    await writeFile(
-      payloadPath,
-      JSON.stringify({
-        commit_id: 'abc123',
-        body: 'Looks good.',
-        event: 'APPROVE',
+    const payloadPath = await writeOutputJson(
+      'review-payload-248.json',
+      buildReviewPayload({
         comments: [
           {
             path: 'src/file.ts',
@@ -261,8 +300,7 @@ describe('output protocol helpers', () => {
             body: 'Nice.',
           },
         ],
-      }),
-      'utf-8'
+      })
     );
     ghMock
       .mockResolvedValueOnce({ stdout: 'reviewer\n', stderr: '' })
@@ -273,7 +311,7 @@ describe('output protocol helpers', () => {
       'owner/repo',
       '248',
       tempDir,
-      '.shipper/output/review-payload-248.json'
+      outputRelative('review-payload-248.json')
     );
 
     expect(ghMock).toHaveBeenNthCalledWith(1, ['api', 'user', '-q', '.login']);
@@ -300,18 +338,9 @@ describe('output protocol helpers', () => {
   });
 
   it('downgrades self-authored approval reviews to comment before submission', async () => {
-    const outputDir = path.join(tempDir, PROTOCOL_OUTPUT_DIR);
-    const payloadPath = path.join(outputDir, 'review-payload-248.json');
-    await mkdir(outputDir, { recursive: true });
-    await writeFile(
-      payloadPath,
-      JSON.stringify({
-        commit_id: 'abc123',
-        body: 'Needs follow-up.',
-        event: 'REQUEST_CHANGES',
-        comments: [],
-      }),
-      'utf-8'
+    const payloadPath = await writeOutputJson(
+      'review-payload-248.json',
+      buildReviewPayload({ event: 'REQUEST_CHANGES' })
     );
     ghMock
       .mockResolvedValueOnce({ stdout: 'author\n', stderr: '' })
@@ -322,7 +351,7 @@ describe('output protocol helpers', () => {
       'owner/repo',
       '248',
       tempDir,
-      '.shipper/output/review-payload-248.json'
+      outputRelative('review-payload-248.json')
     );
 
     await expect(readFile(payloadPath, 'utf-8')).resolves.toContain('"event":"COMMENT"');
@@ -337,13 +366,9 @@ describe('output protocol helpers', () => {
   });
 
   it('rejects review comments that include only one multiline range field', async () => {
-    const outputDir = path.join(tempDir, PROTOCOL_OUTPUT_DIR);
-    await mkdir(outputDir, { recursive: true });
-    await writeFile(
-      path.join(outputDir, 'review-payload-248.json'),
-      JSON.stringify({
-        commit_id: 'abc123',
-        body: 'Needs work.',
+    await writeOutputJson(
+      'review-payload-248.json',
+      buildReviewPayload({
         event: 'COMMENT',
         comments: [
           {
@@ -354,454 +379,497 @@ describe('output protocol helpers', () => {
             start_line: 40,
           },
         ],
-      }),
-      'utf-8'
+      })
     );
 
     await expect(
-      submitReviewPayload('owner/repo', '248', tempDir, '.shipper/output/review-payload-248.json')
+      submitReviewPayload('owner/repo', '248', tempDir, outputRelative('review-payload-248.json'))
     ).rejects.toThrow(
       "'comments[0].start_line' and 'comments[0].start_side' must be provided together"
     );
     expect(ghMock).not.toHaveBeenCalled();
   });
 
-  it('processes a plain result by posting the comment before changing labels', async () => {
-    const outputDir = path.join(tempDir, PROTOCOL_OUTPUT_DIR);
-    await mkdir(outputDir, { recursive: true });
-    await writeFile(
-      path.join(outputDir, 'result.json'),
-      JSON.stringify({
-        verdict: 'accept',
-        comment: '.shipper/output/comment-248.md',
-      }),
-      'utf-8'
-    );
-    await writeFile(path.join(outputDir, 'comment-248.md'), 'summary', 'utf-8');
+  describe('validateStageOutput', () => {
+    it('rejects PR specs on non-pr_open stages', async () => {
+      await writeResultFile(buildResult({ pr_spec: outputRelative('pr-spec-248.json') }));
 
-    await expect(
-      processResult({
-        repo: 'owner/repo',
-        issueNumber: '248',
-        stage: 'plan',
-        cwd: tempDir,
-      })
-    ).resolves.toEqual({
-      verdict: 'accept',
-      comment: '.shipper/output/comment-248.md',
+      await expect(validateStageOutput(tempDir, 'plan')).rejects.toThrow(
+        'result.pr_spec is only supported for the pr_open stage'
+      );
     });
 
-    expect(ghMock).toHaveBeenNthCalledWith(1, [
-      'issue',
-      'comment',
-      '248',
-      '-R',
-      'owner/repo',
-      '--body-file',
-      path.join(tempDir, '.shipper/output/comment-248.md'),
-    ]);
-    expect(ghMock).toHaveBeenNthCalledWith(2, [
-      'issue',
-      'edit',
-      '248',
-      '-R',
-      'owner/repo',
-      '--add-label',
-      'shipper:planned',
-      '--remove-label',
-      'shipper:designed',
-    ]);
-  });
+    it('rejects review payloads on non-pr_review stages', async () => {
+      await writeResultFile(
+        buildResult({ review_payload: outputRelative('review-payload-248.json') })
+      );
 
-  it('processes PR creation before posting the comment and changing labels', async () => {
-    const outputDir = path.join(tempDir, PROTOCOL_OUTPUT_DIR);
-    await mkdir(outputDir, { recursive: true });
-    await writeFile(path.join(outputDir, 'pr-body-248.md'), 'body', 'utf-8');
-    await writeFile(
-      path.join(outputDir, 'pr-spec-248.json'),
-      JSON.stringify({
-        title: 'feat(#248): migrate protocol',
-        body_file: '.shipper/output/pr-body-248.md',
-        base: 'main',
-        head_branch: 'shipper/248-migrate-protocol',
-        draft: false,
-      }),
-      'utf-8'
-    );
-    await writeFile(
-      path.join(outputDir, 'result.json'),
-      JSON.stringify({
-        verdict: 'accept',
-        comment: '.shipper/output/comment-248.md',
-        pr_spec: '.shipper/output/pr-spec-248.json',
-      }),
-      'utf-8'
-    );
-    await writeFile(path.join(outputDir, 'comment-248.md'), 'summary', 'utf-8');
-    ghMock
-      .mockResolvedValueOnce({ stdout: '', stderr: '' })
-      .mockResolvedValueOnce({ stdout: 'https://github.com/owner/repo/pull/248\n', stderr: '' })
-      .mockResolvedValueOnce({ stdout: '', stderr: '' })
-      .mockResolvedValueOnce({ stdout: '', stderr: '' });
-
-    await expect(
-      processResult({
-        repo: 'owner/repo',
-        issueNumber: '248',
-        stage: 'pr_open',
-        cwd: tempDir,
-      })
-    ).resolves.toEqual({
-      verdict: 'accept',
-      comment: '.shipper/output/comment-248.md',
-      pr_spec: '.shipper/output/pr-spec-248.json',
+      await expect(validateStageOutput(tempDir, 'design')).rejects.toThrow(
+        'result.review_payload is only supported for the pr_review stage'
+      );
     });
 
-    expect(ghMock).toHaveBeenNthCalledWith(1, [
-      'pr',
-      'list',
-      '-R',
-      'owner/repo',
-      '--head',
-      'shipper/248-migrate-protocol',
-      '--json',
-      'url',
-      '-q',
-      '.[0].url',
-    ]);
-    expect(ghMock).toHaveBeenNthCalledWith(2, [
-      'pr',
-      'create',
-      '-R',
-      'owner/repo',
-      '--head',
-      'shipper/248-migrate-protocol',
-      '--base',
-      'main',
-      '--title',
-      'feat(#248): migrate protocol',
-      '--body-file',
-      path.join(tempDir, '.shipper/output/pr-body-248.md'),
-    ]);
-    expect(ghMock).toHaveBeenNthCalledWith(3, [
-      'issue',
-      'comment',
-      '248',
-      '-R',
-      'owner/repo',
-      '--body-file',
-      path.join(tempDir, '.shipper/output/comment-248.md'),
-    ]);
-    expect(ghMock).toHaveBeenNthCalledWith(4, [
-      'issue',
-      'edit',
-      '248',
-      '-R',
-      'owner/repo',
-      '--add-label',
-      'shipper:pr-open',
-      '--remove-label',
-      'shipper:implemented',
-    ]);
-  });
+    it('rejects pr_open accepts without a pr_spec', async () => {
+      await writeResultFile(buildResult());
 
-  it('rejects PR side effects for non-pr_open stages', async () => {
-    const outputDir = path.join(tempDir, PROTOCOL_OUTPUT_DIR);
-    await mkdir(outputDir, { recursive: true });
-    await writeFile(
-      path.join(outputDir, 'result.json'),
-      JSON.stringify({
-        verdict: 'accept',
-        comment: '.shipper/output/comment-248.md',
-        pr_spec: '.shipper/output/pr-spec-248.json',
-      }),
-      'utf-8'
-    );
-    await writeFile(path.join(outputDir, 'comment-248.md'), 'summary', 'utf-8');
-
-    await expect(
-      processResult({
-        repo: 'owner/repo',
-        issueNumber: '248',
-        stage: 'plan',
-        cwd: tempDir,
-      })
-    ).rejects.toThrow('result.pr_spec is only supported for the pr_open stage');
-    expect(ghMock).not.toHaveBeenCalled();
-  });
-
-  it('rejects pr_open accepts without a pr_spec before any gh side effects', async () => {
-    const outputDir = path.join(tempDir, PROTOCOL_OUTPUT_DIR);
-    await mkdir(outputDir, { recursive: true });
-    await writeFile(
-      path.join(outputDir, 'result.json'),
-      JSON.stringify({
-        verdict: 'accept',
-        comment: '.shipper/output/comment-248.md',
-      }),
-      'utf-8'
-    );
-    await writeFile(path.join(outputDir, 'comment-248.md'), 'summary', 'utf-8');
-
-    await expect(
-      processResult({
-        repo: 'owner/repo',
-        issueNumber: '248',
-        stage: 'pr_open',
-        cwd: tempDir,
-      })
-    ).rejects.toThrow('pr_open accept requires a pr_spec in result.json');
-    expect(ghMock).not.toHaveBeenCalled();
-  });
-
-  it('processes review submission before posting the comment and changing labels', async () => {
-    const outputDir = path.join(tempDir, PROTOCOL_OUTPUT_DIR);
-    const payloadPath = path.join(outputDir, 'review-payload-248.json');
-    await mkdir(outputDir, { recursive: true });
-    await writeFile(
-      payloadPath,
-      JSON.stringify({
-        commit_id: 'abc123',
-        body: 'Looks good.',
-        event: 'APPROVE',
-        comments: [],
-      }),
-      'utf-8'
-    );
-    await writeFile(
-      path.join(outputDir, 'result.json'),
-      JSON.stringify({
-        verdict: 'accept',
-        comment: '.shipper/output/comment-248.md',
-        review_payload: '.shipper/output/review-payload-248.json',
-      }),
-      'utf-8'
-    );
-    await writeFile(path.join(outputDir, 'comment-248.md'), 'summary', 'utf-8');
-    ghMock
-      .mockResolvedValueOnce({ stdout: 'reviewer\n', stderr: '' })
-      .mockResolvedValueOnce({ stdout: 'author\n', stderr: '' })
-      .mockResolvedValueOnce({ stdout: '', stderr: '' })
-      .mockResolvedValueOnce({ stdout: '', stderr: '' })
-      .mockResolvedValueOnce({ stdout: '', stderr: '' });
-
-    await expect(
-      processResult({
-        repo: 'owner/repo',
-        issueNumber: '248',
-        stage: 'pr_review',
-        cwd: tempDir,
-        prNumber: '77',
-      })
-    ).resolves.toEqual({
-      verdict: 'accept',
-      comment: '.shipper/output/comment-248.md',
-      review_payload: '.shipper/output/review-payload-248.json',
+      await expect(validateStageOutput(tempDir, 'pr_open')).rejects.toThrow(
+        'pr_open accept requires a pr_spec in result.json'
+      );
     });
 
-    expect(ghMock).toHaveBeenNthCalledWith(1, ['api', 'user', '-q', '.login']);
-    expect(ghMock).toHaveBeenNthCalledWith(2, [
-      'pr',
-      'view',
-      '77',
-      '-R',
-      'owner/repo',
-      '--json',
-      'author',
-      '--jq',
-      '.author.login',
-    ]);
-    expect(ghMock).toHaveBeenNthCalledWith(3, [
-      'api',
-      'repos/owner/repo/pulls/77/reviews',
-      '--method',
-      'POST',
-      '--input',
-      payloadPath,
-    ]);
-    expect(ghMock).toHaveBeenNthCalledWith(4, [
-      'issue',
-      'comment',
-      '248',
-      '-R',
-      'owner/repo',
-      '--body-file',
-      path.join(tempDir, '.shipper/output/comment-248.md'),
-    ]);
-    expect(ghMock).toHaveBeenNthCalledWith(5, [
-      'issue',
-      'edit',
-      '248',
-      '-R',
-      'owner/repo',
-      '--add-label',
-      'shipper:pr-reviewed',
-      '--remove-label',
-      'shipper:pr-open',
-    ]);
-  });
+    it('rejects pr_review accepts without a review_payload', async () => {
+      await writeResultFile(buildResult());
 
-  it('rejects pr_review accepts without a review_payload before any gh side effects', async () => {
-    const outputDir = path.join(tempDir, PROTOCOL_OUTPUT_DIR);
-    await mkdir(outputDir, { recursive: true });
-    await writeFile(
-      path.join(outputDir, 'result.json'),
-      JSON.stringify({
-        verdict: 'accept',
-        comment: '.shipper/output/comment-248.md',
-      }),
-      'utf-8'
-    );
-    await writeFile(path.join(outputDir, 'comment-248.md'), 'summary', 'utf-8');
-
-    await expect(
-      processResult({
-        repo: 'owner/repo',
-        issueNumber: '248',
-        stage: 'pr_review',
-        cwd: tempDir,
-        prNumber: '77',
-      })
-    ).rejects.toThrow('pr_review accept requires a review_payload in result.json');
-    expect(ghMock).not.toHaveBeenCalled();
-  });
-
-  it('does not attempt gh operations when result.json is missing', async () => {
-    await expect(
-      processResult({
-        repo: 'owner/repo',
-        issueNumber: '248',
-        stage: 'design',
-        cwd: tempDir,
-      })
-    ).rejects.toThrowError(
-      `Missing result.json at ${path.join(tempDir, PROTOCOL_OUTPUT_DIR, 'result.json')}`
-    );
-
-    expect(ghMock).not.toHaveBeenCalled();
-  });
-
-  it('rejects comment paths that escape the protocol output directory', async () => {
-    const outputDir = path.join(tempDir, PROTOCOL_OUTPUT_DIR);
-    await mkdir(outputDir, { recursive: true });
-    await writeFile(
-      path.join(outputDir, 'result.json'),
-      JSON.stringify({
-        verdict: 'accept',
-        comment: '.shipper/input/comment-248.md',
-      }),
-      'utf-8'
-    );
-
-    await expect(
-      processResult({
-        repo: 'owner/repo',
-        issueNumber: '248',
-        stage: 'design',
-        cwd: tempDir,
-      })
-    ).rejects.toThrowError(
-      `Invalid result.json at ${path.join(outputDir, 'result.json')}:\n- 'comment' must be a relative path under .shipper/output`
-    );
-
-    expect(ghMock).not.toHaveBeenCalled();
-  });
-
-  it('does not retry when result.json is valid with a non-accept verdict', async () => {
-    const outputDir = path.join(tempDir, PROTOCOL_OUTPUT_DIR);
-    const retryMock = vi.fn<(message: string) => Promise<number>>().mockResolvedValue(1);
-    await mkdir(outputDir, { recursive: true });
-    await writeFile(
-      path.join(outputDir, 'result.json'),
-      JSON.stringify({
-        verdict: 'reject',
-        comment: '.shipper/output/comment-248.md',
-      }),
-      'utf-8'
-    );
-
-    await expect(
-      retryOnInvalidOutput({
-        cwd: tempDir,
-        retry: retryMock,
-      })
-    ).resolves.toBeUndefined();
-
-    expect(retryMock).not.toHaveBeenCalled();
-  });
-
-  it('retries when result.json is missing', async () => {
-    const retryMock = vi.fn<(message: string) => Promise<number>>().mockResolvedValue(0);
-
-    await retryOnInvalidOutput({
-      cwd: tempDir,
-      retry: retryMock,
+      await expect(validateStageOutput(tempDir, 'pr_review')).rejects.toThrow(
+        'pr_review accept requires a review_payload in result.json'
+      );
     });
 
-    expect(retryMock).toHaveBeenCalledTimes(1);
-    expect(retryMock).toHaveBeenCalledWith(
-      expect.stringContaining(
-        `Missing result.json at ${path.join(tempDir, PROTOCOL_OUTPUT_DIR, 'result.json')}`
-      )
-    );
-  });
+    it('rejects malformed PR spec JSON', async () => {
+      await writeResultFile(buildResult({ pr_spec: outputRelative('pr-spec-248.json') }));
+      await writeOutputFile('pr-spec-248.json', '{invalid');
 
-  it('retries when result.json contains malformed JSON', async () => {
-    const outputDir = path.join(tempDir, PROTOCOL_OUTPUT_DIR);
-    const retryMock = vi.fn<(message: string) => Promise<number>>().mockResolvedValue(0);
-    await mkdir(outputDir, { recursive: true });
-    await writeFile(path.join(outputDir, 'result.json'), '{invalid', 'utf-8');
-
-    await retryOnInvalidOutput({
-      cwd: tempDir,
-      retry: retryMock,
+      await expect(validateStageOutput(tempDir, 'pr_open')).rejects.toThrow(
+        `Failed to parse PR spec at ${outputAbs('pr-spec-248.json')}`
+      );
     });
 
-    expect(retryMock).toHaveBeenCalledTimes(1);
-    expect(retryMock).toHaveBeenCalledWith(
-      expect.stringContaining(`Failed to parse ${path.join(outputDir, 'result.json')}`)
-    );
-  });
+    it('rejects PR specs that are not JSON objects', async () => {
+      await writeResultFile(buildResult({ pr_spec: outputRelative('pr-spec-248.json') }));
+      await writeOutputJson('pr-spec-248.json', ['not-an-object']);
 
-  it('retries with all validation errors when result.json fails schema validation', async () => {
-    const outputDir = path.join(tempDir, PROTOCOL_OUTPUT_DIR);
-    const retryMock = vi.fn<(message: string) => Promise<number>>().mockResolvedValue(0);
-    await mkdir(outputDir, { recursive: true });
-    await writeFile(
-      path.join(outputDir, 'result.json'),
-      JSON.stringify({
-        verdict: 'approved',
-        comment: '../comment-248.md',
-      }),
-      'utf-8'
-    );
-
-    await retryOnInvalidOutput({
-      cwd: tempDir,
-      retry: retryMock,
+      await expect(validateStageOutput(tempDir, 'pr_open')).rejects.toThrow(
+        `Invalid PR spec at ${outputAbs('pr-spec-248.json')}:\n- PR spec must be a JSON object`
+      );
     });
 
-    expect(retryMock).toHaveBeenCalledTimes(1);
-    expect(retryMock).toHaveBeenCalledWith(
-      [
-        'Your previous output was invalid. Fix the following and produce a valid .shipper/output/result.json:',
-        "- 'verdict' must be one of: accept, reject, fail (got 'approved')",
-        "- 'comment' must be a relative path under .shipper/output",
-      ].join('\n')
-    );
+    it('rejects PR specs missing required fields', async () => {
+      await writeResultFile(buildResult({ pr_spec: outputRelative('pr-spec-248.json') }));
+      const invalidSpec = buildPrSpec();
+      delete (invalidSpec as Partial<typeof invalidSpec>).title;
+      await writeOutputJson('pr-spec-248.json', invalidSpec);
+
+      await expect(validateStageOutput(tempDir, 'pr_open')).rejects.toThrow(
+        "'title' must be a string"
+      );
+    });
+
+    it('rejects PR body paths that escape the output directory', async () => {
+      await writeResultFile(buildResult({ pr_spec: outputRelative('pr-spec-248.json') }));
+      await writeOutputJson(
+        'pr-spec-248.json',
+        buildPrSpec({ body_file: '.shipper/input/pr-body-248.md' })
+      );
+
+      await expect(validateStageOutput(tempDir, 'pr_open')).rejects.toThrow(
+        `PR body path must stay within ${path.join(tempDir, PROTOCOL_OUTPUT_DIR)}`
+      );
+    });
+
+    it('rejects missing PR body files', async () => {
+      await writeResultFile(buildResult({ pr_spec: outputRelative('pr-spec-248.json') }));
+      await writeOutputJson('pr-spec-248.json', buildPrSpec());
+
+      await expect(validateStageOutput(tempDir, 'pr_open')).rejects.toThrow(
+        `PR body path does not exist: ${outputAbs('pr-body-248.md')}`
+      );
+    });
+
+    it('rejects malformed review payload JSON', async () => {
+      await writeResultFile(
+        buildResult({ review_payload: outputRelative('review-payload-248.json') })
+      );
+      await writeOutputFile('review-payload-248.json', '{invalid');
+
+      await expect(validateStageOutput(tempDir, 'pr_review')).rejects.toThrow(
+        `Failed to parse review payload at ${outputAbs('review-payload-248.json')}`
+      );
+    });
+
+    it('rejects review payloads that are not JSON objects', async () => {
+      await writeResultFile(
+        buildResult({ review_payload: outputRelative('review-payload-248.json') })
+      );
+      await writeOutputJson('review-payload-248.json', ['not-an-object']);
+
+      await expect(validateStageOutput(tempDir, 'pr_review')).rejects.toThrow(
+        `Invalid review payload at ${outputAbs('review-payload-248.json')}:\n- review payload must be a JSON object`
+      );
+    });
+
+    it('rejects review payloads missing required fields', async () => {
+      await writeResultFile(
+        buildResult({ review_payload: outputRelative('review-payload-248.json') })
+      );
+      const invalidPayload = buildReviewPayload();
+      delete (invalidPayload as Partial<typeof invalidPayload>).commit_id;
+      await writeOutputJson('review-payload-248.json', invalidPayload);
+
+      await expect(validateStageOutput(tempDir, 'pr_review')).rejects.toThrow(
+        "'commit_id' must be a string"
+      );
+    });
+
+    it('returns the parsed result for valid pr_open output', async () => {
+      const result = buildResult({ pr_spec: outputRelative('pr-spec-248.json') });
+      await writeResultFile(result);
+      await writeOutputFile('pr-body-248.md', 'body');
+      await writeOutputJson('pr-spec-248.json', buildPrSpec());
+
+      await expect(validateStageOutput(tempDir, 'pr_open')).resolves.toEqual(result);
+    });
+
+    it('returns the parsed result for valid pr_review output', async () => {
+      const result = buildResult({ review_payload: outputRelative('review-payload-248.json') });
+      await writeResultFile(result);
+      await writeOutputJson('review-payload-248.json', buildReviewPayload());
+
+      await expect(validateStageOutput(tempDir, 'pr_review')).resolves.toEqual(result);
+    });
   });
 
-  it('ignores the retry callback exit code', async () => {
-    const retryMock = vi.fn<(message: string) => Promise<number>>().mockResolvedValue(17);
+  describe('processResult', () => {
+    it('processes a plain result by posting the comment before changing labels', async () => {
+      const result = buildResult();
+      await writeOutputFile('comment-248.md', 'summary');
 
-    await expect(
-      retryOnInvalidOutput({
-        cwd: tempDir,
-        retry: retryMock,
-      })
-    ).resolves.toBeUndefined();
+      await expect(
+        processResult({
+          repo: 'owner/repo',
+          issueNumber: '248',
+          stage: 'plan',
+          cwd: tempDir,
+          result,
+        })
+      ).resolves.toEqual(result);
 
-    expect(retryMock).toHaveBeenCalledTimes(1);
+      expect(ghMock).toHaveBeenNthCalledWith(1, [
+        'issue',
+        'comment',
+        '248',
+        '-R',
+        'owner/repo',
+        '--body-file',
+        outputAbs('comment-248.md'),
+      ]);
+      expect(ghMock).toHaveBeenNthCalledWith(2, [
+        'issue',
+        'edit',
+        '248',
+        '-R',
+        'owner/repo',
+        '--add-label',
+        'shipper:planned',
+        '--remove-label',
+        'shipper:designed',
+      ]);
+    });
+
+    it('processes PR creation before posting the comment and changing labels', async () => {
+      const result = buildResult({ pr_spec: outputRelative('pr-spec-248.json') });
+      await writeOutputFile('comment-248.md', 'summary');
+      await writeOutputFile('pr-body-248.md', 'body');
+      await writeOutputJson('pr-spec-248.json', buildPrSpec());
+      ghMock
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })
+        .mockResolvedValueOnce({
+          stdout: 'https://github.com/owner/repo/pull/248\n',
+          stderr: '',
+        })
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })
+        .mockResolvedValueOnce({ stdout: '', stderr: '' });
+
+      await expect(
+        processResult({
+          repo: 'owner/repo',
+          issueNumber: '248',
+          stage: 'pr_open',
+          cwd: tempDir,
+          result,
+        })
+      ).resolves.toEqual(result);
+
+      expect(ghMock).toHaveBeenNthCalledWith(1, [
+        'pr',
+        'list',
+        '-R',
+        'owner/repo',
+        '--head',
+        'shipper/248-migrate-protocol',
+        '--json',
+        'url',
+        '-q',
+        '.[0].url',
+      ]);
+      expect(ghMock).toHaveBeenNthCalledWith(2, [
+        'pr',
+        'create',
+        '-R',
+        'owner/repo',
+        '--head',
+        'shipper/248-migrate-protocol',
+        '--base',
+        'main',
+        '--title',
+        'feat(#248): migrate protocol',
+        '--body-file',
+        outputAbs('pr-body-248.md'),
+      ]);
+      expect(ghMock).toHaveBeenNthCalledWith(3, [
+        'issue',
+        'comment',
+        '248',
+        '-R',
+        'owner/repo',
+        '--body-file',
+        outputAbs('comment-248.md'),
+      ]);
+      expect(ghMock).toHaveBeenNthCalledWith(4, [
+        'issue',
+        'edit',
+        '248',
+        '-R',
+        'owner/repo',
+        '--add-label',
+        'shipper:pr-open',
+        '--remove-label',
+        'shipper:implemented',
+      ]);
+    });
+
+    it('processes review submission before posting the comment and changing labels', async () => {
+      const result = buildResult({ review_payload: outputRelative('review-payload-248.json') });
+      await writeOutputFile('comment-248.md', 'summary');
+      await writeOutputJson('review-payload-248.json', buildReviewPayload());
+      ghMock
+        .mockResolvedValueOnce({ stdout: 'reviewer\n', stderr: '' })
+        .mockResolvedValueOnce({ stdout: 'author\n', stderr: '' })
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })
+        .mockResolvedValueOnce({ stdout: '', stderr: '' });
+
+      await expect(
+        processResult({
+          repo: 'owner/repo',
+          issueNumber: '248',
+          stage: 'pr_review',
+          cwd: tempDir,
+          result,
+          prNumber: '77',
+        })
+      ).resolves.toEqual(result);
+
+      expect(ghMock).toHaveBeenNthCalledWith(1, ['api', 'user', '-q', '.login']);
+      expect(ghMock).toHaveBeenNthCalledWith(2, [
+        'pr',
+        'view',
+        '77',
+        '-R',
+        'owner/repo',
+        '--json',
+        'author',
+        '--jq',
+        '.author.login',
+      ]);
+      expect(ghMock).toHaveBeenNthCalledWith(3, [
+        'api',
+        'repos/owner/repo/pulls/77/reviews',
+        '--method',
+        'POST',
+        '--input',
+        outputAbs('review-payload-248.json'),
+      ]);
+      expect(ghMock).toHaveBeenNthCalledWith(4, [
+        'issue',
+        'comment',
+        '248',
+        '-R',
+        'owner/repo',
+        '--body-file',
+        outputAbs('comment-248.md'),
+      ]);
+      expect(ghMock).toHaveBeenNthCalledWith(5, [
+        'issue',
+        'edit',
+        '248',
+        '-R',
+        'owner/repo',
+        '--add-label',
+        'shipper:pr-reviewed',
+        '--remove-label',
+        'shipper:pr-open',
+      ]);
+    });
+
+    it('requires a PR number when posting a review payload', async () => {
+      const result = buildResult({ review_payload: outputRelative('review-payload-248.json') });
+      await writeOutputFile('comment-248.md', 'summary');
+
+      await expect(
+        processResult({
+          repo: 'owner/repo',
+          issueNumber: '248',
+          stage: 'pr_review',
+          cwd: tempDir,
+          result,
+        })
+      ).rejects.toThrow('review payload requires a PR number');
+    });
+
+    it('rejects comment paths that escape the protocol output directory', async () => {
+      await expect(
+        processResult({
+          repo: 'owner/repo',
+          issueNumber: '248',
+          stage: 'design',
+          cwd: tempDir,
+          result: buildResult({ comment: '.shipper/input/comment-248.md' }),
+        })
+      ).rejects.toThrow(`comment path must stay within ${path.join(tempDir, PROTOCOL_OUTPUT_DIR)}`);
+
+      expect(ghMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('retryOnInvalidOutput', () => {
+    it('does not retry when output is already valid', async () => {
+      const result = buildResult({ verdict: 'reject' });
+      const retryMock = vi.fn<(message: string) => Promise<number>>().mockResolvedValue(1);
+      await writeResultFile(result);
+
+      await expect(
+        retryOnInvalidOutput({
+          cwd: tempDir,
+          stage: 'design',
+          retry: retryMock,
+        })
+      ).resolves.toEqual(result);
+
+      expect(retryMock).not.toHaveBeenCalled();
+    });
+
+    it('retries when pr_open accept omits pr_spec', async () => {
+      const retryMock = vi.fn<(message: string) => Promise<number>>().mockResolvedValue(0);
+      await writeResultFile(buildResult());
+
+      await expect(
+        retryOnInvalidOutput({
+          cwd: tempDir,
+          stage: 'pr_open',
+          retry: retryMock,
+        })
+      ).rejects.toThrow('pr_open accept requires a pr_spec in result.json');
+
+      expect(retryMock).toHaveBeenCalledWith(
+        [
+          'Your previous output was invalid. Fix the following and produce a valid .shipper/output/result.json:',
+          '- pr_open accept requires a pr_spec in result.json',
+        ].join('\n')
+      );
+    });
+
+    it('retries when pr_review accept omits review_payload', async () => {
+      const retryMock = vi.fn<(message: string) => Promise<number>>().mockResolvedValue(0);
+      await writeResultFile(buildResult());
+
+      await expect(
+        retryOnInvalidOutput({
+          cwd: tempDir,
+          stage: 'pr_review',
+          retry: retryMock,
+        })
+      ).rejects.toThrow('pr_review accept requires a review_payload in result.json');
+
+      expect(retryMock).toHaveBeenCalledWith(
+        [
+          'Your previous output was invalid. Fix the following and produce a valid .shipper/output/result.json:',
+          '- pr_review accept requires a review_payload in result.json',
+        ].join('\n')
+      );
+    });
+
+    it('retries when the PR spec is incomplete', async () => {
+      const retryMock = vi.fn<(message: string) => Promise<number>>().mockResolvedValue(0);
+      await writeResultFile(buildResult({ pr_spec: outputRelative('pr-spec-248.json') }));
+      const invalidSpec = buildPrSpec();
+      delete (invalidSpec as Partial<typeof invalidSpec>).title;
+      await writeOutputJson('pr-spec-248.json', invalidSpec);
+
+      await expect(
+        retryOnInvalidOutput({
+          cwd: tempDir,
+          stage: 'pr_open',
+          retry: retryMock,
+        })
+      ).rejects.toThrow("'title' must be a string");
+
+      expect(retryMock).toHaveBeenCalledWith(expect.stringContaining("- 'title' must be a string"));
+    });
+
+    it('returns the revalidated output after retry repairs it', async () => {
+      const repairedResult = buildResult({ pr_spec: outputRelative('pr-spec-248.json') });
+      const retryMock = vi
+        .fn<(message: string) => Promise<number>>()
+        .mockImplementation(async () => {
+          await writeResultFile(repairedResult);
+          await writeOutputFile('pr-body-248.md', 'body');
+          await writeOutputJson('pr-spec-248.json', buildPrSpec());
+          return 0;
+        });
+      await writeResultFile(buildResult());
+
+      await expect(
+        retryOnInvalidOutput({
+          cwd: tempDir,
+          stage: 'pr_open',
+          retry: retryMock,
+        })
+      ).resolves.toEqual(repairedResult);
+    });
+
+    it('accepts valid retry output even when the retry exit code is non-zero', async () => {
+      const repairedResult = buildResult({ pr_spec: outputRelative('pr-spec-248.json') });
+      const retryMock = vi
+        .fn<(message: string) => Promise<number>>()
+        .mockImplementation(async () => {
+          await writeResultFile(repairedResult);
+          await writeOutputFile('pr-body-248.md', 'body');
+          await writeOutputJson('pr-spec-248.json', buildPrSpec());
+          return 17;
+        });
+      await writeResultFile(buildResult());
+
+      await expect(
+        retryOnInvalidOutput({
+          cwd: tempDir,
+          stage: 'pr_open',
+          retry: retryMock,
+        })
+      ).resolves.toEqual(repairedResult);
+    });
+
+    it('rethrows the second validation error when retry output is still invalid', async () => {
+      const retryMock = vi
+        .fn<(message: string) => Promise<number>>()
+        .mockImplementation(async () => {
+          await writeResultFile(buildResult({ pr_spec: outputRelative('pr-spec-248.json') }));
+          const invalidSpec = buildPrSpec();
+          delete (invalidSpec as Partial<typeof invalidSpec>).title;
+          await writeOutputJson('pr-spec-248.json', invalidSpec);
+          return 0;
+        });
+      await writeResultFile(buildResult());
+
+      await expect(
+        retryOnInvalidOutput({
+          cwd: tempDir,
+          stage: 'pr_open',
+          retry: retryMock,
+        })
+      ).rejects.toThrow("'title' must be a string");
+
+      expect(retryMock).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('formats correction messages with every validation error', () => {

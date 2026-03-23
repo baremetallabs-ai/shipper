@@ -36,8 +36,12 @@ const writeContextFileMock = vi.fn(() => Promise.resolve());
 const scrubOutputDirMock = vi.fn(() => Promise.resolve());
 const readResultFileMock = vi.fn<() => Promise<ResultJson>>();
 const retryOnInvalidOutputMock = vi.fn<
-  (opts: { cwd: string; retry: (message: string) => Promise<number> }) => Promise<void>
->(() => Promise.resolve());
+  (opts: {
+    cwd: string;
+    stage: string;
+    retry: (message: string) => Promise<number>;
+  }) => Promise<ResultJson>
+>(() => Promise.resolve({ verdict: 'accept', comment: '.shipper/output/comment-10.md' }));
 const postRepliesMock = vi.fn(() => Promise.resolve());
 const postCommentMock = vi.fn(() => Promise.resolve());
 const executeTransitionMock = vi.fn(() => Promise.resolve());
@@ -278,9 +282,10 @@ describe('prRemediateCommand', () => {
       })
     );
     const retryCall = retryOnInvalidOutputMock.mock.calls[0]?.[0] as
-      | { cwd: string; retry: (message: string) => Promise<number> }
+      | { cwd: string; stage: string; retry: (message: string) => Promise<number> }
       | undefined;
     expect(retryCall?.cwd).toBe('/tmp/fake-wt');
+    expect(retryCall?.stage).toBe('pr_remediate');
     expect(retryCall?.retry).toEqual(expect.any(Function));
     expect(runPromptMock.mock.invocationCallOrder[0]).toBeLessThan(
       retryOnInvalidOutputMock.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY
@@ -538,8 +543,9 @@ describe('prRemediateCommand', () => {
     await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
 
     const retryCall = retryOnInvalidOutputMock.mock.calls[0]?.[0] as
-      | { cwd: string; retry: (message: string) => Promise<number> }
+      | { cwd: string; stage: string; retry: (message: string) => Promise<number> }
       | undefined;
+    expect(retryCall?.stage).toBe('pr_remediate');
     await expect(retryCall?.retry('Fix result')).resolves.toBe(0);
 
     expect(runPromptMock).toHaveBeenLastCalledWith('pr_remediate', {

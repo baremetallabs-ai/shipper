@@ -34,23 +34,25 @@ export async function planCommand(
         async (wtPath) => {
           await scrubOutputDir(wtPath);
           await runPrompt('plan', { repo, issueRef: issue, cwd: wtPath, mode, agent, model });
-          await retryOnInvalidOutput({
-            cwd: wtPath,
-            retry: (userInput) =>
-              runPrompt('plan', {
-                repo,
-                issueRef: issue,
-                cwd: wtPath,
-                mode,
-                agent,
-                model,
-                userInput,
-              }),
-          });
           try {
-            await processResult({ repo, issueNumber: issue, stage: 'plan', cwd: wtPath });
+            const result = await retryOnInvalidOutput({
+              cwd: wtPath,
+              stage: 'plan',
+              retry: (userInput) =>
+                runPrompt('plan', {
+                  repo,
+                  issueRef: issue,
+                  cwd: wtPath,
+                  mode,
+                  agent,
+                  model,
+                  userInput,
+                }),
+            });
+            await processResult({ repo, issueNumber: issue, stage: 'plan', cwd: wtPath, result });
           } catch (error) {
             const detail = error instanceof Error ? error.message : String(error);
+            console.error(detail);
             await handleAgentCrash(repo, issue, 'plan', detail);
             process.exitCode = 1;
             return;
