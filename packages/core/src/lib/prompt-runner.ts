@@ -33,6 +33,7 @@ export interface PromptCommand {
   command: string;
   args: string[];
   cwd?: string;
+  initialInput?: string;
 }
 
 const CODEX_HEADLESS_CONFIG = 'sandbox_workspace_write.network_access=true';
@@ -114,18 +115,43 @@ function resolveWorktreeGitDir(cwd: string): WorktreeDirs | undefined {
 function spawnAsync(
   command: string,
   args: string[],
-  opts: { cwd?: string; timeoutMs?: number; logFile?: string }
+  opts: { cwd?: string; timeoutMs?: number; logFile?: string; initialInput?: string }
 ): Promise<number> {
   return new Promise((resolve, reject) => {
-    const stdio: 'inherit' | ['inherit', 'pipe', 'inherit'] = opts.logFile
-      ? ['inherit', 'pipe', 'inherit']
-      : 'inherit';
+    const hasInitialInput = opts.initialInput !== undefined;
+    const stdio:
+      | 'inherit'
+      | ['inherit', 'pipe', 'inherit']
+      | ['pipe', 'inherit', 'inherit']
+      | ['pipe', 'pipe', 'inherit'] = hasInitialInput
+      ? opts.logFile
+        ? ['pipe', 'pipe', 'inherit']
+        : ['pipe', 'inherit', 'inherit']
+      : opts.logFile
+        ? ['inherit', 'pipe', 'inherit']
+        : 'inherit';
     const child: ChildProcess = spawn(command, args, {
       stdio,
       env: process.env,
       cwd: opts.cwd,
     });
     let logCompletion: Promise<void> | undefined;
+    const childStdin = child.stdin;
+    let stdinCleanup: (() => void) | undefined;
+
+    if (hasInitialInput) {
+      if (!childStdin) {
+        reject(new Error(`Failed to capture stdin for ${command}`));
+        return;
+      }
+
+      childStdin.write(`${opts.initialInput}\n`);
+      process.stdin.pipe(childStdin);
+      stdinCleanup = () => {
+        process.stdin.unpipe(childStdin);
+        process.stdin.pause();
+      };
+    }
 
     if (opts.logFile) {
       const stdout = child.stdout;
@@ -184,12 +210,14 @@ function spawnAsync(
     child.on('error', (err) => {
       clearTimeout(killTimer);
       clearTimeout(graceTimer);
+      stdinCleanup?.();
       reject(asError(err));
     });
 
     const handleClose = async (code: number | null): Promise<void> => {
       clearTimeout(killTimer);
       clearTimeout(graceTimer);
+      stdinCleanup?.();
       if (logCompletion) {
         try {
           await logCompletion;
@@ -316,7 +344,7 @@ async function resolvePromptCommand(
     case 'copilot':
       if (effectiveMode === 'headless') {
         normalizeCopilotHeadlessArgs(args);
-      } else if (effectiveMode === 'interactive') {
+      } else {
         stripCopilotHeadlessArgs(args);
       }
       break;
@@ -339,7 +367,9 @@ async function resolvePromptCommand(
   if (agent === 'claude') {
     args.push('--append-system-prompt', promptBody);
   } else if (agent === 'copilot') {
-    args.push('-p', promptBody);
+    if (effectiveMode === 'headless') {
+      args.push('-p', promptBody);
+    }
   } else {
     args.push(promptBody);
   }
@@ -376,11 +406,17 @@ async function resolvePromptCommand(
       const promptIdx = args.indexOf(promptBody);
       if (promptIdx !== -1) {
         args[promptIdx] = promptBody + '\n\n---\n\n' + userMessage;
+      } else {
+        promptBody = promptBody + '\n\n---\n\n' + userMessage;
       }
     }
   }
 
-  const totalBytes = args.reduce((sum, arg) => sum + Buffer.byteLength(arg, 'utf-8'), 0);
+  const totalBytes =
+    args.reduce((sum, arg) => sum + Buffer.byteLength(arg, 'utf-8'), 0) +
+    (agent === 'copilot' && effectiveMode !== 'headless'
+      ? Buffer.byteLength(promptBody, 'utf-8')
+      : 0);
   if (totalBytes > MAX_INPUT_BYTES) {
     throw new Error(
       `Total prompt input size (${totalBytes} bytes) exceeds the ${MAX_INPUT_BYTES}-byte budget. Reduce input size before calling runPrompt.`
@@ -394,8 +430,9 @@ export async function buildPromptCommand(
   name: string,
   opts: RunPromptOpts
 ): Promise<PromptCommand> {
-  const { agent, args } = await resolvePromptCommand(name, opts, 'interactive');
-  return { command: agent, args, cwd: opts.cwd };
+  const { agent, args, promptBody } = await resolvePromptCommand(name, opts, 'interactive');
+  const initialInput = agent === 'copilot' ? promptBody : undefined;
+  return { command: agent, args, cwd: opts.cwd, initialInput };
 }
 
 export async function runPrompt(name: string, opts: RunPromptOpts): Promise<number> {
@@ -440,10 +477,13 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
 
   try {
     const spawnLogFile = opts.logFile ?? (effectiveMode === 'headless' ? logFile : undefined);
+    const initialInput =
+      agent === 'copilot' && effectiveMode !== 'headless' ? resolved.promptBody : undefined;
     const exitCode = await spawnAsync(agent, args, {
       cwd: opts.cwd,
       timeoutMs,
       logFile: spawnLogFile,
+      initialInput,
     });
     let usage: TokenUsage | undefined;
 
@@ -544,6 +584,12 @@ function stripCopilotHeadlessArgs(args: string[]): void {
   for (let i = args.length - 1; i >= 0; i--) {
     if (COPILOT_HEADLESS_FLAGS.includes(args[i] as (typeof COPILOT_HEADLESS_FLAGS)[number])) {
       args.splice(i, 1);
+    }
+  }
+
+  for (let i = args.length - 1; i >= 0; i--) {
+    if (args[i] === '-p' || args[i] === '--prompt') {
+      args.splice(i, args[i + 1] === undefined ? 1 : 2);
     }
   }
 }

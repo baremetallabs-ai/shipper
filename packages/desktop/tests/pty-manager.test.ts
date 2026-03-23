@@ -101,4 +101,28 @@ describe('PtyManager.onSessionExit', () => {
       process.triggerExit(0);
     }).not.toThrow();
   });
+
+  it('writes initial input once after spawn when provided', () => {
+    const manager = new PtyManager();
+    manager.spawn('session-2', 'bash', [], {
+      cols: 80,
+      rows: 24,
+      initialInput: 'seed prompt',
+    });
+
+    const seededProcess = spawnedProcesses.at(-1);
+    if (!seededProcess) {
+      throw new Error('Expected node-pty.spawn to create a PTY process.');
+    }
+
+    expect(seededProcess.write).toHaveBeenCalledTimes(1);
+    expect(seededProcess.write).toHaveBeenCalledWith('seed prompt\n');
+  });
+
+  it('does not write automatically when initial input is omitted', () => {
+    const manager = new PtyManager();
+    const process = spawnSession(manager);
+
+    expect(process.write).not.toHaveBeenCalled();
+  });
 });

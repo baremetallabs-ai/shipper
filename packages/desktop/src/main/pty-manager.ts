@@ -6,6 +6,7 @@ export interface PtySpawnOptions {
   rows: number;
   cwd?: string;
   env?: Record<string, string>;
+  initialInput?: string;
 }
 
 interface PtySessionEntry {
@@ -130,6 +131,10 @@ export class PtyManager {
     };
 
     this.sessions.set(id, entry);
+
+    if (options.initialInput !== undefined) {
+      ptyProcess.write(`${options.initialInput}\n`);
+    }
 
     ptyProcess.onData((data) => {
       // node-pty emits strings on macOS/Linux, but we still run through UTF-8
