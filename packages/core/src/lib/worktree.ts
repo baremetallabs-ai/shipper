@@ -399,7 +399,7 @@ async function pushWorktreeBranch(
   });
 }
 
-async function pushWithRetry(
+export async function pushWithRetry(
   opts: WorktreeGitOpts,
   runAgent: (
     conflictContext?: ConflictContext,
