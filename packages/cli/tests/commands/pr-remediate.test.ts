@@ -37,7 +37,7 @@ const sleepMsMock = vi.fn(() => Promise.resolve());
 const setupProtocolDirsMock = vi.fn(() => Promise.resolve());
 const writeContextFileMock = vi.fn(() => Promise.resolve());
 const scrubOutputDirMock = vi.fn(() => Promise.resolve());
-const readResultFileMock = vi.fn<() => Promise<ResultJson>>();
+const validateStageOutputMock = vi.fn<(cwd: string, stage: string) => Promise<ResultJson>>();
 const retryOnInvalidOutputMock = vi.fn<
   (opts: {
     cwd: string;
@@ -45,6 +45,7 @@ const retryOnInvalidOutputMock = vi.fn<
     retry: (message: string) => Promise<number>;
   }) => Promise<ResultJson>
 >(() => Promise.resolve({ verdict: 'accept', comment: '.shipper/output/comment-10.md' }));
+const processResultMock = vi.fn<(opts: unknown) => Promise<ResultJson>>();
 const postRepliesMock = vi.fn(() => Promise.resolve());
 const postCommentMock = vi.fn(() => Promise.resolve());
 const executeTransitionMock = vi.fn(() => Promise.resolve());
@@ -81,16 +82,14 @@ vi.mock('@dnsquared/shipper-core', () => ({
   setupProtocolDirs: setupProtocolDirsMock,
   writeContextFile: writeContextFileMock,
   scrubOutputDir: scrubOutputDirMock,
-  readResultFile: readResultFileMock,
+  validateStageOutput: validateStageOutputMock,
   retryOnInvalidOutput: retryOnInvalidOutputMock,
+  processResult: processResultMock,
   postReplies: postRepliesMock,
   postComment: postCommentMock,
   executeTransition: executeTransitionMock,
   handleAgentCrash: handleAgentCrashMock,
   resolveTransition: resolveTransitionMock,
-  FAILED_LABEL: 'shipper:failed',
-  PR_REVIEWED_LABEL: 'shipper:pr-reviewed',
-  PROTOCOL_OUTPUT_DIR: '.shipper/output',
 }));
 
 function classifyChecksImpl(checks: PRChecksLine[]): CheckClassification {
@@ -122,13 +121,17 @@ describe('prRemediateCommand', () => {
     truncateLargeInputMock.mockClear();
     writeContextFileMock.mockResolvedValue(undefined);
     scrubOutputDirMock.mockResolvedValue(undefined);
-    readResultFileMock.mockResolvedValue({
+    validateStageOutputMock.mockResolvedValue({
       verdict: 'accept',
       comment: '.shipper/output/comment-10.md',
     });
     retryOnInvalidOutputMock.mockResolvedValue({
       verdict: 'accept',
       comment: '.shipper/output/comment-10.md',
+    });
+    processResultMock.mockImplementation((opts) => {
+      const result = (opts as { result: ResultJson }).result;
+      return Promise.resolve(result);
     });
     postRepliesMock.mockResolvedValue(undefined);
     postCommentMock.mockResolvedValue(undefined);
@@ -258,17 +261,16 @@ describe('prRemediateCommand', () => {
       events.push('fetchChecks');
       return Promise.resolve(PASS_CHECKS);
     });
-    readResultFileMock
-      .mockResolvedValueOnce({
-        verdict: 'accept',
-        comment: '.shipper/output/comment-10.md',
-        replies: '.shipper/output/replies',
-      })
-      .mockResolvedValueOnce({
-        verdict: 'accept',
-        comment: '.shipper/output/comment-11.md',
-        replies: '.shipper/output/replies-updated',
-      });
+    retryOnInvalidOutputMock.mockResolvedValueOnce({
+      verdict: 'accept',
+      comment: '.shipper/output/comment-10.md',
+      replies: '.shipper/output/replies',
+    });
+    validateStageOutputMock.mockResolvedValueOnce({
+      verdict: 'accept',
+      comment: '.shipper/output/comment-11.md',
+      replies: '.shipper/output/replies-updated',
+    });
     pushWithRetryMock.mockImplementation(() => {
       events.push('pushWithRetry');
       return Promise.resolve(0);
@@ -323,8 +325,7 @@ describe('prRemediateCommand', () => {
     expect(writeContextFileMock.mock.invocationCallOrder[3]).toBeLessThan(
       syncWorktreeMock.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY
     );
-    expect(readResultFileMock).toHaveBeenNthCalledWith(1, '/tmp/fake-wt/.shipper/output');
-    expect(readResultFileMock).toHaveBeenNthCalledWith(2, '/tmp/fake-wt/.shipper/output');
+    expect(validateStageOutputMock).toHaveBeenCalledWith('/tmp/fake-wt', 'pr_remediate');
     expect(events).toEqual([
       'fetchChecks',
       'pushWithRetry',
@@ -457,7 +458,7 @@ describe('prRemediateCommand', () => {
       fetchCall += 1;
       return Promise.resolve(fetchCall <= 4 ? FAIL_CHECKS : PASS_CHECKS);
     });
-    readResultFileMock.mockResolvedValue({
+    validateStageOutputMock.mockResolvedValue({
       verdict: 'accept',
       comment: '.shipper/output/comment-10.md',
     });
@@ -533,7 +534,7 @@ describe('prRemediateCommand', () => {
       ];
       return Promise.resolve(new Map([['build-lint-ubuntu', 'full failed log']]));
     });
-    readResultFileMock.mockResolvedValue({
+    validateStageOutputMock.mockResolvedValue({
       verdict: 'accept',
       comment: '.shipper/output/comment-10.md',
     });
@@ -579,12 +580,13 @@ describe('prRemediateCommand', () => {
     );
   });
 
-  it('posts the reject comment, marks the issue failed, and never pushes', async () => {
+  it('delegates reject verdicts to processResult and never pushes', async () => {
     fetchChecksMock.mockResolvedValue(PASS_CHECKS);
-    readResultFileMock.mockResolvedValue({
+    const rejectResult: ResultJson = {
       verdict: 'reject',
       comment: '.shipper/output/comment-10.md',
-    });
+    };
+    retryOnInvalidOutputMock.mockResolvedValue(rejectResult);
 
     const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
 
@@ -592,22 +594,47 @@ describe('prRemediateCommand', () => {
 
     expect(pushWithRetryMock).not.toHaveBeenCalled();
     expect(postRepliesMock).not.toHaveBeenCalled();
-    expect(postCommentMock).toHaveBeenCalledWith(
-      'owner/repo',
-      '10',
-      '/tmp/fake-wt/.shipper/output/comment-10.md'
-    );
-    expect(executeTransitionMock).toHaveBeenCalledWith('owner/repo', '10', {
-      add: ['shipper:failed'],
-      remove: ['shipper:pr-reviewed'],
-    });
+    expect(postCommentMock).not.toHaveBeenCalled();
+    expect(executeTransitionMock).not.toHaveBeenCalled();
     expect(resolveTransitionMock).not.toHaveBeenCalled();
+    expect(processResultMock).toHaveBeenCalledWith({
+      repo: 'owner/repo',
+      issueNumber: '10',
+      stage: 'pr_remediate',
+      cwd: '/tmp/fake-wt',
+      result: rejectResult,
+    });
   });
 
-  it('continues the pass when the initial prompt exits non-zero but readResultFile is valid', async () => {
+  it('delegates fail verdicts to processResult and never pushes', async () => {
+    fetchChecksMock.mockResolvedValue(PASS_CHECKS);
+    const failResult: ResultJson = {
+      verdict: 'fail',
+      comment: '.shipper/output/comment-10.md',
+    };
+    retryOnInvalidOutputMock.mockResolvedValue(failResult);
+
+    const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
+
+    await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
+
+    expect(pushWithRetryMock).not.toHaveBeenCalled();
+    expect(postRepliesMock).not.toHaveBeenCalled();
+    expect(postCommentMock).not.toHaveBeenCalled();
+    expect(executeTransitionMock).not.toHaveBeenCalled();
+    expect(processResultMock).toHaveBeenCalledWith({
+      repo: 'owner/repo',
+      issueNumber: '10',
+      stage: 'pr_remediate',
+      cwd: '/tmp/fake-wt',
+      result: failResult,
+    });
+  });
+
+  it('continues the pass when the initial prompt exits non-zero but retry validation succeeds', async () => {
     fetchChecksMock.mockResolvedValue(PASS_CHECKS);
     runPromptMock.mockResolvedValueOnce(17);
-    readResultFileMock.mockResolvedValue({
+    validateStageOutputMock.mockResolvedValue({
       verdict: 'accept',
       comment: '.shipper/output/comment-10.md',
     });
@@ -625,7 +652,7 @@ describe('prRemediateCommand', () => {
 
   it('exits after five red-CI passes without changing labels', async () => {
     fetchChecksMock.mockResolvedValue(FAIL_CHECKS);
-    readResultFileMock.mockResolvedValue({
+    validateStageOutputMock.mockResolvedValue({
       verdict: 'accept',
       comment: '.shipper/output/comment-10.md',
     });
@@ -646,7 +673,7 @@ describe('prRemediateCommand', () => {
 
   it('reuses the same output directory when retrying within a pass', async () => {
     fetchChecksMock.mockResolvedValue(PASS_CHECKS);
-    readResultFileMock.mockResolvedValue({
+    validateStageOutputMock.mockResolvedValue({
       verdict: 'accept',
       comment: '.shipper/output/comment-10.md',
     });
@@ -676,7 +703,7 @@ describe('prRemediateCommand', () => {
 
   it('forwards push hook failures to the retry agent as raw userInput', async () => {
     fetchChecksMock.mockResolvedValue(PASS_CHECKS);
-    readResultFileMock.mockResolvedValue({
+    validateStageOutputMock.mockResolvedValue({
       verdict: 'accept',
       comment: '.shipper/output/comment-10.md',
     });
@@ -709,25 +736,38 @@ describe('prRemediateCommand', () => {
     expect(formatConflictContextMock).not.toHaveBeenCalled();
   });
 
-  it('handles invalid or missing result files as agent crashes', async () => {
+  it('warns and reuses the previously validated result when refresh validation fails after push', async () => {
     fetchChecksMock.mockResolvedValue(PASS_CHECKS);
-    readResultFileMock.mockRejectedValue(
+    retryOnInvalidOutputMock.mockResolvedValue({
+      verdict: 'accept',
+      comment: '.shipper/output/comment-10.md',
+      replies: '.shipper/output/replies',
+    });
+    validateStageOutputMock.mockRejectedValue(
       new Error('Missing result.json at /tmp/fake-wt/.shipper/output/result.json')
     );
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
 
     await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
 
-    expect(handleAgentCrashMock).toHaveBeenCalledWith(
+    expect(warnSpy).toHaveBeenCalledWith(
+      'Failed to refresh pr_remediate result after push retry; using previously validated output: Missing result.json at /tmp/fake-wt/.shipper/output/result.json'
+    );
+    expect(postRepliesMock).toHaveBeenCalledWith(
+      'owner/repo',
+      '42',
+      '/tmp/fake-wt',
+      '.shipper/output/replies'
+    );
+    expect(postCommentMock).toHaveBeenCalledWith(
       'owner/repo',
       '10',
-      'pr_remediate',
-      'Missing result.json at /tmp/fake-wt/.shipper/output/result.json'
+      '/tmp/fake-wt/.shipper/output/comment-10.md'
     );
-    expect(process.exitCode).toBe(1);
-    expect(pushWithRetryMock).not.toHaveBeenCalled();
-    expect(executeTransitionMock).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(0);
+    warnSpy.mockRestore();
   });
 
   it('handles retryOnInvalidOutput failure as agent crash with stderr', async () => {
@@ -748,7 +788,7 @@ describe('prRemediateCommand', () => {
       'pr_remediate',
       'pr_remediate accept requires a pr_spec in result.json'
     );
-    expect(readResultFileMock).not.toHaveBeenCalled();
+    expect(validateStageOutputMock).not.toHaveBeenCalled();
     expect(pushWithRetryMock).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
 
@@ -756,17 +796,16 @@ describe('prRemediateCommand', () => {
   });
 
   it('reloads prepared outputs before reporting a push failure crash and stops remediation', async () => {
-    readResultFileMock
-      .mockResolvedValueOnce({
-        verdict: 'accept',
-        comment: '.shipper/output/comment-10.md',
-        replies: '.shipper/output/replies',
-      })
-      .mockResolvedValueOnce({
-        verdict: 'accept',
-        comment: '.shipper/output/comment-11.md',
-        replies: '.shipper/output/replies-updated',
-      });
+    retryOnInvalidOutputMock.mockResolvedValueOnce({
+      verdict: 'accept',
+      comment: '.shipper/output/comment-10.md',
+      replies: '.shipper/output/replies',
+    });
+    validateStageOutputMock.mockResolvedValueOnce({
+      verdict: 'accept',
+      comment: '.shipper/output/comment-11.md',
+      replies: '.shipper/output/replies-updated',
+    });
     pushWithRetryMock.mockRejectedValue(new Error('fatal: unable to access remote'));
 
     const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
@@ -806,7 +845,12 @@ describe('prRemediateCommand', () => {
 
   it('still reports a push failure crash when posting prepared outputs also fails', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    readResultFileMock.mockResolvedValue({
+    retryOnInvalidOutputMock.mockResolvedValue({
+      verdict: 'accept',
+      comment: '.shipper/output/comment-10.md',
+      replies: '.shipper/output/replies',
+    });
+    validateStageOutputMock.mockResolvedValue({
       verdict: 'accept',
       comment: '.shipper/output/comment-10.md',
       replies: '.shipper/output/replies',
@@ -861,7 +905,7 @@ describe('prRemediateCommand', () => {
 
   it('does not transition to ready when no checks have appeared yet', async () => {
     fetchChecksMock.mockResolvedValue([]);
-    readResultFileMock.mockResolvedValue({
+    validateStageOutputMock.mockResolvedValue({
       verdict: 'accept',
       comment: '.shipper/output/comment-10.md',
     });
