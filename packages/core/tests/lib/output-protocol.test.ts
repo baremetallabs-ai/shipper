@@ -187,6 +187,25 @@ describe('output protocol helpers', () => {
     );
   });
 
+  it('caps line-based summaries so wide log lines still shrink inline', async () => {
+    const lines = Array.from(
+      { length: 101 },
+      (_, index) => `line ${index + 1} ${'界'.repeat(4_000)}`
+    );
+    const oversized = lines.join('\n');
+
+    const truncated = await truncateLargeInput(tempDir, oversized, 'push-error.txt');
+
+    await expect(
+      readFile(path.join(tempDir, PROTOCOL_INPUT_DIR, 'push-error.txt'), 'utf-8')
+    ).resolves.toBe(oversized);
+    expect(truncated).toContain(
+      '[1 lines omitted; full output written to .shipper/input/push-error.txt]'
+    );
+    expect(Buffer.byteLength(truncated, 'utf-8')).toBeLessThan(60_000);
+    expect(truncated).not.toContain('\uFFFD');
+  });
+
   it('avoids duplicating short-but-huge input when truncating inline content', async () => {
     const oversized = 'A'.repeat(60_000);
 

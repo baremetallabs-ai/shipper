@@ -10,8 +10,9 @@ export const PROTOCOL_OUTPUT_DIR = path.join('.shipper', 'output');
 const TRUNCATION_THRESHOLD_BYTES = 50_000;
 const TRUNCATION_HEAD_LINES = 50;
 const TRUNCATION_TAIL_LINES = 50;
-const TRUNCATION_HEAD_BYTES = 10_000;
-const TRUNCATION_TAIL_BYTES = 10_000;
+const TRUNCATION_HEAD_BYTES = 25_000;
+const TRUNCATION_TAIL_BYTES = 25_000;
+const PROTOCOL_INPUT_DISPLAY_DIR = path.posix.join('.shipper', 'input');
 
 type ReviewEvent = 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT';
 type ReviewCommentSide = 'LEFT' | 'RIGHT';
@@ -335,16 +336,36 @@ export async function writeContextFile(
 }
 
 function truncateByBytes(text: string, maxBytes: number, fromEnd = false): string {
-  if (Buffer.byteLength(text, 'utf-8') <= maxBytes) {
+  const buffer = Buffer.from(text, 'utf-8');
+  if (buffer.length <= maxBytes) {
     return text;
   }
 
-  let result = fromEnd ? text.slice(-maxBytes) : text.slice(0, maxBytes);
-  while (Buffer.byteLength(result, 'utf-8') > maxBytes) {
-    result = fromEnd ? result.slice(1) : result.slice(0, -1);
+  if (maxBytes <= 0) {
+    return '';
   }
 
-  return result;
+  if (fromEnd) {
+    let sliceStart = buffer.length - maxBytes;
+    while (sliceStart < buffer.length) {
+      const byte = buffer[sliceStart];
+      if (byte === undefined || (byte & 0xc0) !== 0x80) {
+        break;
+      }
+      sliceStart++;
+    }
+    return buffer.subarray(sliceStart).toString('utf-8');
+  }
+
+  let sliceEnd = maxBytes;
+  while (sliceEnd > 0) {
+    const byte = buffer[sliceEnd];
+    if (byte === undefined || (byte & 0xc0) !== 0x80) {
+      break;
+    }
+    sliceEnd--;
+  }
+  return buffer.subarray(0, sliceEnd).toString('utf-8');
 }
 
 export async function truncateLargeInput(
@@ -358,18 +379,19 @@ export async function truncateLargeInput(
 
   await writeContextFile(cwd, filename, text);
 
-  const filePath = path.posix.join(PROTOCOL_INPUT_DIR, filename);
+  const filePath = path.posix.join(PROTOCOL_INPUT_DISPLAY_DIR, filename);
   const lines = text.split('\n');
   const headLines = lines.slice(0, TRUNCATION_HEAD_LINES);
   const tailLines = lines.slice(-TRUNCATION_TAIL_LINES);
   const omittedLineCount = lines.length - headLines.length - tailLines.length;
 
   if (omittedLineCount > 0) {
-    return [
-      headLines.join('\n'),
+    const sections = [
+      truncateByBytes(headLines.join('\n'), TRUNCATION_HEAD_BYTES),
       `[${omittedLineCount} lines omitted; full output written to ${filePath}]`,
-      tailLines.join('\n'),
-    ].join('\n\n');
+      truncateByBytes(tailLines.join('\n'), TRUNCATION_TAIL_BYTES, true),
+    ];
+    return sections.filter((section) => section.length > 0).join('\n\n');
   }
 
   const head = truncateByBytes(text, TRUNCATION_HEAD_BYTES);
@@ -381,9 +403,9 @@ export async function truncateLargeInput(
     0
   );
 
-  return [head, `[${omittedBytes} bytes omitted; full output written to ${filePath}]`, tail].join(
-    '\n\n'
-  );
+  return [head, `[${omittedBytes} bytes omitted; full output written to ${filePath}]`, tail]
+    .filter((section) => section.length > 0)
+    .join('\n\n');
 }
 
 export async function executeTransition(
