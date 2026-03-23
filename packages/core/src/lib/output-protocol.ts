@@ -208,8 +208,9 @@ async function readPrSpec(
   const draft = validateBooleanField(parsed, 'draft', errors);
 
   if (bodyFile !== undefined) {
+    let bodyPath: string | undefined;
     try {
-      const bodyPath = resolveOutputPath(cwd, bodyFile, 'PR body path');
+      bodyPath = resolveOutputPath(cwd, bodyFile, 'PR body path');
       await readFile(bodyPath, 'utf-8');
     } catch (error) {
       if (
@@ -218,7 +219,7 @@ async function readPrSpec(
         'code' in error &&
         error.code === 'ENOENT'
       ) {
-        errors.push(`PR body path does not exist: ${path.resolve(cwd, bodyFile)}`);
+        errors.push(`PR body path does not exist: ${bodyPath ?? bodyFile}`);
       } else {
         errors.push(error instanceof Error ? error.message : String(error));
       }
@@ -476,6 +477,11 @@ export async function submitReviewPayload(
 
 export async function validateStageOutput(cwd: string, stage: StageName): Promise<ResultJson> {
   const result = await readResultFile(path.resolve(cwd, PROTOCOL_OUTPUT_DIR));
+
+  // pr_remediate has a custom artifact flow and only depends on result.json schema here.
+  if (stage === 'pr_remediate') {
+    return result;
+  }
 
   if (result.pr_spec && stage !== 'pr_open') {
     throw new Error(`result.pr_spec is only supported for the pr_open stage (got ${stage})`);

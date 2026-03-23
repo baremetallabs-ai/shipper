@@ -425,6 +425,13 @@ describe('output protocol helpers', () => {
       );
     });
 
+    it('treats pr_remediate as schema-only validation', async () => {
+      const result = buildResult();
+      await writeResultFile(result);
+
+      await expect(validateStageOutput(tempDir, 'pr_remediate')).resolves.toEqual(result);
+    });
+
     it('rejects malformed PR spec JSON', async () => {
       await writeResultFile(buildResult({ pr_spec: outputRelative('pr-spec-248.json') }));
       await writeOutputFile('pr-spec-248.json', '{invalid');

@@ -390,21 +390,28 @@ export async function prRemediateCommand(
               agent,
               model,
             });
-            await retryOnInvalidOutput({
-              cwd: wtPath,
-              stage: 'pr_remediate',
-              retry: (userInput) =>
-                runPrompt('pr_remediate', {
-                  repo,
-                  issueRef: issueNumber,
-                  prRef,
-                  cwd: wtPath,
-                  mode,
-                  agent,
-                  model,
-                  userInput,
-                }),
-            });
+            try {
+              await retryOnInvalidOutput({
+                cwd: wtPath,
+                stage: 'pr_remediate',
+                retry: (userInput) =>
+                  runPrompt('pr_remediate', {
+                    repo,
+                    issueRef: issueNumber,
+                    prRef,
+                    cwd: wtPath,
+                    mode,
+                    agent,
+                    model,
+                    userInput,
+                  }),
+              });
+            } catch (error) {
+              const detail = error instanceof Error ? error.message : String(error);
+              console.error(detail);
+              await handleAgentCrash(repo, issueNumber, 'pr_remediate', detail);
+              return 1;
+            }
 
             let result: Awaited<ReturnType<typeof readResultFile>>;
             try {

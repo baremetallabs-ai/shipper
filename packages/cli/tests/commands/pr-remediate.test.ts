@@ -117,6 +117,10 @@ describe('prRemediateCommand', () => {
     setupProtocolDirsMock.mockResolvedValue(undefined);
     writeContextFileMock.mockResolvedValue(undefined);
     scrubOutputDirMock.mockResolvedValue(undefined);
+    retryOnInvalidOutputMock.mockResolvedValue({
+      verdict: 'accept',
+      comment: '.shipper/output/comment-10.md',
+    });
     postRepliesMock.mockResolvedValue(undefined);
     postCommentMock.mockResolvedValue(undefined);
     executeTransitionMock.mockResolvedValue(undefined);
@@ -580,6 +584,31 @@ describe('prRemediateCommand', () => {
     expect(process.exitCode).toBe(1);
     expect(pushWorktreeMock).not.toHaveBeenCalled();
     expect(executeTransitionMock).not.toHaveBeenCalled();
+  });
+
+  it('handles retryOnInvalidOutput failure as agent crash with stderr', async () => {
+    fetchChecksMock.mockResolvedValue(PASS_CHECKS);
+    retryOnInvalidOutputMock.mockRejectedValue(
+      new Error('pr_remediate accept requires a pr_spec in result.json')
+    );
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
+
+    await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
+
+    expect(errorSpy).toHaveBeenCalledWith('pr_remediate accept requires a pr_spec in result.json');
+    expect(handleAgentCrashMock).toHaveBeenCalledWith(
+      'owner/repo',
+      '10',
+      'pr_remediate',
+      'pr_remediate accept requires a pr_spec in result.json'
+    );
+    expect(readResultFileMock).not.toHaveBeenCalled();
+    expect(pushWorktreeMock).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+
+    errorSpy.mockRestore();
   });
 
   it('posts prepared outputs before reporting a push failure crash and stops remediation', async () => {
