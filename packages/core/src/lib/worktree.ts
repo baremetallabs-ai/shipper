@@ -295,6 +295,16 @@ export async function getGitRevParse(cwd: string, ref: string): Promise<string> 
   return result.stdout.trim();
 }
 
+export async function getCommitsAheadCount(wtPath: string, baseBranch: string): Promise<number> {
+  const args = ['rev-list', '--count', `origin/${baseBranch}..HEAD`];
+  const result = await execAsync('git', args, { cwd: wtPath });
+  if (result.code !== 0) {
+    throw new Error(formatCommandFailure('git', args, result));
+  }
+
+  return Number.parseInt(result.stdout.trim(), 10);
+}
+
 async function syncWithRemoteBranch(opts: WorktreeGitOpts): Promise<void> {
   const currentBranch = await getCurrentBranch(opts);
   const remoteRef = `origin/${currentBranch}`;
