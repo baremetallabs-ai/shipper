@@ -32,7 +32,7 @@ import {
   FAILED_LABEL,
 } from '@dnsquared/shipper-core';
 import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
-import { postMerge } from './merge.js';
+import { isPrMerged, postMerge } from './merge.js';
 import type { QueuedPR } from './merge.js';
 import { buildReadyCheck, SKIP_PR_REMEDIATE_WAIT_ENV_VAR } from './pr-remediate.js';
 import { prepareUnblockContext } from './unblock.js';
@@ -591,6 +591,15 @@ async function mergePr(
     logBoth(logStream, `PR #${pr.number} merged successfully.`);
     await postMerge(pr, issueNumber, nwo, false);
   } catch (err) {
+    const merged = await isPrMerged(pr.number, nwo);
+    if (merged === true) {
+      logBoth(
+        logStream,
+        `PR #${pr.number} merge succeeded despite reported error. Proceeding with post-merge cleanup.`
+      );
+      await postMerge(pr, issueNumber, nwo, false);
+      return;
+    }
     const reason = normalizeError(err).message;
     await remediateMergeFailure(pr, issueNumber, nwo, reason, logStream);
     throw new Error(formatMergeFailureMessage(pr.number, reason));

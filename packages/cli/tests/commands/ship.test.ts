@@ -40,6 +40,9 @@ const postMergeMock = vi.hoisted(() =>
     (_pr: unknown, issueNumber: number | string, repo: string, dryRun: boolean) => Promise<void>
   >(() => Promise.resolve())
 );
+const isPrMergedMock = vi.hoisted(() =>
+  vi.fn<(prNumber: number, repo: string) => Promise<boolean | null>>(() => Promise.resolve(false))
+);
 const prepareUnblockContextMock = vi.hoisted(() =>
   vi.fn<(repo: string, issue: string, cwd: string) => Promise<void>>(() => Promise.resolve())
 );
@@ -91,6 +94,7 @@ vi.mock('../../src/commands/pr-remediate.js', () => ({
 vi.mock('../../src/commands/merge.js', () => ({
   postMerge: (_pr: unknown, issueNumber: number | string, repo: string, dryRun: boolean) =>
     postMergeMock(_pr, issueNumber, repo, dryRun),
+  isPrMerged: (prNumber: number, repo: string) => isPrMergedMock(prNumber, repo),
 }));
 
 vi.mock('../../src/commands/unblock.js', () => ({
@@ -1485,6 +1489,8 @@ describe('shipCommand merge path', () => {
     mockSpawn.mockReset();
     postMergeMock.mockClear();
     postMergeMock.mockResolvedValue(undefined);
+    isPrMergedMock.mockReset();
+    isPrMergedMock.mockResolvedValue(false);
     exitSpy.mockClear();
   });
 
@@ -1662,6 +1668,71 @@ describe('shipCommand merge path', () => {
     await shipCommand(repo, '123', { merge: true, auto: false });
     expect(hookSteps).toEqual(['pre', 'post']);
     expect(exitSpy).toHaveBeenLastCalledWith(0);
+  });
+
+  it('uses post-merge cleanup when gh pr merge errors but verification confirms the merge succeeded', async () => {
+    setupReadyMergeFlow({
+      mergeStates: ['CLEAN'],
+      mergeError: new Error('merge timed out'),
+    });
+    isPrMergedMock.mockResolvedValue(true);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await shipCommand(repo, '123', { merge: true, auto: false });
+
+    expect(isPrMergedMock).toHaveBeenCalledWith(456, repo);
+    expect(postMergeMock).toHaveBeenCalledTimes(1);
+    expect(findGhCalls('pr', 'edit')).toHaveLength(0);
+    expect(findGhCalls('issue', 'edit')).toHaveLength(0);
+    expect(findGhCalls('pr', 'comment')).toHaveLength(0);
+    expect(getConsoleOutput(logSpy)).toContain(
+      'PR #456 merge succeeded despite reported error. Proceeding with post-merge cleanup.'
+    );
+    expect(exitSpy).toHaveBeenCalledWith(0);
+
+    logSpy.mockRestore();
+  });
+
+  it('remediates when gh pr merge errors and verification confirms the merge did not succeed', async () => {
+    setupReadyMergeFlow({
+      mergeStates: ['CLEAN'],
+      mergeError: new Error('merge failed'),
+    });
+    isPrMergedMock.mockResolvedValue(false);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await shipCommand(repo, '123', { merge: true, auto: false });
+
+    expect(isPrMergedMock).toHaveBeenCalledWith(456, repo);
+    expect(postMergeMock).not.toHaveBeenCalled();
+    expect(findGhCalls('pr', 'edit')).toHaveLength(1);
+    expect(findGhCalls('issue', 'edit')).toHaveLength(1);
+    expect(findGhCalls('pr', 'comment')).toHaveLength(1);
+    expect(getConsoleOutput(errorSpy)).toContain('Merge failed for PR #456: merge failed');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    errorSpy.mockRestore();
+  });
+
+  it('remediates when merge verification is inconclusive after a reported merge error', async () => {
+    setupReadyMergeFlow({
+      mergeStates: ['CLEAN'],
+      mergeError: new Error('merge failed'),
+    });
+    isPrMergedMock.mockResolvedValue(null);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await shipCommand(repo, '123', { merge: true, auto: false });
+
+    expect(isPrMergedMock).toHaveBeenCalledWith(456, repo);
+    expect(postMergeMock).not.toHaveBeenCalled();
+    expect(findGhCalls('pr', 'edit')).toHaveLength(1);
+    expect(findGhCalls('issue', 'edit')).toHaveLength(1);
+    expect(findGhCalls('pr', 'comment')).toHaveLength(1);
+    expect(getConsoleOutput(errorSpy)).toContain('Merge failed for PR #456: merge failed');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    errorSpy.mockRestore();
   });
 });
 
