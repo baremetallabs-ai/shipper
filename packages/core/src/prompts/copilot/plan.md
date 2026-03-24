@@ -35,6 +35,7 @@ Explore the repo to ground every plan step in reality. You are looking for:
 - **Utilities, services, and abstractions** that should be reused or extended rather than duplicated.
 - **Test patterns** — how are similar features tested? What test framework, file layout, and assertion style does the project use?
 - **Build/config implications** — any changes needed to configuration, dependencies, or build tooling.
+- **Prior implementation feedback** surfaced in issue comments — incorporate concrete mistakes or blockers from earlier attempts (for example path mismatches, file-not-found errors, or missing dependencies) so the new plan does not repeat them.
 
 Be thorough. An implementation plan that names the wrong file or misunderstands an existing interface wastes more time than it saves.
 
