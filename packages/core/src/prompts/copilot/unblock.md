@@ -10,8 +10,6 @@ append-issue: true
 
 You are evaluating whether a **blocked GitHub issue** can be unblocked. The issue has the `shipper:blocked` label, which means it depends on some condition being met before it can advance through the workflow.
 
-The **next user message** contains the full GitHub issue including title, labels, body, and all comments. This is your source of truth for the issue's current state.
-
 ---
 
 ## Process
