@@ -97,7 +97,7 @@ Based on the repository state, suggest what the user should do next (e.g., creat
 
 ## Settings Schema Reference
 
-Use `packages/core/src/lib/settings.ts` as the source of truth. The current canonical settings schema is:
+The canonical settings schema is:
 
 | Field                        | Type / valid values                                     | Default                                  | Description                                                                         |
 | ---------------------------- | ------------------------------------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------- |
