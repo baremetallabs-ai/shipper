@@ -53,6 +53,10 @@ interface PRViewData {
   mergeStateStatus: string;
 }
 
+interface PRStateViewData {
+  state: string;
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -137,6 +141,15 @@ function parsePRViewData(json: string): PRViewData {
   return { mergeStateStatus: parsed.mergeStateStatus };
 }
 
+function parsePRStateViewData(json: string): PRStateViewData {
+  const parsed: unknown = JSON.parse(json);
+  if (!isPlainObject(parsed) || typeof parsed.state !== 'string') {
+    throw new Error('GitHub CLI returned an invalid pull request state payload.');
+  }
+
+  return { state: parsed.state };
+}
+
 async function resolveRepo(override?: string): Promise<string> {
   if (override) return override;
   return await getRepoNwo();
@@ -162,6 +175,16 @@ async function fetchPRView(ref: string, nwo: string): Promise<PRViewResult> {
     'number,title,headRefName,baseRefName,state,labels',
   ]);
   return JSON.parse(json) as PRViewResult;
+}
+
+export async function isPrMerged(prNumber: number, nwo: string): Promise<boolean | null> {
+  try {
+    const { stdout } = await gh(['pr', 'view', String(prNumber), '-R', nwo, '--json', 'state']);
+    const { state } = parsePRStateViewData(stdout);
+    return state === 'MERGED';
+  } catch {
+    return null;
+  }
 }
 
 export async function lookupPR(ref: string, nwo: string): Promise<QueuedPR> {
@@ -596,6 +619,14 @@ async function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): Promise<bo
     await runPostMergeActions(pr, nwo, false);
     return true;
   } catch (err) {
+    const merged = await isPrMerged(pr.number, nwo);
+    if (merged === true) {
+      console.log(
+        `  PR #${pr.number} merge succeeded despite reported error. Proceeding with post-merge cleanup.`
+      );
+      await runPostMergeActions(pr, nwo, false);
+      return true;
+    }
     const msg = err instanceof Error ? err.message : String(err);
     await failPR(pr, `Merge failed: ${msg}`, nwo, dryRun);
     return false;

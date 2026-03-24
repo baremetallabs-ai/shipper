@@ -246,14 +246,38 @@ describe('requirePassingChecks', () => {
     exitSpy.mockRestore();
   });
 
-  function mockPRLookup(mergeStateStatus: string) {
+  function mockPRLookup(
+    mergeStateStatus: string,
+    options?: {
+      mergeError?: Error;
+      verificationState?: string;
+      verificationError?: Error;
+      verificationStdout?: string;
+    }
+  ) {
+    const {
+      mergeError,
+      verificationState = 'OPEN',
+      verificationError,
+      verificationStdout,
+    } = options ?? {};
+
     ghMock.mockImplementation((args: string[]) => {
       if (args[0] === 'pr' && args[1] === 'view') {
         const jsonFields = args[args.indexOf('--json') + 1] ?? '';
-        if (jsonFields.includes('mergeStateStatus')) {
+        if (jsonFields === 'mergeStateStatus') {
           return Promise.resolve({ stdout: JSON.stringify({ mergeStateStatus }), stderr: '' });
         }
-        if (jsonFields.includes('state')) {
+        if (jsonFields === 'state') {
+          if (verificationError) {
+            return Promise.reject(verificationError);
+          }
+          return Promise.resolve({
+            stdout: verificationStdout ?? JSON.stringify({ state: verificationState }),
+            stderr: '',
+          });
+        }
+        if (jsonFields === 'number,title,headRefName,baseRefName,state,labels') {
           return Promise.resolve({
             stdout: JSON.stringify({
               number: 42,
@@ -271,6 +295,9 @@ describe('requirePassingChecks', () => {
         }
       }
       if (args[0] === 'pr' && args[1] === 'merge') {
+        if (mergeError) {
+          return Promise.reject(mergeError);
+        }
         return Promise.resolve({ stdout: '', stderr: '' });
       }
       if (args[0] === 'issue') {
@@ -383,4 +410,103 @@ describe('requirePassingChecks', () => {
       ])
     );
   });
+
+  it('runs post-merge cleanup when merge reports an error but verification confirms MERGED', async () => {
+    mockPRLookup('CLEAN', {
+      mergeError: new Error('merge request timed out'),
+      verificationState: 'MERGED',
+    });
+    fetchChecksMock.mockResolvedValue([]);
+    classifyChecksMock.mockReturnValue({ pending: [], failed: [], passed: [], total: 0 });
+
+    await mergeCommand({ interval: '30', once: true, dryRun: false, number: '42' });
+
+    expect(ghMock).toHaveBeenCalledWith([
+      'pr',
+      'view',
+      '42',
+      '-R',
+      'owner/repo',
+      '--json',
+      'state',
+    ]);
+    expect(ghMock).toHaveBeenCalledWith([
+      'issue',
+      'edit',
+      '10',
+      '-R',
+      'owner/repo',
+      '--remove-label',
+      'shipper:ready',
+    ]);
+    expect(ghMock).toHaveBeenCalledWith(['issue', 'close', '10', '-R', 'owner/repo']);
+    expect(findCalls('pr', 'edit')).toHaveLength(0);
+    expect(findCalls('pr', 'comment')).toHaveLength(0);
+    expect(logMock).toHaveBeenCalledWith(
+      '  PR #42 merge succeeded despite reported error. Proceeding with post-merge cleanup.'
+    );
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  it('remediates when merge reports an error and verification confirms the PR is still open', async () => {
+    mockPRLookup('CLEAN', {
+      mergeError: new Error('merge failed'),
+      verificationState: 'OPEN',
+    });
+    fetchChecksMock.mockResolvedValue([]);
+    classifyChecksMock.mockReturnValue({ pending: [], failed: [], passed: [], total: 0 });
+
+    await expect(
+      mergeCommand({ interval: '30', once: true, dryRun: false, number: '42' })
+    ).rejects.toThrow('exit:1');
+
+    expect(ghMock).toHaveBeenCalledWith([
+      'pr',
+      'view',
+      '42',
+      '-R',
+      'owner/repo',
+      '--json',
+      'state',
+    ]);
+    expect(findCalls('pr', 'edit')).toHaveLength(2);
+    expect(findCalls('pr', 'comment')).toHaveLength(1);
+    expect(findCalls('issue', 'edit')).toHaveLength(0);
+    expect(findCalls('issue', 'close')).toHaveLength(0);
+    expect(logMock).toHaveBeenCalledWith('  PR #42 failed: Merge failed: merge failed');
+  });
+
+  it('remediates when merge verification fails after a reported merge error', async () => {
+    mockPRLookup('CLEAN', {
+      mergeError: new Error('merge failed'),
+      verificationStdout: '{"status":"MERGED"}',
+    });
+    fetchChecksMock.mockResolvedValue([]);
+    classifyChecksMock.mockReturnValue({ pending: [], failed: [], passed: [], total: 0 });
+
+    await expect(
+      mergeCommand({ interval: '30', once: true, dryRun: false, number: '42' })
+    ).rejects.toThrow('exit:1');
+
+    expect(ghMock).toHaveBeenCalledWith([
+      'pr',
+      'view',
+      '42',
+      '-R',
+      'owner/repo',
+      '--json',
+      'state',
+    ]);
+    expect(findCalls('pr', 'edit')).toHaveLength(2);
+    expect(findCalls('pr', 'comment')).toHaveLength(1);
+    expect(findCalls('issue', 'edit')).toHaveLength(0);
+    expect(findCalls('issue', 'close')).toHaveLength(0);
+    expect(logMock).toHaveBeenCalledWith('  PR #42 failed: Merge failed: merge failed');
+  });
 });
+
+function findCalls(command: string, subcommand: string): string[][] {
+  return ghMock.mock.calls
+    .map(([args]) => args)
+    .filter((args) => args[0] === command && args[1] === subcommand);
+}
