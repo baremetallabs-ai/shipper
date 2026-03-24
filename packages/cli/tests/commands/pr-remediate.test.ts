@@ -20,6 +20,7 @@ const truncateLargeInputMock = vi.fn((_: string, text: string, filename: string)
 );
 const runPromptMock = vi.fn();
 const getGitRevParseMock = vi.fn<(cwd: string, ref: string) => Promise<string>>();
+const getCommitsAheadCountMock = vi.fn<(wtPath: string, baseBranch: string) => Promise<number>>();
 const rerunFailedChecksMock =
   vi.fn<(repo: string, failedChecks: PRChecksLine[]) => Promise<void>>();
 const syncWorktreeMock = vi.fn(() => Promise.resolve());
@@ -71,6 +72,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   truncateLargeInput: truncateLargeInputMock,
   runPrompt: runPromptMock,
   getGitRevParse: getGitRevParseMock,
+  getCommitsAheadCount: getCommitsAheadCountMock,
   rerunFailedChecks: rerunFailedChecksMock,
   syncWorktree: syncWorktreeMock,
   pushWithRetry: pushWithRetryMock,
@@ -124,6 +126,7 @@ describe('prRemediateCommand', () => {
     runPromptMock.mockResolvedValue(0);
     syncWorktreeMock.mockResolvedValue(undefined);
     pushWithRetryMock.mockResolvedValue(0);
+    getCommitsAheadCountMock.mockResolvedValue(1);
     setupProtocolDirsMock.mockResolvedValue(undefined);
     truncateLargeInputMock.mockClear();
     writeContextFileMock.mockResolvedValue(undefined);
@@ -354,6 +357,8 @@ describe('prRemediateCommand', () => {
         cwd: '/tmp/fake-wt',
       })
     );
+    expect(getCommitsAheadCountMock).toHaveBeenCalledWith('/tmp/fake-wt', 'release/2026');
+    expect(scrubOutputDirMock).toHaveBeenCalledWith('/tmp/fake-wt');
     const retryCall = retryOnInvalidOutputMock.mock.calls[0]?.[0] as
       | { cwd: string; stage: string; retry: (message: string) => Promise<number> }
       | undefined;
@@ -405,6 +410,54 @@ describe('prRemediateCommand', () => {
       add: ['shipper:ready'],
       remove: ['shipper:pr-reviewed'],
     });
+  });
+
+  it('fails fast when rebase drops all commits ahead of the base branch', async () => {
+    fetchChecksMock.mockResolvedValue(PASS_CHECKS);
+    getCommitsAheadCountMock.mockResolvedValue(0);
+    resolveTransitionMock.mockReturnValue({
+      add: ['shipper:failed'],
+      remove: ['shipper:pr-reviewed'],
+    });
+
+    const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
+
+    await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
+
+    expect(getCommitsAheadCountMock).toHaveBeenCalledWith('/tmp/fake-wt', 'release/2026');
+    expect(handleAgentCrashMock).toHaveBeenCalledWith(
+      'owner/repo',
+      '10',
+      'pr_remediate',
+      expect.stringContaining('0 commits ahead of `origin/release/2026` after rebase')
+    );
+    expect(handleAgentCrashMock).toHaveBeenCalledWith(
+      'owner/repo',
+      '10',
+      'pr_remediate',
+      expect.stringContaining(
+        'commits were already on the base branch through another merge path, so the rebase dropped them all'
+      )
+    );
+    expect(handleAgentCrashMock).toHaveBeenCalledWith(
+      'owner/repo',
+      '10',
+      'pr_remediate',
+      expect.stringContaining('close the PR and reset the issue via `shipper reset`')
+    );
+    expect(resolveTransitionMock).toHaveBeenCalledWith('pr_remediate', 'fail');
+    expect(executeTransitionMock).toHaveBeenCalledWith('owner/repo', '10', {
+      add: ['shipper:failed'],
+      remove: ['shipper:pr-reviewed'],
+    });
+    expect(scrubOutputDirMock).not.toHaveBeenCalled();
+    expect(runPromptMock).not.toHaveBeenCalled();
+    expect(retryOnInvalidOutputMock).not.toHaveBeenCalled();
+    expect(pushWithRetryMock).not.toHaveBeenCalled();
+    expect(postRepliesMock).not.toHaveBeenCalled();
+    expect(postCommentMock).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+    expect(ghMock.mock.calls.some(([args]) => args[0] === 'pr' && args[1] === 'close')).toBe(false);
   });
 
   it('bails out of preflight check polling after three consecutive fetch failures', async () => {
