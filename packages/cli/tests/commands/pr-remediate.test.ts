@@ -56,6 +56,7 @@ const resolveTransitionMock = vi.fn<() => LabelTransition>(() => ({
 }));
 
 const repo = 'owner/repo';
+const PENDING_CHECKS = [{ name: 'build', state: 'IN_PROGRESS', bucket: 'pending' }];
 const PASS_CHECKS = [{ name: 'build', state: 'COMPLETED', bucket: 'pass' }];
 const FAIL_CHECKS = [{ name: 'build', state: 'COMPLETED', bucket: 'fail' }];
 type WriteContextFileCall = [string, string, string];
@@ -208,9 +209,7 @@ describe('prRemediateCommand', () => {
   });
 
   it('reports checks readiness as false while checks are pending', async () => {
-    fetchChecksMock
-      .mockResolvedValueOnce([{ name: 'build', state: 'IN_PROGRESS', bucket: 'pending' }])
-      .mockResolvedValueOnce([{ name: 'build', state: 'IN_PROGRESS', bucket: 'pending' }]);
+    fetchChecksMock.mockResolvedValueOnce(PENDING_CHECKS).mockResolvedValueOnce(PENDING_CHECKS);
 
     const { buildReadyCheck } = await import('../../src/commands/pr-remediate.js');
     const readyCheck = await buildReadyCheck(repo, '42', {
@@ -222,9 +221,7 @@ describe('prRemediateCommand', () => {
   });
 
   it('reports checks readiness once pending checks clear', async () => {
-    fetchChecksMock
-      .mockResolvedValueOnce([{ name: 'build', state: 'IN_PROGRESS', bucket: 'pending' }])
-      .mockResolvedValueOnce([{ name: 'build', state: 'COMPLETED', bucket: 'pass' }]);
+    fetchChecksMock.mockResolvedValueOnce(PENDING_CHECKS).mockResolvedValueOnce(PASS_CHECKS);
 
     const { buildReadyCheck } = await import('../../src/commands/pr-remediate.js');
     const readyCheck = await buildReadyCheck(repo, '42', {
@@ -253,6 +250,52 @@ describe('prRemediateCommand', () => {
 
     vi.setSystemTime(new Date('2026-03-12T10:00:31Z'));
     await expect(readyCheck()).resolves.toBe(true);
+  });
+
+  it('returns ready after three consecutive fetch failures in checks mode', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    fetchChecksMock
+      .mockResolvedValueOnce(PENDING_CHECKS)
+      .mockRejectedValueOnce(new Error('network error'))
+      .mockRejectedValueOnce(new Error('network error'))
+      .mockRejectedValueOnce(new Error('network error'));
+
+    const { buildReadyCheck } = await import('../../src/commands/pr-remediate.js');
+    const readyCheck = await buildReadyCheck(repo, '42', {
+      mode: 'checks',
+      timeoutMinutes: 15,
+    });
+
+    await expect(readyCheck()).resolves.toBe(false);
+    await expect(readyCheck()).resolves.toBe(false);
+    await expect(readyCheck()).resolves.toBe(true);
+
+    warnSpy.mockRestore();
+  });
+
+  it('resets the checks-mode failure counter after a successful fetch', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    fetchChecksMock
+      .mockResolvedValueOnce(PENDING_CHECKS)
+      .mockRejectedValueOnce(new Error('network error'))
+      .mockResolvedValueOnce(PENDING_CHECKS)
+      .mockRejectedValueOnce(new Error('network error'))
+      .mockRejectedValueOnce(new Error('network error'))
+      .mockRejectedValueOnce(new Error('network error'));
+
+    const { buildReadyCheck } = await import('../../src/commands/pr-remediate.js');
+    const readyCheck = await buildReadyCheck(repo, '42', {
+      mode: 'checks',
+      timeoutMinutes: 15,
+    });
+
+    await expect(readyCheck()).resolves.toBe(false);
+    await expect(readyCheck()).resolves.toBe(false);
+    await expect(readyCheck()).resolves.toBe(false);
+    await expect(readyCheck()).resolves.toBe(false);
+    await expect(readyCheck()).resolves.toBe(true);
+
+    warnSpy.mockRestore();
   });
 
   it('accepts on the first pass, posts artifacts in order, and transitions to ready on green CI', async () => {
@@ -352,6 +395,70 @@ describe('prRemediateCommand', () => {
       add: ['shipper:ready'],
       remove: ['shipper:pr-reviewed'],
     });
+  });
+
+  it('bails out of preflight check polling after three consecutive fetch failures', async () => {
+    getSettingsMock.mockReturnValue({
+      prReviewWait: { mode: 'checks', timeoutMinutes: 15 },
+    });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    fetchChecksMock
+      .mockResolvedValueOnce(PENDING_CHECKS)
+      .mockRejectedValueOnce(new Error('network error'))
+      .mockRejectedValueOnce(new Error('network error'))
+      .mockRejectedValueOnce(new Error('network error'))
+      .mockResolvedValue(PASS_CHECKS);
+
+    const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
+
+    await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
+
+    expect(logSpy).toHaveBeenCalledWith(
+      'Check polling stopped: persistent fetch failures. Proceeding.'
+    );
+    expect(sleepMsMock).toHaveBeenCalledTimes(2);
+    expect(sleepMsMock).toHaveBeenNthCalledWith(1, 20_000);
+    expect(sleepMsMock).toHaveBeenNthCalledWith(2, 20_000);
+    expect(process.exitCode).toBe(0);
+
+    warnSpy.mockRestore();
+    logSpy.mockRestore();
+  });
+
+  it('resets waitForChecks consecutive failures after a successful fetch', async () => {
+    getSettingsMock.mockReturnValue({
+      prReviewWait: { mode: 'checks', timeoutMinutes: 15 },
+    });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    fetchChecksMock
+      .mockResolvedValueOnce(PENDING_CHECKS)
+      .mockRejectedValueOnce(new Error('network error'))
+      .mockRejectedValueOnce(new Error('network error'))
+      .mockResolvedValueOnce(PENDING_CHECKS)
+      .mockRejectedValueOnce(new Error('network error'))
+      .mockRejectedValueOnce(new Error('network error'))
+      .mockRejectedValueOnce(new Error('network error'))
+      .mockResolvedValue(PASS_CHECKS);
+
+    const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
+
+    await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
+
+    expect(logSpy).toHaveBeenCalledWith(
+      'Check polling stopped: persistent fetch failures. Proceeding.'
+    );
+    expect(sleepMsMock).toHaveBeenCalledTimes(5);
+    expect(sleepMsMock).toHaveBeenNthCalledWith(1, 20_000);
+    expect(sleepMsMock).toHaveBeenNthCalledWith(2, 20_000);
+    expect(sleepMsMock).toHaveBeenNthCalledWith(3, 20_000);
+    expect(sleepMsMock).toHaveBeenNthCalledWith(4, 20_000);
+    expect(sleepMsMock).toHaveBeenNthCalledWith(5, 20_000);
+    expect(process.exitCode).toBe(0);
+
+    warnSpy.mockRestore();
+    logSpy.mockRestore();
   });
 
   it('routes sync conflict context through truncateLargeInput', async () => {

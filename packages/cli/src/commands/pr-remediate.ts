@@ -58,6 +58,7 @@ function parseCreatedAt(json: string): string {
 async function waitForChecks(repo: string, pr: string, timeoutMinutes: number): Promise<void> {
   const deadline = Date.now() + timeoutMinutes * 60_000;
   let previousCompleted = -1;
+  let consecutiveFailures = 0;
   let interrupted = false;
 
   const sigHandler = () => {
@@ -94,7 +95,14 @@ async function waitForChecks(repo: string, pr: string, timeoutMinutes: number): 
       }
 
       checks = await fetchChecksGraceful(repo, pr);
-      if (checks !== null) {
+      if (checks === null) {
+        consecutiveFailures += 1;
+        if (consecutiveFailures >= 3) {
+          console.log('Check polling stopped: persistent fetch failures. Proceeding.');
+          break;
+        }
+      } else {
+        consecutiveFailures = 0;
         const { pending, total } = classifyChecks(checks);
         const completed = total - pending.length;
 
@@ -238,6 +246,7 @@ export async function buildReadyCheck(
   }
 
   const deadline = Date.now() + prReviewWait.timeoutMinutes * 60_000;
+  let consecutiveFailures = 0;
   const initialChecks = await fetchChecksGraceful(repo, pr);
   const zeroChecksDeadline =
     initialChecks !== null && initialChecks.length === 0
@@ -251,6 +260,15 @@ export async function buildReadyCheck(
     }
 
     const checks = await fetchChecksGraceful(repo, pr);
+    if (checks === null) {
+      consecutiveFailures += 1;
+      if (consecutiveFailures >= 3) {
+        return true;
+      }
+    } else {
+      consecutiveFailures = 0;
+    }
+
     if (zeroChecksDeadline !== null && (checks === null || checks.length === 0)) {
       return now >= zeroChecksDeadline;
     }
