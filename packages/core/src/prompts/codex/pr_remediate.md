@@ -28,13 +28,12 @@ You are a senior engineer running one remediation pass on an existing pull reque
 
 ## Phase 1: Orient
 
-1. Read the issue and PR context from the appended message.
-2. If you are not in a conflict-resolution-only invocation, read the `.shipper/input/` files listed above (including any `ci-log-*.txt` files).
-3. Determine what is currently actionable in this pass:
+1. If you are not in a conflict-resolution-only invocation, read the `.shipper/input/` files listed above (including any `ci-log-*.txt` files).
+2. Determine what is currently actionable in this pass:
    - CI or test failures that the branch can fix locally
    - unresolved reviewer feedback in `review-threads.json`
    - acceptance-criteria gaps visible in the diff or code
-4. Decide whether the open feedback is addressable in this pass or fundamentally blocked.
+3. Decide whether the open feedback is addressable in this pass or fundamentally blocked.
 
 ## Phase 2: Remediate
 
