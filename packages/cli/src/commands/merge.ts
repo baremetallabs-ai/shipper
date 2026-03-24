@@ -472,6 +472,12 @@ async function runPostMergeActions(pr: QueuedPR, nwo: string, dryRun: boolean): 
 }
 
 async function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): Promise<boolean> {
+  const completePostMerge = async (message: string): Promise<boolean> => {
+    console.log(message);
+    await runPostMergeActions(pr, nwo, false);
+    return true;
+  };
+
   console.log(`  Processing PR #${pr.number}: ${pr.title}`);
 
   // Check merge state
@@ -615,17 +621,13 @@ async function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): Promise<bo
     if (stdout.trim()) {
       process.stdout.write(stdout);
     }
-    console.log(`  PR #${pr.number} merged successfully.`);
-    await runPostMergeActions(pr, nwo, false);
-    return true;
+    return await completePostMerge(`  PR #${pr.number} merged successfully.`);
   } catch (err) {
     const merged = await isPrMerged(pr.number, nwo);
     if (merged === true) {
-      console.log(
+      return await completePostMerge(
         `  PR #${pr.number} merge succeeded despite reported error. Proceeding with post-merge cleanup.`
       );
-      await runPostMergeActions(pr, nwo, false);
-      return true;
     }
     const msg = err instanceof Error ? err.message : String(err);
     await failPR(pr, `Merge failed: ${msg}`, nwo, dryRun);

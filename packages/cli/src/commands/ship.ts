@@ -544,6 +544,11 @@ async function mergePr(
   nwo: string,
   logStream?: WriteStream
 ): Promise<void> {
+  const completePostMerge = async (message: string): Promise<void> => {
+    logBoth(logStream, message);
+    await postMerge(pr, issueNumber, nwo, false);
+  };
+
   try {
     let mergeState = await getMergeStateStatus(pr.number, nwo);
     let rebased = false;
@@ -576,30 +581,32 @@ async function mergePr(
       throw new Error(await getMergeStateFailureReason(pr, nwo, mergeState, rebased));
     }
 
-    const { stdout } = await gh([
-      'pr',
-      'merge',
-      String(pr.number),
-      '-R',
-      nwo,
-      '--rebase',
-      '--delete-branch',
-    ]);
-    if (stdout.trim()) {
-      writeStdoutBoth(logStream, stdout);
-    }
-    logBoth(logStream, `PR #${pr.number} merged successfully.`);
-    await postMerge(pr, issueNumber, nwo, false);
-  } catch (err) {
-    const merged = await isPrMerged(pr.number, nwo);
-    if (merged === true) {
-      logBoth(
-        logStream,
-        `PR #${pr.number} merge succeeded despite reported error. Proceeding with post-merge cleanup.`
-      );
-      await postMerge(pr, issueNumber, nwo, false);
+    try {
+      const { stdout } = await gh([
+        'pr',
+        'merge',
+        String(pr.number),
+        '-R',
+        nwo,
+        '--rebase',
+        '--delete-branch',
+      ]);
+      if (stdout.trim()) {
+        writeStdoutBoth(logStream, stdout);
+      }
+      await completePostMerge(`PR #${pr.number} merged successfully.`);
       return;
+    } catch (err) {
+      const merged = await isPrMerged(pr.number, nwo);
+      if (merged === true) {
+        await completePostMerge(
+          `PR #${pr.number} merge succeeded despite reported error. Proceeding with post-merge cleanup.`
+        );
+        return;
+      }
+      throw err;
     }
+  } catch (err) {
     const reason = normalizeError(err).message;
     await remediateMergeFailure(pr, issueNumber, nwo, reason, logStream);
     throw new Error(formatMergeFailureMessage(pr.number, reason));

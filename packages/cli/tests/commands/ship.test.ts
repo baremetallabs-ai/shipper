@@ -1523,6 +1523,7 @@ describe('shipCommand merge path', () => {
     expect(stderrOutput).toContain(
       'Merge failed for PR #456: Failed to rebase PR #456 onto its base branch: rebase conflict'
     );
+    expect(isPrMergedMock).not.toHaveBeenCalled();
     expect(findGhCalls('pr', 'merge')).toHaveLength(0);
     expect(findGhCalls('pr', 'edit')).toHaveLength(1);
     expect(findGhCalls('issue', 'edit')).toHaveLength(1);
