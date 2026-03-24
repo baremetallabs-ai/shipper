@@ -24,13 +24,14 @@ Find defects and risky assumptions, not style nits. Trace execution paths end-to
 
 ### Step 1: Read the pre-flight inputs
 
-Read the pre-flight machine-readable inputs that Shipper wrote for you:
+The review context comes from multiple sources:
 
-- `.shipper/input/pr-diff.patch`
-- `.shipper/input/pr-files.json`
-- `.shipper/input/pr-metadata.json`
+- **Appended PR text** (in the next user message): PR body, comments, reviews, and general PR metadata (title, author, state, labels, branch names)
+- **`.shipper/input/pr-diff.patch`**: the full PR diff
+- **`.shipper/input/pr-files.json`**: the structured changed-file list
+- **`.shipper/input/pr-metadata.json`**: `headRefOid` (used as the review `commit_id`), plus PR author, title, and head branch name
 
-Treat those `.shipper/input/` files as authoritative for the diff, changed-file list, and PR metadata.
+Read all sources before proceeding.
 
 ### Step 2: Understand the PR metadata
 
