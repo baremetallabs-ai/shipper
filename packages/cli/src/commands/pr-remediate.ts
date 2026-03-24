@@ -419,15 +419,21 @@ export async function prRemediateCommand(
               return 1;
             }
 
-            const commitsAhead = await getCommitsAheadCount(wtPath, baseBranch);
+            let commitsAhead: number;
+            try {
+              commitsAhead = await getCommitsAheadCount(wtPath, baseBranch);
+            } catch (error) {
+              const detail = error instanceof Error ? error.message : String(error);
+              await handleAgentCrash(repo, issueNumber, 'pr_remediate', detail);
+              return 1;
+            }
+
             if (commitsAhead === 0) {
-              const detail = [
-                `The PR branch has 0 commits ahead of \`origin/${baseBranch}\` after rebase.`,
-                '',
-                "This typically means the branch's commits were already on the base branch through another merge path, so the rebase dropped them all.",
-                '',
-                'Suggested recovery: close the PR and reset the issue via `shipper reset`.',
-              ].join('\n');
+              const detail = `The PR branch has 0 commits ahead of \`origin/${baseBranch}\` after rebase.
+
+This typically means the branch's commits were already on the base branch through another merge path, so the rebase dropped them all.
+
+Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
               await handleAgentCrash(repo, issueNumber, 'pr_remediate', detail);
               await executeTransition(repo, issueNumber, resolveTransition('pr_remediate', 'fail'));
               return 1;

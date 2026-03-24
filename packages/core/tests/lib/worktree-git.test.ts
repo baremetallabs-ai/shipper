@@ -622,6 +622,15 @@ describe('getCommitsAheadCount', () => {
     );
     expect(gitArgsFromExecCalls()).toEqual([['rev-list', '--count', 'origin/main..HEAD']]);
   });
+
+  it('throws when git rev-list returns a non-numeric count', async () => {
+    queueExecResult({ stdout: '\n' });
+
+    await expect(getCommitsAheadCount('/tmp/wt', 'main')).rejects.toThrow(
+      'git rev-list --count origin/main..HEAD returned a non-numeric commit count'
+    );
+    expect(gitArgsFromExecCalls()).toEqual([['rev-list', '--count', 'origin/main..HEAD']]);
+  });
 });
 
 describe('pushWorktree', () => {

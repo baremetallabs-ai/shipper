@@ -424,26 +424,18 @@ describe('prRemediateCommand', () => {
 
     await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
 
+    const expectedDetail = `The PR branch has 0 commits ahead of \`origin/release/2026\` after rebase.
+
+This typically means the branch's commits were already on the base branch through another merge path, so the rebase dropped them all.
+
+Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
+
     expect(getCommitsAheadCountMock).toHaveBeenCalledWith('/tmp/fake-wt', 'release/2026');
     expect(handleAgentCrashMock).toHaveBeenCalledWith(
       'owner/repo',
       '10',
       'pr_remediate',
-      expect.stringContaining('0 commits ahead of `origin/release/2026` after rebase')
-    );
-    expect(handleAgentCrashMock).toHaveBeenCalledWith(
-      'owner/repo',
-      '10',
-      'pr_remediate',
-      expect.stringContaining(
-        'commits were already on the base branch through another merge path, so the rebase dropped them all'
-      )
-    );
-    expect(handleAgentCrashMock).toHaveBeenCalledWith(
-      'owner/repo',
-      '10',
-      'pr_remediate',
-      expect.stringContaining('close the PR and reset the issue via `shipper reset`')
+      expectedDetail
     );
     expect(resolveTransitionMock).toHaveBeenCalledWith('pr_remediate', 'fail');
     expect(executeTransitionMock).toHaveBeenCalledWith('owner/repo', '10', {
@@ -458,6 +450,28 @@ describe('prRemediateCommand', () => {
     expect(postCommentMock).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
     expect(ghMock.mock.calls.some(([args]) => args[0] === 'pr' && args[1] === 'close')).toBe(false);
+  });
+
+  it('reports a crash when the ahead-count check fails', async () => {
+    fetchChecksMock.mockResolvedValue(PASS_CHECKS);
+    getCommitsAheadCountMock.mockRejectedValue(new Error('git rev-list failed'));
+
+    const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
+
+    await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
+
+    expect(getCommitsAheadCountMock).toHaveBeenCalledWith('/tmp/fake-wt', 'release/2026');
+    expect(handleAgentCrashMock).toHaveBeenCalledWith(
+      'owner/repo',
+      '10',
+      'pr_remediate',
+      'git rev-list failed'
+    );
+    expect(executeTransitionMock).not.toHaveBeenCalled();
+    expect(scrubOutputDirMock).not.toHaveBeenCalled();
+    expect(runPromptMock).not.toHaveBeenCalled();
+    expect(pushWithRetryMock).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
   });
 
   it('bails out of preflight check polling after three consecutive fetch failures', async () => {
