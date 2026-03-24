@@ -25,6 +25,6 @@ export default defineConfig({
       },
     },
     include: ['**/*.test.{ts,tsx}'],
-    exclude: ['node_modules', 'dist', 'out'],
+    exclude: ['node_modules', 'dist', 'out', 'release'],
   },
 });

@@ -1,0 +1,25 @@
+appId: com.dnsquared.shipper
+productName: Shipper
+electronVersion: 35.7.5
+
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - target: dmg
+      arch: [arm64]
+    - target: zip
+      arch: [arm64]
+  identity: null
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - out/**/*
+  - '!out/**/node_modules'
+
+npmRebuild: true
+
+asarUnpack:
+  - '**/node-pty/**'
