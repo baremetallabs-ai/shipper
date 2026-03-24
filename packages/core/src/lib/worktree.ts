@@ -285,6 +285,16 @@ async function remoteRefExists(opts: WorktreeGitOpts, targetRef: string): Promis
   return result.code === 0;
 }
 
+export async function getGitRevParse(cwd: string, ref: string): Promise<string> {
+  const result = await execAsync('git', ['rev-parse', ref], { cwd });
+  if (result.code !== 0) {
+    const output = [result.stderr.trim(), result.stdout.trim()].filter(Boolean).join('\n');
+    throw new Error(`git rev-parse ${ref} failed${output ? `: ${output}` : ''}`);
+  }
+
+  return result.stdout.trim();
+}
+
 async function syncWithRemoteBranch(opts: WorktreeGitOpts): Promise<void> {
   const currentBranch = await getCurrentBranch(opts);
   const remoteRef = `origin/${currentBranch}`;

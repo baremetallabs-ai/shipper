@@ -102,6 +102,30 @@ export async function enrichFailedChecks(
   return logDumps;
 }
 
+export async function rerunFailedChecks(repo: string, failedChecks: PRChecksLine[]): Promise<void> {
+  const runIds = new Set<string>();
+
+  for (const check of failedChecks) {
+    if (!check.link) {
+      continue;
+    }
+
+    const runId = extractRunId(check.link);
+    if (runId) {
+      runIds.add(runId);
+    }
+  }
+
+  for (const runId of runIds) {
+    try {
+      await gh(['run', 'rerun', runId, '--failed', '-R', repo]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`Warning: Failed to re-run workflow ${runId}: ${message}`);
+    }
+  }
+}
+
 export function classifyChecks(checks: PRChecksLine[]): CheckClassification {
   const pending: PRChecksLine[] = [];
   const failed: PRChecksLine[] = [];
