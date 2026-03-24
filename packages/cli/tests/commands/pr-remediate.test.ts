@@ -19,6 +19,9 @@ const truncateLargeInputMock = vi.fn((_: string, text: string, filename: string)
   Promise.resolve(`truncated:${filename}:${text}`)
 );
 const runPromptMock = vi.fn();
+const getGitRevParseMock = vi.fn<(cwd: string, ref: string) => Promise<string>>();
+const rerunFailedChecksMock =
+  vi.fn<(repo: string, failedChecks: PRChecksLine[]) => Promise<void>>();
 const syncWorktreeMock = vi.fn(() => Promise.resolve());
 const pushWithRetryMock = vi.fn(() => Promise.resolve(0));
 const withStageHooksMock = vi.fn((_stage: unknown, _env: unknown, fn: () => Promise<unknown>) =>
@@ -67,6 +70,8 @@ vi.mock('@dnsquared/shipper-core', () => ({
   formatConflictContext: formatConflictContextMock,
   truncateLargeInput: truncateLargeInputMock,
   runPrompt: runPromptMock,
+  getGitRevParse: getGitRevParseMock,
+  rerunFailedChecks: rerunFailedChecksMock,
   syncWorktree: syncWorktreeMock,
   pushWithRetry: pushWithRetryMock,
   withStageHooks: withStageHooksMock,
@@ -109,6 +114,7 @@ function getWriteContextFileCalls(): WriteContextFileCall[] {
 describe('prRemediateCommand', () => {
   let exitSpy: ReturnType<typeof vi.spyOn>;
   const originalSkipPrRemediateWait = process.env.SHIPPER_SKIP_PR_REMEDIATE_WAIT;
+  let revParseCounter = 0;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -142,6 +148,9 @@ describe('prRemediateCommand', () => {
       add: ['shipper:ready'],
       remove: ['shipper:pr-reviewed'],
     });
+    revParseCounter = 0;
+    getGitRevParseMock.mockImplementation(() => Promise.resolve(`sha-${++revParseCounter}`));
+    rerunFailedChecksMock.mockResolvedValue(undefined);
     classifyChecksMock.mockImplementation(classifyChecksImpl);
     enrichFailedChecksMock.mockResolvedValue(new Map());
     ghMock.mockImplementation((args: string[]) => {
@@ -390,6 +399,7 @@ describe('prRemediateCommand', () => {
       '/tmp/fake-wt',
       '.shipper/output/replies-updated'
     );
+    expect(rerunFailedChecksMock).not.toHaveBeenCalled();
     expect(resolveTransitionMock).toHaveBeenCalledWith('pr_remediate', 'accept');
     expect(executeTransitionMock).toHaveBeenCalledWith('owner/repo', '10', {
       add: ['shipper:ready'],
@@ -602,6 +612,91 @@ describe('prRemediateCommand', () => {
       add: ['shipper:ready'],
       remove: ['shipper:pr-reviewed'],
     });
+  });
+
+  it('reruns failed CI checks before polling when no new commit was pushed and exits after a green rerun', async () => {
+    getGitRevParseMock.mockResolvedValueOnce('same-sha').mockResolvedValueOnce('same-sha');
+    fetchChecksMock
+      .mockResolvedValueOnce(FAIL_CHECKS)
+      .mockResolvedValueOnce(FAIL_CHECKS)
+      .mockResolvedValueOnce(PASS_CHECKS)
+      .mockResolvedValueOnce(PASS_CHECKS)
+      .mockResolvedValueOnce(PASS_CHECKS);
+    validateStageOutputMock.mockResolvedValue({
+      verdict: 'accept',
+      comment: '.shipper/output/comment-10.md',
+    });
+
+    const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
+
+    await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
+
+    expect(rerunFailedChecksMock).toHaveBeenCalledTimes(1);
+    expect(rerunFailedChecksMock).toHaveBeenCalledWith(
+      repo,
+      classifyChecksImpl(FAIL_CHECKS).failed
+    );
+    expect(sleepMsMock).toHaveBeenCalledWith(10_000);
+    expect(rerunFailedChecksMock.mock.invocationCallOrder[0]).toBeLessThan(
+      fetchChecksMock.mock.invocationCallOrder[2] ?? Number.POSITIVE_INFINITY
+    );
+    expect(syncWorktreeMock).toHaveBeenCalledTimes(1);
+    expect(pushWithRetryMock).toHaveBeenCalledTimes(1);
+    expect(executeTransitionMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips rerunning failed CI checks when pushWithRetry advances the remote branch', async () => {
+    fetchChecksMock.mockResolvedValue(PASS_CHECKS);
+    validateStageOutputMock.mockResolvedValue({
+      verdict: 'accept',
+      comment: '.shipper/output/comment-10.md',
+    });
+
+    const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
+
+    await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
+
+    expect(getGitRevParseMock).toHaveBeenCalledTimes(2);
+    expect(rerunFailedChecksMock).not.toHaveBeenCalled();
+    expect(sleepMsMock).not.toHaveBeenCalledWith(10_000);
+    expect(syncWorktreeMock).toHaveBeenCalledTimes(1);
+    expect(pushWithRetryMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('counts a no-push rerun that stays red as a pass and starts the next remediation pass', async () => {
+    getGitRevParseMock
+      .mockResolvedValueOnce('same-sha')
+      .mockResolvedValueOnce('same-sha')
+      .mockResolvedValueOnce('before-pass-2')
+      .mockResolvedValueOnce('after-pass-2');
+    fetchChecksMock
+      .mockResolvedValueOnce(FAIL_CHECKS)
+      .mockResolvedValueOnce(FAIL_CHECKS)
+      .mockResolvedValueOnce(FAIL_CHECKS)
+      .mockResolvedValueOnce(FAIL_CHECKS)
+      .mockResolvedValueOnce(FAIL_CHECKS)
+      .mockResolvedValueOnce(PASS_CHECKS)
+      .mockResolvedValueOnce(PASS_CHECKS)
+      .mockResolvedValueOnce(PASS_CHECKS)
+      .mockResolvedValueOnce(PASS_CHECKS);
+    validateStageOutputMock.mockResolvedValue({
+      verdict: 'accept',
+      comment: '.shipper/output/comment-10.md',
+    });
+
+    const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
+
+    await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
+
+    expect(rerunFailedChecksMock).toHaveBeenCalledTimes(1);
+    expect(syncWorktreeMock).toHaveBeenCalledTimes(2);
+    expect(pushWithRetryMock).toHaveBeenCalledTimes(2);
+    expect(writeContextFileMock).toHaveBeenCalledWith(
+      '/tmp/fake-wt',
+      'pass-info.json',
+      JSON.stringify({ pass: 2, maxPasses: 5 }, null, 2)
+    );
+    expect(executeTransitionMock).toHaveBeenCalledTimes(1);
   });
 
   it('writes enriched ci-status.json and ci-log artifacts before diff and pass metadata', async () => {

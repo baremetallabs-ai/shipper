@@ -1,7 +1,12 @@
 import path from 'node:path';
 
 import { getBranchForPR, getRepoRoot } from '@dnsquared/shipper-core';
-import { fetchChecks, classifyChecks, enrichFailedChecks } from '@dnsquared/shipper-core';
+import {
+  fetchChecks,
+  classifyChecks,
+  enrichFailedChecks,
+  rerunFailedChecks,
+} from '@dnsquared/shipper-core';
 import { autoSelectPrForStage, resolveRef } from '@dnsquared/shipper-core';
 import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
 import { formatConflictContext } from '@dnsquared/shipper-core';
@@ -24,6 +29,7 @@ import {
   scrubOutputDir,
   setupProtocolDirs,
   syncWorktree,
+  getGitRevParse,
   pushWithRetry,
   validateStageOutput,
   writeContextFile,
@@ -468,6 +474,9 @@ export async function prRemediateCommand(
               }
             };
 
+            const remoteRef = `origin/${branch}`;
+            const remoteHeadBefore = await getGitRevParse(wtPath, remoteRef);
+
             try {
               const pushCode = await pushWithRetry(
                 gitOpts,
@@ -529,6 +538,20 @@ export async function prRemediateCommand(
             const postingResult = await readLatestPostingResult();
             await postReplies(repo, prRef, wtPath, postingResult.replies);
             await postComment(repo, issueNumber, path.resolve(wtPath, postingResult.comment));
+
+            const remoteHeadAfter = await getGitRevParse(wtPath, remoteRef);
+            if (remoteHeadBefore === remoteHeadAfter) {
+              const staleChecks = await fetchChecks(repo, prRef);
+              const { failed: staleFailures } = classifyChecks(staleChecks);
+              if (staleFailures.length > 0) {
+                console.log(
+                  `Pass ${pass}/${MAX_REMEDIATION_PASSES}: No new commits pushed. ` +
+                    `Re-running ${staleFailures.length} failed CI check(s)...`
+                );
+                await rerunFailedChecks(repo, staleFailures);
+                await sleepMs(10_000);
+              }
+            }
 
             await waitForChecks(repo, prRef, CI_WAIT_TIMEOUT_MINUTES);
             const checks = await fetchChecks(repo, prRef);

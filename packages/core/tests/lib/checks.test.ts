@@ -32,7 +32,8 @@ vi.mock('node:child_process', async () => {
   return { ...actual, execFile };
 });
 
-const { fetchChecks, classifyChecks, enrichFailedChecks } = await import('../../src/lib/checks.js');
+const { fetchChecks, classifyChecks, enrichFailedChecks, rerunFailedChecks } =
+  await import('../../src/lib/checks.js');
 type PRChecksLine = import('../../src/lib/checks.js').PRChecksLine;
 const repo = 'owner/repo';
 
@@ -503,5 +504,171 @@ describe('classifyChecks', () => {
     expect(result.pending).toHaveLength(1);
     expect(result.failed).toHaveLength(1);
     expect(result.total).toBe(4);
+  });
+});
+
+describe('rerunFailedChecks', () => {
+  function mockRerunCalls(
+    handlers: Array<{
+      match: (args: string[]) => boolean;
+      result:
+        | { stdout: string; stderr?: string }
+        | {
+            error: Error;
+            stdout?: string;
+            stderr?: string;
+          };
+    }>
+  ): void {
+    execFileMock.mockImplementation((_cmd: string, args: string[], ...rest: unknown[]) => {
+      const handler = handlers.find((candidate) => candidate.match(args));
+      if (!handler) {
+        throw new Error(`Unexpected gh args: ${JSON.stringify(args)}`);
+      }
+
+      const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
+      if ('error' in handler.result) {
+        cb(handler.result.error, handler.result.stdout ?? '', handler.result.stderr ?? '');
+        return;
+      }
+
+      cb(null, handler.result.stdout, handler.result.stderr ?? '');
+    });
+  }
+
+  it('deduplicates failed checks from the same run and reruns only failed jobs', async () => {
+    const failedChecks: PRChecksLine[] = [
+      {
+        name: 'build',
+        state: 'COMPLETED',
+        bucket: 'fail',
+        link: 'https://github.com/owner/repo/actions/runs/123456789/job/111',
+      },
+      {
+        name: 'test',
+        state: 'COMPLETED',
+        bucket: 'fail',
+        link: 'https://github.com/owner/repo/actions/runs/123456789/job/222',
+      },
+    ];
+
+    mockRerunCalls([
+      {
+        match: (args) => args.join(' ') === `run rerun 123456789 --failed -R ${repo}`,
+        result: { stdout: '' },
+      },
+    ]);
+
+    await expect(rerunFailedChecks(repo, failedChecks)).resolves.toBeUndefined();
+
+    expect(execFileMock).toHaveBeenCalledTimes(1);
+    expect(execFileMock).toHaveBeenCalledWith(
+      'gh',
+      ['run', 'rerun', '123456789', '--failed', '-R', repo],
+      expect.objectContaining({ encoding: 'utf-8' }),
+      expect.any(Function)
+    );
+  });
+
+  it('reruns each distinct failed workflow run individually', async () => {
+    const failedChecks: PRChecksLine[] = [
+      {
+        name: 'build',
+        state: 'COMPLETED',
+        bucket: 'fail',
+        link: 'https://github.com/owner/repo/actions/runs/123456789/job/111',
+      },
+      {
+        name: 'test',
+        state: 'COMPLETED',
+        bucket: 'fail',
+        link: 'https://github.com/owner/repo/actions/runs/987654321/job/222',
+      },
+    ];
+
+    mockRerunCalls([
+      {
+        match: (args) => args.join(' ') === `run rerun 123456789 --failed -R ${repo}`,
+        result: { stdout: '' },
+      },
+      {
+        match: (args) => args.join(' ') === `run rerun 987654321 --failed -R ${repo}`,
+        result: { stdout: '' },
+      },
+    ]);
+
+    await expect(rerunFailedChecks(repo, failedChecks)).resolves.toBeUndefined();
+
+    expect(execFileMock).toHaveBeenCalledTimes(2);
+    expect(execFileMock).toHaveBeenNthCalledWith(
+      1,
+      'gh',
+      ['run', 'rerun', '123456789', '--failed', '-R', repo],
+      expect.objectContaining({ encoding: 'utf-8' }),
+      expect.any(Function)
+    );
+    expect(execFileMock).toHaveBeenNthCalledWith(
+      2,
+      'gh',
+      ['run', 'rerun', '987654321', '--failed', '-R', repo],
+      expect.objectContaining({ encoding: 'utf-8' }),
+      expect.any(Function)
+    );
+  });
+
+  it('ignores failed checks without GitHub Actions run links', async () => {
+    const failedChecks: PRChecksLine[] = [
+      { name: 'build', state: 'COMPLETED', bucket: 'fail' },
+      {
+        name: 'test',
+        state: 'COMPLETED',
+        bucket: 'fail',
+        link: 'https://app.circleci.com/pipelines/github/owner/repo/123',
+      },
+    ];
+
+    await expect(rerunFailedChecks(repo, failedChecks)).resolves.toBeUndefined();
+
+    expect(execFileMock).not.toHaveBeenCalled();
+  });
+
+  it('warns and continues when rerunning a workflow fails', async () => {
+    const failedChecks: PRChecksLine[] = [
+      {
+        name: 'build',
+        state: 'COMPLETED',
+        bucket: 'fail',
+        link: 'https://github.com/owner/repo/actions/runs/123456789/job/111',
+      },
+      {
+        name: 'test',
+        state: 'COMPLETED',
+        bucket: 'fail',
+        link: 'https://github.com/owner/repo/actions/runs/987654321/job/222',
+      },
+    ];
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    mockRerunCalls([
+      {
+        match: (args) => args.join(' ') === `run rerun 123456789 --failed -R ${repo}`,
+        result: {
+          error: Object.assign(new Error('rerun exploded'), { stderr: 'HTTP 422: rerun exploded' }),
+        },
+      },
+      {
+        match: (args) => args.join(' ') === `run rerun 987654321 --failed -R ${repo}`,
+        result: { stdout: '' },
+      },
+    ]);
+
+    await expect(rerunFailedChecks(repo, failedChecks)).resolves.toBeUndefined();
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      'Warning: Failed to re-run workflow 123456789: rerun exploded'
+    );
+    expect(execFileMock).toHaveBeenCalledTimes(2);
+
+    warnSpy.mockRestore();
   });
 });
