@@ -83,8 +83,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${GITHUB_REF_NAME}"
-          gh release create "${TAG}" \
-            --title "${TAG}" \
-            --generate-notes \
-            packages/desktop/release/*.dmg \
-            packages/desktop/release/*.zip
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release upload "${TAG}" packages/desktop/release/*.dmg packages/desktop/release/*.zip --clobber
+          else
+            gh release create "${TAG}" \
+              --title "${TAG}" \
+              --generate-notes \
+              packages/desktop/release/*.dmg \
+              packages/desktop/release/*.zip
+          fi
