@@ -127,6 +127,11 @@ function queueCleanBeforePush(): void {
   queueExecResult();
 }
 
+function queueCleanBeforeForcePush(commitsAhead = '1\n'): void {
+  queueExecResult({ stdout: commitsAhead });
+  queueCleanBeforePush();
+}
+
 function gitArgsFromSpawnCalls(): string[][] {
   return spawnMock.mock.calls.map(([, args]) => args ?? []);
 }
@@ -668,6 +673,7 @@ describe('pushWorktree', () => {
       cwd: '/tmp/wt',
       maxBuffer: 10 * 1024 * 1024,
     });
+    expect(gitArgsFromExecCalls()).not.toContainEqual(['rev-list', '--count', 'origin/main..HEAD']);
   });
 
   it('aborts before push when git checkout -- . fails', async () => {
@@ -711,7 +717,7 @@ describe('pushWorktree', () => {
     queueExecResult({ stdout: 'feature/retry\n' });
     queueExecResult({ stdout: 'abc123\n' });
     queueExecResult();
-    queueCleanBeforePush();
+    queueCleanBeforeForcePush();
     queueExecResult();
 
     await expect(
@@ -730,6 +736,7 @@ describe('pushWorktree', () => {
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
       ['rebase', '--autostash', 'origin/feature/retry'],
+      ['rev-list', '--count', 'origin/main..HEAD'],
       ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
@@ -770,7 +777,7 @@ describe('pushWorktree', () => {
 
   it('aborts and throws when the recovery rebase fails, preserving any abort failure detail', async () => {
     queueExecResult({ stdout: 'feature/retry\n' });
-    queueCleanBeforePush();
+    queueCleanBeforeForcePush();
     queueExecResult({ code: 1, stderr: 'non-fast-forward' });
     queueSpawnExit();
     queueExecResult({ stdout: 'feature/retry\n' });
@@ -797,7 +804,7 @@ describe('pushWorktree', () => {
 
   it('surfaces recovery fetch failures immediately', async () => {
     queueExecResult({ stdout: 'feature/retry\n' });
-    queueCleanBeforePush();
+    queueCleanBeforeForcePush();
     queueExecResult({ code: 1, stderr: 'non-fast-forward' });
     queueSpawnExit(1);
 
@@ -812,6 +819,7 @@ describe('pushWorktree', () => {
 
     expect(gitArgsFromExecCalls()).toEqual([
       ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-list', '--count', 'origin/main..HEAD'],
       ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
@@ -821,22 +829,22 @@ describe('pushWorktree', () => {
 
   it('stops after three recovery attempts and throws the final push failure', async () => {
     queueExecResult({ stdout: 'feature/retry\n' });
-    queueCleanBeforePush();
+    queueCleanBeforeForcePush();
     queueExecResult({ code: 1, stderr: 'pre-push hook failed', stdout: 'attempt 1' });
     queueSpawnExit();
     queueExecResult({ stdout: 'feature/retry\n' });
     queueExecResult({ code: 1, stderr: 'fatal: Needed a single revision' });
-    queueCleanBeforePush();
+    queueCleanBeforeForcePush();
     queueExecResult({ code: 1, stderr: 'pre-push hook failed', stdout: 'attempt 2' });
     queueSpawnExit();
     queueExecResult({ stdout: 'feature/retry\n' });
     queueExecResult({ code: 1, stderr: 'fatal: Needed a single revision' });
-    queueCleanBeforePush();
+    queueCleanBeforeForcePush();
     queueExecResult({ code: 1, stderr: 'pre-push hook failed', stdout: 'attempt 3' });
     queueSpawnExit();
     queueExecResult({ stdout: 'feature/retry\n' });
     queueExecResult({ code: 1, stderr: 'fatal: Needed a single revision' });
-    queueCleanBeforePush();
+    queueCleanBeforeForcePush();
     queueExecResult({ code: 1, stderr: 'pre-push hook failed', stdout: 'attempt 4' });
 
     await expect(
@@ -852,21 +860,25 @@ describe('pushWorktree', () => {
 
     expect(gitArgsFromExecCalls()).toEqual([
       ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-list', '--count', 'origin/main..HEAD'],
       ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
+      ['rev-list', '--count', 'origin/main..HEAD'],
       ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
+      ['rev-list', '--count', 'origin/main..HEAD'],
       ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
+      ['rev-list', '--count', 'origin/main..HEAD'],
       ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
@@ -876,6 +888,114 @@ describe('pushWorktree', () => {
       ['fetch', 'origin'],
       ['fetch', 'origin'],
     ]);
+  });
+
+  it('refuses to force-push when the branch has no commits ahead of the base branch', async () => {
+    queueExecResult({ stdout: 'feature/retry\n' });
+    queueExecResult({ stdout: '0\n' });
+
+    await expect(
+      pushWorktree({
+        wtPath: '/tmp/wt',
+        repoRoot: '/tmp/repo',
+        baseBranch: 'main',
+        pushMode: 'force-with-lease',
+      })
+    ).rejects.toThrow('Refusing to push: branch has 0 commits ahead of base branch');
+
+    expect(gitArgsFromExecCalls()).toEqual([
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-list', '--count', 'origin/main..HEAD'],
+    ]);
+  });
+
+  it('continues force-push checkout, clean, and push when the branch is ahead of the base branch', async () => {
+    queueExecResult({ stdout: 'feature/retry\n' });
+    queueCleanBeforeForcePush('3\n');
+    queueExecResult();
+
+    await expect(
+      pushWorktree({
+        wtPath: '/tmp/wt',
+        repoRoot: '/tmp/repo',
+        baseBranch: 'main',
+        pushMode: 'force-with-lease',
+      })
+    ).resolves.toBeUndefined();
+
+    expect(gitArgsFromExecCalls()).toEqual([
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-list', '--count', 'origin/main..HEAD'],
+      ['checkout', 'HEAD', '--', '.'],
+      ['clean', '-fd', '--exclude=.shipper'],
+      ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
+    ]);
+  });
+
+  it('logs and proceeds with force-push when the commit-count safety check fails', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      queueExecResult({ stdout: 'feature/retry\n' });
+      queueExecResult({ code: 128, stderr: 'fatal: bad revision' });
+      queueCleanBeforePush();
+      queueExecResult();
+
+      await expect(
+        pushWorktree({
+          wtPath: '/tmp/wt',
+          repoRoot: '/tmp/repo',
+          baseBranch: 'main',
+          pushMode: 'force-with-lease',
+        })
+      ).resolves.toBeUndefined();
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        'Commit-count safety check failed before force-push; proceeding with push.\n' +
+          'git rev-list --count origin/main..HEAD exited with code 128:\n' +
+          'fatal: bad revision'
+      );
+      expect(gitArgsFromExecCalls()).toEqual([
+        ['rev-parse', '--abbrev-ref', 'HEAD'],
+        ['rev-list', '--count', 'origin/main..HEAD'],
+        ['checkout', 'HEAD', '--', '.'],
+        ['clean', '-fd', '--exclude=.shipper'],
+        ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
+      ]);
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it('re-checks the commit count before retrying a force-push attempt', async () => {
+    queueExecResult({ stdout: 'feature/retry\n' });
+    queueCleanBeforeForcePush();
+    queueExecResult({ code: 1, stderr: 'non-fast-forward' });
+    queueSpawnExit();
+    queueExecResult({ stdout: 'feature/retry\n' });
+    queueExecResult({ code: 1, stderr: 'fatal: Needed a single revision' });
+    queueExecResult({ stdout: '0\n' });
+
+    await expect(
+      pushWorktree({
+        wtPath: '/tmp/wt',
+        repoRoot: '/tmp/repo',
+        baseBranch: 'main',
+        pushMode: 'force-with-lease',
+      })
+    ).rejects.toThrow('Refusing to push: branch has 0 commits ahead of base branch');
+
+    expect(gitArgsFromExecCalls()).toEqual([
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-list', '--count', 'origin/main..HEAD'],
+      ['checkout', 'HEAD', '--', '.'],
+      ['clean', '-fd', '--exclude=.shipper'],
+      ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-parse', '--verify', 'origin/feature/retry'],
+      ['rev-list', '--count', 'origin/main..HEAD'],
+    ]);
+    expect(gitArgsFromSpawnCalls()).toEqual([['fetch', 'origin']]);
   });
 });
 
@@ -1023,7 +1143,7 @@ describe('withGitTransport', () => {
     queueExecResult();
     queueExecResult();
     queueExecResult({ stdout: 'feature/retry\n' });
-    queueCleanBeforePush();
+    queueCleanBeforeForcePush();
     queueExecResult();
     const runAgent = vi.fn().mockResolvedValue(0);
 
@@ -1065,6 +1185,7 @@ describe('withGitTransport', () => {
       ['add', '-u'],
       ['rebase', '--continue'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-list', '--count', 'origin/main..HEAD'],
       ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
@@ -1082,7 +1203,7 @@ describe('withGitTransport', () => {
     queueExecResult({ stdout: 'feature/retry\n' });
     queueExecResult({ stdout: 'abc123\n' });
     queueExecResult();
-    queueCleanBeforePush();
+    queueCleanBeforeForcePush();
     queueExecResult();
     const runAgent = vi.fn().mockResolvedValue(0);
 
@@ -1117,6 +1238,7 @@ describe('withGitTransport', () => {
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
       ['rebase', '--autostash', 'origin/feature/retry'],
+      ['rev-list', '--count', 'origin/main..HEAD'],
       ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
@@ -1179,7 +1301,7 @@ describe('withGitTransport', () => {
     queueExecResult({ code: 128 }); // remoteRefExists
     queueExecResult();
     queueExecResult({ stdout: 'feature/retry\n' });
-    queueCleanBeforePush();
+    queueCleanBeforeForcePush();
     queueExecResult({ code: 1, stderr: 'non-fast-forward' });
     queueSpawnExit();
     queueExecResult({ stdout: 'feature/retry\n' });
@@ -1191,7 +1313,7 @@ describe('withGitTransport', () => {
     );
     queueExecResult();
     queueExecResult();
-    queueCleanBeforePush();
+    queueCleanBeforeForcePush();
     queueExecResult();
     const runAgent = vi.fn().mockResolvedValue(0);
 
@@ -1232,6 +1354,7 @@ describe('withGitTransport', () => {
       ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-list', '--count', 'origin/main..HEAD'],
       ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
@@ -1241,6 +1364,7 @@ describe('withGitTransport', () => {
       ['diff', '--name-only', '--diff-filter=U'],
       ['add', '-u'],
       ['rebase', '--continue'],
+      ['rev-list', '--count', 'origin/main..HEAD'],
       ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
@@ -1292,7 +1416,7 @@ describe('withGitTransport', () => {
     queueExecResult({ code: 128 }); // remoteRefExists
     queueExecResult();
     queueExecResult({ stdout: 'feature/retry\n' });
-    queueCleanBeforePush();
+    queueCleanBeforeForcePush();
     queueExecResult({ code: 1, stderr: 'non-fast-forward' });
     queueSpawnExit();
     queueExecResult({ stdout: 'feature/retry\n' });
@@ -1312,7 +1436,7 @@ describe('withGitTransport', () => {
     );
     queueExecResult();
     queueExecResult();
-    queueCleanBeforePush();
+    queueCleanBeforeForcePush();
     queueExecResult();
     const runAgent = vi.fn().mockResolvedValue(0);
 
@@ -1348,6 +1472,7 @@ describe('withGitTransport', () => {
       ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-list', '--count', 'origin/main..HEAD'],
       ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
@@ -1360,6 +1485,7 @@ describe('withGitTransport', () => {
       ['diff', '--name-only', '--diff-filter=U'],
       ['add', '-u'],
       ['rebase', '--continue'],
+      ['rev-list', '--count', 'origin/main..HEAD'],
       ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
@@ -1420,7 +1546,7 @@ describe('withGitTransport', () => {
     queueExecResult({ code: 128 }); // remoteRefExists
     queueExecResult();
     queueExecResult({ stdout: 'feature/retry\n' });
-    queueCleanBeforePush();
+    queueCleanBeforeForcePush();
     queueExecResult({ code: 1, stderr: 'non-fast-forward' });
     queueSpawnExit(1);
     const runAgent = vi.fn().mockResolvedValue(0);
@@ -1447,6 +1573,7 @@ describe('withGitTransport', () => {
       ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-list', '--count', 'origin/main..HEAD'],
       ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
@@ -1638,7 +1765,7 @@ describe('withGitTransport', () => {
     queueExecResult({ code: 128 }); // remoteRefExists
     queueExecResult();
     queueExecResult({ stdout: 'shipper/456-feed-pre-push-hook-failures-back-to-the-agent-inst\n' });
-    queueCleanBeforePush();
+    queueCleanBeforeForcePush();
     queueExecResult({ code: 1, stderr: 'non-fast-forward', stdout: 'attempt 1' });
     queueSpawnExit();
     queueExecResult({ stdout: 'shipper/456-feed-pre-push-hook-failures-back-to-the-agent-inst\n' });
@@ -1646,7 +1773,7 @@ describe('withGitTransport', () => {
       stdout: 'abc123\n',
     });
     queueExecResult();
-    queueCleanBeforePush();
+    queueCleanBeforeForcePush();
     queueExecResult();
     const runAgent = vi.fn().mockResolvedValue(0);
 
@@ -1678,6 +1805,7 @@ describe('withGitTransport', () => {
       ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-list', '--count', 'origin/main..HEAD'],
       ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       [
@@ -1697,6 +1825,7 @@ describe('withGitTransport', () => {
         '--autostash',
         'origin/shipper/456-feed-pre-push-hook-failures-back-to-the-agent-inst',
       ],
+      ['rev-list', '--count', 'origin/main..HEAD'],
       ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       [
@@ -1714,16 +1843,16 @@ describe('withGitTransport', () => {
     queueExecResult({ code: 128 }); // remoteRefExists
     queueExecResult();
     queueExecResult({ stdout: 'feature/retry\n' });
-    queueCleanBeforePush();
+    queueCleanBeforeForcePush();
     queueExecResult({ code: 1, stderr: 'lefthook pre-push failed', stdout: 'attempt 1' });
-    queueCleanBeforePush();
+    queueCleanBeforeForcePush();
     queueExecResult({ code: 1, stderr: 'non-fast-forward', stdout: 'attempt 2' });
     queueSpawnExit();
     queueExecResult({ stdout: 'feature/retry\n' });
     queueExecResult({ code: 1, stderr: 'fatal: Needed a single revision' });
-    queueCleanBeforePush();
+    queueCleanBeforeForcePush();
     queueExecResult({ code: 1, stderr: 'overcommit pre-push failed', stdout: 'attempt 3' });
-    queueCleanBeforePush();
+    queueCleanBeforeForcePush();
     queueExecResult({ code: 1, stderr: 'non-fast-forward', stdout: 'attempt 4' });
     const runAgent = vi.fn().mockResolvedValue(0);
 
@@ -1765,17 +1894,21 @@ describe('withGitTransport', () => {
       ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-list', '--count', 'origin/main..HEAD'],
       ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
+      ['rev-list', '--count', 'origin/main..HEAD'],
       ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
+      ['rev-list', '--count', 'origin/main..HEAD'],
       ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
+      ['rev-list', '--count', 'origin/main..HEAD'],
       ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
@@ -1929,7 +2062,7 @@ describe('withGitTransport', () => {
     queueExecResult();
     // push (via execAsync, not spawnAsync)
     queueExecResult({ stdout: 'feature/retry\n' });
-    queueCleanBeforePush();
+    queueCleanBeforeForcePush();
     queueExecResult();
     const runAgent = vi.fn().mockResolvedValue(0);
 
@@ -1958,6 +2091,7 @@ describe('withGitTransport', () => {
       ['diff', '--name-only', '--diff-filter=U'],
       ['rev-parse', '--git-dir'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
+      ['rev-list', '--count', 'origin/main..HEAD'],
       ['checkout', 'HEAD', '--', '.'],
       ['clean', '-fd', '--exclude=.shipper'],
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],

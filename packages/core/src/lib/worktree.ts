@@ -401,6 +401,27 @@ async function pushWorktreeBranch(
   pushMode: WorktreeGitOpts['pushMode'],
   forcePushBranch?: string
 ): Promise<CommandResult> {
+  if (pushMode === 'force-with-lease') {
+    let commitsAhead: number | undefined;
+
+    try {
+      commitsAhead = await getCommitsAheadCount(opts.wtPath, opts.baseBranch);
+    } catch (error) {
+      console.error(
+        `Commit-count safety check failed before force-push; proceeding with push.\n${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+
+    if (commitsAhead === 0) {
+      throw formatTransportError(
+        opts,
+        'Refusing to push: branch has 0 commits ahead of base branch'
+      );
+    }
+  }
+
   const checkoutResult = await execAsync('git', ['checkout', 'HEAD', '--', '.'], {
     cwd: opts.wtPath,
   });
