@@ -407,10 +407,9 @@ async function pushWorktreeBranch(
     try {
       commitsAhead = await getCommitsAheadCount(opts.wtPath, opts.baseBranch);
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
       console.error(
-        `Commit-count safety check failed before force-push; proceeding with push.\n${
-          error instanceof Error ? error.message : String(error)
-        }`
+        `Commit-count safety check failed before force-push; proceeding with push.\n${errorMessage}`
       );
     }
 
