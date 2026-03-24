@@ -147,6 +147,16 @@ async function fetchChecksGraceful(
   }
 }
 
+async function getGitRevParseGraceful(cwd: string, ref: string): Promise<string | null> {
+  try {
+    return await getGitRevParse(cwd, ref);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`Warning: Failed to resolve git ref ${ref}: ${msg}`);
+    return null;
+  }
+}
+
 async function preflight(
   wtPath: string,
   repo: string,
@@ -475,7 +485,7 @@ export async function prRemediateCommand(
             };
 
             const remoteRef = `origin/${branch}`;
-            const remoteHeadBefore = await getGitRevParse(wtPath, remoteRef);
+            const remoteHeadBefore = await getGitRevParseGraceful(wtPath, remoteRef);
 
             try {
               const pushCode = await pushWithRetry(
@@ -539,22 +549,38 @@ export async function prRemediateCommand(
             await postReplies(repo, prRef, wtPath, postingResult.replies);
             await postComment(repo, issueNumber, path.resolve(wtPath, postingResult.comment));
 
-            const remoteHeadAfter = await getGitRevParse(wtPath, remoteRef);
-            if (remoteHeadBefore === remoteHeadAfter) {
-              const staleChecks = await fetchChecks(repo, prRef);
-              const { failed: staleFailures } = classifyChecks(staleChecks);
-              if (staleFailures.length > 0) {
-                console.log(
-                  `Pass ${pass}/${MAX_REMEDIATION_PASSES}: No new commits pushed. ` +
-                    `Re-running ${staleFailures.length} failed CI check(s)...`
+            const remoteHeadAfter = await getGitRevParseGraceful(wtPath, remoteRef);
+            if (
+              remoteHeadBefore !== null &&
+              remoteHeadAfter !== null &&
+              remoteHeadBefore === remoteHeadAfter
+            ) {
+              const staleChecks = await fetchChecksGraceful(repo, prRef);
+              if (staleChecks === null) {
+                console.warn(
+                  `Pass ${pass}/${MAX_REMEDIATION_PASSES}: Failed to fetch CI checks before potential re-run.`
                 );
-                await rerunFailedChecks(repo, staleFailures);
-                await sleepMs(10_000);
+              } else {
+                const { failed: staleFailures } = classifyChecks(staleChecks);
+                if (staleFailures.length > 0) {
+                  console.log(
+                    `Pass ${pass}/${MAX_REMEDIATION_PASSES}: No new commits pushed. ` +
+                      `Re-running ${staleFailures.length} failed CI check(s)...`
+                  );
+                  await rerunFailedChecks(repo, staleFailures);
+                  await sleepMs(10_000);
+                }
               }
             }
 
             await waitForChecks(repo, prRef, CI_WAIT_TIMEOUT_MINUTES);
-            const checks = await fetchChecks(repo, prRef);
+            const checks = await fetchChecksGraceful(repo, prRef);
+            if (checks === null) {
+              console.error(
+                `Pass ${pass}/${MAX_REMEDIATION_PASSES}: Failed to fetch CI checks after waiting. Continuing to next pass.`
+              );
+              continue;
+            }
             const { failed, pending } = classifyChecks(checks);
 
             if (checks.length > 0 && failed.length === 0 && pending.length === 0) {

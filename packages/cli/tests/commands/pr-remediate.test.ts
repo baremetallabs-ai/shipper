@@ -699,6 +699,61 @@ describe('prRemediateCommand', () => {
     expect(executeTransitionMock).toHaveBeenCalledTimes(1);
   });
 
+  it('skips no-push detection when origin branch is not yet available locally', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    getGitRevParseMock
+      .mockRejectedValueOnce(new Error('git rev-parse origin/shipper/10-feature failed'))
+      .mockResolvedValueOnce('after-push-sha');
+    fetchChecksMock.mockResolvedValue(PASS_CHECKS);
+    validateStageOutputMock.mockResolvedValue({
+      verdict: 'accept',
+      comment: '.shipper/output/comment-10.md',
+    });
+
+    const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
+
+    await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
+
+    expect(getGitRevParseMock).toHaveBeenCalledTimes(2);
+    expect(rerunFailedChecksMock).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Warning: Failed to resolve git ref origin/shipper/10-feature:')
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it('continues to the next pass when fetching final CI state after waiting fails', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    fetchChecksMock
+      .mockResolvedValueOnce(PASS_CHECKS)
+      .mockResolvedValueOnce(PASS_CHECKS)
+      .mockResolvedValueOnce(PASS_CHECKS)
+      .mockRejectedValueOnce(new Error('network error'))
+      .mockResolvedValueOnce(PASS_CHECKS)
+      .mockResolvedValueOnce(PASS_CHECKS)
+      .mockResolvedValueOnce(PASS_CHECKS)
+      .mockResolvedValueOnce(PASS_CHECKS);
+    validateStageOutputMock.mockResolvedValue({
+      verdict: 'accept',
+      comment: '.shipper/output/comment-10.md',
+    });
+
+    const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
+
+    await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      'Pass 1/5: Failed to fetch CI checks after waiting. Continuing to next pass.'
+    );
+    expect(syncWorktreeMock).toHaveBeenCalledTimes(2);
+    expect(pushWithRetryMock).toHaveBeenCalledTimes(2);
+    expect(postCommentMock).toHaveBeenCalledTimes(2);
+    expect(executeTransitionMock).toHaveBeenCalledTimes(1);
+
+    errorSpy.mockRestore();
+  });
+
   it('writes enriched ci-status.json and ci-log artifacts before diff and pass metadata', async () => {
     const checksWithFailure: PRChecksLine[] = [
       {
