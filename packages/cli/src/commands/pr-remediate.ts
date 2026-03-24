@@ -34,6 +34,7 @@ import { sleepMs } from '@dnsquared/shipper-core';
 const ZERO_CHECKS_GRACE_MS = 30_000;
 const CI_WAIT_TIMEOUT_MINUTES = 30;
 const MAX_REMEDIATION_PASSES = 5;
+const MAX_CONSECUTIVE_FETCH_FAILURES = 3;
 export const SKIP_PR_REMEDIATE_WAIT_ENV_VAR = 'SHIPPER_SKIP_PR_REMEDIATE_WAIT';
 
 class PollingInterruptedError extends Error {
@@ -97,7 +98,7 @@ async function waitForChecks(repo: string, pr: string, timeoutMinutes: number): 
       checks = await fetchChecksGraceful(repo, pr);
       if (checks === null) {
         consecutiveFailures += 1;
-        if (consecutiveFailures >= 3) {
+        if (consecutiveFailures >= MAX_CONSECUTIVE_FETCH_FAILURES) {
           console.log('Check polling stopped: persistent fetch failures. Proceeding.');
           break;
         }
@@ -262,7 +263,7 @@ export async function buildReadyCheck(
     const checks = await fetchChecksGraceful(repo, pr);
     if (checks === null) {
       consecutiveFailures += 1;
-      if (consecutiveFailures >= 3) {
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FETCH_FAILURES) {
         return true;
       }
     } else {
