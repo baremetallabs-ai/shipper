@@ -44,8 +44,13 @@ vi.mock('../../src/lib/settings.js', () => ({
   getSettings: () => getSettingsMock(),
 }));
 
-const { formatConflictContext, pushWorktree, syncWorktree, withGitTransport } =
-  await import('../../src/lib/worktree.js');
+const {
+  formatConflictContext,
+  getCommitsAheadCount,
+  pushWorktree,
+  syncWorktree,
+  withGitTransport,
+} = await import('../../src/lib/worktree.js');
 
 function queueSpawnExit(code = 0): void {
   spawnMock.mockImplementationOnce(() => {
@@ -586,6 +591,36 @@ describe('syncWorktree', () => {
     ).rejects.toThrow('Failed to sync with remote branch origin/feature/my-branch');
 
     expect(resolveConflicts).not.toHaveBeenCalled();
+  });
+});
+
+describe('getCommitsAheadCount', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns the number of commits ahead of the base branch', async () => {
+    queueExecResult({ stdout: '3\n' });
+
+    await expect(getCommitsAheadCount('/tmp/wt', 'main')).resolves.toBe(3);
+
+    expect(gitArgsFromExecCalls()).toEqual([['rev-list', '--count', 'origin/main..HEAD']]);
+    expect(execFileMock.mock.calls[0]?.[2]).toMatchObject({
+      cwd: '/tmp/wt',
+    });
+  });
+
+  it('throws a formatted error when git rev-list fails', async () => {
+    queueExecResult({ code: 128, stderr: 'fatal: bad revision' });
+
+    await expect(getCommitsAheadCount('/tmp/wt', 'main')).rejects.toThrow(
+      'git rev-list --count origin/main..HEAD exited with code 128:\nfatal: bad revision'
+    );
+    expect(gitArgsFromExecCalls()).toEqual([['rev-list', '--count', 'origin/main..HEAD']]);
   });
 });
 
