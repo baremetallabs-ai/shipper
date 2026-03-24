@@ -302,7 +302,16 @@ export async function getCommitsAheadCount(wtPath: string, baseBranch: string): 
     throw new Error(formatCommandFailure('git', args, result));
   }
 
-  return Number.parseInt(result.stdout.trim(), 10);
+  const trimmedStdout = result.stdout.trim();
+  const commitsAhead = Number.parseInt(trimmedStdout, 10);
+  if (Number.isNaN(commitsAhead)) {
+    const output = [result.stderr.trim(), trimmedStdout].filter(Boolean).join('\n');
+    throw new Error(
+      `git ${args.join(' ')} returned a non-numeric commit count${output ? `:\n${output}` : ''}`
+    );
+  }
+
+  return commitsAhead;
 }
 
 async function syncWithRemoteBranch(opts: WorktreeGitOpts): Promise<void> {
