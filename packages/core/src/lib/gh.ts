@@ -15,6 +15,7 @@ const PERMANENT_PATTERNS = [
   /HTTP 422/i,
   /could not resolve to a/i,
   /validation failed/i,
+  /no commit found/i,
 ];
 
 function isPermanent(stderr: string): boolean {

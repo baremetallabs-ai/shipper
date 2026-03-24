@@ -203,6 +203,7 @@ describe('gh', () => {
     'HTTP 422 validation failed',
     'could not resolve to a Repository',
     'validation failed',
+    'No commit found on the pull request',
   ])('does not retry permanent failure "%s"', async (stderr) => {
     const err = permanentError(stderr);
     execFileMock.mockImplementationOnce((_cmd: string, _args: string[], ...rest: unknown[]) => {
