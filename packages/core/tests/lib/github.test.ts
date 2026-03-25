@@ -64,7 +64,9 @@ beforeEach(() => {
 
 const {
   autoSelectIssue,
+  autoSelectPrForStage,
   fetchPR,
+  fetchIssueTimelines,
   formatIssue,
   formatPR,
   listIssues,
@@ -489,6 +491,70 @@ describe('resolveBaseBranch', () => {
   });
 });
 
+describe('fetchIssueTimelines', () => {
+  it('parses newline-delimited labeled timeline events per issue', async () => {
+    queueExecFileResult(
+      [
+        JSON.stringify({
+          event: 'labeled',
+          label: { name: 'shipper:groomed' },
+          created_at: '2025-01-01T00:00:00Z',
+        }),
+        JSON.stringify({
+          event: 'labeled',
+          label: { name: 'shipper:groomed' },
+          created_at: '2025-01-02T00:00:00Z',
+        }),
+      ].join('\n')
+    );
+    queueExecFileResult('');
+
+    const result = await fetchIssueTimelines(repo, [10, 20]);
+
+    expect(result).toEqual(
+      new Map([
+        [
+          10,
+          [
+            {
+              event: 'labeled',
+              label: { name: 'shipper:groomed' },
+              created_at: '2025-01-01T00:00:00Z',
+            },
+            {
+              event: 'labeled',
+              label: { name: 'shipper:groomed' },
+              created_at: '2025-01-02T00:00:00Z',
+            },
+          ],
+        ],
+        [20, []],
+      ])
+    );
+    expect(execFileMock).toHaveBeenNthCalledWith(
+      1,
+      'gh',
+      [
+        'api',
+        `repos/${repo}/issues/10/timeline`,
+        '--paginate',
+        '--jq',
+        '.[] | select(.event == "labeled") | {event, label, created_at}',
+      ],
+      { encoding: 'utf-8' },
+      expect.any(Function)
+    );
+  });
+
+  it('falls back to an empty event list when a timeline fetch fails', async () => {
+    queueExecFileError('gh failed');
+
+    const result = await fetchIssueTimelines(repo, [33]);
+
+    expect(result).toEqual(new Map([[33, []]]));
+  });
+});
+
 describe('selectIssuesForStage', () => {
   let mockIsLockStale: ReturnType<typeof vi.fn>;
 
@@ -783,6 +849,45 @@ describe('selectIssuesForStage', () => {
       { number: 30, title: 'Low oldest', priority: 2 },
     ]);
   });
+
+  it('skips timeline fetches when skipTimeline is true and still sorts by priority', async () => {
+    queueExecFileResult(
+      JSON.stringify([
+        {
+          number: 30,
+          title: 'Low issue',
+          labels: [{ name: 'shipper:new' }, { name: 'shipper:priority-low' }],
+        },
+        {
+          number: 10,
+          title: 'High issue',
+          labels: [{ name: 'shipper:new' }, { name: 'shipper:priority-high' }],
+        },
+        {
+          number: 20,
+          title: 'Normal issue',
+          labels: [{ name: 'shipper:new' }],
+        },
+      ])
+    );
+    queueExecFileResult(JSON.stringify([]));
+
+    const result = await selectIssuesForStage(repo, 'shipper:new', undefined, {
+      skipTimeline: true,
+    });
+
+    expect(result).toEqual([
+      { number: 10, title: 'High issue', priority: 0 },
+      { number: 20, title: 'Normal issue', priority: 1 },
+      { number: 30, title: 'Low issue', priority: 2 },
+    ]);
+    expect(execFileMock).toHaveBeenCalledTimes(2);
+    expect(
+      execFileMock.mock.calls.some(
+        (_call) => Array.isArray(_call[1]) && (_call[1] as string[])[0] === 'api'
+      )
+    ).toBe(false);
+  });
 });
 
 describe('autoSelectIssue', () => {
@@ -872,6 +977,71 @@ describe('autoSelectIssue', () => {
     const result = await autoSelectIssue(repo, 'shipper:new');
 
     expect(result).toEqual({ number: 10, title: 'Normal issue' });
+  });
+});
+
+describe('autoSelectPrForStage', () => {
+  let mockReleaseIssueLock: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    const lock = await import('../../src/lib/lock.js');
+    mockReleaseIssueLock = vi.mocked(lock.releaseIssueLock);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('keeps timeline-aware ordering for single-stage PR selection', async () => {
+    queueExecFileResult(
+      JSON.stringify([
+        { number: 20, title: 'Newer issue', labels: [{ name: 'shipper:planned' }] },
+        { number: 10, title: 'Older issue', labels: [{ name: 'shipper:planned' }] },
+      ])
+    );
+    queueExecFileResult(JSON.stringify([]));
+    queueExecFileResult(
+      JSON.stringify({
+        event: 'labeled',
+        label: { name: 'shipper:planned' },
+        created_at: '2025-01-02T00:00:00Z',
+      })
+    );
+    queueExecFileResult(
+      JSON.stringify({
+        event: 'labeled',
+        label: { name: 'shipper:planned' },
+        created_at: '2025-01-01T00:00:00Z',
+      })
+    );
+    queueExecFileResult(
+      JSON.stringify([
+        { number: 300, headRefName: 'shipper/10' },
+        { number: 400, headRefName: 'shipper/20' },
+      ])
+    );
+
+    const result = await autoSelectPrForStage(repo, 'shipper:planned', 'no PRs');
+
+    expect(result).toEqual({
+      pr: '300',
+      issue: { number: 10, title: 'Older issue' },
+    });
+    expect(mockReleaseIssueLock).not.toHaveBeenCalled();
+    expect(
+      execFileMock.mock.calls.some(
+        (call) =>
+          Array.isArray(call[1]) &&
+          (call[1] as string[]).includes(`repos/${repo}/issues/20/timeline`)
+      )
+    ).toBe(true);
+    expect(
+      execFileMock.mock.calls.some(
+        (call) =>
+          Array.isArray(call[1]) &&
+          (call[1] as string[]).includes(`repos/${repo}/issues/10/timeline`)
+      )
+    ).toBe(true);
   });
 });
 
