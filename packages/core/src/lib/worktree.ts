@@ -977,10 +977,15 @@ export async function createWorktree(opts: CreateWorktreeOpts): Promise<string> 
     }
 
     const startPoint = `origin/${opts.baseBranch}`;
-    const fetchResult = await execAsync('git', ['fetch', 'origin'], { cwd: opts.repoRoot });
+    const fetchArgs = [
+      'fetch',
+      'origin',
+      `refs/heads/${opts.baseBranch}:refs/remotes/${startPoint}`,
+    ];
+    const fetchResult = await execAsync('git', fetchArgs, { cwd: opts.repoRoot });
     if (fetchResult.code !== 0) {
       throw new Error(
-        `Failed to fetch origin before worktree creation: ${formatCommandFailure('git', ['fetch', 'origin'], fetchResult)}`
+        `Failed to fetch origin/${opts.baseBranch} before worktree creation: ${formatCommandFailure('git', fetchArgs, fetchResult)}`
       );
     }
 
