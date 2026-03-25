@@ -14,6 +14,7 @@ const INSTALL_OUTPUT_MAX_BUFFER = Number.POSITIVE_INFINITY;
 const PUSH_OUTPUT_MAX_BUFFER = 10 * 1024 * 1024;
 const HOOK_FAILURE_PATTERN = /husky|lefthook|pre-push|simple-git-hooks|overcommit/i;
 const CONFLICT_BLOCK_PATTERN = /^<{7}.*$\n[\s\S]*?^={7}$\n[\s\S]*?^>{7}.*(?:\n|$)?/gm;
+const PROTECTED_SHIPPER_DIRS = ['.shipper/output/', '.shipper/input/', '.shipper/tmp/'];
 
 interface CommandOpts {
   cwd?: string;
@@ -396,6 +397,47 @@ function getPushArgs(pushMode: WorktreeGitOpts['pushMode'], forcePushBranch?: st
       : ['push', '--force-with-lease'];
 }
 
+async function stripProtectedPaths(opts: WorktreeGitOpts): Promise<void> {
+  const lsFilesArgs = ['ls-files', '--', ...PROTECTED_SHIPPER_DIRS];
+  const lsFilesResult = await execAsync('git', lsFilesArgs, {
+    cwd: opts.wtPath,
+  });
+  if (lsFilesResult.code !== 0) {
+    return;
+  }
+
+  const trackedFiles = lsFilesResult.stdout
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .filter((file) => path.basename(file) !== '.gitkeep');
+
+  if (trackedFiles.length === 0) {
+    return;
+  }
+
+  const rmArgs = ['rm', '--cached', '--', ...trackedFiles];
+  const rmResult = await execAsync('git', rmArgs, {
+    cwd: opts.wtPath,
+  });
+  if (rmResult.code !== 0) {
+    throw formatTransportError(opts, formatCommandFailure('git', rmArgs, rmResult));
+  }
+
+  const amendArgs = ['commit', '--amend', '--allow-empty', '--no-edit'];
+  const amendResult = await execAsync('git', amendArgs, {
+    cwd: opts.wtPath,
+    env: { GIT_EDITOR: 'true' },
+  });
+  if (amendResult.code !== 0) {
+    throw formatTransportError(opts, formatCommandFailure('git', amendArgs, amendResult));
+  }
+
+  console.error(
+    `Stripped ${trackedFiles.length} tracked .shipper/ artifact files from git index before push`
+  );
+}
+
 async function pushWorktreeBranch(
   opts: WorktreeGitOpts,
   pushMode: WorktreeGitOpts['pushMode'],
@@ -420,6 +462,8 @@ async function pushWorktreeBranch(
       );
     }
   }
+
+  await stripProtectedPaths(opts);
 
   const checkoutResult = await execAsync('git', ['checkout', 'HEAD', '--', '.'], {
     cwd: opts.wtPath,
