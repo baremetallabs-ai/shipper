@@ -167,10 +167,10 @@ afterEach(() => {
   restoreEnvVar('UV_CACHE_DIR', originalUvCacheDir);
 });
 
-describe('withWorktree', () => {
+describe('createWorktree', () => {
   it('fetches origin and branches from origin/<baseBranch> when creating a new worktree branch', async () => {
     queueExecResult(); // git worktree prune
-    queueExecResult(); // git fetch origin
+    queueExecResult(); // git fetch origin main refspec
     queueExecResult({ stdout: 'abc123\n' }); // git rev-parse --verify origin/main
     queueExecResult({ code: 128, stderr: 'fatal: Needed a single revision' }); // branch missing
 
@@ -178,7 +178,7 @@ describe('withWorktree', () => {
 
     expect(gitArgsFromExecCalls()).toEqual([
       ['worktree', 'prune'],
-      ['fetch', 'origin'],
+      ['fetch', 'origin', 'refs/heads/main:refs/remotes/origin/main'],
       ['rev-parse', '--verify', 'origin/main'],
       ['rev-parse', '--verify', 'shipper/42-add-feature'],
     ]);
@@ -198,10 +198,10 @@ describe('withWorktree', () => {
 
   it('fails fast with a descriptive error when fetching origin fails', async () => {
     queueExecResult(); // git worktree prune
-    queueExecResult({ code: 1, stderr: 'fatal: network down' }); // git fetch origin
+    queueExecResult({ code: 1, stderr: 'fatal: network down' }); // git fetch origin main refspec
 
     await expect(createWorktree(defaultOpts)).rejects.toThrow(
-      'Failed to fetch origin before worktree creation: git fetch origin exited with code 1:\nfatal: network down'
+      'Failed to fetch origin/main before worktree creation: git fetch origin refs/heads/main:refs/remotes/origin/main exited with code 1:\nfatal: network down'
     );
 
     expect(gitArgsFromSpawnCalls()).toEqual([]);
@@ -235,7 +235,9 @@ describe('withWorktree', () => {
       ['worktree', 'add', expectedWtPath, 'shipper/42-add-feature'],
     ]);
   });
+});
 
+describe('withWorktree', () => {
   it('runs setup before the callback and teardown after it', async () => {
     const callOrder: string[] = [];
     runWorktreeHookMock.mockImplementation((event: string) => {
