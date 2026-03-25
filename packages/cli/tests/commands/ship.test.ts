@@ -115,11 +115,19 @@ import type { UnblockAttempt } from '../../src/commands/ship.js';
 
 vi.mock('@dnsquared/shipper-core', () => ({
   selectIssuesForStage: vi.fn<
-    (_repo: string, _label: string, _staleLocked?: Set<number>) => Promise<MockCandidate[]>
+    (
+      _repo: string,
+      _label: string,
+      _staleLocked?: Set<number>,
+      _options?: { skipTimeline?: boolean }
+    ) => Promise<MockCandidate[]>
   >(() => Promise.resolve([])),
   clearStaleLockIfNeeded: vi.fn<
     (repo: string, issueNumber: string, staleLocked: Set<number>) => Promise<void>
   >(() => Promise.resolve()),
+  fetchIssueTimelines: vi.fn<
+    (repo: string, issueNumbers: number[]) => Promise<Map<number, { created_at?: string }[]>>
+  >(() => Promise.resolve(new Map())),
   aggregateSessionUsage: vi.fn(),
   gh: vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>(),
   fetchChecks: vi.fn<(repo: string, pr: string) => Promise<MockCheck[]>>(() => Promise.resolve([])),
@@ -138,6 +146,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   getSettings: () => getSettingsMock(),
   processResult: (result?: { issueNumber?: string; stage?: string }) => processResultMock(result),
   scrubOutputDir: vi.fn<(cwd: string) => Promise<void>>(() => Promise.resolve()),
+  sortIssuesByLabelTime: vi.fn(<T>(issues: T[]) => issues),
   withStageHooks: vi.fn((_stage: string, _env: unknown, fn: () => Promise<unknown>) => fn()),
   withIssueLock: vi.fn((_repo: string, issue: string, fn: () => Promise<unknown>) => {
     lockState.lockedIssues.add(issue);
@@ -202,10 +211,12 @@ import {
   aggregateSessionUsage,
   selectIssuesForStage,
   clearStaleLockIfNeeded,
+  fetchIssueTimelines,
   gh,
   fetchChecks,
   classifyChecks,
   retryOnInvalidOutput,
+  sortIssuesByLabelTime,
   totalTokens,
   withStageHooks,
   withIssueLock,
@@ -217,10 +228,12 @@ import { spawn } from 'node:child_process';
 const mockAggregateSessionUsage = vi.mocked(aggregateSessionUsage);
 const mockSelectIssuesForStage = vi.mocked(selectIssuesForStage);
 const mockClearStaleLockIfNeeded = vi.mocked(clearStaleLockIfNeeded);
+const mockFetchIssueTimelines = vi.mocked(fetchIssueTimelines);
 const mockGh = vi.mocked(gh);
 const mockFetchChecks = vi.mocked(fetchChecks);
 const mockClassifyChecks = vi.mocked(classifyChecks);
 const mockRetryOnInvalidOutput = vi.mocked(retryOnInvalidOutput);
+const mockSortIssuesByLabelTime = vi.mocked(sortIssuesByLabelTime);
 const mockTotalTokens = vi.mocked(totalTokens);
 const mockWithStageHooks = vi.mocked(withStageHooks);
 const mockWithIssueLock = vi.mocked(withIssueLock);
@@ -489,6 +502,16 @@ function getPriority(issue: MockIssueState): 0 | 1 | 2 {
   return 1;
 }
 
+function withDefaultPriority(
+  issues: Array<{ number: number; title: string; priority?: 0 | 1 | 2 }>
+): MockCandidate[] {
+  return issues.map((issue) => ({
+    number: issue.number,
+    title: issue.title,
+    priority: issue.priority ?? 1,
+  }));
+}
+
 function installSequentialCliMocks(options?: {
   stageOutput?: (
     issueNumber: number,
@@ -496,11 +519,17 @@ function installSequentialCliMocks(options?: {
   ) => { stdout?: string; stderr?: string; code?: number };
 }): void {
   mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
-    return Array.from(mockIssues.values())
-      .filter((issue) => getStageLabel(issue) === label)
-      .filter((issue) => !issue.labels.includes('shipper:blocked'))
-      .filter((issue) => !lockState.lockedIssues.has(String(issue.number)))
-      .map((issue) => ({ number: issue.number, title: issue.title, priority: getPriority(issue) }));
+    return withDefaultPriority(
+      Array.from(mockIssues.values())
+        .filter((issue) => getStageLabel(issue) === label)
+        .filter((issue) => !issue.labels.includes('shipper:blocked'))
+        .filter((issue) => !lockState.lockedIssues.has(String(issue.number)))
+        .map((issue) => ({
+          number: issue.number,
+          title: issue.title,
+          priority: getPriority(issue),
+        }))
+    );
   });
 
   mockGh.mockImplementation((args: string[]) => {
@@ -653,6 +682,10 @@ describe('selectNextCandidate', () => {
     mockSelectIssuesForStage.mockReset();
     mockSelectIssuesForStage.mockResolvedValue([]);
     mockClearStaleLockIfNeeded.mockReset();
+    mockFetchIssueTimelines.mockReset();
+    mockFetchIssueTimelines.mockResolvedValue(new Map());
+    mockSortIssuesByLabelTime.mockReset();
+    mockSortIssuesByLabelTime.mockImplementation(<T>(issues: T[]) => issues);
   });
 
   it('returns the issue from the highest-priority stage when priorities are equal', async () => {
@@ -666,6 +699,12 @@ describe('selectNextCandidate', () => {
 
     const result = await selectNextCandidate(repo, new Set());
     expect(result).toEqual({ number: 10, title: 'PR open issue' });
+    expect(mockSelectIssuesForStage).toHaveBeenCalledWith(
+      repo,
+      'shipper:ready',
+      expect.any(Set),
+      expect.objectContaining({ skipTimeline: true })
+    );
   });
 
   it('skips issues in the skippedIssues set', async () => {
@@ -699,18 +738,78 @@ describe('selectNextCandidate', () => {
     expect(result).toBeNull();
   });
 
-  it('uses FIFO ordering as the tiebreaker within the same priority and stage', async () => {
+  it('does not fetch timelines when only one candidate exists across all stages', async () => {
     mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
-      if (label === 'shipper:groomed')
-        return [
-          { number: 1, title: 'Oldest', priority: 1 },
-          { number: 2, title: 'Newer', priority: 1 },
-        ];
+      if (label === 'shipper:groomed') return [{ number: 1, title: 'Only issue', priority: 1 }];
       return [];
     });
 
     const result = await selectNextCandidate(repo, new Set());
-    expect(result).toEqual({ number: 1, title: 'Oldest' });
+
+    expect(result).toEqual({ number: 1, title: 'Only issue' });
+    expect(mockFetchIssueTimelines).not.toHaveBeenCalled();
+    expect(mockSortIssuesByLabelTime).not.toHaveBeenCalled();
+  });
+
+  it('does not fetch timelines when the winning bucket has a single candidate', async () => {
+    mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
+      if (label === 'shipper:pr-open') {
+        return [{ number: 30, title: 'PR open issue', priority: 1 }];
+      }
+
+      if (label === 'shipper:groomed') {
+        return [
+          { number: 40, title: 'High groomed issue', priority: 0 },
+          { number: 41, title: 'Normal groomed issue', priority: 1 },
+        ];
+      }
+
+      return [];
+    });
+
+    const result = await selectNextCandidate(repo, new Set());
+
+    expect(result).toEqual({ number: 40, title: 'High groomed issue' });
+    expect(mockFetchIssueTimelines).not.toHaveBeenCalled();
+    expect(mockSortIssuesByLabelTime).not.toHaveBeenCalled();
+  });
+
+  it('fetches timelines only for the winning bucket when tie-breaking is needed', async () => {
+    mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
+      if (label === 'shipper:pr-open') {
+        return [{ number: 30, title: 'Non-winning issue', priority: 2 }];
+      }
+
+      if (label === 'shipper:groomed') {
+        return [
+          { number: 1, title: 'Oldest', priority: 1 },
+          { number: 2, title: 'Newer', priority: 1 },
+        ];
+      }
+
+      return [];
+    });
+    mockFetchIssueTimelines.mockResolvedValue(
+      new Map([
+        [1, [{ created_at: '2025-01-01T00:00:00Z' }]],
+        [2, [{ created_at: '2025-01-02T00:00:00Z' }]],
+      ])
+    );
+    mockSortIssuesByLabelTime.mockImplementation((issues) => issues.slice().reverse());
+
+    const result = await selectNextCandidate(repo, new Set());
+
+    expect(result).toEqual({ number: 2, title: 'Newer' });
+    expect(mockFetchIssueTimelines).toHaveBeenCalledTimes(1);
+    expect(mockFetchIssueTimelines).toHaveBeenCalledWith(repo, [1, 2]);
+    expect(mockSortIssuesByLabelTime).toHaveBeenCalledWith(
+      [
+        { number: 1, title: 'Oldest', priority: 1 },
+        { number: 2, title: 'Newer', priority: 1 },
+      ],
+      expect.any(Map),
+      'shipper:groomed'
+    );
   });
 
   it('clears stale lock on selected candidate', async () => {
@@ -771,6 +870,7 @@ describe('selectNextCandidate', () => {
     const result = await selectNextCandidate(repo, new Set());
 
     expect(result).toEqual({ number: 40, title: 'High groomed issue' });
+    expect(mockFetchIssueTimelines).not.toHaveBeenCalled();
   });
 });
 
@@ -2174,7 +2274,7 @@ describe('shipCommand auto skip handling', () => {
     mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
       if (label === 'shipper:planned') {
         plannedSelections++;
-        return [{ number: 42, title: 'Reset issue' }];
+        return withDefaultPriority([{ number: 42, title: 'Reset issue' }]);
       }
       return [];
     });
@@ -2244,7 +2344,7 @@ describe('shipCommand auto merge-failure retry handling', () => {
     mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
       if (label === 'shipper:ready' && readySelections < 2) {
         readySelections++;
-        return [{ number: 123, title: 'Retry merge issue' }];
+        return withDefaultPriority([{ number: 123, title: 'Retry merge issue' }]);
       }
       return [];
     });
@@ -2261,7 +2361,7 @@ describe('shipCommand auto merge-failure retry handling', () => {
     mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
       if (label === 'shipper:ready' && readySelections < 2) {
         readySelections++;
-        return [{ number: 123, title: 'Hook failure issue' }];
+        return withDefaultPriority([{ number: 123, title: 'Hook failure issue' }]);
       }
       return [];
     });
@@ -2280,7 +2380,7 @@ describe('shipCommand auto merge-failure retry handling', () => {
     let candidateAvailable = true;
     mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
       if (label === 'shipper:ready' && candidateAvailable) {
-        return [{ number: 1, title: 'Retry merge issue' }];
+        return withDefaultPriority([{ number: 1, title: 'Retry merge issue' }]);
       }
       return [];
     });
@@ -2366,7 +2466,7 @@ describe('shipCommand parallel auto runner', () => {
       { number: 3, title: 'Issue three' },
     ];
     mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
-      if (label === 'shipper:planned') return plannedIssues;
+      if (label === 'shipper:planned') return withDefaultPriority(plannedIssues);
       return [];
     });
 
@@ -2414,7 +2514,7 @@ describe('shipCommand parallel auto runner', () => {
   it('marks parallel ship children as auto-child runs', async () => {
     let plannedIssues = [{ number: 1, title: 'Issue one' }];
     mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
-      if (label === 'shipper:planned') return plannedIssues;
+      if (label === 'shipper:planned') return withDefaultPriority(plannedIssues);
       return [];
     });
 
@@ -2443,7 +2543,7 @@ describe('shipCommand parallel auto runner', () => {
       { number: 3, title: 'Issue three' },
     ];
     mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
-      if (label === 'shipper:planned') return plannedIssues;
+      if (label === 'shipper:planned') return withDefaultPriority(plannedIssues);
       return [];
     });
 
@@ -2481,7 +2581,7 @@ describe('shipCommand parallel auto runner', () => {
   it('forwards an explicit model override to child ship processes', async () => {
     let plannedIssues = [{ number: 1, title: 'Issue one' }];
     mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
-      if (label === 'shipper:planned') return plannedIssues;
+      if (label === 'shipper:planned') return withDefaultPriority(plannedIssues);
       return [];
     });
 
@@ -2591,7 +2691,7 @@ describe('shipCommand parallel auto runner', () => {
       { number: 2, title: 'Issue two' },
     ];
     mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
-      if (label === 'shipper:planned') return plannedIssues;
+      if (label === 'shipper:planned') return withDefaultPriority(plannedIssues);
       return [];
     });
     mockGh.mockImplementation((args: string[]) => {
@@ -2690,7 +2790,7 @@ describe('shipCommand parallel auto runner', () => {
       { number: 2, title: 'Issue two' },
     ];
     mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
-      if (label === 'shipper:planned') return plannedIssues;
+      if (label === 'shipper:planned') return withDefaultPriority(plannedIssues);
       return [];
     });
     mockAggregateSessionUsage
@@ -2835,7 +2935,7 @@ describe('shipCommand parallel auto runner', () => {
       { number: 3, title: 'Issue three' },
     ];
     mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
-      if (label === 'shipper:planned') return plannedIssues;
+      if (label === 'shipper:planned') return withDefaultPriority(plannedIssues);
       return [];
     });
 
@@ -2876,7 +2976,7 @@ describe('shipCommand parallel auto runner', () => {
     ];
     mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
       if (label === 'shipper:planned') {
-        return plannedIssues;
+        return withDefaultPriority(plannedIssues);
       }
       return [];
     });
@@ -2948,7 +3048,7 @@ describe('shipCommand parallel auto runner', () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
       if (label === 'shipper:planned') {
-        return [{ number: 1, title: 'Issue one' }];
+        return withDefaultPriority([{ number: 1, title: 'Issue one' }]);
       }
       return [];
     });
@@ -2998,7 +3098,7 @@ describe('shipCommand parallel auto runner', () => {
       ];
       mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
         if (label === 'shipper:planned') {
-          return plannedIssues;
+          return withDefaultPriority(plannedIssues);
         }
         return [];
       });

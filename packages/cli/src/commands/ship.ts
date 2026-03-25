@@ -9,8 +9,10 @@ import {
   classifyChecks,
   clearStaleLockIfNeeded,
   fetchChecks,
+  fetchIssueTimelines,
   handleAgentCrash,
   selectIssuesForStage,
+  sortIssuesByLabelTime,
   gh,
   getSettings,
   processResult,
@@ -1017,14 +1019,12 @@ export async function selectNextCandidate(
   skippedIssues: Set<number>,
   activeIssues: ReadonlySet<number> = new Set<number>()
 ): Promise<{ number: number; title: string } | null> {
-  const allCandidates: Array<{
-    number: number;
-    title: string;
-    priority: 0 | 1 | 2;
+  const stageData: Array<{
+    label: string;
     stageIndex: number;
-    issueIndex: number;
+    staleLocked: Set<number>;
+    candidates: Array<{ number: number; title: string; priority: 0 | 1 | 2 }>;
   }> = [];
-  const staleLockedByIssue = new Map<number, Set<number>>();
 
   for (let stageIndex = 0; stageIndex < AUTO_PRIORITY_LABELS.length; stageIndex++) {
     const label = AUTO_PRIORITY_LABELS[stageIndex];
@@ -1032,53 +1032,68 @@ export async function selectNextCandidate(
       continue;
     }
     const staleLocked = new Set<number>();
-    const issues = await selectIssuesForStage(repo, label, staleLocked);
+    const issues = await selectIssuesForStage(repo, label, staleLocked, { skipTimeline: true });
+    const candidates = issues.filter(
+      (issue) => !skippedIssues.has(issue.number) && !activeIssues.has(issue.number)
+    );
 
-    for (let issueIndex = 0; issueIndex < issues.length; issueIndex++) {
-      const issue = issues[issueIndex];
-      if (!issue) {
-        continue;
-      }
-      if (skippedIssues.has(issue.number) || activeIssues.has(issue.number)) {
-        continue;
-      }
+    stageData.push({ label, stageIndex, staleLocked, candidates });
+  }
 
-      staleLockedByIssue.set(issue.number, staleLocked);
-      allCandidates.push({
-        number: issue.number,
-        title: issue.title,
-        priority: issue.priority,
-        stageIndex,
-        issueIndex,
-      });
+  let winningStage:
+    | {
+        label: string;
+        stageIndex: number;
+        staleLocked: Set<number>;
+        candidates: Array<{ number: number; title: string; priority: 0 | 1 | 2 }>;
+      }
+    | undefined;
+  let winningPriority: 0 | 1 | 2 | undefined;
+
+  for (const stage of stageData) {
+    const stageCandidate = stage.candidates[0];
+    if (!stageCandidate) {
+      continue;
+    }
+
+    if (
+      !winningStage ||
+      winningPriority === undefined ||
+      stageCandidate.priority < winningPriority ||
+      (stageCandidate.priority === winningPriority && stage.stageIndex < winningStage.stageIndex)
+    ) {
+      winningStage = stage;
+      winningPriority = stageCandidate.priority;
     }
   }
 
-  if (allCandidates.length === 0) {
+  if (!winningStage || winningPriority === undefined) {
     return null;
   }
 
-  allCandidates.sort((a, b) => {
-    if (a.priority !== b.priority) {
-      return a.priority - b.priority;
-    }
-
-    if (a.stageIndex !== b.stageIndex) {
-      return a.stageIndex - b.stageIndex;
-    }
-
-    return a.issueIndex - b.issueIndex;
-  });
-
-  const winner = allCandidates[0];
-  if (!winner) {
+  const bucketCandidates = winningStage.candidates.filter(
+    (candidate) => candidate.priority === winningPriority
+  );
+  const bucketWinner = bucketCandidates[0];
+  if (!bucketWinner) {
     return null;
   }
 
-  const staleLocked = staleLockedByIssue.get(winner.number);
-  if (staleLocked) {
-    await clearStaleLockIfNeeded(repo, winner.number, staleLocked);
+  let winner = bucketWinner;
+  if (bucketCandidates.length >= 2) {
+    const timelinesByIssue = await fetchIssueTimelines(
+      repo,
+      bucketCandidates.map((candidate) => candidate.number)
+    );
+    const sortedCandidates = sortIssuesByLabelTime(
+      bucketCandidates,
+      timelinesByIssue,
+      winningStage.label
+    );
+    winner = sortedCandidates[0] ?? bucketWinner;
   }
+
+  await clearStaleLockIfNeeded(repo, winner.number, winningStage.staleLocked);
 
   return { number: winner.number, title: winner.title };
 }

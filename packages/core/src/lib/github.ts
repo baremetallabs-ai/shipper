@@ -485,10 +485,39 @@ export function sortIssuesByLabelTime<T extends { number: number; title: string 
   return withTimestamps.map((w) => w.issue);
 }
 
+export async function fetchIssueTimelines(
+  repo: string,
+  issueNumbers: number[]
+): Promise<Map<number, TimelineLabelEvent[]>> {
+  const timelinesByIssue = new Map<number, TimelineLabelEvent[]>();
+
+  for (const issueNumber of issueNumbers) {
+    try {
+      const result = await gh([
+        'api',
+        `repos/${repo}/issues/${issueNumber}/timeline`,
+        '--paginate',
+        '--jq',
+        '.[] | select(.event == "labeled") | {event, label, created_at}',
+      ]);
+      const output = result.stdout.trim();
+      const events: TimelineLabelEvent[] = output
+        ? output.split('\n').map((line) => JSON.parse(line) as TimelineLabelEvent)
+        : [];
+      timelinesByIssue.set(issueNumber, events);
+    } catch {
+      timelinesByIssue.set(issueNumber, []);
+    }
+  }
+
+  return timelinesByIssue;
+}
+
 export async function selectIssuesForStage(
   repo: string,
   label: string,
-  staleLocked?: Set<number>
+  staleLocked?: Set<number>,
+  options?: { skipTimeline?: boolean }
 ): Promise<StageIssueCandidate[]> {
   const issueSearchFilter =
     label === 'shipper:new'
@@ -554,35 +583,20 @@ export async function selectIssuesForStage(
     console.error('Warning: Could not check for stale-locked issues. Proceeding without them.');
   }
 
-  if (issues.length <= 1) {
-    return issues.map((issue) => ({
-      number: issue.number,
-      title: issue.title,
-      priority: getPriorityTier(issue.labels.map((candidate) => candidate.name)),
-    }));
+  if (issues.length <= 1 || options?.skipTimeline) {
+    return issues
+      .map((issue) => ({
+        number: issue.number,
+        title: issue.title,
+        priority: getPriorityTier(issue.labels.map((candidate) => candidate.name)),
+      }))
+      .sort((a, b) => a.priority - b.priority);
   }
 
-  const timelinesByIssue = new Map<number, TimelineLabelEvent[]>();
-
-  for (const issue of issues) {
-    try {
-      const result = await gh([
-        'api',
-        `repos/${repo}/issues/${issue.number}/timeline`,
-        '--paginate',
-        '--jq',
-        '.[] | select(.event == "labeled") | {event, label, created_at}',
-      ]);
-      const output = result.stdout.trim();
-      const events: TimelineLabelEvent[] = output
-        ? output.split('\n').map((line) => JSON.parse(line) as TimelineLabelEvent)
-        : [];
-      timelinesByIssue.set(issue.number, events);
-    } catch {
-      timelinesByIssue.set(issue.number, []);
-    }
-  }
-
+  const timelinesByIssue = await fetchIssueTimelines(
+    repo,
+    issues.map((issue) => issue.number)
+  );
   const sortedIssues = sortIssuesByLabelTime(issues, timelinesByIssue, label);
 
   return sortedIssues
