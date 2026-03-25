@@ -58,6 +58,7 @@ const protectedPathsArgs = [
   '.shipper/input/',
   '.shipper/tmp/',
 ];
+const resetIndexArgs = ['reset', 'HEAD', '--', '.'];
 const checkoutArgs = ['checkout', 'HEAD', '--', '.'];
 const cleanArgs = ['clean', '-fd', '--exclude=.shipper'];
 
@@ -1011,6 +1012,15 @@ describe('pushWorktree', () => {
         ].join('\n')
       );
       queueExecResult();
+      queueProtectedPathsLsFiles(
+        [
+          '.shipper/output/result.json',
+          '.shipper/output/.gitkeep',
+          '.shipper/input/request.json',
+          '.shipper/tmp/debug.log',
+        ].join('\n')
+      );
+      queueExecResult();
       queueExecResult();
       queueExecResult();
       queueExecResult();
@@ -1027,6 +1037,8 @@ describe('pushWorktree', () => {
 
       expect(gitArgsFromExecCalls()).toEqual([
         protectedPathsArgs,
+        resetIndexArgs,
+        protectedPathsArgs,
         [
           'rm',
           '--cached',
@@ -1040,10 +1052,10 @@ describe('pushWorktree', () => {
         cleanArgs,
         ['push', '-u', 'origin', 'HEAD'],
       ]);
-      expect(execFileMock.mock.calls[2]?.[2]).toMatchObject({
+      expect(execFileMock.mock.calls[4]?.[2]).toMatchObject({
         cwd: '/tmp/wt',
       });
-      expect(execFileMock.mock.calls[2]?.[2]).toHaveProperty('env.GIT_EDITOR', 'true');
+      expect(execFileMock.mock.calls[4]?.[2]).toHaveProperty('env.GIT_EDITOR', 'true');
       expect(consoleErrorSpy).toHaveBeenCalledWith(
         'Stripped 3 tracked .shipper/ artifact files from git index before push'
       );
@@ -1100,6 +1112,12 @@ describe('pushWorktree', () => {
         )
       );
       queueExecResult();
+      queueProtectedPathsLsFiles(
+        ['.shipper/output/.gitkeep', '.shipper/input/.gitkeep', '.shipper/output/result.json'].join(
+          '\n'
+        )
+      );
+      queueExecResult();
       queueExecResult();
       queueExecResult();
       queueExecResult();
@@ -1116,6 +1134,8 @@ describe('pushWorktree', () => {
 
       expect(gitArgsFromExecCalls()).toEqual([
         protectedPathsArgs,
+        resetIndexArgs,
+        protectedPathsArgs,
         ['rm', '--cached', '--', '.shipper/output/result.json'],
         ['commit', '--amend', '--allow-empty', '--no-edit', '--no-verify', '--no-gpg-sign'],
         checkoutArgs,
@@ -1128,6 +1148,63 @@ describe('pushWorktree', () => {
     } finally {
       consoleErrorSpy.mockRestore();
     }
+  });
+
+  it('resets the index before push and skips amend when only staged protected files were present', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      queueProtectedPathsLsFiles('.shipper/output/result.json');
+      queueExecResult();
+      queueProtectedPathsLsFiles();
+      queueExecResult();
+      queueExecResult();
+      queueExecResult();
+
+      await expect(
+        pushWorktree({
+          wtPath: '/tmp/wt',
+          repoRoot: '/tmp/repo',
+          baseBranch: 'main',
+          pushMode: 'new-branch',
+        })
+      ).resolves.toBeUndefined();
+
+      expect(gitArgsFromExecCalls()).toEqual([
+        protectedPathsArgs,
+        resetIndexArgs,
+        protectedPathsArgs,
+        checkoutArgs,
+        cleanArgs,
+        ['push', '-u', 'origin', 'HEAD'],
+      ]);
+      expect(gitArgsFromExecCalls()).not.toContainEqual([
+        'commit',
+        '--amend',
+        '--allow-empty',
+        '--no-edit',
+        '--no-verify',
+        '--no-gpg-sign',
+      ]);
+      expect(consoleErrorSpy).not.toHaveBeenCalled();
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it('aborts before push when git ls-files fails', async () => {
+    queueExecResult({ code: 1, stderr: 'ls-files failed' });
+
+    await expect(
+      pushWorktree({
+        wtPath: '/tmp/wt',
+        repoRoot: '/tmp/repo',
+        baseBranch: 'main',
+        pushMode: 'new-branch',
+      })
+    ).rejects.toThrow('git ls-files -- .shipper/output/ .shipper/input/ .shipper/tmp/');
+
+    expect(gitArgsFromExecCalls()).toEqual([protectedPathsArgs]);
   });
 });
 
