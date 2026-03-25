@@ -67,13 +67,53 @@ function mockSpawnSuccess(): void {
   });
 }
 
-const { withWorktree } = await import('../../src/lib/worktree.js');
+function queueExecResult(opts: { code?: number; stdout?: string; stderr?: string } = {}): void {
+  const { code = 0, stdout = '', stderr = '' } = opts;
+  execFileMock.mockImplementationOnce(
+    (
+      _command: string,
+      _args: string[],
+      _execOpts: unknown,
+      callback: (error: Error | null, stdout: string, stderr: string) => void
+    ) => {
+      globalThis.queueMicrotask(() => {
+        if (code === 0) {
+          callback(null, stdout, stderr);
+          return;
+        }
+
+        const error = new Error(`exit:${code}`) as Error & {
+          code?: number;
+          stdout?: string;
+          stderr?: string;
+        };
+        error.code = code;
+        error.stdout = stdout;
+        error.stderr = stderr;
+        callback(error, stdout, stderr);
+      });
+    }
+  );
+}
+
+function gitArgsFromExecCalls(): string[][] {
+  return execFileMock.mock.calls.filter(([command]) => command === 'git').map(([, args]) => args);
+}
+
+function gitArgsFromSpawnCalls(): string[][] {
+  return spawnMock.mock.calls
+    .filter(([command]) => command === 'git')
+    .map(([, args]) => args ?? []);
+}
+
+const { createWorktree, withWorktree } = await import('../../src/lib/worktree.js');
 
 const WORKTREES_DIR = path.join('/home/user', '.shipper', 'worktrees');
 const defaultOpts = {
   repoRoot: '/repos/my-repo',
   branch: 'shipper/42-add-feature',
   createBranch: true,
+  baseBranch: 'main',
   issueNumber: '42',
   stage: 'implement',
 };
@@ -128,6 +168,74 @@ afterEach(() => {
 });
 
 describe('withWorktree', () => {
+  it('fetches origin and branches from origin/<baseBranch> when creating a new worktree branch', async () => {
+    queueExecResult(); // git worktree prune
+    queueExecResult(); // git fetch origin
+    queueExecResult({ stdout: 'abc123\n' }); // git rev-parse --verify origin/main
+    queueExecResult({ code: 128, stderr: 'fatal: Needed a single revision' }); // branch missing
+
+    await expect(createWorktree(defaultOpts)).resolves.toBe(expectedWtPath);
+
+    expect(gitArgsFromExecCalls()).toEqual([
+      ['worktree', 'prune'],
+      ['fetch', 'origin'],
+      ['rev-parse', '--verify', 'origin/main'],
+      ['rev-parse', '--verify', 'shipper/42-add-feature'],
+    ]);
+    expect(gitArgsFromSpawnCalls()).toEqual([
+      ['worktree', 'add', '-b', 'shipper/42-add-feature', expectedWtPath, 'origin/main'],
+    ]);
+  });
+
+  it('throws when createBranch is true without baseBranch', async () => {
+    await expect(
+      createWorktree({
+        ...defaultOpts,
+        baseBranch: undefined,
+      })
+    ).rejects.toThrow('baseBranch is required when createBranch is true');
+  });
+
+  it('fails fast with a descriptive error when fetching origin fails', async () => {
+    queueExecResult(); // git worktree prune
+    queueExecResult({ code: 1, stderr: 'fatal: network down' }); // git fetch origin
+
+    await expect(createWorktree(defaultOpts)).rejects.toThrow(
+      'Failed to fetch origin before worktree creation: git fetch origin exited with code 1:\nfatal: network down'
+    );
+
+    expect(gitArgsFromSpawnCalls()).toEqual([]);
+  });
+
+  it('fails fast with a descriptive error when origin/<baseBranch> cannot be resolved', async () => {
+    queueExecResult(); // git worktree prune
+    queueExecResult(); // git fetch origin
+    queueExecResult({ code: 128, stderr: 'fatal: ambiguous argument origin/main' });
+
+    await expect(createWorktree(defaultOpts)).rejects.toThrow(
+      "Remote ref origin/main does not exist after fetching origin. Ensure the branch 'main' exists on origin.\ngit rev-parse --verify origin/main exited with code 128:\nfatal: ambiguous argument origin/main"
+    );
+
+    expect(gitArgsFromSpawnCalls()).toEqual([]);
+  });
+
+  it('keeps createBranch false behavior unchanged', async () => {
+    queueExecResult(); // git worktree prune
+
+    await expect(
+      createWorktree({
+        ...defaultOpts,
+        createBranch: false,
+        baseBranch: undefined,
+      })
+    ).resolves.toBe(expectedWtPath);
+
+    expect(gitArgsFromExecCalls()).toEqual([['worktree', 'prune']]);
+    expect(gitArgsFromSpawnCalls()).toEqual([
+      ['worktree', 'add', expectedWtPath, 'shipper/42-add-feature'],
+    ]);
+  });
+
   it('runs setup before the callback and teardown after it', async () => {
     const callOrder: string[] = [];
     runWorktreeHookMock.mockImplementation((event: string) => {

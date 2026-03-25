@@ -1,7 +1,9 @@
 import {
   autoSelectIssue,
   generateBranchName,
+  getSettings,
   getRepoRoot,
+  resolveBaseBranch,
   resolveMode,
 } from '@dnsquared/shipper-core';
 import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
@@ -28,13 +30,22 @@ async function groomOneIssue(
   const code = await withIssueLock(repo, issueStr, async () => {
     const repoRoot = await getRepoRoot();
     const branch = await generateBranchName(repo, issueStr);
+    const settings = getSettings();
+    const baseBranch = await resolveBaseBranch(repo, settings.defaultBaseBranch);
 
     return await withStageHooks(
       'groom',
       { issueNumber: issueStr, branchName: branch },
       async () =>
         await withWorktree(
-          { repoRoot, branch, createBranch: true, issueNumber: issueStr, stage: 'groom' },
+          {
+            repoRoot,
+            branch,
+            createBranch: true,
+            baseBranch,
+            issueNumber: issueStr,
+            stage: 'groom',
+          },
           async (wtPath) =>
             await runPrompt('groom', { repo, issueRef: issueStr, cwd: wtPath, mode, agent, model })
         )

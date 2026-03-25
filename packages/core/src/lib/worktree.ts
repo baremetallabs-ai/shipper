@@ -944,6 +944,7 @@ export interface CreateWorktreeOpts {
   repoRoot: string;
   branch: string;
   createBranch: boolean;
+  baseBranch?: string;
   issueNumber?: string;
   stage?: string;
 }
@@ -971,6 +972,27 @@ export async function createWorktree(opts: CreateWorktreeOpts): Promise<string> 
 
   const args = ['worktree', 'add'];
   if (opts.createBranch) {
+    if (!opts.baseBranch) {
+      throw new Error('baseBranch is required when createBranch is true');
+    }
+
+    const startPoint = `origin/${opts.baseBranch}`;
+    const fetchResult = await execAsync('git', ['fetch', 'origin'], { cwd: opts.repoRoot });
+    if (fetchResult.code !== 0) {
+      throw new Error(
+        `Failed to fetch origin before worktree creation: ${formatCommandFailure('git', ['fetch', 'origin'], fetchResult)}`
+      );
+    }
+
+    const verifyResult = await execAsync('git', ['rev-parse', '--verify', startPoint], {
+      cwd: opts.repoRoot,
+    });
+    if (verifyResult.code !== 0) {
+      throw new Error(
+        `Remote ref ${startPoint} does not exist after fetching origin. Ensure the branch '${opts.baseBranch}' exists on origin.\n${formatCommandFailure('git', ['rev-parse', '--verify', startPoint], verifyResult)}`
+      );
+    }
+
     // Check if branch already exists (e.g. from a previous crashed run)
     let branchExists = false;
     try {
@@ -985,6 +1007,8 @@ export async function createWorktree(opts: CreateWorktreeOpts): Promise<string> 
     args.push(wtPath);
     if (branchExists) {
       args.push(opts.branch);
+    } else {
+      args.push(startPoint);
     }
   } else {
     args.push(wtPath, opts.branch);

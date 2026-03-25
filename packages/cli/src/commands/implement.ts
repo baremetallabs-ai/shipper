@@ -37,7 +37,14 @@ export async function implementCommand(
 
     await withStageHooks('implement', { issueNumber: issue, branchName: branch }, async () => {
       await withWorktree(
-        { repoRoot, branch, createBranch: true, issueNumber: issue, stage: 'implement' },
+        {
+          repoRoot,
+          branch,
+          createBranch: true,
+          baseBranch,
+          issueNumber: issue,
+          stage: 'implement',
+        },
         async (wtPath) => {
           await scrubOutputDir(wtPath);
           const getTransportUserInput = async (

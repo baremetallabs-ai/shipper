@@ -1,5 +1,6 @@
 import { autoSelectIssue, generateBranchName, getRepoRoot } from '@dnsquared/shipper-core';
 import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
+import { getSettings, resolveBaseBranch } from '@dnsquared/shipper-core';
 import { handleAgentCrash, processResult, scrubOutputDir } from '@dnsquared/shipper-core';
 import { retryOnInvalidOutput } from '@dnsquared/shipper-core';
 import { withStageHooks } from '@dnsquared/shipper-core';
@@ -27,10 +28,12 @@ export async function planCommand(
   await withIssueLock(repo, issue, async () => {
     const repoRoot = await getRepoRoot();
     const branch = await generateBranchName(repo, issue);
+    const settings = getSettings();
+    const baseBranch = await resolveBaseBranch(repo, settings.defaultBaseBranch);
 
     await withStageHooks('plan', { issueNumber: issue, branchName: branch }, async () => {
       await withWorktree(
-        { repoRoot, branch, createBranch: true, issueNumber: issue, stage: 'plan' },
+        { repoRoot, branch, createBranch: true, baseBranch, issueNumber: issue, stage: 'plan' },
         async (wtPath) => {
           await scrubOutputDir(wtPath);
           await runPrompt('plan', { repo, issueRef: issue, cwd: wtPath, mode, agent, model });
