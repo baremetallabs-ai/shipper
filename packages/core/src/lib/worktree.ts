@@ -397,26 +397,43 @@ function getPushArgs(pushMode: WorktreeGitOpts['pushMode'], forcePushBranch?: st
       : ['push', '--force-with-lease'];
 }
 
-async function stripProtectedPaths(opts: WorktreeGitOpts): Promise<void> {
+async function listProtectedTrackedFiles(opts: WorktreeGitOpts): Promise<string[]> {
   const lsFilesArgs = ['ls-files', '--', ...PROTECTED_SHIPPER_DIRS];
   const lsFilesResult = await execAsync('git', lsFilesArgs, {
     cwd: opts.wtPath,
+    maxBuffer: PUSH_OUTPUT_MAX_BUFFER,
   });
   if (lsFilesResult.code !== 0) {
-    return;
+    throw formatTransportError(opts, formatCommandFailure('git', lsFilesArgs, lsFilesResult));
   }
 
-  const trackedFiles = lsFilesResult.stdout
+  return lsFilesResult.stdout
+    .trim()
     .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .filter((file) => path.basename(file) !== '.gitkeep');
+    .filter((file) => file && path.basename(file) !== '.gitkeep');
+}
+
+async function stripProtectedPaths(opts: WorktreeGitOpts): Promise<void> {
+  const trackedFiles = await listProtectedTrackedFiles(opts);
 
   if (trackedFiles.length === 0) {
     return;
   }
 
-  const rmArgs = ['rm', '--cached', '--', ...trackedFiles];
+  const resetArgs = ['reset', 'HEAD', '--', '.'];
+  const resetResult = await execAsync('git', resetArgs, {
+    cwd: opts.wtPath,
+  });
+  if (resetResult.code !== 0) {
+    throw formatTransportError(opts, formatCommandFailure('git', resetArgs, resetResult));
+  }
+
+  const committedTrackedFiles = await listProtectedTrackedFiles(opts);
+  if (committedTrackedFiles.length === 0) {
+    return;
+  }
+
+  const rmArgs = ['rm', '--cached', '--', ...committedTrackedFiles];
   const rmResult = await execAsync('git', rmArgs, {
     cwd: opts.wtPath,
   });
@@ -441,7 +458,7 @@ async function stripProtectedPaths(opts: WorktreeGitOpts): Promise<void> {
   }
 
   console.error(
-    `Stripped ${trackedFiles.length} tracked .shipper/ artifact files from git index before push`
+    `Stripped ${committedTrackedFiles.length} tracked .shipper/ artifact files from git index before push`
   );
 }
 
