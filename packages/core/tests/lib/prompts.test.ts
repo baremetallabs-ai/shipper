@@ -111,3 +111,22 @@ describe('pr_remediate prompts', () => {
     }
   );
 });
+
+describe('implement prompts', () => {
+  it.each(['claude', 'codex', 'copilot'])(
+    'warn against force-adding .shipper files for %s',
+    (agent) => {
+      const prompt = readFileSync(
+        new URL(`../../src/prompts/${agent}/implement.md`, import.meta.url),
+        'utf-8'
+      );
+
+      expect(prompt).toContain('.shipper/');
+      expect(prompt).toContain('git add -f');
+      expect(prompt).toContain('git add --force');
+      expect(prompt).toContain('stale artifacts');
+      expect(prompt).toContain('downstream stage failures');
+      expect(prompt).toContain('restores output files');
+    }
+  );
+});
