@@ -85,11 +85,17 @@ function makeScan(overrides: Partial<ArtifactScan> = {}): ArtifactScan {
   };
 }
 
-function setupScanGh(options: { comments?: string; prs?: string; timeline?: string } = {}): void {
-  const { comments = '', prs = '[]', timeline = '' } = options;
+function setupScanGh(
+  options: { comments?: string; prs?: string; remoteRefs?: string; timeline?: string } = {}
+): void {
+  const { comments = '', prs = '[]', remoteRefs = '[]', timeline = '' } = options;
   mockGh.mockImplementation((args: string[]) => {
     if (args[0] === 'pr' && args[1] === 'list') {
       return Promise.resolve(ok(prs));
+    }
+
+    if (args[0] === 'api' && args[1]?.includes('/git/matching-refs/heads/shipper/')) {
+      return Promise.resolve(ok(remoteRefs));
     }
 
     if (args[0] === 'api' && args[1]?.includes('/timeline')) {
@@ -253,6 +259,27 @@ describe('scanArtifacts', () => {
     expect(scan.branchesToDelete).toEqual([]);
   });
 
+  it('falls back to GitHub matching refs when no repoRoot is available', async () => {
+    setupScanGh({
+      remoteRefs: JSON.stringify([
+        { ref: 'refs/heads/shipper/18' },
+        { ref: 'refs/heads/shipper/18-add-reset' },
+        { ref: 'refs/heads/shipper/180-keep-out' },
+      ]),
+    });
+
+    const scan = await scanArtifacts(18, 'owner/repo', 'new', ['shipper:implemented'], {
+      repoName: 'shipper',
+    });
+
+    expect(scan.branchesToDelete).toEqual(['shipper/18', 'shipper/18-add-reset']);
+    expect(mockExecFileSync).not.toHaveBeenCalled();
+    expect(ghCalls()).toContainEqual([
+      'api',
+      'repos/owner/repo/git/matching-refs/heads/shipper/18',
+    ]);
+  });
+
   it('tolerates git fetch failures and still scans stale remote refs', async () => {
     setupScanGh();
     setupScanExecFileSync({
@@ -281,6 +308,17 @@ describe('executeReset', () => {
   it('deletes an orphaned remote branch directly through the ref delete API', async () => {
     mockGh.mockImplementation((args: string[]) => {
       if (
+        args[0] === 'pr' &&
+        args[1] === 'list' &&
+        args[2] === '-R' &&
+        args[3] === 'owner/repo' &&
+        args[4] === '--head' &&
+        args[5] === 'shipper/18-add-reset'
+      ) {
+        return Promise.resolve(ok('[]'));
+      }
+
+      if (
         args[0] === 'api' &&
         args[1] === '-X' &&
         args[2] === 'DELETE' &&
@@ -304,6 +342,18 @@ describe('executeReset', () => {
       'owner/repo'
     );
 
+    expect(ghCalls()).toContainEqual([
+      'pr',
+      'list',
+      '-R',
+      'owner/repo',
+      '--head',
+      'shipper/18-add-reset',
+      '--state',
+      'open',
+      '--json',
+      'number,headRefName',
+    ]);
     expect(ghCalls()).toContainEqual([
       'api',
       '-X',
@@ -395,6 +445,17 @@ describe('executeReset', () => {
       }
 
       if (
+        args[0] === 'pr' &&
+        args[1] === 'list' &&
+        args[2] === '-R' &&
+        args[3] === 'owner/repo' &&
+        args[4] === '--head' &&
+        args[5] === 'shipper/18-orphan'
+      ) {
+        return Promise.resolve(ok('[]'));
+      }
+
+      if (
         args[0] === 'api' &&
         args[1] === '-X' &&
         args[2] === 'DELETE' &&
@@ -425,6 +486,80 @@ describe('executeReset', () => {
       'DELETE',
       'repos/owner/repo/git/refs/heads/shipper/18-orphan',
     ]);
+    expect(ghCalls()).not.toContainEqual([
+      'api',
+      '-X',
+      'DELETE',
+      'repos/owner/repo/git/refs/heads/shipper/18-open-pr',
+    ]);
+  });
+
+  it('does not delete a branch when branch-level PR verification finds an open PR', async () => {
+    mockGh.mockImplementation((args: string[]) => {
+      if (
+        args[0] === 'pr' &&
+        args[1] === 'list' &&
+        args[2] === '-R' &&
+        args[3] === 'owner/repo' &&
+        args[4] === '--head' &&
+        args[5] === 'shipper/18-open-pr'
+      ) {
+        return Promise.resolve(
+          ok(JSON.stringify([{ number: 101, headRefName: 'shipper/18-open-pr' }]))
+        );
+      }
+
+      if (args[0] === 'issue' && args[1] === 'comment') {
+        return Promise.resolve(ok());
+      }
+
+      return Promise.reject(new Error(`Unexpected gh call: ${args.join(' ')}`));
+    });
+
+    await executeReset(
+      18,
+      makeScan({
+        branchesToDelete: ['shipper/18-open-pr'],
+      }),
+      'owner/repo'
+    );
+
+    expect(ghCalls()).not.toContainEqual([
+      'api',
+      '-X',
+      'DELETE',
+      'repos/owner/repo/git/refs/heads/shipper/18-open-pr',
+    ]);
+  });
+
+  it('does not delete a branch when branch-level PR verification fails', async () => {
+    mockGh.mockImplementation((args: string[]) => {
+      if (
+        args[0] === 'pr' &&
+        args[1] === 'list' &&
+        args[2] === '-R' &&
+        args[3] === 'owner/repo' &&
+        args[4] === '--head' &&
+        args[5] === 'shipper/18-open-pr'
+      ) {
+        return Promise.reject(new Error('lookup failed'));
+      }
+
+      if (args[0] === 'issue' && args[1] === 'comment') {
+        return Promise.resolve(ok());
+      }
+
+      return Promise.reject(new Error(`Unexpected gh call: ${args.join(' ')}`));
+    });
+
+    await executeReset(
+      18,
+      makeScan({
+        branchesToDelete: ['shipper/18-open-pr'],
+      }),
+      'owner/repo'
+    );
+
     expect(ghCalls()).not.toContainEqual([
       'api',
       '-X',
