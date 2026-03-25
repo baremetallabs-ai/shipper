@@ -95,6 +95,17 @@ describe('implementCommand', () => {
     expect(process.exitCode).toBeUndefined();
 
     expect(resolveBaseBranchMock).toHaveBeenCalledWith('owner/repo', 'main');
+    expect(withWorktreeMock).toHaveBeenCalledWith(
+      {
+        repoRoot: '/tmp/fake-repo',
+        branch: 'shipper/239-branch',
+        createBranch: true,
+        baseBranch: 'main',
+        issueNumber: '239',
+        stage: 'implement',
+      },
+      expect.any(Function)
+    );
     expect(scrubOutputDirMock).toHaveBeenCalledWith('/tmp/fake-wt');
     expect(withGitTransportMock).toHaveBeenCalledWith(
       expect.objectContaining({

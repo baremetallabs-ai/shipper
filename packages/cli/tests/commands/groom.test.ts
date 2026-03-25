@@ -4,8 +4,10 @@ const autoSelectIssueMock = vi.fn();
 const generateBranchNameMock = vi.fn((_repo: string, issueRef: string) =>
   Promise.resolve(`shipper/${issueRef}-branch`)
 );
+const getSettingsMock = vi.fn(() => ({ defaultBaseBranch: 'main' }));
 const getRepoRootMock = vi.fn(() => Promise.resolve('/tmp/fake-repo'));
 const printAutoSummaryMock = vi.fn();
+const resolveBaseBranchMock = vi.fn(() => Promise.resolve('main'));
 const resolveModeMock = vi.fn((_step: string, override?: string) => override ?? 'default');
 const runPromptMock = vi.fn(() => Promise.resolve(0));
 const withIssueLockMock = vi.fn((_repo: unknown, _issue: unknown, fn: () => Promise<unknown>) =>
@@ -21,7 +23,9 @@ const withWorktreeMock = vi.fn((_opts: unknown, fn: (wtPath: string) => Promise<
 vi.mock('@dnsquared/shipper-core', () => ({
   autoSelectIssue: autoSelectIssueMock,
   generateBranchName: generateBranchNameMock,
+  getSettings: getSettingsMock,
   getRepoRoot: getRepoRootMock,
+  resolveBaseBranch: resolveBaseBranchMock,
   resolveMode: resolveModeMock,
   runPrompt: runPromptMock,
   withIssueLock: withIssueLockMock,
@@ -57,6 +61,7 @@ describe('groomCommand', () => {
 
     expect(getRepoRootMock).toHaveBeenCalledTimes(1);
     expect(generateBranchNameMock).toHaveBeenCalledWith('owner/repo', '123');
+    expect(resolveBaseBranchMock).toHaveBeenCalledWith('owner/repo', 'main');
     expect(withStageHooksMock).toHaveBeenCalledWith(
       'groom',
       { issueNumber: '123', branchName: 'shipper/123-branch' },
@@ -67,6 +72,7 @@ describe('groomCommand', () => {
         repoRoot: '/tmp/fake-repo',
         branch: 'shipper/123-branch',
         createBranch: true,
+        baseBranch: 'main',
         issueNumber: '123',
         stage: 'groom',
       },
@@ -95,12 +101,15 @@ describe('groomCommand', () => {
     await expect(groomCommand('owner/repo', undefined, { auto: true })).resolves.toBeUndefined();
 
     expect(withWorktreeMock).toHaveBeenCalledTimes(2);
+    expect(resolveBaseBranchMock).toHaveBeenNthCalledWith(1, 'owner/repo', 'main');
+    expect(resolveBaseBranchMock).toHaveBeenNthCalledWith(2, 'owner/repo', 'main');
     expect(withWorktreeMock).toHaveBeenNthCalledWith(
       1,
       {
         repoRoot: '/tmp/fake-repo',
         branch: 'shipper/101-branch',
         createBranch: true,
+        baseBranch: 'main',
         issueNumber: '101',
         stage: 'groom',
       },
@@ -112,6 +121,7 @@ describe('groomCommand', () => {
         repoRoot: '/tmp/fake-repo',
         branch: 'shipper/102-branch',
         createBranch: true,
+        baseBranch: 'main',
         issueNumber: '102',
         stage: 'groom',
       },

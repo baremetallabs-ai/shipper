@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const autoSelectIssueMock = vi.fn();
 const generateBranchNameMock = vi.fn(() => Promise.resolve('shipper/123-branch'));
 const getRepoRootMock = vi.fn(() => Promise.resolve('/tmp/fake-repo'));
+const getSettingsMock = vi.fn(() => ({ defaultBaseBranch: 'main' }));
 const handleAgentCrashMock = vi.fn(() => Promise.resolve());
 const validatedResult = {
   verdict: 'accept' as const,
@@ -16,6 +17,7 @@ const retryOnInvalidOutputMock = vi.fn<
     retry: (message: string) => Promise<number>;
   }) => Promise<typeof validatedResult>
 >(() => Promise.resolve(validatedResult));
+const resolveBaseBranchMock = vi.fn(() => Promise.resolve('main'));
 const runPromptMock = vi.fn(() => Promise.resolve(7));
 const scrubOutputDirMock = vi.fn(() => Promise.resolve());
 const withIssueLockMock = vi.fn((_repo: unknown, _issue: unknown, fn: () => Promise<unknown>) =>
@@ -32,9 +34,11 @@ vi.mock('@dnsquared/shipper-core', () => ({
   autoSelectIssue: autoSelectIssueMock,
   generateBranchName: generateBranchNameMock,
   getRepoRoot: getRepoRootMock,
+  getSettings: getSettingsMock,
   handleAgentCrash: handleAgentCrashMock,
   processResult: processResultMock,
   retryOnInvalidOutput: retryOnInvalidOutputMock,
+  resolveBaseBranch: resolveBaseBranchMock,
   runPrompt: runPromptMock,
   scrubOutputDir: scrubOutputDirMock,
   withIssueLock: withIssueLockMock,
@@ -67,6 +71,7 @@ describe('designCommand', () => {
     await expect(designCommand('owner/repo', '123')).resolves.toBeUndefined();
 
     expect(generateBranchNameMock).toHaveBeenCalledWith('owner/repo', '123');
+    expect(resolveBaseBranchMock).toHaveBeenCalledWith('owner/repo', 'main');
     expect(withStageHooksMock).toHaveBeenCalledWith(
       'design',
       { issueNumber: '123', branchName: 'shipper/123-branch' },
@@ -77,6 +82,7 @@ describe('designCommand', () => {
         repoRoot: '/tmp/fake-repo',
         branch: 'shipper/123-branch',
         createBranch: true,
+        baseBranch: 'main',
         issueNumber: '123',
         stage: 'design',
       },
