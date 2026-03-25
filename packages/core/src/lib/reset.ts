@@ -78,6 +78,21 @@ function parsePrEntries(json: string): PREntry[] {
   });
 }
 
+function parseMatchingRefs(json: string): string[] {
+  const parsed: unknown = JSON.parse(json);
+  if (!Array.isArray(parsed)) {
+    throw new Error('GitHub CLI returned an invalid matching refs payload.');
+  }
+
+  return parsed.map((entry) => {
+    if (!isPlainObject(entry) || typeof entry.ref !== 'string') {
+      throw new Error('GitHub CLI returned an invalid matching ref entry.');
+    }
+
+    return entry.ref;
+  });
+}
+
 async function getStageTimestamp(
   issueNum: number,
   nwo: string,
@@ -278,33 +293,52 @@ export async function scanArtifacts(
   }
 
   let remoteBranches: string[] = [];
-  if (targetStage !== 'implemented' && options.repoRoot) {
-    try {
-      execFileSync('git', ['fetch', 'origin', '--prune'], {
-        cwd: options.repoRoot,
-        stdio: ['ignore', 'ignore', 'ignore'],
-      });
-    } catch {
-      // Best-effort — fall through to branch lookup with stale refs.
-    }
-
-    try {
-      const raw = execFileSync(
-        'git',
-        ['branch', '-r', '--list', `origin/shipper/${issueNum}`, `origin/shipper/${issueNum}-*`],
-        {
+  if (targetStage !== 'implemented') {
+    if (options.repoRoot) {
+      try {
+        execFileSync('git', ['fetch', 'origin', '--prune'], {
           cwd: options.repoRoot,
-          encoding: 'utf-8',
-        }
-      );
-      remoteBranches = raw
-        .split('\n')
-        .map((line) => line.trim())
-        .filter((branchName) => branchName !== '')
-        .map((branchName) => branchName.replace(/^origin\//, ''));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.warn(`Warning: Could not scan remote branches for issue #${issueNum}: ${message}`);
+          stdio: ['ignore', 'ignore', 'ignore'],
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`Warning: Could not fetch remote branches for issue #${issueNum}: ${message}`);
+      }
+
+      try {
+        const raw = execFileSync(
+          'git',
+          ['branch', '-r', '--list', `origin/shipper/${issueNum}`, `origin/shipper/${issueNum}-*`],
+          {
+            cwd: options.repoRoot,
+            encoding: 'utf-8',
+          }
+        );
+        remoteBranches = raw
+          .split('\n')
+          .map((line) => line.trim())
+          .filter((branchName) => branchName !== '')
+          .map((branchName) => branchName.replace(/^origin\//, ''));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`Warning: Could not scan remote branches for issue #${issueNum}: ${message}`);
+      }
+    } else {
+      try {
+        const { stdout: refsJson } = await gh([
+          'api',
+          `repos/${nwo}/git/matching-refs/heads/shipper/${issueNum}`,
+        ]);
+        remoteBranches = parseMatchingRefs(refsJson)
+          .map((ref) => ref.replace(/^refs\/heads\//, ''))
+          .filter(
+            (branchName) =>
+              branchName === `shipper/${issueNum}` || branchName.startsWith(`shipper/${issueNum}-`)
+          );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`Warning: Could not scan remote branches for issue #${issueNum}: ${message}`);
+      }
     }
   }
 
@@ -480,9 +514,48 @@ export async function executeReset(
   }
 
   const prBranches = new Set(scan.prs.map((pr) => pr.headRefName));
-  const deletableBranches = scan.branchesToDelete.filter(
-    (branchName) => closedPrBranches.has(branchName) || !prBranches.has(branchName)
-  );
+  const deletableBranches: string[] = [];
+  for (const branchName of scan.branchesToDelete) {
+    if (closedPrBranches.has(branchName)) {
+      deletableBranches.push(branchName);
+      continue;
+    }
+
+    if (prBranches.has(branchName)) {
+      continue;
+    }
+
+    try {
+      const { stdout: prJson } = await gh([
+        'pr',
+        'list',
+        '-R',
+        nwo,
+        '--head',
+        branchName,
+        '--state',
+        'open',
+        '--json',
+        'number,headRefName',
+      ]);
+      const branchPrs = parsePrEntries(prJson).filter((pr) => pr.headRefName === branchName);
+      if (branchPrs.length === 0) {
+        deletableBranches.push(branchName);
+        continue;
+      }
+
+      console.warn(
+        `  Warning: Skipping branch ${branchName} because it still has an open PR: ${branchPrs
+          .map((pr) => `#${pr.number}`)
+          .join(', ')}`
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(
+        `  Warning: Could not verify open PR state for branch ${branchName}: ${message}`
+      );
+    }
+  }
   for (const branch of deletableBranches) {
     try {
       await gh(['api', '-X', 'DELETE', `repos/${nwo}/git/refs/heads/${branch}`]);
