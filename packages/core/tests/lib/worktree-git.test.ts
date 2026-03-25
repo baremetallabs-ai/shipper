@@ -1035,7 +1035,7 @@ describe('pushWorktree', () => {
           '.shipper/input/request.json',
           '.shipper/tmp/debug.log',
         ],
-        ['commit', '--amend', '--allow-empty', '--no-edit'],
+        ['commit', '--amend', '--allow-empty', '--no-edit', '--no-verify', '--no-gpg-sign'],
         checkoutArgs,
         cleanArgs,
         ['push', '-u', 'origin', 'HEAD'],
@@ -1072,12 +1072,17 @@ describe('pushWorktree', () => {
         ...cleanBeforePushGitArgs(),
         ['push', '-u', 'origin', 'HEAD'],
       ]);
-      expect(gitArgsFromExecCalls()).not.toContainEqual(['rm', '--cached', '--']);
+      const rmCachedCalls = gitArgsFromExecCalls().filter(
+        (args) => args[0] === 'rm' && args[1] === '--cached'
+      );
+      expect(rmCachedCalls).toHaveLength(0);
       expect(gitArgsFromExecCalls()).not.toContainEqual([
         'commit',
         '--amend',
         '--allow-empty',
         '--no-edit',
+        '--no-verify',
+        '--no-gpg-sign',
       ]);
       expect(consoleErrorSpy).not.toHaveBeenCalled();
     } finally {
@@ -1112,7 +1117,7 @@ describe('pushWorktree', () => {
       expect(gitArgsFromExecCalls()).toEqual([
         protectedPathsArgs,
         ['rm', '--cached', '--', '.shipper/output/result.json'],
-        ['commit', '--amend', '--allow-empty', '--no-edit'],
+        ['commit', '--amend', '--allow-empty', '--no-edit', '--no-verify', '--no-gpg-sign'],
         checkoutArgs,
         cleanArgs,
         ['push', '-u', 'origin', 'HEAD'],

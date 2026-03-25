@@ -424,7 +424,14 @@ async function stripProtectedPaths(opts: WorktreeGitOpts): Promise<void> {
     throw formatTransportError(opts, formatCommandFailure('git', rmArgs, rmResult));
   }
 
-  const amendArgs = ['commit', '--amend', '--allow-empty', '--no-edit'];
+  const amendArgs = [
+    'commit',
+    '--amend',
+    '--allow-empty',
+    '--no-edit',
+    '--no-verify',
+    '--no-gpg-sign',
+  ];
   const amendResult = await execAsync('git', amendArgs, {
     cwd: opts.wtPath,
     env: { GIT_EDITOR: 'true' },
