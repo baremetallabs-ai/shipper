@@ -51,6 +51,15 @@ const {
   syncWorktree,
   withGitTransport,
 } = await import('../../src/lib/worktree.js');
+const protectedPathsArgs = [
+  'ls-files',
+  '--',
+  '.shipper/output/',
+  '.shipper/input/',
+  '.shipper/tmp/',
+];
+const checkoutArgs = ['checkout', 'HEAD', '--', '.'];
+const cleanArgs = ['clean', '-fd', '--exclude=.shipper'];
 
 function queueSpawnExit(code = 0): void {
   spawnMock.mockImplementationOnce(() => {
@@ -122,7 +131,12 @@ function queueExecProcessError(opts: {
   );
 }
 
+function queueProtectedPathsLsFiles(stdout = ''): void {
+  queueExecResult({ stdout });
+}
+
 function queueCleanBeforePush(): void {
+  queueProtectedPathsLsFiles();
   queueExecResult();
   queueExecResult();
 }
@@ -130,6 +144,14 @@ function queueCleanBeforePush(): void {
 function queueCleanBeforeForcePush(commitsAhead = '1\n'): void {
   queueExecResult({ stdout: commitsAhead });
   queueCleanBeforePush();
+}
+
+function cleanBeforePushGitArgs(): string[][] {
+  return [protectedPathsArgs, checkoutArgs, cleanArgs];
+}
+
+function cleanBeforeForcePushGitArgs(_commitsAhead = '1\n'): string[][] {
+  return [['rev-list', '--count', 'origin/main..HEAD'], ...cleanBeforePushGitArgs()];
 }
 
 function gitArgsFromSpawnCalls(): string[][] {
@@ -661,15 +683,14 @@ describe('pushWorktree', () => {
     ).resolves.toBeUndefined();
 
     expect(gitArgsFromExecCalls()).toEqual([
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforePushGitArgs(),
       ['push', '-u', 'origin', 'HEAD'],
     ]);
-    expect(execFileMock.mock.calls[1]?.[2]).toMatchObject({
+    expect(execFileMock.mock.calls[2]?.[2]).toMatchObject({
       cwd: '/tmp/wt',
       maxBuffer: 10 * 1024 * 1024,
     });
-    expect(execFileMock.mock.calls[2]?.[2]).toMatchObject({
+    expect(execFileMock.mock.calls[3]?.[2]).toMatchObject({
       cwd: '/tmp/wt',
       maxBuffer: 10 * 1024 * 1024,
     });
@@ -677,6 +698,7 @@ describe('pushWorktree', () => {
   });
 
   it('aborts before push when git checkout -- . fails', async () => {
+    queueProtectedPathsLsFiles();
     queueExecResult({ code: 1, stderr: 'checkout failed' });
 
     await expect(
@@ -688,10 +710,11 @@ describe('pushWorktree', () => {
       })
     ).rejects.toThrow('Failed to clean tracked files before push');
 
-    expect(gitArgsFromExecCalls()).toEqual([['checkout', 'HEAD', '--', '.']]);
+    expect(gitArgsFromExecCalls()).toEqual([protectedPathsArgs, checkoutArgs]);
   });
 
   it('aborts before push when git clean -fd --exclude=.shipper fails', async () => {
+    queueProtectedPathsLsFiles();
     queueExecResult();
     queueExecResult({ code: 1, stderr: 'clean failed' });
 
@@ -704,10 +727,7 @@ describe('pushWorktree', () => {
       })
     ).rejects.toThrow('Failed to remove untracked files before push');
 
-    expect(gitArgsFromExecCalls()).toEqual([
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
-    ]);
+    expect(gitArgsFromExecCalls()).toEqual([...cleanBeforePushGitArgs()]);
   });
 
   it('fetches, rebases onto the remote branch, and force-pushes after a failed new-branch push', async () => {
@@ -730,15 +750,12 @@ describe('pushWorktree', () => {
     ).resolves.toBeUndefined();
 
     expect(gitArgsFromExecCalls()).toEqual([
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforePushGitArgs(),
       ['push', '-u', 'origin', 'HEAD'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
       ['rebase', '--autostash', 'origin/feature/retry'],
-      ['rev-list', '--count', 'origin/main..HEAD'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforeForcePushGitArgs(),
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
     ]);
     expect(gitArgsFromSpawnCalls()).toEqual([['fetch', 'origin']]);
@@ -763,13 +780,11 @@ describe('pushWorktree', () => {
     ).resolves.toBeUndefined();
 
     expect(gitArgsFromExecCalls()).toEqual([
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforePushGitArgs(),
       ['push', '-u', 'origin', 'HEAD'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforePushGitArgs(),
       ['push', '-u', 'origin', 'HEAD'],
     ]);
     expect(gitArgsFromSpawnCalls()).toEqual([['fetch', 'origin']]);
@@ -819,9 +834,7 @@ describe('pushWorktree', () => {
 
     expect(gitArgsFromExecCalls()).toEqual([
       ['rev-parse', '--abbrev-ref', 'HEAD'],
-      ['rev-list', '--count', 'origin/main..HEAD'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforeForcePushGitArgs(),
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
     ]);
     expect(gitArgsFromSpawnCalls()).toEqual([['fetch', 'origin']]);
@@ -860,27 +873,19 @@ describe('pushWorktree', () => {
 
     expect(gitArgsFromExecCalls()).toEqual([
       ['rev-parse', '--abbrev-ref', 'HEAD'],
-      ['rev-list', '--count', 'origin/main..HEAD'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforeForcePushGitArgs(),
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
-      ['rev-list', '--count', 'origin/main..HEAD'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforeForcePushGitArgs(),
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
-      ['rev-list', '--count', 'origin/main..HEAD'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforeForcePushGitArgs(),
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
-      ['rev-list', '--count', 'origin/main..HEAD'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforeForcePushGitArgs(),
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
     ]);
     expect(gitArgsFromSpawnCalls()).toEqual([
@@ -925,9 +930,7 @@ describe('pushWorktree', () => {
 
     expect(gitArgsFromExecCalls()).toEqual([
       ['rev-parse', '--abbrev-ref', 'HEAD'],
-      ['rev-list', '--count', 'origin/main..HEAD'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforeForcePushGitArgs('3\n'),
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
     ]);
   });
@@ -958,8 +961,7 @@ describe('pushWorktree', () => {
       expect(gitArgsFromExecCalls()).toEqual([
         ['rev-parse', '--abbrev-ref', 'HEAD'],
         ['rev-list', '--count', 'origin/main..HEAD'],
-        ['checkout', 'HEAD', '--', '.'],
-        ['clean', '-fd', '--exclude=.shipper'],
+        ...cleanBeforePushGitArgs(),
         ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
       ]);
     } finally {
@@ -987,15 +989,140 @@ describe('pushWorktree', () => {
 
     expect(gitArgsFromExecCalls()).toEqual([
       ['rev-parse', '--abbrev-ref', 'HEAD'],
-      ['rev-list', '--count', 'origin/main..HEAD'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforeForcePushGitArgs(),
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
       ['rev-list', '--count', 'origin/main..HEAD'],
     ]);
     expect(gitArgsFromSpawnCalls()).toEqual([['fetch', 'origin']]);
+  });
+
+  it('strips tracked protected files, amends HEAD, and then pushes', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      queueProtectedPathsLsFiles(
+        [
+          '.shipper/output/result.json',
+          '.shipper/output/.gitkeep',
+          '.shipper/input/request.json',
+          '.shipper/tmp/debug.log',
+        ].join('\n')
+      );
+      queueExecResult();
+      queueExecResult();
+      queueExecResult();
+      queueExecResult();
+      queueExecResult();
+
+      await expect(
+        pushWorktree({
+          wtPath: '/tmp/wt',
+          repoRoot: '/tmp/repo',
+          baseBranch: 'main',
+          pushMode: 'new-branch',
+        })
+      ).resolves.toBeUndefined();
+
+      expect(gitArgsFromExecCalls()).toEqual([
+        protectedPathsArgs,
+        [
+          'rm',
+          '--cached',
+          '--',
+          '.shipper/output/result.json',
+          '.shipper/input/request.json',
+          '.shipper/tmp/debug.log',
+        ],
+        ['commit', '--amend', '--allow-empty', '--no-edit'],
+        checkoutArgs,
+        cleanArgs,
+        ['push', '-u', 'origin', 'HEAD'],
+      ]);
+      expect(execFileMock.mock.calls[2]?.[2]).toMatchObject({
+        cwd: '/tmp/wt',
+      });
+      expect(execFileMock.mock.calls[2]?.[2]).toHaveProperty('env.GIT_EDITOR', 'true');
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        'Stripped 3 tracked .shipper/ artifact files from git index before push'
+      );
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it('no-ops when no protected files are tracked before push', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      queueCleanBeforePush();
+      queueExecResult();
+
+      await expect(
+        pushWorktree({
+          wtPath: '/tmp/wt',
+          repoRoot: '/tmp/repo',
+          baseBranch: 'main',
+          pushMode: 'new-branch',
+        })
+      ).resolves.toBeUndefined();
+
+      expect(gitArgsFromExecCalls()).toEqual([
+        ...cleanBeforePushGitArgs(),
+        ['push', '-u', 'origin', 'HEAD'],
+      ]);
+      expect(gitArgsFromExecCalls()).not.toContainEqual(['rm', '--cached', '--']);
+      expect(gitArgsFromExecCalls()).not.toContainEqual([
+        'commit',
+        '--amend',
+        '--allow-empty',
+        '--no-edit',
+      ]);
+      expect(consoleErrorSpy).not.toHaveBeenCalled();
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it('preserves .gitkeep while stripping other tracked protected files', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      queueProtectedPathsLsFiles(
+        ['.shipper/output/.gitkeep', '.shipper/input/.gitkeep', '.shipper/output/result.json'].join(
+          '\n'
+        )
+      );
+      queueExecResult();
+      queueExecResult();
+      queueExecResult();
+      queueExecResult();
+      queueExecResult();
+
+      await expect(
+        pushWorktree({
+          wtPath: '/tmp/wt',
+          repoRoot: '/tmp/repo',
+          baseBranch: 'main',
+          pushMode: 'new-branch',
+        })
+      ).resolves.toBeUndefined();
+
+      expect(gitArgsFromExecCalls()).toEqual([
+        protectedPathsArgs,
+        ['rm', '--cached', '--', '.shipper/output/result.json'],
+        ['commit', '--amend', '--allow-empty', '--no-edit'],
+        checkoutArgs,
+        cleanArgs,
+        ['push', '-u', 'origin', 'HEAD'],
+      ]);
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        'Stripped 1 tracked .shipper/ artifact files from git index before push'
+      );
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
   });
 });
 
@@ -1045,11 +1172,10 @@ describe('withGitTransport', () => {
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforePushGitArgs(),
       ['push', '-u', 'origin', 'HEAD'],
     ]);
-    expect(execFileMock.mock.calls[6]?.[2]).toMatchObject({
+    expect(execFileMock.mock.calls[7]?.[2]).toMatchObject({
       cwd: '/tmp/wt',
       maxBuffer: 10 * 1024 * 1024,
     });
@@ -1083,8 +1209,7 @@ describe('withGitTransport', () => {
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforePushGitArgs(),
       ['push', '-u', 'origin', 'HEAD'],
     ]);
   });
@@ -1117,8 +1242,7 @@ describe('withGitTransport', () => {
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforePushGitArgs(),
       ['push', '-u', 'origin', 'HEAD'],
     ]);
   });
@@ -1185,9 +1309,7 @@ describe('withGitTransport', () => {
       ['add', '-u'],
       ['rebase', '--continue'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
-      ['rev-list', '--count', 'origin/main..HEAD'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforeForcePushGitArgs(),
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
     ]);
   });
@@ -1232,15 +1354,12 @@ describe('withGitTransport', () => {
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforePushGitArgs(),
       ['push', '-u', 'origin', 'HEAD'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
       ['rebase', '--autostash', 'origin/feature/retry'],
-      ['rev-list', '--count', 'origin/main..HEAD'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforeForcePushGitArgs(),
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
     ]);
   });
@@ -1284,13 +1403,11 @@ describe('withGitTransport', () => {
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforePushGitArgs(),
       ['push', '-u', 'origin', 'HEAD'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforePushGitArgs(),
       ['push', '-u', 'origin', 'HEAD'],
     ]);
   });
@@ -1354,9 +1471,7 @@ describe('withGitTransport', () => {
       ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
-      ['rev-list', '--count', 'origin/main..HEAD'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforeForcePushGitArgs(),
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
@@ -1364,9 +1479,7 @@ describe('withGitTransport', () => {
       ['diff', '--name-only', '--diff-filter=U'],
       ['add', '-u'],
       ['rebase', '--continue'],
-      ['rev-list', '--count', 'origin/main..HEAD'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforeForcePushGitArgs(),
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
     ]);
   });
@@ -1472,9 +1585,7 @@ describe('withGitTransport', () => {
       ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
-      ['rev-list', '--count', 'origin/main..HEAD'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforeForcePushGitArgs(),
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
@@ -1485,9 +1596,7 @@ describe('withGitTransport', () => {
       ['diff', '--name-only', '--diff-filter=U'],
       ['add', '-u'],
       ['rebase', '--continue'],
-      ['rev-list', '--count', 'origin/main..HEAD'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforeForcePushGitArgs(),
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
     ]);
   });
@@ -1530,8 +1639,7 @@ describe('withGitTransport', () => {
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforePushGitArgs(),
       ['push', '-u', 'origin', 'HEAD'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
@@ -1573,9 +1681,7 @@ describe('withGitTransport', () => {
       ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
-      ['rev-list', '--count', 'origin/main..HEAD'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforeForcePushGitArgs(),
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
     ]);
   });
@@ -1634,23 +1740,19 @@ describe('withGitTransport', () => {
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforePushGitArgs(),
       ['push', '-u', 'origin', 'HEAD'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforePushGitArgs(),
       ['push', '-u', 'origin', 'HEAD'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforePushGitArgs(),
       ['push', '-u', 'origin', 'HEAD'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforePushGitArgs(),
       ['push', '-u', 'origin', 'HEAD'],
     ]);
   });
@@ -1694,11 +1796,9 @@ describe('withGitTransport', () => {
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforePushGitArgs(),
       ['push', '-u', 'origin', 'HEAD'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforePushGitArgs(),
       ['push', '-u', 'origin', 'HEAD'],
     ]);
   });
@@ -1747,11 +1847,9 @@ describe('withGitTransport', () => {
         ['rev-parse', '--abbrev-ref', 'HEAD'],
         ['rev-parse', '--verify', 'origin/feature/test-branch'],
         ['rebase', '--autostash', 'origin/main'],
-        ['checkout', 'HEAD', '--', '.'],
-        ['clean', '-fd', '--exclude=.shipper'],
+        ...cleanBeforePushGitArgs(),
         ['push', '-u', 'origin', 'HEAD'],
-        ['checkout', 'HEAD', '--', '.'],
-        ['clean', '-fd', '--exclude=.shipper'],
+        ...cleanBeforePushGitArgs(),
         ['push', '-u', 'origin', 'HEAD'],
       ]);
     } finally {
@@ -1805,9 +1903,7 @@ describe('withGitTransport', () => {
       ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
-      ['rev-list', '--count', 'origin/main..HEAD'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforeForcePushGitArgs(),
       [
         'push',
         '--force-with-lease',
@@ -1825,9 +1921,7 @@ describe('withGitTransport', () => {
         '--autostash',
         'origin/shipper/456-feed-pre-push-hook-failures-back-to-the-agent-inst',
       ],
-      ['rev-list', '--count', 'origin/main..HEAD'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforeForcePushGitArgs(),
       [
         'push',
         '--force-with-lease',
@@ -1894,23 +1988,15 @@ describe('withGitTransport', () => {
       ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
-      ['rev-list', '--count', 'origin/main..HEAD'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforeForcePushGitArgs(),
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
-      ['rev-list', '--count', 'origin/main..HEAD'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforeForcePushGitArgs(),
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/retry'],
-      ['rev-list', '--count', 'origin/main..HEAD'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforeForcePushGitArgs(),
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
-      ['rev-list', '--count', 'origin/main..HEAD'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforeForcePushGitArgs(),
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
     ]);
   });
@@ -2091,9 +2177,7 @@ describe('withGitTransport', () => {
       ['diff', '--name-only', '--diff-filter=U'],
       ['rev-parse', '--git-dir'],
       ['rev-parse', '--abbrev-ref', 'HEAD'],
-      ['rev-list', '--count', 'origin/main..HEAD'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforeForcePushGitArgs(),
       ['push', '--force-with-lease', 'origin', 'HEAD:refs/heads/feature/retry'],
     ]);
   });
@@ -2138,8 +2222,7 @@ describe('withGitTransport', () => {
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforePushGitArgs(),
       ['push', '-u', 'origin', 'HEAD'],
     ]);
   });
@@ -2304,8 +2387,7 @@ describe('withGitTransport', () => {
       ['rev-parse', '--verify', 'origin/feature/my-branch'],
       ['reset', '--hard', 'origin/feature/my-branch'],
       ['rebase', '--autostash', 'origin/main'],
-      ['checkout', 'HEAD', '--', '.'],
-      ['clean', '-fd', '--exclude=.shipper'],
+      ...cleanBeforePushGitArgs(),
       ['push', '-u', 'origin', 'HEAD'],
     ]);
   });
