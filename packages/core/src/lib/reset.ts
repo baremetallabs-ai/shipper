@@ -277,10 +277,42 @@ export async function scanArtifacts(
     console.warn(`Warning: Could not fetch PRs for issue #${issueNum}: ${message}`);
   }
 
+  let remoteBranches: string[] = [];
+  if (targetStage !== 'implemented' && options.repoRoot) {
+    try {
+      execFileSync('git', ['fetch', 'origin', '--prune'], {
+        cwd: options.repoRoot,
+        stdio: ['ignore', 'ignore', 'ignore'],
+      });
+    } catch {
+      // Best-effort — fall through to branch lookup with stale refs.
+    }
+
+    try {
+      const raw = execFileSync(
+        'git',
+        ['branch', '-r', '--list', `origin/shipper/${issueNum}`, `origin/shipper/${issueNum}-*`],
+        {
+          cwd: options.repoRoot,
+          encoding: 'utf-8',
+        }
+      );
+      remoteBranches = raw
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((branchName) => branchName !== '')
+        .map((branchName) => branchName.replace(/^origin\//, ''));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`Warning: Could not scan remote branches for issue #${issueNum}: ${message}`);
+    }
+  }
+
+  const prBranches = prs
+    .map((pr) => pr.headRefName)
+    .filter((branchName) => branchName.startsWith('shipper/'));
   const branchesToDelete =
-    targetStage === 'implemented'
-      ? []
-      : prs.map((pr) => pr.headRefName).filter((branchName) => branchName.startsWith('shipper/'));
+    targetStage === 'implemented' ? [] : [...new Set([...prBranches, ...remoteBranches])];
 
   const worktreesRoot = path.join(homedir(), '.shipper', 'worktrees');
   let localWorktrees: string[] = [];
@@ -447,8 +479,9 @@ export async function executeReset(
     actions.push(`Closed PRs: ${scan.prs.map((pr) => `#${pr.number}`).join(', ')}`);
   }
 
-  const deletableBranches = scan.branchesToDelete.filter((branchName) =>
-    closedPrBranches.has(branchName)
+  const prBranches = new Set(scan.prs.map((pr) => pr.headRefName));
+  const deletableBranches = scan.branchesToDelete.filter(
+    (branchName) => closedPrBranches.has(branchName) || !prBranches.has(branchName)
   );
   for (const branch of deletableBranches) {
     try {
