@@ -14,6 +14,7 @@ const retryOnInvalidOutputMock = vi.fn<
   (opts: {
     cwd: string;
     stage: string;
+    prFiles?: Set<string>;
     retry: (message: string) => Promise<number>;
   }) => Promise<typeof validatedResult>
 >(() => Promise.resolve(validatedResult));
@@ -143,10 +144,16 @@ describe('prReviewCommand', () => {
       model: undefined,
     });
     const retryCall = retryOnInvalidOutputMock.mock.calls[0]?.[0] as
-      | { cwd: string; stage: string; retry: (message: string) => Promise<number> }
+      | {
+          cwd: string;
+          stage: string;
+          prFiles?: Set<string>;
+          retry: (message: string) => Promise<number>;
+        }
       | undefined;
     expect(retryCall?.cwd).toBe('/tmp/fake-wt');
     expect(retryCall?.stage).toBe('pr_review');
+    expect(retryCall?.prFiles).toEqual(new Set(['src/file.ts']));
     expect(retryCall?.retry).toEqual(expect.any(Function));
     expect(processResultMock).toHaveBeenCalledWith({
       repo,

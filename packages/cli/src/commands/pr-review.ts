@@ -62,7 +62,11 @@ export async function prReviewCommand(
             '--paginate',
             '--slurp',
           ]);
-          const prFiles = JSON.stringify((JSON.parse(prFilesRaw) as unknown[]).flat());
+          const parsedPrFiles = (
+            JSON.parse(prFilesRaw) as Array<Array<{ filename: string }>>
+          ).flat();
+          const prFiles = JSON.stringify(parsedPrFiles);
+          const prFileSet = new Set(parsedPrFiles.map((file) => file.filename));
           await writeContextFile(wtPath, 'pr-files.json', prFiles);
 
           const { stdout: prMetadata } = await gh([
@@ -89,6 +93,7 @@ export async function prReviewCommand(
             const result = await retryOnInvalidOutput({
               cwd: wtPath,
               stage: 'pr_review',
+              prFiles: prFileSet,
               retry: (userInput) =>
                 runPrompt('pr_review', {
                   repo,

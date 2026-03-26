@@ -257,7 +257,8 @@ async function readPrSpec(
 
 async function readReviewPayload(
   cwd: string,
-  payloadPath: string
+  payloadPath: string,
+  prFiles?: Set<string>
 ): Promise<{ abs: string; payload: ReviewPayloadJson }> {
   const abs = resolveOutputPath(cwd, payloadPath, 'review payload path');
   const parsed = await readJsonFile(abs, 'review payload');
@@ -283,6 +284,24 @@ async function readReviewPayload(
         .map((comment, index) => validateReviewComment(comment, index, errors))
         .filter((comment): comment is ReviewPayloadComment => comment !== undefined)
     : [];
+
+  if (prFiles) {
+    const invalidPaths: string[] = [];
+    for (const comment of comments) {
+      if (!prFiles.has(comment.path) && !invalidPaths.includes(comment.path)) {
+        invalidPaths.push(comment.path);
+      }
+    }
+
+    if (invalidPaths.length > 0) {
+      const validFiles = [...prFiles];
+      errors.push(
+        `comment path(s) not in PR diff: ${invalidPaths.join(', ')}. Valid files: ${
+          validFiles.length > 0 ? validFiles.join(', ') : '(none)'
+        }`
+      );
+    }
+  }
 
   if (errors.length > 0 || commitId === undefined || body === undefined || event === undefined) {
     throw new Error(`Invalid review payload at ${abs}:\n- ${errors.join('\n- ')}`);
@@ -554,7 +573,11 @@ export async function submitReviewPayload(
   await gh(['api', `repos/${repo}/pulls/${prNumber}/reviews`, '--method', 'POST', '--input', abs]);
 }
 
-export async function validateStageOutput(cwd: string, stage: StageName): Promise<ResultJson> {
+export async function validateStageOutput(
+  cwd: string,
+  stage: StageName,
+  prFiles?: Set<string>
+): Promise<ResultJson> {
   const result = await readResultFile(path.resolve(cwd, PROTOCOL_OUTPUT_DIR));
 
   // pr_remediate has a custom artifact flow and only depends on result.json schema here.
@@ -585,7 +608,11 @@ export async function validateStageOutput(cwd: string, stage: StageName): Promis
   }
 
   if (result.review_payload) {
-    await readReviewPayload(cwd, result.review_payload);
+    await readReviewPayload(
+      cwd,
+      result.review_payload,
+      stage === 'pr_review' ? prFiles : undefined
+    );
   }
 
   return result;
@@ -626,17 +653,18 @@ export async function processResult(opts: {
 export async function retryOnInvalidOutput(opts: {
   cwd: string;
   stage: StageName;
+  prFiles?: Set<string>;
   retry: (correctionMessage: string) => Promise<number>;
 }): Promise<ResultJson> {
   try {
-    return await validateStageOutput(opts.cwd, opts.stage);
+    return await validateStageOutput(opts.cwd, opts.stage, opts.prFiles);
   } catch (error) {
     const errors =
       error instanceof ResultValidationError
         ? error.errors
         : [error instanceof Error ? error.message : String(error)];
     await opts.retry(formatCorrectionMessage(errors));
-    return await validateStageOutput(opts.cwd, opts.stage);
+    return await validateStageOutput(opts.cwd, opts.stage, opts.prFiles);
   }
 }
 
