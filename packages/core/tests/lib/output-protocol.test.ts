@@ -593,6 +593,70 @@ describe('output protocol helpers', () => {
 
       await expect(validateStageOutput(tempDir, 'pr_review')).resolves.toEqual(result);
     });
+
+    it('accepts pr_review output when all comment paths match the PR diff files', async () => {
+      const result = buildResult({ review_payload: outputRelative('review-payload-248.json') });
+      await writeResultFile(result);
+      await writeOutputJson(
+        'review-payload-248.json',
+        buildReviewPayload({
+          comments: [
+            {
+              path: 'src/file.ts',
+              line: 12,
+              side: 'RIGHT',
+              body: 'Needs a test.',
+            },
+            {
+              path: 'README.md',
+              line: 3,
+              side: 'RIGHT',
+              body: 'Update the usage docs.',
+            },
+          ],
+        })
+      );
+
+      await expect(
+        validateStageOutput(tempDir, 'pr_review', new Set(['src/file.ts', 'README.md']))
+      ).resolves.toEqual(result);
+    });
+
+    it('rejects pr_review output when comment paths are outside the PR diff files', async () => {
+      const result = buildResult({ review_payload: outputRelative('review-payload-248.json') });
+      await writeResultFile(result);
+      await writeOutputJson(
+        'review-payload-248.json',
+        buildReviewPayload({
+          comments: [
+            {
+              path: 'src/file.ts',
+              line: 12,
+              side: 'RIGHT',
+              body: 'Needs a test.',
+            },
+            {
+              path: 'src/missing.ts',
+              line: 18,
+              side: 'RIGHT',
+              body: 'This file is not in the diff.',
+            },
+            {
+              path: 'docs/missing.md',
+              line: 4,
+              side: 'RIGHT',
+              body: 'Also outside the diff.',
+            },
+          ],
+        })
+      );
+
+      await expect(
+        validateStageOutput(tempDir, 'pr_review', new Set(['src/file.ts', 'README.md']))
+      ).rejects.toThrow(
+        'comment path(s) not in PR diff: src/missing.ts, docs/missing.md. Valid files: src/file.ts, README.md'
+      );
+    });
   });
 
   describe('processResult', () => {
@@ -852,6 +916,60 @@ describe('output protocol helpers', () => {
           'Your previous output was invalid. Fix the following and produce a valid .shipper/output/result.json:',
           '- pr_review accept requires a review_payload in result.json',
         ].join('\n')
+      );
+    });
+
+    it('retries when pr_review comment paths are outside the PR diff files', async () => {
+      const repairedResult = buildResult({
+        review_payload: outputRelative('review-payload-248.json'),
+      });
+      const retryMock = vi
+        .fn<(message: string) => Promise<number>>()
+        .mockImplementation(async () => {
+          await writeOutputJson(
+            'review-payload-248.json',
+            buildReviewPayload({
+              comments: [
+                {
+                  path: 'src/file.ts',
+                  line: 12,
+                  side: 'RIGHT',
+                  body: 'Needs a test.',
+                },
+              ],
+            })
+          );
+          return 0;
+        });
+
+      await writeResultFile(repairedResult);
+      await writeOutputJson(
+        'review-payload-248.json',
+        buildReviewPayload({
+          comments: [
+            {
+              path: 'src/missing.ts',
+              line: 18,
+              side: 'RIGHT',
+              body: 'This file is not in the diff.',
+            },
+          ],
+        })
+      );
+
+      await expect(
+        retryOnInvalidOutput({
+          cwd: tempDir,
+          stage: 'pr_review',
+          prFiles: new Set(['src/file.ts']),
+          retry: retryMock,
+        })
+      ).resolves.toEqual(repairedResult);
+
+      expect(retryMock).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'comment path(s) not in PR diff: src/missing.ts. Valid files: src/file.ts'
+        )
       );
     });
 
