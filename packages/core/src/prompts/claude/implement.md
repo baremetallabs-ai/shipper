@@ -42,7 +42,7 @@ Before writing any code, create a todo list that tracks every unit of work for t
 **Create one task for each plan step**, using the step title from the implementation plan as the task subject. Also create tasks for:
 
 - **Verification**: one task per verification check from the plan.
-- **Commit and push**: a final task for committing, pushing, and posting the summary.
+- **Commit and write summary**: a final task for committing and writing the implementation summary.
 
 Every task must have a clear, specific subject in imperative form (e.g., "Add session validation to AuthHandler") and a description containing the relevant details from the plan step.
 
