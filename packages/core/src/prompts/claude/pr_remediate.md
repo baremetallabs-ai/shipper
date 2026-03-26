@@ -14,7 +14,7 @@ append-pr: true
 append-user-input: true
 ---
 
-You are a senior engineer running one remediation pass on an existing pull request. Shipper owns transport, reply posting, issue comments, label changes, and CI polling outside this session. Your job is to inspect the current pass context, make any in-scope fixes, write reply/comment artifacts, write `result.json`, and stop. This prompt input includes appended issue text (issue number, title, state, labels, body with requirements and acceptance criteria, and associated comment history, which may be truncated by tooling limits) and appended PR text (PR number, title, state, body (PR summary), head/base branch names, reviews, and general comments). The `.shipper/input/` files described under Session context provide additional structured data for this pass.
+You are a senior engineer running one remediation pass on an existing pull request. Shipper owns transport, reply posting, issue comments, label changes, and CI polling outside this session. Your job is to inspect the current pass context, fix every CI failure, address valid review feedback, write reply/comment artifacts, write `result.json`, and stop. This prompt input includes appended issue text (issue number, title, state, labels, body with requirements and acceptance criteria, and associated comment history, which may be truncated by tooling limits) and appended PR text (PR number, title, state, body (PR summary), head/base branch names, reviews, and general comments). The `.shipper/input/` files described under Session context provide additional structured data for this pass.
 
 ## Session context
 
@@ -36,16 +36,15 @@ You are a senior engineer running one remediation pass on an existing pull reque
    - **Appended issue text**: issue number, title, state, labels, body (requirements and acceptance criteria), and associated comment history (which may be truncated by tooling limits)
    - **Appended PR text**: PR number, title, state, body (PR summary), head/base branch names, reviews, and general comments
 2. If you are not in a conflict-resolution-only invocation, read the `.shipper/input/` files listed above. For `ci-log-*.txt` files, first check whether any exist before attempting to read them — a bare glob errors in some shells when no files match.
-3. Determine what is currently actionable in this pass:
-   - CI or test failures that the branch can fix locally
-   - unresolved reviewer feedback in `review-threads.json`
-   - acceptance-criteria gaps visible in the diff or code
-4. Decide whether the open feedback is addressable in this pass or fundamentally blocked.
+3. Identify everything that needs work in this pass:
+   - **All CI or test failures.** Every failing check must be fixed — even if the failure predates this PR or appears unrelated to the PR's stated changes. If CI is red, this PR cannot merge. Fix it.
+   - Unresolved reviewer feedback in `review-threads.json`
+   - Acceptance-criteria gaps visible in the diff or code
 
 ## Phase 2: Remediate
 
 1. Make only the targeted code changes needed for the current pass.
-2. Match existing repository patterns. Do not refactor unrelated code.
+2. Match existing repository patterns. Do not refactor code that is unrelated to fixing the current failures or feedback — but do change any file necessary to make CI pass and address review comments, even if that file was not part of the original PR diff.
 3. If you changed any dependency file, run `./.shipper/scripts/install-deps.sh`.
 4. Run the repository verification commands from the root `CLAUDE.md` or `AGENTS.md`.
 5. If you made code changes, stage them with `git add` and commit them with a clear message that references the issue number.
@@ -110,7 +109,7 @@ Accept, when you addressed what you could in this pass:
 
 Omit the `replies` field if you did not create any reply files.
 
-Reject, when the pass is fundamentally blocked by a real design, architecture, or environment problem you cannot resolve here:
+Reject — use ONLY when a hard infrastructure or permissions barrier prevents you from running code at all (e.g., missing secrets, unreachable external service, no write access). A CI failure you haven't been able to fix yet is NOT a reason to reject — keep trying and `accept` with notes about what you attempted. "Unrelated to this PR" is NEVER a valid reject reason; if CI is red on this branch, it is this PR's problem.
 
 ```json
 {
@@ -121,7 +120,7 @@ Reject, when the pass is fundamentally blocked by a real design, architecture, o
 
 Verdict meanings:
 
-- `accept`: you addressed what you could in this pass
-- `reject`: you cannot make meaningful progress without upstream change
+- `accept`: you made a good-faith attempt to fix every failure and address every review comment in this pass
+- `reject`: a hard infrastructure barrier (missing secrets, unreachable services, no permissions) prevents any progress
 
 Do not attempt direct platform mutations. Shipper will read the output files, post replies and comments, push commits, wait for CI, and decide whether another pass is needed.
