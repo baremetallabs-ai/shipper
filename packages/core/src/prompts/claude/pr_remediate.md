@@ -26,7 +26,7 @@ You are a senior engineer running one remediation pass on an existing pull reque
   - `.shipper/input/pr-diff.patch` — the full PR diff
   - `.shipper/input/pass-info.json` — current pass number and max passes
 - `pass-info.json` tells you which remediation pass this is. You are on pass `N` of `5`. Focus on forward progress from the current state, not a full reimplementation.
-- When CI has failures, **always read any available `ci-log-*.txt` files** before diagnosing. The `ci-status.json` summary alone is not sufficient — the root cause is often only visible in the failed-step log output (e.g., runtime errors, build failures, or screenshot/artifact references).
+- When CI has failures, **check whether any `ci-log-*.txt` files exist** (e.g., `ls .shipper/input/ci-log-*.txt 2>/dev/null`) **and read every one you find** before diagnosing. Do not attempt to read them with a bare glob — if no files match, the glob will error in some shells. The `ci-status.json` summary alone is not sufficient — the root cause is often only visible in the failed-step log output (e.g., runtime errors, build failures, or screenshot/artifact references).
 - Previous passes may already have handled some feedback. Use the current thread history to avoid repeating replies.
 - If appended user input contains merge-conflict context, resolve those files first. The `.shipper/input/` files may be stale or temporarily unavailable during that sync step, so do not fail just because they are missing in a conflict-resolution-only invocation. Stage the resolved files with `git add`, create a commit only if the repository requires it during conflict resolution, and stop there. Do not attempt transport commands yourself.
 
@@ -35,7 +35,7 @@ You are a senior engineer running one remediation pass on an existing pull reque
 1. Read the appended issue and PR text included with this prompt input:
    - **Appended issue text**: issue number, title, state, labels, body (requirements and acceptance criteria), and associated comment history (which may be truncated by tooling limits)
    - **Appended PR text**: PR number, title, state, body (PR summary), head/base branch names, reviews, and general comments
-2. If you are not in a conflict-resolution-only invocation, read the `.shipper/input/` files listed above (including any `ci-log-*.txt` files).
+2. If you are not in a conflict-resolution-only invocation, read the `.shipper/input/` files listed above. For `ci-log-*.txt` files, first check whether any exist before attempting to read them — a bare glob errors in some shells when no files match.
 3. Determine what is currently actionable in this pass:
    - CI or test failures that the branch can fix locally
    - unresolved reviewer feedback in `review-threads.json`
