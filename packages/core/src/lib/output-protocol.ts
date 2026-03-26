@@ -12,6 +12,7 @@ const TRUNCATION_HEAD_LINES = 50;
 const TRUNCATION_TAIL_LINES = 50;
 const TRUNCATION_HEAD_BYTES = 25_000;
 const TRUNCATION_TAIL_BYTES = 25_000;
+const REVIEW_VALID_FILES_DISPLAY_LIMIT = 50;
 const PROTOCOL_INPUT_DISPLAY_DIR = path.posix.join('.shipper', 'input');
 
 type ReviewEvent = 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT';
@@ -286,19 +287,25 @@ async function readReviewPayload(
     : [];
 
   if (prFiles) {
-    const invalidPaths: string[] = [];
+    const invalidPaths = new Set<string>();
     for (const comment of comments) {
-      if (!prFiles.has(comment.path) && !invalidPaths.includes(comment.path)) {
-        invalidPaths.push(comment.path);
+      if (!prFiles.has(comment.path)) {
+        invalidPaths.add(comment.path);
       }
     }
 
-    if (invalidPaths.length > 0) {
+    if (invalidPaths.size > 0) {
       const validFiles = [...prFiles];
+      const displayedValidFiles = validFiles.slice(0, REVIEW_VALID_FILES_DISPLAY_LIMIT);
+      const remainingValidFileCount = validFiles.length - displayedValidFiles.length;
+      const validFilesDisplay =
+        validFiles.length === 0
+          ? '(none)'
+          : remainingValidFileCount > 0
+            ? `${displayedValidFiles.join(', ')} (and ${remainingValidFileCount} more)`
+            : displayedValidFiles.join(', ');
       errors.push(
-        `comment path(s) not in PR diff: ${invalidPaths.join(', ')}. Valid files: ${
-          validFiles.length > 0 ? validFiles.join(', ') : '(none)'
-        }`
+        `comment path(s) not in PR diff: ${[...invalidPaths].join(', ')}. Valid files: ${validFilesDisplay}`
       );
     }
   }

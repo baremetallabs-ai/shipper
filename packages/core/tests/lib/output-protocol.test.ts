@@ -657,6 +657,29 @@ describe('output protocol helpers', () => {
         'comment path(s) not in PR diff: src/missing.ts, docs/missing.md. Valid files: src/file.ts, README.md'
       );
     });
+
+    it('summarizes large valid file lists in invalid-path errors', async () => {
+      const result = buildResult({ review_payload: outputRelative('review-payload-248.json') });
+      await writeResultFile(result);
+      await writeOutputJson(
+        'review-payload-248.json',
+        buildReviewPayload({
+          comments: [
+            {
+              path: 'src/missing.ts',
+              line: 18,
+              side: 'RIGHT',
+              body: 'This file is not in the diff.',
+            },
+          ],
+        })
+      );
+      const prFiles = new Set(Array.from({ length: 55 }, (_, index) => `src/file-${index + 1}.ts`));
+
+      await expect(validateStageOutput(tempDir, 'pr_review', prFiles)).rejects.toThrow(
+        'comment path(s) not in PR diff: src/missing.ts. Valid files: src/file-1.ts, src/file-2.ts, src/file-3.ts, src/file-4.ts, src/file-5.ts, src/file-6.ts, src/file-7.ts, src/file-8.ts, src/file-9.ts, src/file-10.ts, src/file-11.ts, src/file-12.ts, src/file-13.ts, src/file-14.ts, src/file-15.ts, src/file-16.ts, src/file-17.ts, src/file-18.ts, src/file-19.ts, src/file-20.ts, src/file-21.ts, src/file-22.ts, src/file-23.ts, src/file-24.ts, src/file-25.ts, src/file-26.ts, src/file-27.ts, src/file-28.ts, src/file-29.ts, src/file-30.ts, src/file-31.ts, src/file-32.ts, src/file-33.ts, src/file-34.ts, src/file-35.ts, src/file-36.ts, src/file-37.ts, src/file-38.ts, src/file-39.ts, src/file-40.ts, src/file-41.ts, src/file-42.ts, src/file-43.ts, src/file-44.ts, src/file-45.ts, src/file-46.ts, src/file-47.ts, src/file-48.ts, src/file-49.ts, src/file-50.ts (and 5 more)'
+      );
+    });
   });
 
   describe('processResult', () => {
