@@ -4,7 +4,7 @@ const tryResolvePrForIssueMock =
   vi.fn<(repo: string, issueNumber: number) => Promise<string | undefined>>();
 const getSettingsMock = vi.fn<
   () => {
-    prReviewWait: { mode: 'checks'; timeoutMinutes: number };
+    prReviewWait: { mode: 'checks'; minDurationMinutes?: number; maxDurationMinutes?: number };
     merge: { requirePassingChecks: boolean };
   }
 >();
@@ -49,7 +49,7 @@ beforeEach(() => {
   warnMock.mockClear();
   errorMock.mockClear();
   getSettingsMock.mockReturnValue({
-    prReviewWait: { mode: 'checks', timeoutMinutes: 30 },
+    prReviewWait: { mode: 'checks', maxDurationMinutes: 30 },
     merge: { requirePassingChecks: true },
   });
 });
@@ -390,7 +390,7 @@ describe('requirePassingChecks', () => {
 
   it('skips check verification when requirePassingChecks is false', async () => {
     getSettingsMock.mockReturnValue({
-      prReviewWait: { mode: 'checks', timeoutMinutes: 30 },
+      prReviewWait: { mode: 'checks', maxDurationMinutes: 30 },
       merge: { requirePassingChecks: false },
     });
     mockPRLookup('CLEAN');

@@ -45,7 +45,7 @@ describe('loadSettings', () => {
     await loadSettings();
 
     expect(getSettings()).toEqual({
-      prReviewWait: { mode: 'checks', timeoutMinutes: 15 },
+      prReviewWait: { mode: 'checks', maxDurationMinutes: 30 },
       lockTimeoutMinutes: 30,
       agentTimeoutMinutes: 60,
       commands: { default: { agent: 'claude' } },
@@ -221,7 +221,7 @@ describe('loadSettings', () => {
     await loadSettings();
 
     expect(getSettings()).toEqual({
-      prReviewWait: { mode: 'checks', timeoutMinutes: 15 },
+      prReviewWait: { mode: 'checks', maxDurationMinutes: 30 },
       lockTimeoutMinutes: 30,
       agentTimeoutMinutes: 60,
       commands: { default: { agent: 'claude' } },
@@ -287,7 +287,8 @@ describe('loadSettings', () => {
 
   it('throws on malformed local JSON', async () => {
     readFileMock.mockImplementation((p: string) => {
-      if (p === settingsPath) return '{"prReviewWait": {"mode": "checks", "timeoutMinutes": 20}}';
+      if (p === settingsPath)
+        return '{"prReviewWait": {"mode": "checks", "maxDurationMinutes": 20}}';
       if (p === localPath) return 'not json';
       throw enoent(p);
     });
@@ -300,7 +301,7 @@ describe('getSettings', () => {
   it('returns defaults when loadSettings has not been called', async () => {
     const { getSettings } = await loadModule();
     expect(getSettings()).toEqual({
-      prReviewWait: { mode: 'checks', timeoutMinutes: 15 },
+      prReviewWait: { mode: 'checks', maxDurationMinutes: 30 },
       lockTimeoutMinutes: 30,
       agentTimeoutMinutes: 60,
       commands: { default: { agent: 'claude' } },
@@ -317,29 +318,50 @@ describe('prReviewWait migration', () => {
     });
     const { loadSettings, getSettings } = await loadModule();
     await loadSettings();
-    expect(getSettings().prReviewWait).toEqual({ mode: 'timer', timeoutMinutes: 10 });
+    expect(getSettings().prReviewWait).toEqual({ mode: 'timer', durationMinutes: 10 });
     expect((getSettings() as Record<string, unknown>).prReviewWaitMinutes).toBeUndefined();
   });
 
-  it('uses prReviewWait directly when present', async () => {
+  it('migrates timer-mode timeoutMinutes to durationMinutes', async () => {
+    readFileMock.mockImplementation((p: string) => {
+      if (p === settingsPath) return '{"prReviewWait": {"mode": "timer", "timeoutMinutes": 20}}';
+      throw enoent(p);
+    });
+    const { loadSettings, getSettings } = await loadModule();
+    await loadSettings();
+    expect(getSettings().prReviewWait).toEqual({ mode: 'timer', durationMinutes: 20 });
+  });
+
+  it('migrates checks-mode timeoutMinutes to maxDurationMinutes', async () => {
     readFileMock.mockImplementation((p: string) => {
       if (p === settingsPath) return '{"prReviewWait": {"mode": "checks", "timeoutMinutes": 20}}';
       throw enoent(p);
     });
     const { loadSettings, getSettings } = await loadModule();
     await loadSettings();
-    expect(getSettings().prReviewWait).toEqual({ mode: 'checks', timeoutMinutes: 20 });
+    expect(getSettings().prReviewWait).toEqual({ mode: 'checks', maxDurationMinutes: 20 });
+  });
+
+  it('uses prReviewWait directly when present', async () => {
+    readFileMock.mockImplementation((p: string) => {
+      if (p === settingsPath)
+        return '{"prReviewWait": {"mode": "checks", "maxDurationMinutes": 20}}';
+      throw enoent(p);
+    });
+    const { loadSettings, getSettings } = await loadModule();
+    await loadSettings();
+    expect(getSettings().prReviewWait).toEqual({ mode: 'checks', maxDurationMinutes: 20 });
   });
 
   it('does not overwrite explicit prReviewWait with legacy migration', async () => {
     readFileMock.mockImplementation((p: string) => {
       if (p === settingsPath)
-        return '{"prReviewWaitMinutes": 10, "prReviewWait": {"mode": "checks", "timeoutMinutes": 25}}';
+        return '{"prReviewWaitMinutes": 10, "prReviewWait": {"mode": "checks", "maxDurationMinutes": 25}}';
       throw enoent(p);
     });
     const { loadSettings, getSettings } = await loadModule();
     await loadSettings();
-    expect(getSettings().prReviewWait).toEqual({ mode: 'checks', timeoutMinutes: 25 });
+    expect(getSettings().prReviewWait).toEqual({ mode: 'checks', maxDurationMinutes: 25 });
   });
 });
 

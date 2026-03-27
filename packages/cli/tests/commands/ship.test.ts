@@ -17,10 +17,12 @@ const lockState = vi.hoisted(() => ({
 const getSettingsMock = vi.hoisted(() =>
   vi.fn<
     () => {
-      prReviewWait: { mode: 'checks'; timeoutMinutes: number };
+      prReviewWait:
+        | { mode: 'timer'; durationMinutes: number }
+        | { mode: 'checks'; minDurationMinutes?: number; maxDurationMinutes?: number };
     }
   >(() => ({
-    prReviewWait: { mode: 'checks', timeoutMinutes: 15 },
+    prReviewWait: { mode: 'checks', maxDurationMinutes: 30 },
   }))
 );
 type MockCheck = { name: string; state: string; bucket: string };
@@ -1844,7 +1846,7 @@ describe('shipCommand sequential auto runner parking', () => {
     lockState.lockedIssues.clear();
     mockIssues.clear();
     getSettingsMock.mockReturnValue({
-      prReviewWait: { mode: 'checks', timeoutMinutes: 15 },
+      prReviewWait: { mode: 'checks', maxDurationMinutes: 30 },
     });
     mockBuildReadyCheck.mockReset();
     mockSpawn.mockReset();
@@ -1900,7 +1902,7 @@ describe('shipCommand sequential auto runner parking', () => {
       },
     ]);
     getSettingsMock.mockReturnValue({
-      prReviewWait: { mode: 'timer', timeoutMinutes: 15 },
+      prReviewWait: { mode: 'timer', durationMinutes: 15 },
     });
 
     let timerReady = false;

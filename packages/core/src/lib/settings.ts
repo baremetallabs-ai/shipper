@@ -4,10 +4,9 @@ import path from 'node:path';
 export type AgentName = 'claude' | 'codex' | 'copilot';
 export type CommandMode = 'headless' | 'interactive' | 'default';
 
-export interface PrReviewWait {
-  mode: 'checks' | 'timer';
-  timeoutMinutes: number;
-}
+export type PrReviewWait =
+  | { mode: 'timer'; durationMinutes: number }
+  | { mode: 'checks'; minDurationMinutes?: number; maxDurationMinutes?: number };
 
 export interface CommandConfig {
   mode?: CommandMode;
@@ -35,7 +34,7 @@ export interface Settings {
 }
 
 export const DEFAULTS: Settings = {
-  prReviewWait: { mode: 'checks', timeoutMinutes: 15 },
+  prReviewWait: { mode: 'checks', maxDurationMinutes: 30 },
   lockTimeoutMinutes: 30,
   agentTimeoutMinutes: 60,
   commands: { default: { agent: 'claude' as const } },
@@ -43,7 +42,8 @@ export const DEFAULTS: Settings = {
 };
 
 export const SETTING_DESCRIPTIONS: Record<string, string> = {
-  prReviewWait: 'PR review wait strategy: { mode: "checks" | "timer", timeoutMinutes: number }',
+  prReviewWait:
+    'PR review wait strategy: { mode: "timer", durationMinutes: number } | { mode: "checks", minDurationMinutes?: number, maxDurationMinutes?: number }',
   lockTimeoutMinutes: 'stale lock timeout (minutes) before auto-clearing shipper:locked',
   agentTimeoutMinutes: 'agent process timeout in headless mode (minutes); 0 to disable',
   commands:
@@ -240,8 +240,18 @@ async function readSettingsFile(filepath: string): Promise<Partial<Settings>> {
     }
     // Auto-migrate legacy "prReviewWaitMinutes" to "prReviewWait"
     if (typeof parsed.prReviewWaitMinutes === 'number' && !parsed.prReviewWait) {
-      parsed.prReviewWait = { mode: 'timer', timeoutMinutes: parsed.prReviewWaitMinutes };
+      parsed.prReviewWait = { mode: 'timer', durationMinutes: parsed.prReviewWaitMinutes };
       delete parsed.prReviewWaitMinutes;
+    }
+    if (
+      isPlainObject(parsed.prReviewWait) &&
+      typeof parsed.prReviewWait.timeoutMinutes === 'number'
+    ) {
+      const timeoutMinutes = parsed.prReviewWait.timeoutMinutes;
+      parsed.prReviewWait =
+        parsed.prReviewWait.mode === 'timer'
+          ? { mode: 'timer', durationMinutes: timeoutMinutes }
+          : { mode: 'checks', maxDurationMinutes: timeoutMinutes };
     }
     if (parsed.agents && !parsed.commands) {
       const agents = isPlainObject(parsed.agents) ? parsed.agents : {};

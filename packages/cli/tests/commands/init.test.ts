@@ -101,7 +101,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   scripts: {},
   LABELS: canonicalLabels,
   DEFAULTS: {
-    prReviewWait: { mode: 'checks', timeoutMinutes: 15 },
+    prReviewWait: { mode: 'checks', maxDurationMinutes: 30 },
     lockTimeoutMinutes: 30,
     commands: { default: { agent: 'claude' } },
   },
