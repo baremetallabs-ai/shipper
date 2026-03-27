@@ -6,8 +6,11 @@ import type {
   ResultJson,
 } from '@dnsquared/shipper-core';
 
-const getSettingsMock =
-  vi.fn<() => { prReviewWait: { mode: 'timer' | 'checks'; timeoutMinutes: number } }>();
+type MockPrReviewWait =
+  | { mode: 'timer'; durationMinutes: number }
+  | { mode: 'checks'; minDurationMinutes?: number; maxDurationMinutes?: number };
+
+const getSettingsMock = vi.fn<() => { prReviewWait: MockPrReviewWait }>();
 const fetchChecksMock = vi.fn<(repo: string, pr: string) => Promise<PRChecksLine[]>>();
 const classifyChecksMock = vi.fn<(checks: PRChecksLine[]) => CheckClassification>();
 const enrichFailedChecksMock =
@@ -182,7 +185,7 @@ describe('prRemediateCommand', () => {
       return Promise.resolve({ stdout: '', stderr: '' });
     });
     getSettingsMock.mockReturnValue({
-      prReviewWait: { mode: 'timer', timeoutMinutes: 0 },
+      prReviewWait: { mode: 'timer', durationMinutes: 0 },
     });
     exitSpy = vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
       throw new Error(`exit:${code}`);
@@ -200,6 +203,17 @@ describe('prRemediateCommand', () => {
     exitSpy.mockRestore();
   });
 
+  it('skips timer readiness checks entirely when durationMinutes is 0', async () => {
+    const { buildReadyCheck } = await import('../../src/commands/pr-remediate.js');
+    const readyCheck = await buildReadyCheck(repo, '42', {
+      mode: 'timer',
+      durationMinutes: 0,
+    });
+
+    await expect(readyCheck()).resolves.toBe(true);
+    expect(ghMock).not.toHaveBeenCalled();
+  });
+
   it('reports timer readiness only after the deadline passes', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-03-12T10:00:00Z'));
@@ -211,7 +225,7 @@ describe('prRemediateCommand', () => {
     const { buildReadyCheck } = await import('../../src/commands/pr-remediate.js');
     const readyCheck = await buildReadyCheck(repo, '42', {
       mode: 'timer',
-      timeoutMinutes: 15,
+      durationMinutes: 15,
     });
 
     await expect(readyCheck()).resolves.toBe(false);
@@ -226,7 +240,7 @@ describe('prRemediateCommand', () => {
     const { buildReadyCheck } = await import('../../src/commands/pr-remediate.js');
     const readyCheck = await buildReadyCheck(repo, '42', {
       mode: 'checks',
-      timeoutMinutes: 15,
+      maxDurationMinutes: 15,
     });
 
     await expect(readyCheck()).resolves.toBe(false);
@@ -238,7 +252,7 @@ describe('prRemediateCommand', () => {
     const { buildReadyCheck } = await import('../../src/commands/pr-remediate.js');
     const readyCheck = await buildReadyCheck(repo, '42', {
       mode: 'checks',
-      timeoutMinutes: 15,
+      maxDurationMinutes: 15,
     });
 
     await expect(readyCheck()).resolves.toBe(true);
@@ -252,7 +266,7 @@ describe('prRemediateCommand', () => {
     const { buildReadyCheck } = await import('../../src/commands/pr-remediate.js');
     const readyCheck = await buildReadyCheck(repo, '42', {
       mode: 'checks',
-      timeoutMinutes: 15,
+      maxDurationMinutes: 15,
     });
 
     await expect(readyCheck()).resolves.toBe(false);
@@ -275,7 +289,7 @@ describe('prRemediateCommand', () => {
     const { buildReadyCheck } = await import('../../src/commands/pr-remediate.js');
     const readyCheck = await buildReadyCheck(repo, '42', {
       mode: 'checks',
-      timeoutMinutes: 15,
+      maxDurationMinutes: 15,
     });
 
     await expect(readyCheck()).resolves.toBe(false);
@@ -298,7 +312,7 @@ describe('prRemediateCommand', () => {
     const { buildReadyCheck } = await import('../../src/commands/pr-remediate.js');
     const readyCheck = await buildReadyCheck(repo, '42', {
       mode: 'checks',
-      timeoutMinutes: 15,
+      maxDurationMinutes: 15,
     });
 
     await expect(readyCheck()).resolves.toBe(false);
@@ -308,6 +322,82 @@ describe('prRemediateCommand', () => {
     await expect(readyCheck()).resolves.toBe(true);
 
     warnSpy.mockRestore();
+  });
+
+  it('keeps checks mode blocked until minDurationMinutes elapses from PR creation', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-12T10:10:00Z'));
+    ghMock.mockResolvedValue({
+      stdout: JSON.stringify({ createdAt: '2026-03-12T10:00:00Z' }),
+      stderr: '',
+    });
+    fetchChecksMock.mockResolvedValue(PASS_CHECKS);
+
+    const { buildReadyCheck } = await import('../../src/commands/pr-remediate.js');
+    const readyCheck = await buildReadyCheck(repo, '42', {
+      mode: 'checks',
+      minDurationMinutes: 15,
+    });
+
+    await expect(readyCheck()).resolves.toBe(false);
+
+    vi.setSystemTime(new Date('2026-03-12T10:15:01Z'));
+    await expect(readyCheck()).resolves.toBe(true);
+  });
+
+  it('proceeds immediately when checks pass after minDurationMinutes has already elapsed', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-12T10:20:00Z'));
+    ghMock.mockResolvedValue({
+      stdout: JSON.stringify({ createdAt: '2026-03-12T10:00:00Z' }),
+      stderr: '',
+    });
+    fetchChecksMock.mockResolvedValue(PASS_CHECKS);
+
+    const { buildReadyCheck } = await import('../../src/commands/pr-remediate.js');
+    const readyCheck = await buildReadyCheck(repo, '42', {
+      mode: 'checks',
+      minDurationMinutes: 15,
+    });
+
+    await expect(readyCheck()).resolves.toBe(true);
+  });
+
+  it('treats maxDurationMinutes as the ceiling even when minDurationMinutes has not elapsed', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-12T10:00:00Z'));
+    ghMock.mockResolvedValue({
+      stdout: JSON.stringify({ createdAt: '2026-03-12T10:00:00Z' }),
+      stderr: '',
+    });
+    fetchChecksMock.mockResolvedValue(PENDING_CHECKS);
+
+    const { buildReadyCheck } = await import('../../src/commands/pr-remediate.js');
+    const readyCheck = await buildReadyCheck(repo, '42', {
+      mode: 'checks',
+      minDurationMinutes: 45,
+      maxDurationMinutes: 30,
+    });
+
+    await expect(readyCheck()).resolves.toBe(false);
+
+    vi.setSystemTime(new Date('2026-03-12T10:30:01Z'));
+    await expect(readyCheck()).resolves.toBe(true);
+  });
+
+  it('waits indefinitely in checks mode with no duration fields until checks clear', async () => {
+    fetchChecksMock
+      .mockResolvedValueOnce(PENDING_CHECKS)
+      .mockResolvedValueOnce(PENDING_CHECKS)
+      .mockResolvedValueOnce(PASS_CHECKS);
+
+    const { buildReadyCheck } = await import('../../src/commands/pr-remediate.js');
+    const readyCheck = await buildReadyCheck(repo, '42', {
+      mode: 'checks',
+    });
+
+    await expect(readyCheck()).resolves.toBe(false);
+    await expect(readyCheck()).resolves.toBe(true);
   });
 
   it('accepts on the first pass, posts artifacts in order, and transitions to ready on green CI', async () => {
@@ -476,7 +566,7 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
 
   it('bails out of preflight check polling after three consecutive fetch failures', async () => {
     getSettingsMock.mockReturnValue({
-      prReviewWait: { mode: 'checks', timeoutMinutes: 15 },
+      prReviewWait: { mode: 'checks', maxDurationMinutes: 15 },
     });
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -505,7 +595,7 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
 
   it('resets waitForChecks consecutive failures after a successful fetch', async () => {
     getSettingsMock.mockReturnValue({
-      prReviewWait: { mode: 'checks', timeoutMinutes: 15 },
+      prReviewWait: { mode: 'checks', maxDurationMinutes: 15 },
     });
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -536,6 +626,92 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
 
     warnSpy.mockRestore();
     logSpy.mockRestore();
+  });
+
+  it('waits for the remaining minimum review window after checks pass', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-12T10:10:00Z'));
+    getSettingsMock.mockReturnValue({
+      prReviewWait: { mode: 'checks', minDurationMinutes: 15 },
+    });
+    ghMock.mockImplementation((args: string[]) => {
+      if (args[0] === 'pr' && args[1] === 'view' && args.includes('baseRefName')) {
+        return Promise.resolve({
+          stdout: JSON.stringify({ baseRefName: 'release/2026' }),
+          stderr: '',
+        });
+      }
+
+      if (args[0] === 'pr' && args[1] === 'view' && args.includes('createdAt')) {
+        return Promise.resolve({
+          stdout: JSON.stringify({ createdAt: '2026-03-12T10:00:00Z' }),
+          stderr: '',
+        });
+      }
+
+      if (args[0] === 'pr' && args[1] === 'diff') {
+        return Promise.resolve({ stdout: 'diff --git a/file b/file\n', stderr: '' });
+      }
+
+      if (args[0] === 'api' && args[1] === 'graphql') {
+        return Promise.resolve({ stdout: '[]', stderr: '' });
+      }
+
+      return Promise.resolve({ stdout: '', stderr: '' });
+    });
+    fetchChecksMock.mockResolvedValue(PASS_CHECKS);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
+
+    await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
+
+    expect(logSpy).toHaveBeenCalledWith(
+      'Checks passed. Waiting 5 more minute(s) for minimum review window (prReviewWait.minDurationMinutes: 15)...'
+    );
+    expect(sleepMsMock).toHaveBeenCalledWith(300_000);
+
+    logSpy.mockRestore();
+  });
+
+  it('does not sleep after checks pass when the minimum review window has already elapsed', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-12T10:20:00Z'));
+    getSettingsMock.mockReturnValue({
+      prReviewWait: { mode: 'checks', minDurationMinutes: 15 },
+    });
+    ghMock.mockImplementation((args: string[]) => {
+      if (args[0] === 'pr' && args[1] === 'view' && args.includes('baseRefName')) {
+        return Promise.resolve({
+          stdout: JSON.stringify({ baseRefName: 'release/2026' }),
+          stderr: '',
+        });
+      }
+
+      if (args[0] === 'pr' && args[1] === 'view' && args.includes('createdAt')) {
+        return Promise.resolve({
+          stdout: JSON.stringify({ createdAt: '2026-03-12T10:00:00Z' }),
+          stderr: '',
+        });
+      }
+
+      if (args[0] === 'pr' && args[1] === 'diff') {
+        return Promise.resolve({ stdout: 'diff --git a/file b/file\n', stderr: '' });
+      }
+
+      if (args[0] === 'api' && args[1] === 'graphql') {
+        return Promise.resolve({ stdout: '[]', stderr: '' });
+      }
+
+      return Promise.resolve({ stdout: '', stderr: '' });
+    });
+    fetchChecksMock.mockResolvedValue(PASS_CHECKS);
+
+    const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
+
+    await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
+
+    expect(sleepMsMock).not.toHaveBeenCalled();
   });
 
   it('routes sync conflict context through truncateLargeInput', async () => {

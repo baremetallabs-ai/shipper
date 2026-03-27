@@ -251,44 +251,56 @@ export async function buildReadyCheck(
   pr: string,
   prReviewWait: PrReviewWait
 ): Promise<() => Promise<boolean>> {
-  if (prReviewWait.timeoutMinutes <= 0) {
-    return () => Promise.resolve(true);
-  }
-
   if (prReviewWait.mode === 'timer') {
+    if (prReviewWait.durationMinutes <= 0) {
+      return () => Promise.resolve(true);
+    }
+
     const { stdout } = await gh(['pr', 'view', pr, '-R', repo, '--json', 'createdAt']);
     const createdAt = parseCreatedAt(stdout);
-    const deadline = new Date(createdAt).getTime() + prReviewWait.timeoutMinutes * 60_000;
+    const deadline = new Date(createdAt).getTime() + prReviewWait.durationMinutes * 60_000;
 
     return () => Promise.resolve(Date.now() >= deadline);
   }
 
-  const deadline = Date.now() + prReviewWait.timeoutMinutes * 60_000;
+  const maxDurationMinutes = prReviewWait.maxDurationMinutes;
+  const maxDeadline =
+    maxDurationMinutes === undefined ? null : Date.now() + maxDurationMinutes * 60_000;
+  const minDurationMinutes = prReviewWait.minDurationMinutes;
+  const minDeadline =
+    minDurationMinutes === undefined
+      ? null
+      : await (async () => {
+          const { stdout } = await gh(['pr', 'view', pr, '-R', repo, '--json', 'createdAt']);
+          const createdAt = parseCreatedAt(stdout);
+          return new Date(createdAt).getTime() + minDurationMinutes * 60_000;
+        })();
   let consecutiveFailures = 0;
   const initialChecks = await fetchChecksGraceful(repo, pr);
   const zeroChecksDeadline =
     initialChecks !== null && initialChecks.length === 0
-      ? Math.min(deadline, Date.now() + ZERO_CHECKS_GRACE_MS)
+      ? Math.min(maxDeadline ?? Number.POSITIVE_INFINITY, Date.now() + ZERO_CHECKS_GRACE_MS)
       : null;
 
   return async () => {
     const now = Date.now();
-    if (now >= deadline) {
+    if (maxDeadline !== null && now >= maxDeadline) {
       return true;
     }
+    const minElapsed = minDeadline === null || now >= minDeadline;
 
     const checks = await fetchChecksGraceful(repo, pr);
     if (checks === null) {
       consecutiveFailures += 1;
       if (consecutiveFailures >= MAX_CONSECUTIVE_FETCH_FAILURES) {
-        return true;
+        return minElapsed;
       }
     } else {
       consecutiveFailures = 0;
     }
 
     if (zeroChecksDeadline !== null && (checks === null || checks.length === 0)) {
-      return now >= zeroChecksDeadline;
+      return now >= zeroChecksDeadline && minElapsed;
     }
 
     if (checks === null) {
@@ -296,7 +308,7 @@ export async function buildReadyCheck(
     }
 
     const { pending } = classifyChecks(checks);
-    return pending.length === 0;
+    return pending.length === 0 && minElapsed;
   };
 }
 
@@ -350,24 +362,39 @@ export async function prRemediateCommand(
 
       if (process.env[SKIP_PR_REMEDIATE_WAIT_ENV_VAR] !== '1') {
         if (prReviewWait.mode === 'timer') {
-          if (prReviewWait.timeoutMinutes > 0) {
+          if (prReviewWait.durationMinutes > 0) {
             const { stdout } = await gh(['pr', 'view', prRef, '-R', repo, '--json', 'createdAt']);
-            const { createdAt } = JSON.parse(stdout) as { createdAt: string };
+            const createdAt = parseCreatedAt(stdout);
             const elapsedMs = Date.now() - new Date(createdAt).getTime();
-            const waitMs = prReviewWait.timeoutMinutes * 60_000;
+            const waitMs = prReviewWait.durationMinutes * 60_000;
             const remainingMs = waitMs - elapsedMs;
 
             if (remainingMs > 0) {
               const remainingMin = Math.ceil(remainingMs / 60_000);
               console.log(
                 `PR #${pr} is ${Math.floor(elapsedMs / 60_000)} minutes old. ` +
-                  `Waiting ${remainingMin} more minute(s) for reviewers (prReviewWait.timeoutMinutes: ${prReviewWait.timeoutMinutes})...`
+                  `Waiting ${remainingMin} more minute(s) for reviewers (prReviewWait.durationMinutes: ${prReviewWait.durationMinutes})...`
               );
               await sleepMs(remainingMs);
             }
           }
         } else {
-          await waitForChecks(repo, prRef, prReviewWait.timeoutMinutes);
+          await waitForChecks(repo, prRef, prReviewWait.maxDurationMinutes ?? Infinity);
+          if (prReviewWait.minDurationMinutes !== undefined) {
+            const { stdout } = await gh(['pr', 'view', prRef, '-R', repo, '--json', 'createdAt']);
+            const createdAt = parseCreatedAt(stdout);
+            const minDeadline =
+              new Date(createdAt).getTime() + prReviewWait.minDurationMinutes * 60_000;
+            const remainingMs = minDeadline - Date.now();
+
+            if (remainingMs > 0) {
+              const remainingMin = Math.ceil(remainingMs / 60_000);
+              console.log(
+                `Checks passed. Waiting ${remainingMin} more minute(s) for minimum review window (prReviewWait.minDurationMinutes: ${prReviewWait.minDurationMinutes})...`
+              );
+              await sleepMs(remainingMs);
+            }
+          }
         }
       }
 
