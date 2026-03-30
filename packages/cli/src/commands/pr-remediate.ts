@@ -379,8 +379,15 @@ export async function prRemediateCommand(
             }
           }
         } else {
+          const maxDeadline =
+            prReviewWait.maxDurationMinutes === undefined
+              ? null
+              : Date.now() + prReviewWait.maxDurationMinutes * 60_000;
           await waitForChecks(repo, prRef, prReviewWait.maxDurationMinutes ?? Infinity);
-          if (prReviewWait.minDurationMinutes !== undefined) {
+          if (
+            prReviewWait.minDurationMinutes !== undefined &&
+            (maxDeadline === null || Date.now() < maxDeadline)
+          ) {
             const { stdout } = await gh(['pr', 'view', prRef, '-R', repo, '--json', 'createdAt']);
             const createdAt = parseCreatedAt(stdout);
             const minDeadline =
@@ -390,7 +397,7 @@ export async function prRemediateCommand(
             if (remainingMs > 0) {
               const remainingMin = Math.ceil(remainingMs / 60_000);
               console.log(
-                `Checks passed. Waiting ${remainingMin} more minute(s) for minimum review window (prReviewWait.minDurationMinutes: ${prReviewWait.minDurationMinutes})...`
+                `Wait complete. Waiting ${remainingMin} more minute(s) for minimum review window (prReviewWait.minDurationMinutes: ${prReviewWait.minDurationMinutes})...`
               );
               await sleepMs(remainingMs);
             }
