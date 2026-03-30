@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import type { ChildProcess } from 'node:child_process';
+import type { ChildProcess, StdioOptions } from 'node:child_process';
 import type { WriteStream } from 'node:fs';
 import { createWriteStream, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -16,6 +16,7 @@ import {
   gh,
   getSettings,
   processResult,
+  resolveMode,
   retryOnInvalidOutput,
   scrubOutputDir,
   totalTokens as getTotalTokens,
@@ -47,9 +48,7 @@ const tokenFormatter = new Intl.NumberFormat('en-US');
 
 export const STAGE_NAME: Record<string, string> = { ...STAGE_NAME_MAP };
 
-export const AUTO_PRIORITY_LABELS: string[] = STAGE_LABEL_NAMES.filter(
-  (label) => label !== NEW_LABEL
-).reverse();
+export const AUTO_PRIORITY_LABELS: string[] = [...STAGE_LABEL_NAMES].reverse();
 
 interface StageResult {
   stage: string;
@@ -219,12 +218,11 @@ function spawnTee(
   opts: { env?: typeof process.env; logStream?: WriteStream; interactive?: boolean }
 ): Promise<number> {
   return new Promise((resolve, reject) => {
-    const stdio: 'inherit' | ['inherit', 'pipe', 'inherit'] | ['inherit', 'pipe', 'pipe'] =
-      opts.logStream
-        ? opts.interactive
-          ? ['inherit', 'pipe', 'inherit']
-          : ['inherit', 'pipe', 'pipe']
-        : 'inherit';
+    const stdio: StdioOptions = opts.logStream
+      ? opts.interactive
+        ? 'inherit'
+        : ['inherit', 'pipe', 'pipe']
+      : 'inherit';
     const child = spawn(command, args, {
       stdio,
       env: opts.env,
@@ -728,10 +726,9 @@ async function shipOneIssue(
 
           logBoth(logStream, `Running stage: ${stageName}`);
 
-          const stageMode =
-            label === NEW_LABEL && !parkHooks && !isAutoChildRun ? 'interactive' : mode;
+          const stageMode = resolveMode(stageName, mode);
           const nextArgs = [cliEntrypoint, 'next', issueStr];
-          if (stageMode && stageMode !== 'default') {
+          if (stageMode !== 'default') {
             nextArgs.push('--mode', stageMode);
           }
           if (agent) {
@@ -739,6 +736,14 @@ async function shipOneIssue(
           }
           if (model) {
             nextArgs.push('--model', model);
+          }
+          if (isAutoChildRun && stageMode === 'interactive') {
+            logBoth(
+              logStream,
+              `Skipping issue #${issueStr}: stage "${stageName}" requires interactive mode.`
+            );
+            printSummary(results, logStream);
+            return { success: true };
           }
           const status = await spawnTee(process.execPath, nextArgs, {
             env: buildIssueCommandEnv(

@@ -25,6 +25,14 @@ const getSettingsMock = vi.hoisted(() =>
     prReviewWait: { mode: 'checks', maxDurationMinutes: 30 },
   }))
 );
+const resolveModeMock = vi.hoisted(() =>
+  vi.fn<
+    (
+      step: string,
+      override?: 'headless' | 'interactive' | 'default'
+    ) => 'headless' | 'interactive' | 'default'
+  >((_step: string, override?: 'headless' | 'interactive' | 'default') => override ?? 'default')
+);
 type MockCheck = { name: string; state: string; bucket: string };
 type MockCandidate = { number: number; title: string; priority: 0 | 1 | 2 };
 type ReadyCheck = () => Promise<boolean>;
@@ -146,6 +154,8 @@ vi.mock('@dnsquared/shipper-core', () => ({
   LOCKED_LABEL: 'shipper:locked',
   FAILED_LABEL: 'shipper:failed',
   getSettings: () => getSettingsMock(),
+  resolveMode: (step: string, override?: 'headless' | 'interactive' | 'default') =>
+    resolveModeMock(step, override),
   processResult: (result?: { issueNumber?: string; stage?: string }) => processResultMock(result),
   scrubOutputDir: vi.fn<(cwd: string) => Promise<void>>(() => Promise.resolve()),
   sortIssuesByLabelTime: vi.fn(<T>(issues: T[]) => issues),
@@ -235,6 +245,7 @@ const mockGh = vi.mocked(gh);
 const mockFetchChecks = vi.mocked(fetchChecks);
 const mockClassifyChecks = vi.mocked(classifyChecks);
 const mockRetryOnInvalidOutput = vi.mocked(retryOnInvalidOutput);
+const mockResolveMode = resolveModeMock;
 const mockSortIssuesByLabelTime = vi.mocked(sortIssuesByLabelTime);
 const mockTotalTokens = vi.mocked(totalTokens);
 const mockWithStageHooks = vi.mocked(withStageHooks);
@@ -257,6 +268,8 @@ const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((_code?: number) =
 beforeEach(() => {
   mockAggregateSessionUsage.mockReset();
   mockAggregateSessionUsage.mockResolvedValue(undefined);
+  mockResolveMode.mockReset();
+  mockResolveMode.mockImplementation((_step, override) => override ?? 'default');
   mockTotalTokens.mockReset();
   mockTotalTokens.mockImplementation((usage: { inputTokens: number; outputTokens: number }) => {
     return usage.inputTokens + usage.outputTokens;
@@ -658,7 +671,7 @@ describe('STAGE_NAME', () => {
 });
 
 describe('AUTO_PRIORITY_LABELS', () => {
-  it('contains all 7 expected labels in priority order', () => {
+  it('contains all 8 expected labels in priority order', () => {
     expect(AUTO_PRIORITY_LABELS).toEqual([
       'shipper:ready',
       'shipper:pr-reviewed',
@@ -667,6 +680,7 @@ describe('AUTO_PRIORITY_LABELS', () => {
       'shipper:planned',
       'shipper:designed',
       'shipper:groomed',
+      'shipper:new',
     ]);
   });
 
@@ -674,8 +688,8 @@ describe('AUTO_PRIORITY_LABELS', () => {
     expect(AUTO_PRIORITY_LABELS[0]).toBe('shipper:ready');
   });
 
-  it('has shipper:groomed as the lowest priority', () => {
-    expect(AUTO_PRIORITY_LABELS[AUTO_PRIORITY_LABELS.length - 1]).toBe('shipper:groomed');
+  it('has shipper:new as the lowest priority', () => {
+    expect(AUTO_PRIORITY_LABELS[AUTO_PRIORITY_LABELS.length - 1]).toBe('shipper:new');
   });
 });
 
@@ -1237,6 +1251,9 @@ describe('shipCommand single-issue path', () => {
   it('allows explicit single-issue runs to start from shipper:new', async () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockResolveMode.mockImplementation((step, override) =>
+      step === 'groom' ? 'interactive' : (override ?? 'default')
+    );
 
     mockIssueViewSequence(['shipper:new', 'shipper:groomed', 'shipper:ready']);
 
@@ -1251,7 +1268,7 @@ describe('shipCommand single-issue path', () => {
     expect(firstCall).toEqual([
       process.execPath,
       [cliEntrypoint, 'next', '42', '--mode', 'interactive'],
-      expect.objectContaining({ stdio: ['inherit', 'pipe', 'inherit'] }),
+      expect.objectContaining({ stdio: 'inherit' }),
     ]);
     expect(secondCall).toEqual([
       process.execPath,
@@ -1266,29 +1283,43 @@ describe('shipCommand single-issue path', () => {
     errorSpy.mockRestore();
   });
 
-  it('resumes the original mode after grooming a new issue', async () => {
+  it('does not force interactive grooming when resolveMode returns default', async () => {
     mockIssueViewSequence(['shipper:new', 'shipper:groomed', 'shipper:ready']);
 
-    await shipCommand(repo, '42', { auto: false, merge: false, mode: 'headless' });
+    await shipCommand(repo, '42', { auto: false, merge: false });
 
     const cliEntrypoint = process.argv[1];
     expect(cliEntrypoint).toBeDefined();
     expect(mockSpawn).toHaveBeenCalledTimes(2);
-    expect(mockSpawn.mock.calls[0]?.[1]).toEqual([
-      cliEntrypoint,
-      'next',
-      '42',
-      '--mode',
-      'interactive',
-    ]);
-    expect(mockSpawn.mock.calls[1]?.[1]).toEqual([
-      cliEntrypoint,
-      'next',
-      '42',
-      '--mode',
-      'headless',
-    ]);
+    expect(mockSpawn.mock.calls[0]?.[1]).toEqual([cliEntrypoint, 'next', '42']);
+    expect(mockSpawn.mock.calls[0]?.[2]).toMatchObject({ stdio: ['inherit', 'pipe', 'pipe'] });
+    expect(mockSpawn.mock.calls[1]?.[1]).toEqual([cliEntrypoint, 'next', '42']);
     expect(exitSpy).toHaveBeenCalledWith(0);
+  });
+
+  it('uses resolveMode for non-groom stages and preserves the stage log in interactive mode', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-06T02:30:00'));
+    mockResolveMode.mockImplementation((step, override) =>
+      step === 'implement' ? 'interactive' : (override ?? 'default')
+    );
+
+    mockIssueViewSequence(['shipper:planned', 'shipper:ready']);
+
+    await shipCommand(repo, '42', { auto: false, merge: false });
+
+    const cliEntrypoint = process.argv[1];
+    expect(cliEntrypoint).toBeDefined();
+    expect(mockSpawn.mock.calls[0]).toEqual([
+      process.execPath,
+      [cliEntrypoint, 'next', '42', '--mode', 'interactive'],
+      expect.objectContaining({ stdio: 'inherit' }),
+    ]);
+    expect(
+      fsMockState.capturedLogs.get('/mock-home/.shipper/logs/ship-42-20260306T023000.log')
+    ).toContain('Running stage: implement');
+
+    vi.useRealTimers();
   });
 
   it('writes a single-issue ship log, tees child output, and prints the final log path', async () => {
@@ -1330,6 +1361,38 @@ describe('shipCommand single-issue path', () => {
     stdoutWriteSpy.mockRestore();
     stderrWriteSpy.mockRestore();
     logSpy.mockRestore();
+    vi.useRealTimers();
+  });
+
+  it('surfaces the existing groom headless rejection when the resolved mode is headless', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-06T02:30:00'));
+
+    const stderrWriteSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    mockIssueViewSequence(['shipper:new']);
+    mockSpawn.mockImplementationOnce(() => {
+      const child = new FakeChildProcess();
+      globalThis.queueMicrotask(() => {
+        child.finish(
+          1,
+          null,
+          'Error: groom does not support headless mode. Grooming requires interactive input.\n'
+        );
+      });
+      return child as never;
+    });
+
+    await shipCommand(repo, '42', { auto: false, merge: false, mode: 'headless' });
+
+    const logFile = '/mock-home/.shipper/logs/ship-42-20260306T023000.log';
+    expect(mockSpawn.mock.calls[0]?.[2]).toMatchObject({ stdio: ['inherit', 'pipe', 'pipe'] });
+    expect(fsMockState.capturedLogs.get(logFile)).toContain(
+      'Error: groom does not support headless mode. Grooming requires interactive input.'
+    );
+    expect(stderrWriteSpy).toHaveBeenCalledWith(expect.any(Buffer));
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    stderrWriteSpy.mockRestore();
     vi.useRealTimers();
   });
 
@@ -1453,6 +1516,9 @@ describe('shipCommand single-issue path', () => {
 
   it('continues into groom when a default-mode run resets an issue to shipper:new', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockResolveMode.mockImplementation((step, override) =>
+      step === 'groom' ? 'interactive' : (override ?? 'default')
+    );
 
     mockIssueViewSequence(['shipper:planned', 'shipper:new', 'shipper:groomed', 'shipper:ready']);
 
@@ -1469,7 +1535,7 @@ describe('shipCommand single-issue path', () => {
       '--mode',
       'interactive',
     ]);
-    expect(mockSpawn.mock.calls[1]?.[2]).toMatchObject({ stdio: ['inherit', 'pipe', 'inherit'] });
+    expect(mockSpawn.mock.calls[1]?.[2]).toMatchObject({ stdio: 'inherit' });
     expect(mockSpawn.mock.calls[2]?.[1]).toEqual([cliEntrypoint, 'next', '42']);
     expect(exitSpy).toHaveBeenCalledWith(0);
     expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining('was reset to shipper:new'));
@@ -1523,6 +1589,36 @@ describe('shipCommand single-issue path', () => {
     }
   });
 
+  it('skips interactive stages in auto-child runs before spawning', async () => {
+    const previousAutoChild = process.env.SHIPPER_AUTO_CHILD_RUN;
+    process.env.SHIPPER_AUTO_CHILD_RUN = '1';
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    mockResolveMode.mockImplementation((step, override) =>
+      step === 'groom' ? 'interactive' : (override ?? 'default')
+    );
+
+    try {
+      mockIssueViewSequence(['shipper:new']);
+
+      await shipCommand(repo, '42', { auto: false, merge: false });
+
+      expect(mockSpawn).not.toHaveBeenCalled();
+      expect(mockAggregateSessionUsage).not.toHaveBeenCalled();
+      expect(mockTotalTokens).not.toHaveBeenCalled();
+      expect(getConsoleOutput(logSpy)).toContain(
+        'Skipping issue #42: stage "groom" requires interactive mode.'
+      );
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    } finally {
+      if (previousAutoChild === undefined) {
+        delete process.env.SHIPPER_AUTO_CHILD_RUN;
+      } else {
+        process.env.SHIPPER_AUTO_CHILD_RUN = previousAutoChild;
+      }
+      logSpy.mockRestore();
+    }
+  });
+
   it('continues into groom when an interactive run resets an issue to shipper:new', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
@@ -1554,6 +1650,9 @@ describe('shipCommand single-issue path', () => {
       '--mode',
       'interactive',
     ]);
+    expect(mockSpawn.mock.calls[0]?.[2]).toMatchObject({ stdio: 'inherit' });
+    expect(mockSpawn.mock.calls[1]?.[2]).toMatchObject({ stdio: 'inherit' });
+    expect(mockSpawn.mock.calls[2]?.[2]).toMatchObject({ stdio: 'inherit' });
     expect(exitSpy).toHaveBeenCalledWith(0);
     expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining('was reset to shipper:new'));
 
@@ -2252,6 +2351,34 @@ describe('shipCommand sequential auto runner parking', () => {
 
     expect(mockBuildReadyCheck).not.toHaveBeenCalled();
     expect(getIssuedCalls(mockSpawn.mock.calls)).toEqual(['1', '1', '1', '1']);
+  });
+
+  it('gives sequential auto groom runs inherited stdio when resolveMode returns interactive', async () => {
+    setMockIssues([
+      {
+        number: 1,
+        title: 'Needs grooming',
+        labels: ['shipper:new'],
+        nextLabels: ['shipper:groomed', 'shipper:ready'],
+      },
+    ]);
+    mockResolveMode.mockImplementation((step, override) =>
+      step === 'groom' ? 'interactive' : (override ?? 'default')
+    );
+
+    await shipCommand(repo, undefined, { auto: true, merge: false, parallel: 1 });
+
+    const cliEntrypoint = process.argv[1];
+    expect(cliEntrypoint).toBeDefined();
+    expect(mockSpawn.mock.calls[0]?.[1]).toEqual([
+      cliEntrypoint,
+      'next',
+      '1',
+      '--mode',
+      'interactive',
+    ]);
+    expect(mockSpawn.mock.calls[0]?.[2]).toMatchObject({ stdio: 'inherit' });
+    expect(exitSpy).toHaveBeenCalledWith(0);
   });
 });
 
