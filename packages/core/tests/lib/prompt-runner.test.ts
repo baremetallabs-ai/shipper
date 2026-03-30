@@ -915,6 +915,9 @@ describe('runPrompt', () => {
     });
     expect(spawnedArgs()).toContain('--output-format');
     expect(spawnedArgs()).toContain('stream-json');
+    expect(spawnedArgs().indexOf('--output-format')).toBeLessThan(
+      spawnedArgs().indexOf('--append-system-prompt')
+    );
     expect(parseAgentUsageMock).toHaveBeenCalledWith(
       'claude',
       expect.stringContaining('/home/user/.shipper/sessions/owner-repo/308-implement-')
@@ -1039,6 +1042,31 @@ describe('runPrompt', () => {
         cacheWriteTokens: 1,
       },
     });
+  });
+
+  it('captures interactive caller-supplied logs without attempting usage parsing', async () => {
+    resolveModeMock.mockReturnValue('interactive');
+    readFileMock.mockResolvedValueOnce(makePrompt('claude'));
+    mockSpawnResult();
+
+    const overridePath = '/home/user/.shipper/logs/new-42-20260318T050000.log';
+    await expect(
+      runPrompt('new', {
+        mode: 'interactive',
+        repo: 'owner/repo',
+        logFile: overridePath,
+      })
+    ).resolves.toBe(0);
+
+    expect(createWriteStreamMock).toHaveBeenCalledWith(overridePath);
+    expect(parseAgentUsageMock).not.toHaveBeenCalled();
+    expect(writeSessionMetaMock).toHaveBeenCalledWith(
+      expect.stringContaining('/home/user/.shipper/sessions/owner-repo/unlinked-new-'),
+      expect.objectContaining({
+        logFile: overridePath,
+        usage: undefined,
+      })
+    );
   });
 
   it('does not echo headless stdout back to the terminal while capturing session logs', async () => {
