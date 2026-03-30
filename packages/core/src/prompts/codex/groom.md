@@ -192,6 +192,12 @@ If your decomposition recommendation includes additional issues, you must create
    - If this issue depends on another sibling being completed first, also add `shipper:blocked`: `--label "shipper:groomed" --label "shipper:blocked"`.
    - For each blocked issue, post a comment starting with `## Blocked` that explains the unblock condition in natural language. Example: `## Blocked\n\nBlocked until #35 is merged — reset's branch cleanup depends on the shipper/ prefix convention being in place.`
    - The original issue can also receive `shipper:blocked` if grooming determines a sibling should go first. In that case, add the label and post the blocking-condition comment on the original issue too.
+   - After creating each child issue, post a **scoped grooming comment** on it. This carries forward relevant context from the parent's grooming summary so downstream stages have the rationale behind product decisions without navigating back to the parent:
+     - Create `.shipper/tmp/child_grooming_comment-<child_number>.md` for the child issue.
+     - From the parent's grooming summary, extract only the portions relevant to this child's scope: applicable cross-issue findings, key decisions, and rationale/context. Use judgment; do not copy the entire parent grooming summary.
+     - Always exclude the **decomposition recommendation** section.
+     - Include a back-reference line: `Groomed as part of #<parent> — see parent for full grooming context.`
+     - Post it with `gh issue comment <CHILD_ISSUE_NUMBER> --body-file ./.shipper/tmp/child_grooming_comment-<child_number>.md`.
 3. After creating them, include the created URLs in your final response, and (optionally) add them as links in the original issue comment if appropriate.
 4. **Handle the parent issue** after creating child issues:
 
