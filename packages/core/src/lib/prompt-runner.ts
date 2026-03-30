@@ -493,7 +493,7 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
     });
     let usage: TokenUsage | undefined;
 
-    if (spawnLogFile) {
+    if (trackUsage && spawnLogFile) {
       try {
         usage = await parseAgentUsage(agent, spawnLogFile);
       } catch {
@@ -617,18 +617,21 @@ function canTrackUsage(agent: AgentName, args: string[]): boolean {
 
 function ensureJsonOutputFormat(agent: AgentName, args: string[]): void {
   switch (agent) {
-    case 'claude':
+    case 'claude': {
       if (!args.includes('--output-format')) {
-        args.push('--output-format', 'stream-json');
+        const appendSystemPromptIdx = args.indexOf('--append-system-prompt');
+        const insertIdx = appendSystemPromptIdx === -1 ? args.length : appendSystemPromptIdx;
+        args.splice(insertIdx, 0, '--output-format', 'stream-json');
       }
       return;
+    }
     case 'codex': {
       if (args.includes(CODEX_HEADLESS_JSON_ARG)) {
         return;
       }
 
       const execIdx = args.indexOf('exec');
-      const insertIdx = execIdx === -1 ? 0 : execIdx + 1;
+      const insertIdx = execIdx + 1;
       args.splice(insertIdx, 0, CODEX_HEADLESS_JSON_ARG);
       return;
     }
