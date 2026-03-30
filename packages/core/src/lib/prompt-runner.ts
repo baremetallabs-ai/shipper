@@ -476,7 +476,13 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
   const effectiveModel = getEffectiveModel(agent, args);
 
   try {
-    const spawnLogFile = opts.logFile ?? (effectiveMode === 'headless' ? logFile : undefined);
+    const trackUsage = canTrackUsage(agent, args);
+    if (trackUsage) {
+      ensureJsonOutputFormat(agent, args);
+    }
+
+    const spawnLogFile =
+      opts.logFile ?? (trackUsage || effectiveMode === 'headless' ? logFile : undefined);
     const initialInput =
       agent === 'copilot' && effectiveMode !== 'headless' ? resolved.promptBody : undefined;
     const exitCode = await spawnAsync(agent, args, {
@@ -487,7 +493,7 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
     });
     let usage: TokenUsage | undefined;
 
-    if (effectiveMode === 'headless' && spawnLogFile) {
+    if (spawnLogFile) {
       try {
         usage = await parseAgentUsage(agent, spawnLogFile);
       } catch {
@@ -590,6 +596,47 @@ function stripCopilotHeadlessArgs(args: string[]): void {
   for (let i = args.length - 1; i >= 0; i--) {
     if (args[i] === '-p' || args[i] === '--prompt') {
       args.splice(i, args[i + 1] === undefined ? 1 : 2);
+    }
+  }
+}
+
+function canTrackUsage(agent: AgentName, args: string[]): boolean {
+  switch (agent) {
+    case 'claude':
+      return args.includes('-p');
+    case 'codex':
+      return args.includes('exec');
+    case 'copilot':
+      return false;
+    default: {
+      const exhaustiveCheck: never = agent;
+      throw new Error(`Unsupported agent: ${String(exhaustiveCheck)}`);
+    }
+  }
+}
+
+function ensureJsonOutputFormat(agent: AgentName, args: string[]): void {
+  switch (agent) {
+    case 'claude':
+      if (!args.includes('--output-format')) {
+        args.push('--output-format', 'stream-json');
+      }
+      return;
+    case 'codex': {
+      if (args.includes(CODEX_HEADLESS_JSON_ARG)) {
+        return;
+      }
+
+      const execIdx = args.indexOf('exec');
+      const insertIdx = execIdx === -1 ? 0 : execIdx + 1;
+      args.splice(insertIdx, 0, CODEX_HEADLESS_JSON_ARG);
+      return;
+    }
+    case 'copilot':
+      return;
+    default: {
+      const exhaustiveCheck: never = agent;
+      throw new Error(`Unsupported agent: ${String(exhaustiveCheck)}`);
     }
   }
 }
