@@ -1,6 +1,20 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
+const expectedRelevantDocumentationSection = `# Relevant Documentation (optional — include only if relevant docs are found)
+
+Scan the repository for documentation files (e.g., README.md, docs/, CONTRIBUTING.md, CHANGELOG.md) relevant to the request, then list the 3-5 most relevant entries. For each, label as:
+
+- **Relevant context** — provides useful background for the feature area
+- **May need updating** — the requested change would likely make this doc stale
+
+For example:
+
+- \`CONTRIBUTING.md\`: **Relevant context**
+- \`docs/api/v1.md\`: **May need updating**
+
+Omit this section entirely if no relevant docs are found.`;
+
 describe('groom prompts', () => {
   it.each(['claude', 'codex', 'copilot'])(
     'documents priority choices and label reconciliation for %s',
@@ -140,16 +154,7 @@ describe('new prompts', () => {
         'utf-8'
       );
 
-      expect(prompt).toContain(
-        '# Relevant Documentation (optional — include only if relevant docs are found)'
-      );
-      expect(prompt).toContain('README.md');
-      expect(prompt).toContain('docs/');
-      expect(prompt).toContain('CONTRIBUTING.md');
-      expect(prompt).toContain('CHANGELOG.md');
-      expect(prompt).toContain('**Relevant context**');
-      expect(prompt).toContain('**May need updating**');
-      expect(prompt).toContain('Omit this section entirely if no relevant docs are found.');
+      expect(prompt).toContain(expectedRelevantDocumentationSection);
       expect(prompt).toContain(
         'File paths or module names are allowed only in the optional Starting Point and Relevant Documentation sections.'
       );
