@@ -40,7 +40,7 @@ const withWorktreeMock = vi.fn((_opts: unknown, fn: (wtPath: string) => Promise<
 const getBranchForPRMock = vi.fn(() => Promise.resolve('shipper/10-feature'));
 const getRepoRootMock = vi.fn(() => Promise.resolve('/tmp/fake-repo'));
 const ghMock = vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>();
-const sleepMsMock = vi.fn(() => Promise.resolve());
+const sleepMsMock = vi.fn<(ms: number) => Promise<void>>(() => Promise.resolve());
 const setupProtocolDirsMock = vi.fn(() => Promise.resolve());
 const writeContextFileMock = vi.fn(() => Promise.resolve());
 const scrubOutputDirMock = vi.fn(() => Promise.resolve());
@@ -667,7 +667,7 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
     await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
 
     expect(logSpy).toHaveBeenCalledWith(
-      'Checks passed. Waiting 5 more minute(s) for minimum review window (prReviewWait.minDurationMinutes: 15)...'
+      'Wait complete. Waiting 5 more minute(s) for minimum review window (prReviewWait.minDurationMinutes: 15)...'
     );
     expect(sleepMsMock).toHaveBeenCalledWith(300_000);
 
@@ -712,6 +712,54 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
     await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
 
     expect(sleepMsMock).not.toHaveBeenCalled();
+  });
+
+  it('does not sleep for minDurationMinutes after maxDurationMinutes has already elapsed', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-12T10:00:00Z'));
+    getSettingsMock.mockReturnValue({
+      prReviewWait: { mode: 'checks', minDurationMinutes: 45, maxDurationMinutes: 1 },
+    });
+    ghMock.mockImplementation((args: string[]) => {
+      if (args[0] === 'pr' && args[1] === 'view' && args.includes('baseRefName')) {
+        return Promise.resolve({
+          stdout: JSON.stringify({ baseRefName: 'release/2026' }),
+          stderr: '',
+        });
+      }
+
+      if (args[0] === 'pr' && args[1] === 'view' && args.includes('createdAt')) {
+        return Promise.resolve({
+          stdout: JSON.stringify({ createdAt: '2026-03-12T10:00:00Z' }),
+          stderr: '',
+        });
+      }
+
+      if (args[0] === 'pr' && args[1] === 'diff') {
+        return Promise.resolve({ stdout: 'diff --git a/file b/file\n', stderr: '' });
+      }
+
+      if (args[0] === 'api' && args[1] === 'graphql') {
+        return Promise.resolve({ stdout: '[]', stderr: '' });
+      }
+
+      return Promise.resolve({ stdout: '', stderr: '' });
+    });
+    fetchChecksMock.mockResolvedValue(PENDING_CHECKS);
+    sleepMsMock.mockImplementation((ms: number) => {
+      vi.setSystemTime(new Date(Date.now() + ms));
+      return Promise.resolve();
+    });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
+
+    await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
+
+    expect(sleepMsMock.mock.calls.every((call) => call[0] === 20_000)).toBe(true);
+    expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('minimum review window'));
+
+    logSpy.mockRestore();
   });
 
   it('routes sync conflict context through truncateLargeInput', async () => {

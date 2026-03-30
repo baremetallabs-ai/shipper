@@ -342,6 +342,19 @@ describe('prReviewWait migration', () => {
     expect(getSettings().prReviewWait).toEqual({ mode: 'checks', maxDurationMinutes: 20 });
   });
 
+  it('does not migrate timeoutMinutes when prReviewWait.mode is invalid', async () => {
+    readFileMock.mockImplementation((p: string) => {
+      if (p === settingsPath) return '{"prReviewWait": {"mode": "typo", "timeoutMinutes": 20}}';
+      throw enoent(p);
+    });
+    const { loadSettings, getSettings } = await loadModule();
+    await loadSettings();
+    expect((getSettings() as Record<string, unknown>).prReviewWait).toEqual({
+      mode: 'typo',
+      timeoutMinutes: 20,
+    });
+  });
+
   it('uses prReviewWait directly when present', async () => {
     readFileMock.mockImplementation((p: string) => {
       if (p === settingsPath)

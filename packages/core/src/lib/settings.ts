@@ -248,10 +248,13 @@ async function readSettingsFile(filepath: string): Promise<Partial<Settings>> {
       typeof parsed.prReviewWait.timeoutMinutes === 'number'
     ) {
       const timeoutMinutes = parsed.prReviewWait.timeoutMinutes;
-      parsed.prReviewWait =
-        parsed.prReviewWait.mode === 'timer'
-          ? { mode: 'timer', durationMinutes: timeoutMinutes }
-          : { mode: 'checks', maxDurationMinutes: timeoutMinutes };
+      const mode = parsed.prReviewWait.mode;
+
+      if (mode === 'timer') {
+        parsed.prReviewWait = { mode: 'timer', durationMinutes: timeoutMinutes };
+      } else if (mode === 'checks') {
+        parsed.prReviewWait = { mode: 'checks', maxDurationMinutes: timeoutMinutes };
+      }
     }
     if (parsed.agents && !parsed.commands) {
       const agents = isPlainObject(parsed.agents) ? parsed.agents : {};
