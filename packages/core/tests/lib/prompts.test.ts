@@ -130,3 +130,29 @@ describe('implement prompts', () => {
     }
   );
 });
+
+describe('new prompts', () => {
+  it.each(['claude', 'codex', 'copilot'])(
+    'describe relevant documentation scanning and labeling for %s',
+    (agent) => {
+      const prompt = readFileSync(
+        new URL(`../../src/prompts/${agent}/new.md`, import.meta.url),
+        'utf-8'
+      );
+
+      expect(prompt).toContain(
+        '# Relevant Documentation (optional — include only if relevant docs are found)'
+      );
+      expect(prompt).toContain('README.md');
+      expect(prompt).toContain('docs/');
+      expect(prompt).toContain('CONTRIBUTING.md');
+      expect(prompt).toContain('CHANGELOG.md');
+      expect(prompt).toContain('**Relevant context**');
+      expect(prompt).toContain('**May need updating**');
+      expect(prompt).toContain('Omit this section entirely if no relevant docs are found.');
+      expect(prompt).toContain(
+        'File paths or module names are allowed only in the optional Starting Point and Relevant Documentation sections.'
+      );
+    }
+  );
+});

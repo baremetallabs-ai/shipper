@@ -60,10 +60,19 @@ Your inferences, assumptions, and gap-filling go here. Frame everything as an as
 
 Brief pointers to relevant files or modules. Keep it to 2-3 bullets max. Omit this section entirely if nothing stood out.
 
+# Relevant Documentation (optional — include only if relevant docs are found)
+
+List documentation files (e.g., README.md, docs/, CONTRIBUTING.md, CHANGELOG.md) relevant to the request. For each, label as:
+
+- **Relevant context** — provides useful background for the feature area
+- **May need updating** — the requested change would likely make this doc stale
+
+Omit this section entirely if no relevant docs are found.
+
 ## Constraints
 
 - Do NOT edit, create, or modify any files outside `.shipper/tmp/`. Your only action on the codebase is reading it.
-- Do NOT include technical design, line numbers, or step-by-step implementation. File paths or module names are allowed only in the optional Starting Point section.
+- Do NOT include technical design, line numbers, or step-by-step implementation. File paths or module names are allowed only in the optional Starting Point and Relevant Documentation sections.
 - Do NOT ask questions just to be thorough. If a reasonable default exists, use it.
 - Keep the issue body concise.
 
