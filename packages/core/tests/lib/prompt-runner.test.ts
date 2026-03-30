@@ -890,30 +890,79 @@ describe('runPrompt', () => {
     );
   });
 
-  it('inherits stdio for non-headless runs to preserve TTY and writes metadata without logFile', async () => {
+  it('captures default-mode non-interactive stdout and persists usage metadata', async () => {
+    readFileMock.mockResolvedValueOnce(makePrompt('claude', ['-p']));
+    parseAgentUsageMock.mockResolvedValueOnce({
+      inputTokens: 45,
+      outputTokens: 12,
+      cacheReadTokens: 8,
+      cacheWriteTokens: 2,
+    });
+    const logMock = vi.spyOn(console, 'log').mockImplementation(() => {});
+    mockSpawnResult();
+
+    await expect(
+      runPrompt('implement', { mode: 'default', repo: 'owner/repo', issueRef: '308' })
+    ).resolves.toBe(0);
+
+    expect(createWriteStreamMock).toHaveBeenCalledWith(
+      expect.stringContaining('/home/user/.shipper/sessions/owner-repo/308-implement-')
+    );
+    expect(spawnMock.mock.calls[0]?.[2]).toMatchObject({
+      cwd: undefined,
+      env: process.env,
+      stdio: ['inherit', 'pipe', 'inherit'],
+    });
+    expect(spawnedArgs()).toContain('--output-format');
+    expect(spawnedArgs()).toContain('stream-json');
+    expect(parseAgentUsageMock).toHaveBeenCalledWith(
+      'claude',
+      expect.stringContaining('/home/user/.shipper/sessions/owner-repo/308-implement-')
+    );
+    expect(writeSessionMetaMock).toHaveBeenCalledWith(
+      expect.stringContaining('/home/user/.shipper/sessions/owner-repo/308-implement-'),
+      expect.objectContaining({
+        repo: 'owner/repo',
+        issue: '308',
+        stage: 'implement',
+        agent: 'claude',
+        usage: {
+          inputTokens: 45,
+          outputTokens: 12,
+          cacheReadTokens: 8,
+          cacheWriteTokens: 2,
+        },
+      })
+    );
+
+    logMock.mockRestore();
+  });
+
+  it('inherits stdio for interactive runs to preserve TTY and avoids usage tracking', async () => {
     resolveModeMock.mockReturnValue('interactive');
     readFileMock.mockResolvedValueOnce(makePrompt('claude'));
     mockSpawnResult();
 
-    await expect(runPrompt('test', { mode: 'interactive', repo: 'owner/repo' })).resolves.toBe(0);
+    await expect(runPrompt('groom', { mode: 'interactive', repo: 'owner/repo' })).resolves.toBe(0);
 
     expect(resolveSessionRepoMock).toHaveBeenCalledWith({ repo: 'owner/repo', cwd: undefined });
     expect(getSessionPathsMock).toHaveBeenCalledWith(
       'owner-repo',
       undefined,
-      'test',
+      'groom',
       expect.any(Date)
     );
     expect(mkdirMock).toHaveBeenCalledWith('/home/user/.shipper/sessions/owner-repo', {
       recursive: true,
     });
     expect(createWriteStreamMock).not.toHaveBeenCalled();
+    expect(parseAgentUsageMock).not.toHaveBeenCalled();
     expect(writeSessionMetaMock).toHaveBeenCalledWith(
-      expect.stringContaining('/home/user/.shipper/sessions/owner-repo/unlinked-test-'),
+      expect.stringContaining('/home/user/.shipper/sessions/owner-repo/unlinked-groom-'),
       expect.objectContaining({
         repo: 'owner/repo',
         issue: 'unlinked',
-        stage: 'test',
+        stage: 'groom',
         exitCode: 0,
         logFile: undefined,
       })
@@ -951,30 +1000,45 @@ describe('runPrompt', () => {
     expect((writeMetaCall?.[1] as { logFile: string }).logFile).toBe(overridePath);
   });
 
-  it('uses caller-supplied logFile for non-headless runs that would otherwise skip capture', async () => {
-    resolveModeMock.mockReturnValue('interactive');
-    readFileMock.mockResolvedValueOnce(makePrompt('claude'));
+  it('captures a caller-supplied logFile for default-mode unblock runs and persists usage', async () => {
+    resolveAgentMock.mockReturnValue('codex');
+    readFileMock.mockResolvedValueOnce(makePrompt('codex', ['exec']));
+    parseAgentUsageMock.mockResolvedValueOnce({
+      inputTokens: 18,
+      outputTokens: 7,
+      cacheReadTokens: 4,
+      cacheWriteTokens: 1,
+    });
     mockSpawnResult();
 
     const overridePath = '/home/user/.shipper/logs/unblock-42-20260318T050000.log';
     await expect(
       runPrompt('unblock', {
-        mode: 'interactive',
+        mode: 'default',
         repo: 'owner/repo',
         issueRef: '42',
         logFile: overridePath,
       })
     ).resolves.toBe(0);
 
-    // Even in interactive mode, the override path should be used for capture
+    // Even when the caller supplies a log file, usage should be parsed and persisted.
     expect(createWriteStreamMock).toHaveBeenCalledWith(overridePath);
     expect(spawnMock.mock.calls[0]?.[2]).toMatchObject({
       stdio: ['inherit', 'pipe', 'inherit'],
     });
+    expect(spawnedArgs()).toContain('--json');
+    expect(parseAgentUsageMock).toHaveBeenCalledWith('codex', overridePath);
     expect((writeSessionMetaMock.mock.calls[0]?.[1] as { logFile: string }).logFile).toBe(
       overridePath
     );
-    expect(parseAgentUsageMock).not.toHaveBeenCalled();
+    expect(writeSessionMetaMock.mock.calls[0]?.[1]).toMatchObject({
+      usage: {
+        inputTokens: 18,
+        outputTokens: 7,
+        cacheReadTokens: 4,
+        cacheWriteTokens: 1,
+      },
+    });
   });
 
   it('does not echo headless stdout back to the terminal while capturing session logs', async () => {
@@ -1141,19 +1205,14 @@ describe('runPrompt', () => {
     logMock.mockRestore();
   });
 
-  it('does not parse or persist usage for interactive runs even with a caller log file', async () => {
+  it('does not parse or persist usage for interactive runs without a log file', async () => {
     resolveModeMock.mockReturnValue('interactive');
     readFileMock.mockResolvedValueOnce(makePrompt('claude'));
     mockSpawnResult();
 
-    await expect(
-      runPrompt('test', {
-        mode: 'interactive',
-        repo: 'owner/repo',
-        logFile: '/tmp/interactive.log',
-      })
-    ).resolves.toBe(0);
+    await expect(runPrompt('new', { mode: 'interactive', repo: 'owner/repo' })).resolves.toBe(0);
 
+    expect(createWriteStreamMock).not.toHaveBeenCalled();
     expect(parseAgentUsageMock).not.toHaveBeenCalled();
     expect(formatUsageLineMock).not.toHaveBeenCalled();
     const interactiveMeta = writeSessionMetaMock.mock.calls[0]?.[1];
@@ -1238,6 +1297,48 @@ describe('runPrompt', () => {
       '-c',
       'sandbox_workspace_write.network_access=true',
     ]);
+  });
+
+  it('adds json output and persists usage for default-mode codex prompts', async () => {
+    resolveAgentMock.mockReturnValue('codex');
+    readFileMock.mockResolvedValueOnce(makePrompt('codex', ['exec']));
+    parseAgentUsageMock.mockResolvedValueOnce({
+      inputTokens: 21,
+      outputTokens: 9,
+      cacheReadTokens: 5,
+      cacheWriteTokens: 0,
+    });
+    const logMock = vi.spyOn(console, 'log').mockImplementation(() => {});
+    mockSpawnResult();
+
+    await expect(
+      runPrompt('design', { mode: 'default', repo: 'owner/repo', issueRef: '77' })
+    ).resolves.toBe(0);
+
+    expect(spawnedArgs()).toContain('exec');
+    expect(spawnedArgs()).toContain('--json');
+    expect(createWriteStreamMock).toHaveBeenCalledWith(
+      expect.stringContaining('/home/user/.shipper/sessions/owner-repo/77-design-')
+    );
+    expect(parseAgentUsageMock).toHaveBeenCalledWith(
+      'codex',
+      expect.stringContaining('/home/user/.shipper/sessions/owner-repo/77-design-')
+    );
+    expect(writeSessionMetaMock).toHaveBeenCalledWith(
+      expect.stringContaining('/home/user/.shipper/sessions/owner-repo/77-design-'),
+      expect.objectContaining({
+        stage: 'design',
+        agent: 'codex',
+        usage: {
+          inputTokens: 21,
+          outputTokens: 9,
+          cacheReadTokens: 5,
+          cacheWriteTokens: 0,
+        },
+      })
+    );
+
+    logMock.mockRestore();
   });
 
   it('strips codex headless args for interactive mode', async () => {

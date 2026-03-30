@@ -2351,6 +2351,62 @@ describe('shipCommand sequential auto runner parking', () => {
     logSpy.mockRestore();
   });
 
+  it('aggregates persisted token totals for sequential auto summary rows in headless mode', async () => {
+    mockResolveMode.mockImplementation((_step, override) => override ?? 'headless');
+    setMockIssues([
+      {
+        number: 1,
+        title: 'Tokenized issue',
+        labels: ['shipper:planned'],
+        nextLabels: ['shipper:ready'],
+        prNumber: 101,
+      },
+    ]);
+    mockAggregateSessionUsage.mockResolvedValueOnce({
+      inputTokens: 10,
+      outputTokens: 3,
+      cacheReadTokens: 2,
+      cacheWriteTokens: 1,
+    });
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await shipCommand(repo, undefined, { auto: true, merge: false, parallel: 1 });
+
+    expect(mockAggregateSessionUsage).toHaveBeenCalledWith(repo, '1', expect.any(Date));
+    expect(mockTotalTokens).toHaveBeenCalledWith({
+      inputTokens: 10,
+      outputTokens: 3,
+      cacheReadTokens: 2,
+      cacheWriteTokens: 1,
+    });
+    expect(getConsoleOutput(logSpy)).toContain('13');
+
+    logSpy.mockRestore();
+  });
+
+  it('shows an em dash for auto summary rows when issue usage is missing', async () => {
+    setMockIssues([
+      {
+        number: 1,
+        title: 'Missing usage',
+        labels: ['shipper:planned'],
+        nextLabels: ['shipper:ready'],
+        prNumber: 101,
+      },
+    ]);
+    mockAggregateSessionUsage.mockResolvedValueOnce(undefined);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await shipCommand(repo, undefined, { auto: true, merge: false, parallel: 1 });
+
+    expect(mockAggregateSessionUsage).toHaveBeenCalledWith(repo, '1', expect.any(Date));
+    expect(mockTotalTokens).not.toHaveBeenCalled();
+    expect(getConsoleOutput(logSpy)).toMatch(/Missing usage.*—\s+✓ pass/s);
+
+    logSpy.mockRestore();
+  });
+
   it('does not enable parking for non-auto ship runs', async () => {
     setMockIssues([
       {
