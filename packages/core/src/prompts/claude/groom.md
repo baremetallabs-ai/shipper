@@ -230,8 +230,8 @@ If your decomposition recommendation includes additional issues, you must create
      - Create `.shipper/tmp/child_grooming_comment-<child_number>.md` for the child issue.
      - From the parent's grooming summary, extract only the portions relevant to this child's scope: applicable cross-issue findings, key decisions, and rationale/context. Use judgment; do not copy the entire parent grooming summary.
      - Always exclude the **decomposition recommendation** section.
-     - Include a back-reference line: `Groomed as part of #<parent> — see parent for full grooming context.`
-     - Post it with `gh issue comment <CHILD_ISSUE_NUMBER> --body-file ./.shipper/tmp/child_grooming_comment-<child_number>.md`.
+     - Include a back-reference line: `Groomed as part of #<number> — see parent for full grooming context.`
+     - Post it with `gh issue comment <child_number> --body-file ./.shipper/tmp/child_grooming_comment-<child_number>.md`.
 4. After creating them, include the created URLs in your final response, and (optionally) add them as links in the original issue comment if appropriate.
 5. **Handle the parent issue** after creating child issues:
 

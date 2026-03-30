@@ -70,10 +70,10 @@ describe('groom prompts', () => {
       expect(prompt).toContain('do not copy the entire parent grooming summary');
       expect(prompt).toContain('Always exclude the **decomposition recommendation** section.');
       expect(prompt).toContain(
-        'Groomed as part of #<parent> — see parent for full grooming context.'
+        'Groomed as part of #<number> — see parent for full grooming context.'
       );
       expect(prompt).toContain(
-        'gh issue comment <CHILD_ISSUE_NUMBER> --body-file ./.shipper/tmp/child_grooming_comment-<child_number>.md'
+        'gh issue comment <child_number> --body-file ./.shipper/tmp/child_grooming_comment-<child_number>.md'
       );
     }
   );
