@@ -62,10 +62,15 @@ Brief pointers to relevant files or modules. Keep it to 2-3 bullets max. Omit th
 
 # Relevant Documentation (optional — include only if relevant docs are found)
 
-List documentation files (e.g., README.md, docs/, CONTRIBUTING.md, CHANGELOG.md) relevant to the request. For each, label as:
+Scan the repository for documentation files (e.g., README.md, docs/, CONTRIBUTING.md, CHANGELOG.md) relevant to the request, then list the 3-5 most relevant entries. For each, label as:
 
 - **Relevant context** — provides useful background for the feature area
 - **May need updating** — the requested change would likely make this doc stale
+
+For example:
+
+- `CONTRIBUTING.md`: **Relevant context**
+- `docs/api/v1.md`: **May need updating**
 
 Omit this section entirely if no relevant docs are found.
 
