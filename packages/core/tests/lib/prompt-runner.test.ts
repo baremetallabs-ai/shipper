@@ -913,8 +913,12 @@ describe('runPrompt', () => {
       env: process.env,
       stdio: ['inherit', 'pipe', 'inherit'],
     });
+    expect(spawnedArgs()).toContain('--verbose');
     expect(spawnedArgs()).toContain('--output-format');
     expect(spawnedArgs()).toContain('stream-json');
+    expect(spawnedArgs().indexOf('--verbose')).toBeLessThan(
+      spawnedArgs().indexOf('--output-format')
+    );
     expect(spawnedArgs().indexOf('--output-format')).toBeLessThan(
       spawnedArgs().indexOf('--append-system-prompt')
     );

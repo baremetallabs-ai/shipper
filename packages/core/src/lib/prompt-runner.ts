@@ -623,6 +623,12 @@ function ensureJsonOutputFormat(agent: AgentName, args: string[]): void {
         const insertIdx = appendSystemPromptIdx === -1 ? args.length : appendSystemPromptIdx;
         args.splice(insertIdx, 0, '--output-format', 'stream-json');
       }
+      // Claude CLI requires --verbose when using --output-format=stream-json with --print
+      if (args.includes('-p') && !args.includes('--verbose')) {
+        const outputFmtIdx = args.indexOf('--output-format');
+        const insertIdx = outputFmtIdx === -1 ? args.length : outputFmtIdx;
+        args.splice(insertIdx, 0, '--verbose');
+      }
       return;
     }
     case 'codex': {
