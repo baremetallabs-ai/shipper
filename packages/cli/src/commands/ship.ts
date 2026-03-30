@@ -50,6 +50,12 @@ export const STAGE_NAME: Record<string, string> = { ...STAGE_NAME_MAP };
 
 export const AUTO_PRIORITY_LABELS: string[] = [...STAGE_LABEL_NAMES].reverse();
 
+const STAGE_MODE_KEY: Record<string, string> = {
+  'pr open': 'pr_open',
+  'pr review': 'pr_review',
+  'pr remediate': 'pr_remediate',
+};
+
 interface StageResult {
   stage: string;
   status: 'pass' | 'fail';
@@ -135,6 +141,10 @@ interface ParkedIssue {
 interface PRMergeStateViewData {
   mergeStateStatus: string;
   mergeable: string;
+}
+
+function getStageModeKey(stageName: string): string {
+  return STAGE_MODE_KEY[stageName] ?? stageName;
 }
 
 function buildIssueCommandEnv(
@@ -724,9 +734,17 @@ async function shipOneIssue(
             }
           }
 
+          const stageMode = resolveMode(getStageModeKey(stageName), mode);
+          if (isAutoChildRun && stageMode === 'interactive') {
+            logBoth(
+              logStream,
+              `Skipping issue #${issueStr}: stage "${stageName}" requires interactive mode.`
+            );
+            return { success: true };
+          }
+
           logBoth(logStream, `Running stage: ${stageName}`);
 
-          const stageMode = resolveMode(stageName, mode);
           const nextArgs = [cliEntrypoint, 'next', issueStr];
           if (stageMode !== 'default') {
             nextArgs.push('--mode', stageMode);
@@ -736,14 +754,6 @@ async function shipOneIssue(
           }
           if (model) {
             nextArgs.push('--model', model);
-          }
-          if (isAutoChildRun && stageMode === 'interactive') {
-            logBoth(
-              logStream,
-              `Skipping issue #${issueStr}: stage "${stageName}" requires interactive mode.`
-            );
-            printSummary(results, logStream);
-            return { success: true };
           }
           const status = await spawnTee(process.execPath, nextArgs, {
             env: buildIssueCommandEnv(

@@ -1322,6 +1322,25 @@ describe('shipCommand single-issue path', () => {
     vi.useRealTimers();
   });
 
+  it('normalizes PR stage names before resolving mode', async () => {
+    mockResolveMode.mockImplementation((step, override) =>
+      step === 'pr_open' ? 'interactive' : (override ?? 'default')
+    );
+
+    mockIssueViewSequence(['shipper:implemented', 'shipper:pr-open', 'shipper:ready']);
+
+    await shipCommand(repo, '42', { auto: false, merge: false });
+
+    const cliEntrypoint = process.argv[1];
+    expect(cliEntrypoint).toBeDefined();
+    expect(mockResolveMode).toHaveBeenCalledWith('pr_open', undefined);
+    expect(mockSpawn.mock.calls[0]).toEqual([
+      process.execPath,
+      [cliEntrypoint, 'next', '42', '--mode', 'interactive'],
+      expect.objectContaining({ stdio: 'inherit' }),
+    ]);
+  });
+
   it('writes a single-issue ship log, tees child output, and prints the final log path', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-03-06T02:30:00'));
@@ -1605,9 +1624,10 @@ describe('shipCommand single-issue path', () => {
       expect(mockSpawn).not.toHaveBeenCalled();
       expect(mockAggregateSessionUsage).not.toHaveBeenCalled();
       expect(mockTotalTokens).not.toHaveBeenCalled();
-      expect(getConsoleOutput(logSpy)).toContain(
-        'Skipping issue #42: stage "groom" requires interactive mode.'
-      );
+      const output = getConsoleOutput(logSpy);
+      expect(output).toContain('Skipping issue #42: stage "groom" requires interactive mode.');
+      expect(output).not.toContain('Running stage: groom');
+      expect(output).not.toContain('Stage summary:');
       expect(exitSpy).toHaveBeenCalledWith(0);
     } finally {
       if (previousAutoChild === undefined) {
