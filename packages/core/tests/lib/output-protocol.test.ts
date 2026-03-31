@@ -24,6 +24,7 @@ const {
   postComment,
   postReplies,
   processResult,
+  parseDiffHunks,
   retryOnInvalidOutput,
   scrubOutputDir,
   submitReviewPayload,
@@ -112,6 +113,31 @@ describe('output protocol helpers', () => {
       comments: [],
       ...overrides,
     };
+  }
+
+  function buildReviewDiffFixture(): string {
+    return [
+      'diff --git a/src/file.ts b/src/file.ts',
+      '--- a/src/file.ts',
+      '+++ b/src/file.ts',
+      '@@ -10,5 +10,6 @@',
+      ' context',
+      '@@ -30 +31 @@',
+      ' context',
+      'diff --git a/src/new.ts b/src/new.ts',
+      'new file mode 100644',
+      '--- /dev/null',
+      '+++ b/src/new.ts',
+      '@@ -0,0 +1,3 @@',
+      '+export const created = true;',
+      'diff --git a/src/old.ts b/src/old.ts',
+      'deleted file mode 100644',
+      '--- a/src/old.ts',
+      '+++ /dev/null',
+      '@@ -4,2 +0,0 @@',
+      '-legacy',
+      '-code',
+    ].join('\n');
   }
 
   beforeEach(async () => {
@@ -450,6 +476,31 @@ describe('output protocol helpers', () => {
     expect(ghMock).not.toHaveBeenCalled();
   });
 
+  describe('parseDiffHunks', () => {
+    it('parses multiple hunks in a file plus new and deleted file ranges', () => {
+      const diffHunks = parseDiffHunks(buildReviewDiffFixture());
+
+      expect(diffHunks.get('src/file.ts')).toEqual({
+        left: [
+          [10, 14],
+          [30, 30],
+        ],
+        right: [
+          [10, 15],
+          [31, 31],
+        ],
+      });
+      expect(diffHunks.get('src/new.ts')).toEqual({
+        left: [],
+        right: [[1, 3]],
+      });
+      expect(diffHunks.get('src/old.ts')).toEqual({
+        left: [[4, 5]],
+        right: [],
+      });
+    });
+  });
+
   describe('validateStageOutput', () => {
     it('rejects PR specs on non-pr_open stages', async () => {
       await writeResultFile(buildResult({ pr_spec: outputRelative('pr-spec-248.json') }));
@@ -622,6 +673,98 @@ describe('output protocol helpers', () => {
       ).resolves.toEqual(result);
     });
 
+    it('rejects pr_review output when a comment line is outside every diff hunk', async () => {
+      const result = buildResult({ review_payload: outputRelative('review-payload-248.json') });
+      const diffHunks = parseDiffHunks(buildReviewDiffFixture());
+      await writeResultFile(result);
+      await writeOutputJson(
+        'review-payload-248.json',
+        buildReviewPayload({
+          comments: [
+            {
+              path: 'src/file.ts',
+              line: 45,
+              side: 'RIGHT',
+              body: 'This line is not commentable.',
+            },
+          ],
+        })
+      );
+
+      await expect(
+        validateStageOutput(
+          tempDir,
+          'pr_review',
+          new Set(['src/file.ts', 'src/new.ts', 'src/old.ts']),
+          diffHunks
+        )
+      ).rejects.toThrow(
+        "comments[0].line 45 (side RIGHT) is not within any diff hunk for 'src/file.ts'. Valid ranges — LEFT: 10-14, 30-30; RIGHT: 10-15, 31-31"
+      );
+    });
+
+    it('rejects pr_review output when a multiline start_line is outside every diff hunk', async () => {
+      const result = buildResult({ review_payload: outputRelative('review-payload-248.json') });
+      const diffHunks = parseDiffHunks(buildReviewDiffFixture());
+      await writeResultFile(result);
+      await writeOutputJson(
+        'review-payload-248.json',
+        buildReviewPayload({
+          comments: [
+            {
+              path: 'src/file.ts',
+              line: 12,
+              side: 'RIGHT',
+              body: 'This multiline range starts outside any hunk.',
+              start_line: 45,
+              start_side: 'RIGHT',
+            },
+          ],
+        })
+      );
+
+      await expect(
+        validateStageOutput(
+          tempDir,
+          'pr_review',
+          new Set(['src/file.ts', 'src/new.ts', 'src/old.ts']),
+          diffHunks
+        )
+      ).rejects.toThrow(
+        "comments[0].start_line 45 (side RIGHT) is not within any diff hunk for 'src/file.ts'. Valid ranges — LEFT: 10-14, 30-30; RIGHT: 10-15, 31-31"
+      );
+    });
+
+    it('rejects pr_review output when a comment side does not match the diff hunk side', async () => {
+      const result = buildResult({ review_payload: outputRelative('review-payload-248.json') });
+      const diffHunks = parseDiffHunks(buildReviewDiffFixture());
+      await writeResultFile(result);
+      await writeOutputJson(
+        'review-payload-248.json',
+        buildReviewPayload({
+          comments: [
+            {
+              path: 'src/old.ts',
+              line: 4,
+              side: 'RIGHT',
+              body: 'Deleted lines are only commentable on the left.',
+            },
+          ],
+        })
+      );
+
+      await expect(
+        validateStageOutput(
+          tempDir,
+          'pr_review',
+          new Set(['src/file.ts', 'src/new.ts', 'src/old.ts']),
+          diffHunks
+        )
+      ).rejects.toThrow(
+        "comments[0].line 4 (side RIGHT) is not within any diff hunk for 'src/old.ts'. Valid ranges — LEFT: 4-5"
+      );
+    });
+
     it('rejects pr_review output when comment paths are outside the PR diff files', async () => {
       const result = buildResult({ review_payload: outputRelative('review-payload-248.json') });
       await writeResultFile(result);
@@ -679,6 +822,49 @@ describe('output protocol helpers', () => {
       await expect(validateStageOutput(tempDir, 'pr_review', prFiles)).rejects.toThrow(
         'comment path(s) not in PR diff: src/missing.ts. Valid files: src/file-1.ts, src/file-2.ts, src/file-3.ts, src/file-4.ts, src/file-5.ts, src/file-6.ts, src/file-7.ts, src/file-8.ts, src/file-9.ts, src/file-10.ts, src/file-11.ts, src/file-12.ts, src/file-13.ts, src/file-14.ts, src/file-15.ts, src/file-16.ts, src/file-17.ts, src/file-18.ts, src/file-19.ts, src/file-20.ts, src/file-21.ts, src/file-22.ts, src/file-23.ts, src/file-24.ts, src/file-25.ts, src/file-26.ts, src/file-27.ts, src/file-28.ts, src/file-29.ts, src/file-30.ts, src/file-31.ts, src/file-32.ts, src/file-33.ts, src/file-34.ts, src/file-35.ts, src/file-36.ts, src/file-37.ts, src/file-38.ts, src/file-39.ts, src/file-40.ts, src/file-41.ts, src/file-42.ts, src/file-43.ts, src/file-44.ts, src/file-45.ts, src/file-46.ts, src/file-47.ts, src/file-48.ts, src/file-49.ts, src/file-50.ts (and 5 more)'
       );
+    });
+
+    it('accepts pr_review output when comment lines and sides match parsed diff hunks', async () => {
+      const result = buildResult({ review_payload: outputRelative('review-payload-248.json') });
+      const diffHunks = parseDiffHunks(buildReviewDiffFixture());
+      await writeResultFile(result);
+      await writeOutputJson(
+        'review-payload-248.json',
+        buildReviewPayload({
+          event: 'COMMENT',
+          comments: [
+            {
+              path: 'src/file.ts',
+              line: 12,
+              side: 'RIGHT',
+              body: 'Single-line comment on a valid right-side line.',
+            },
+            {
+              path: 'src/file.ts',
+              line: 15,
+              side: 'RIGHT',
+              body: 'Multiline comment fully inside the first hunk.',
+              start_line: 10,
+              start_side: 'RIGHT',
+            },
+            {
+              path: 'src/old.ts',
+              line: 4,
+              side: 'LEFT',
+              body: 'Deleted lines remain valid on the left side.',
+            },
+          ],
+        })
+      );
+
+      await expect(
+        validateStageOutput(
+          tempDir,
+          'pr_review',
+          new Set(['src/file.ts', 'src/new.ts', 'src/old.ts']),
+          diffHunks
+        )
+      ).resolves.toEqual(result);
     });
   });
 
@@ -992,6 +1178,62 @@ describe('output protocol helpers', () => {
       expect(retryMock).toHaveBeenCalledWith(
         expect.stringContaining(
           'comment path(s) not in PR diff: src/missing.ts. Valid files: src/file.ts'
+        )
+      );
+    });
+
+    it('retries when pr_review comments target invalid diff hunk locations', async () => {
+      const repairedResult = buildResult({
+        review_payload: outputRelative('review-payload-248.json'),
+      });
+      const diffHunks = parseDiffHunks(buildReviewDiffFixture());
+      const retryMock = vi
+        .fn<(message: string) => Promise<number>>()
+        .mockImplementation(async () => {
+          await writeOutputJson(
+            'review-payload-248.json',
+            buildReviewPayload({
+              comments: [
+                {
+                  path: 'src/file.ts',
+                  line: 12,
+                  side: 'RIGHT',
+                  body: 'Needs a test.',
+                },
+              ],
+            })
+          );
+          return 0;
+        });
+
+      await writeResultFile(repairedResult);
+      await writeOutputJson(
+        'review-payload-248.json',
+        buildReviewPayload({
+          comments: [
+            {
+              path: 'src/file.ts',
+              line: 45,
+              side: 'RIGHT',
+              body: 'This line is outside the diff hunks.',
+            },
+          ],
+        })
+      );
+
+      await expect(
+        retryOnInvalidOutput({
+          cwd: tempDir,
+          stage: 'pr_review',
+          prFiles: new Set(['src/file.ts', 'src/new.ts', 'src/old.ts']),
+          diffHunks,
+          retry: retryMock,
+        })
+      ).resolves.toEqual(repairedResult);
+
+      expect(retryMock).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "comments[0].line 45 (side RIGHT) is not within any diff hunk for 'src/file.ts'. Valid ranges — LEFT: 10-14, 30-30; RIGHT: 10-15, 31-31"
         )
       );
     });

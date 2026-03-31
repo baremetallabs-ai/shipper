@@ -3,6 +3,7 @@ import {
   getBranchForPR,
   getRepoRoot,
   gh,
+  parseDiffHunks,
   resolveRef,
 } from '@dnsquared/shipper-core';
 import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
@@ -54,6 +55,7 @@ export async function prReviewCommand(
         async (wtPath) => {
           await scrubOutputDir(wtPath);
           const { stdout: diff } = await gh(['pr', 'diff', pr, '-R', repo]);
+          const diffHunks = parseDiffHunks(diff);
           await writeContextFile(wtPath, 'pr-diff.patch', diff);
 
           const { stdout: prFilesRaw } = await gh([
@@ -94,6 +96,7 @@ export async function prReviewCommand(
               cwd: wtPath,
               stage: 'pr_review',
               prFiles: prFileSet,
+              diffHunks,
               retry: (userInput) =>
                 runPrompt('pr_review', {
                   repo,

@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { parseDiffHunks } from '../../../core/src/lib/output-protocol.js';
+
 const autoSelectPrForStageMock = vi.fn();
 const getBranchForPRMock = vi.fn(() => Promise.resolve('shipper/10-feature'));
 const getRepoRootMock = vi.fn(() => Promise.resolve('/tmp/fake-repo'));
@@ -15,6 +17,7 @@ const retryOnInvalidOutputMock = vi.fn<
     cwd: string;
     stage: string;
     prFiles?: Set<string>;
+    diffHunks?: Map<string, { left: Array<[number, number]>; right: Array<[number, number]> }>;
     retry: (message: string) => Promise<number>;
   }) => Promise<typeof validatedResult>
 >(() => Promise.resolve(validatedResult));
@@ -32,6 +35,16 @@ const withWorktreeMock = vi.fn((_opts: unknown, fn: (wtPath: string) => Promise<
 );
 const writeContextFileMock = vi.fn(() => Promise.resolve());
 const repo = 'owner/repo';
+const diffFixture = [
+  'diff --git a/src/file.ts b/src/file.ts',
+  '--- a/src/file.ts',
+  '+++ b/src/file.ts',
+  '@@ -1,3 +1,4 @@',
+  ' line 1',
+  ' line 2',
+  ' line 3',
+  '+line 4',
+].join('\n');
 
 vi.mock('@dnsquared/shipper-core', () => ({
   autoSelectPrForStage: autoSelectPrForStageMock,
@@ -39,6 +52,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   getRepoRoot: getRepoRootMock,
   gh: ghMock,
   handleAgentCrash: handleAgentCrashMock,
+  parseDiffHunks,
   processResult: processResultMock,
   retryOnInvalidOutput: retryOnInvalidOutputMock,
   resolveRef: resolveRefMock,
@@ -58,7 +72,7 @@ describe('prReviewCommand', () => {
     vi.clearAllMocks();
     process.exitCode = undefined;
     ghMock
-      .mockResolvedValueOnce({ stdout: 'diff --git a/file b/file', stderr: '' })
+      .mockResolvedValueOnce({ stdout: diffFixture, stderr: '' })
       .mockResolvedValueOnce({ stdout: '[[{"filename":"src/file.ts"}]]', stderr: '' })
       .mockResolvedValueOnce({
         stdout:
@@ -120,7 +134,7 @@ describe('prReviewCommand', () => {
       1,
       '/tmp/fake-wt',
       'pr-diff.patch',
-      'diff --git a/file b/file'
+      diffFixture
     );
     expect(writeContextFileMock).toHaveBeenNthCalledWith(
       2,
@@ -148,13 +162,29 @@ describe('prReviewCommand', () => {
           cwd: string;
           stage: string;
           prFiles?: Set<string>;
+          diffHunks?: Map<
+            string,
+            { left: Array<[number, number]>; right: Array<[number, number]> }
+          >;
           retry: (message: string) => Promise<number>;
         }
       | undefined;
     expect(retryCall?.cwd).toBe('/tmp/fake-wt');
     expect(retryCall?.stage).toBe('pr_review');
     expect(retryCall?.prFiles).toEqual(new Set(['src/file.ts']));
+    expect(retryCall?.diffHunks).toEqual(
+      new Map([
+        [
+          'src/file.ts',
+          {
+            left: [[1, 3]],
+            right: [[1, 4]],
+          },
+        ],
+      ])
+    );
     expect(retryCall?.retry).toEqual(expect.any(Function));
+    expect(ghMock).toHaveBeenCalledTimes(3);
     expect(processResultMock).toHaveBeenCalledWith({
       repo,
       issueNumber: '10',
