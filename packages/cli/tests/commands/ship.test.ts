@@ -56,6 +56,7 @@ const isPrMergedMock = vi.hoisted(() =>
 const prepareUnblockContextMock = vi.hoisted(() =>
   vi.fn<(repo: string, issue: string, cwd: string) => Promise<void>>(() => Promise.resolve())
 );
+const sleepMsMock = vi.hoisted(() => vi.fn<(ms: number) => Promise<void>>(() => Promise.resolve()));
 const processResultMock = vi.hoisted(() =>
   vi.fn<
     (result?: {
@@ -142,6 +143,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   gh: vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>(),
   fetchChecks: vi.fn<(repo: string, pr: string) => Promise<MockCheck[]>>(() => Promise.resolve([])),
   classifyChecks: vi.fn(() => ({ pending: [], failed: [], passed: [], total: 0 })),
+  sleepMs: (ms: number) => sleepMsMock(ms),
   handleAgentCrash: (repo: string, issue: string, stage: string, detail: string) =>
     handleAgentCrashMock(repo, issue, stage, detail),
   STAGE_NAME_MAP: labelFixtures.stageNameMap,
@@ -244,6 +246,7 @@ const mockFetchIssueTimelines = vi.mocked(fetchIssueTimelines);
 const mockGh = vi.mocked(gh);
 const mockFetchChecks = vi.mocked(fetchChecks);
 const mockClassifyChecks = vi.mocked(classifyChecks);
+const mockSleepMs = sleepMsMock;
 const mockRetryOnInvalidOutput = vi.mocked(retryOnInvalidOutput);
 const mockResolveMode = resolveModeMock;
 const mockSortIssuesByLabelTime = vi.mocked(sortIssuesByLabelTime);
@@ -261,6 +264,8 @@ const mockCreateWriteStream = fsMockState.mockCreateWriteStream;
 const mockMkdirSync = fsMockState.mockMkdirSync;
 const mockHomedir = osMockState.mockHomedir;
 const repo = 'owner/repo';
+const UNKNOWN_STATE_POLL_MAX = 5;
+const UNKNOWN_STATE_POLL_DELAY_MS = 3_000;
 const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((_code?: number) => {
   return undefined as never;
 }) as typeof process.exit);
@@ -1703,6 +1708,8 @@ describe('shipCommand merge path', () => {
     mockFetchChecks.mockResolvedValue([]);
     mockClassifyChecks.mockReset();
     mockClassifyChecks.mockReturnValue({ pending: [], failed: [], passed: [], total: 0 });
+    mockSleepMs.mockReset();
+    mockSleepMs.mockResolvedValue(undefined);
     mockWithStageHooks.mockReset();
     mockWithStageHooks.mockImplementation(defaultWithStageHooks);
     mockWithIssueLock.mockReset();
@@ -1824,7 +1831,10 @@ describe('shipCommand merge path', () => {
   });
 
   it('fails early when GitHub reports UNKNOWN merge state and PR is not mergeable', async () => {
-    setupReadyMergeFlow({ mergeStates: ['UNKNOWN'], mergeable: 'UNKNOWN' });
+    setupReadyMergeFlow({
+      mergeStates: Array.from({ length: UNKNOWN_STATE_POLL_MAX + 1 }, () => 'UNKNOWN'),
+      mergeable: 'UNKNOWN',
+    });
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     await shipCommand(repo, '123', { merge: true, auto: false });
@@ -1833,6 +1843,47 @@ describe('shipCommand merge path', () => {
     expect(stderrOutput).toContain(
       'Merge failed for PR #456: GitHub has not computed merge state for PR #456 yet. Retry shortly.'
     );
+    expect(mockSleepMs.mock.calls).toEqual(
+      Array.from({ length: UNKNOWN_STATE_POLL_MAX }, () => [UNKNOWN_STATE_POLL_DELAY_MS])
+    );
+    expect(findGhCalls('pr', 'merge')).toHaveLength(0);
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    errorSpy.mockRestore();
+  });
+
+  it('resolves UNKNOWN merge state after polling and merges successfully', async () => {
+    setupReadyMergeFlow({
+      mergeStates: ['UNKNOWN', 'UNKNOWN', 'CLEAN'],
+      mergeable: 'UNKNOWN',
+      mergeStdout: 'merged\n',
+    });
+
+    await shipCommand(repo, '123', { merge: true, auto: false });
+
+    expect(mockSleepMs.mock.calls).toEqual([
+      [UNKNOWN_STATE_POLL_DELAY_MS],
+      [UNKNOWN_STATE_POLL_DELAY_MS],
+    ]);
+    expect(findGhCalls('pr', 'merge')).toHaveLength(1);
+    expect(postMergeMock).toHaveBeenCalledTimes(1);
+    expect(exitSpy).toHaveBeenCalledWith(0);
+  });
+
+  it('stops polling UNKNOWN when state resolves to a non-ready state', async () => {
+    setupReadyMergeFlow({
+      mergeStates: ['UNKNOWN', 'DIRTY'],
+      mergeable: 'UNKNOWN',
+    });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await shipCommand(repo, '123', { merge: true, auto: false });
+
+    const stderrOutput = getConsoleOutput(errorSpy);
+    expect(stderrOutput).toContain(
+      'Merge failed for PR #456: PR #456 has merge conflicts that must be resolved.'
+    );
+    expect(mockSleepMs.mock.calls).toEqual([[UNKNOWN_STATE_POLL_DELAY_MS]]);
     expect(findGhCalls('pr', 'merge')).toHaveLength(0);
     expect(exitSpy).toHaveBeenCalledWith(1);
 
@@ -1848,6 +1899,7 @@ describe('shipCommand merge path', () => {
 
     await shipCommand(repo, '123', { merge: true, auto: false });
 
+    expect(mockSleepMs).not.toHaveBeenCalled();
     expect(findGhCalls('pr', 'merge')).toHaveLength(1);
     expect(postMergeMock).toHaveBeenCalledTimes(1);
     expect(exitSpy).toHaveBeenCalledWith(0);
