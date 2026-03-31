@@ -1390,7 +1390,7 @@ describe('runPrompt', () => {
     await runPrompt('test', { mode: 'interactive' });
 
     expect(spawnedArgs()).not.toContain('exec');
-    expect(spawnedArgs()).not.toContain('--full-auto');
+    expect(spawnedArgs()).toContain('--full-auto');
     expect(spawnedArgs()).not.toContain('--json');
     expect(spawnedArgs()).not.toContain('-c');
     expect(spawnedArgs()).not.toContain('sandbox_workspace_write.network_access=true');
@@ -1417,7 +1417,7 @@ describe('runPrompt', () => {
     expect(spawnedArgs()).toContain('-c');
     expect(spawnedArgs()).toContain('config1');
     expect(spawnedArgs()).not.toContain('exec');
-    expect(spawnedArgs()).not.toContain('--full-auto');
+    expect(spawnedArgs()).toContain('--full-auto');
     expect(spawnedArgs()).not.toContain('sandbox_workspace_write.network_access=true');
   });
 });

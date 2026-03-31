@@ -62,7 +62,7 @@ Run `shipper eject` to scaffold editable prompt overrides. Existing overrides ar
 
 **`settings.json`** — Team-wide configuration, committed to version control:
 
-- `prReviewWait` — PR review wait strategy (default: `{ "mode": "checks", "timeoutMinutes": 15 }`). In `"checks"` mode, polls CI checks until all complete. In `"timer"` mode, waits a fixed duration based on PR age. Legacy `prReviewWaitMinutes` values auto-migrate to `"timer"` mode.
+- `prReviewWait` — PR review wait strategy (default: `{ "mode": "checks", "maxDurationMinutes": 30 }`). Use `{ "mode": "timer", "durationMinutes": 30 }` to wait a fixed number of minutes from PR creation time, or a checks-mode object such as `{ "mode": "checks", "minDurationMinutes": 10, "maxDurationMinutes": 30 }` to wait for CI with an optional minimum review window and optional maximum polling ceiling. `minDurationMinutes` and `maxDurationMinutes` are both optional. Legacy `prReviewWaitMinutes`, timer-mode `timeoutMinutes`, and checks-mode `timeoutMinutes` values auto-migrate to the new shape.
 
 **`settings.local.json`** — Local overrides that apply only to your machine. This file is gitignored and will not be committed. Any key set here takes precedence over `settings.json`.
 

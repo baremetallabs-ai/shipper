@@ -562,11 +562,6 @@ function stripCodexHeadlessArgs(args: string[]): void {
     args.splice(execIdx, 1);
   }
 
-  const fullAutoIdx = args.indexOf('--full-auto');
-  if (fullAutoIdx !== -1) {
-    args.splice(fullAutoIdx, 1);
-  }
-
   const jsonIdx = args.indexOf(CODEX_HEADLESS_JSON_ARG);
   if (jsonIdx !== -1) {
     args.splice(jsonIdx, 1);
