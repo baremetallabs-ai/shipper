@@ -12,6 +12,7 @@ import {
   fetchIssueTimelines,
   handleAgentCrash,
   selectIssuesForStage,
+  sleepMs,
   sortIssuesByLabelTime,
   gh,
   getSettings,
@@ -389,6 +390,9 @@ function normalizeError(err: unknown): Error {
   return err instanceof Error ? err : new Error(String(err));
 }
 
+const UNKNOWN_STATE_POLL_MAX = 5;
+const UNKNOWN_STATE_POLL_DELAY_MS = 3_000;
+
 function formatMergeFailureMessage(prNumber: number, reason: string): string {
   const prefix = `${MERGE_FAILURE_PREFIX}${prNumber}:`;
   return reason.startsWith(prefix) ? reason : `${prefix} ${reason}`;
@@ -585,6 +589,14 @@ async function mergePr(
 
       rebased = true;
       mergeState = await getMergeStateStatus(pr.number, nwo);
+    }
+
+    if (mergeState === 'UNKNOWN') {
+      logBoth(logStream, `PR #${pr.number} merge state is UNKNOWN. Polling for resolution...`);
+      for (let i = 0; i < UNKNOWN_STATE_POLL_MAX && mergeState === 'UNKNOWN'; i++) {
+        await sleepMs(UNKNOWN_STATE_POLL_DELAY_MS);
+        mergeState = await getMergeStateStatus(pr.number, nwo);
+      }
     }
 
     if (!isMergeReadyState(mergeState)) {
