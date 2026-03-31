@@ -17,6 +17,12 @@ const PROTOCOL_INPUT_DISPLAY_DIR = path.posix.join('.shipper', 'input');
 
 type ReviewEvent = 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT';
 type ReviewCommentSide = 'LEFT' | 'RIGHT';
+type DiffLineRange = [number, number];
+
+export interface DiffFileHunks {
+  left: DiffLineRange[];
+  right: DiffLineRange[];
+}
 
 interface PrSpecJson {
   title: string;
@@ -44,6 +50,110 @@ interface ReviewPayloadJson {
 
 const VALID_REVIEW_EVENTS = new Set<ReviewEvent>(['APPROVE', 'REQUEST_CHANGES', 'COMMENT']);
 const VALID_REVIEW_COMMENT_SIDES = new Set<ReviewCommentSide>(['LEFT', 'RIGHT']);
+const DIFF_HUNK_HEADER_PATTERN = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
+
+function parseDiffPath(line: string, prefix: string): string | undefined {
+  const rawPath = line.slice(4);
+  if (rawPath === '/dev/null') {
+    return undefined;
+  }
+
+  return rawPath.startsWith(prefix) ? rawPath.slice(prefix.length) : rawPath;
+}
+
+function ensureDiffFileHunks(
+  diffHunks: Map<string, DiffFileHunks>,
+  filePath: string
+): DiffFileHunks {
+  let fileHunks = diffHunks.get(filePath);
+  if (!fileHunks) {
+    fileHunks = { left: [], right: [] };
+    diffHunks.set(filePath, fileHunks);
+  }
+
+  return fileHunks;
+}
+
+function parseHunkCount(rawCount: string | undefined): number {
+  return rawCount === undefined ? 1 : Number(rawCount);
+}
+
+function includesLine(ranges: DiffLineRange[], line: number): boolean {
+  return ranges.some(([start, end]) => line >= start && line <= end);
+}
+
+function formatRanges(ranges: DiffLineRange[]): string {
+  return ranges.map(([start, end]) => `${start}-${end}`).join(', ');
+}
+
+function formatValidRanges(fileHunks?: DiffFileHunks): string {
+  if (!fileHunks || (fileHunks.left.length === 0 && fileHunks.right.length === 0)) {
+    return 'Valid ranges — (none)';
+  }
+
+  const parts: string[] = [];
+  if (fileHunks.left.length > 0) {
+    parts.push(`LEFT: ${formatRanges(fileHunks.left)}`);
+  }
+  if (fileHunks.right.length > 0) {
+    parts.push(`RIGHT: ${formatRanges(fileHunks.right)}`);
+  }
+
+  return `Valid ranges — ${parts.join('; ')}`;
+}
+
+export function parseDiffHunks(diff: string): Map<string, DiffFileHunks> {
+  const diffHunks = new Map<string, DiffFileHunks>();
+  let oldFilePath: string | undefined;
+  let currentFilePath: string | undefined;
+
+  for (const line of diff.split('\n')) {
+    if (line.startsWith('diff --git ')) {
+      oldFilePath = undefined;
+      currentFilePath = undefined;
+      continue;
+    }
+
+    if (line.startsWith('--- ')) {
+      oldFilePath = parseDiffPath(line, 'a/');
+      continue;
+    }
+
+    if (line.startsWith('+++ ')) {
+      const newFilePath = parseDiffPath(line, 'b/');
+      currentFilePath = newFilePath ?? oldFilePath;
+      if (currentFilePath) {
+        ensureDiffFileHunks(diffHunks, currentFilePath);
+      }
+      continue;
+    }
+
+    if (!line.startsWith('@@ ') || !currentFilePath) {
+      continue;
+    }
+
+    const match = DIFF_HUNK_HEADER_PATTERN.exec(line);
+    if (!match) {
+      continue;
+    }
+
+    const [, rawOldStart, rawOldCount, rawNewStart, rawNewCount] = match;
+    const oldStart = Number(rawOldStart);
+    const oldCount = parseHunkCount(rawOldCount);
+    const newStart = Number(rawNewStart);
+    const newCount = parseHunkCount(rawNewCount);
+    const fileHunks = ensureDiffFileHunks(diffHunks, currentFilePath);
+
+    if (oldCount > 0) {
+      fileHunks.left.push([oldStart, oldStart + oldCount - 1]);
+    }
+    if (newCount > 0) {
+      fileHunks.right.push([newStart, newStart + newCount - 1]);
+    }
+  }
+
+  return diffHunks;
+}
 
 function resolveContainedPath(rootDir: string, relativePath: string, label: string): string {
   if (path.isAbsolute(relativePath)) {
@@ -259,7 +369,8 @@ async function readPrSpec(
 async function readReviewPayload(
   cwd: string,
   payloadPath: string,
-  prFiles?: Set<string>
+  prFiles?: Set<string>,
+  diffHunks?: Map<string, DiffFileHunks>
 ): Promise<{ abs: string; payload: ReviewPayloadJson }> {
   const abs = resolveOutputPath(cwd, payloadPath, 'review payload path');
   const parsed = await readJsonFile(abs, 'review payload');
@@ -286,8 +397,8 @@ async function readReviewPayload(
         .filter((comment): comment is ReviewPayloadComment => comment !== undefined)
     : [];
 
+  const invalidPaths = new Set<string>();
   if (prFiles) {
-    const invalidPaths = new Set<string>();
     for (const comment of comments) {
       if (!prFiles.has(comment.path)) {
         invalidPaths.add(comment.path);
@@ -307,6 +418,35 @@ async function readReviewPayload(
       errors.push(
         `comment path(s) not in PR diff: ${[...invalidPaths].join(', ')}. Valid files: ${validFilesDisplay}`
       );
+    }
+  }
+
+  if (diffHunks) {
+    for (const [index, comment] of comments.entries()) {
+      if (invalidPaths.has(comment.path)) {
+        continue;
+      }
+
+      const fileHunks = diffHunks.get(comment.path);
+      const sideRanges =
+        comment.side === 'LEFT' ? (fileHunks?.left ?? []) : (fileHunks?.right ?? []);
+      if (!includesLine(sideRanges, comment.line)) {
+        errors.push(
+          `comments[${index}].line ${comment.line} (side ${comment.side}) is not within any diff hunk for '${comment.path}'. ${formatValidRanges(fileHunks)}`
+        );
+      }
+
+      if (comment.start_line === undefined || comment.start_side === undefined) {
+        continue;
+      }
+
+      const startSideRanges =
+        comment.start_side === 'LEFT' ? (fileHunks?.left ?? []) : (fileHunks?.right ?? []);
+      if (!includesLine(startSideRanges, comment.start_line)) {
+        errors.push(
+          `comments[${index}].start_line ${comment.start_line} (side ${comment.start_side}) is not within any diff hunk for '${comment.path}'. ${formatValidRanges(fileHunks)}`
+        );
+      }
     }
   }
 
@@ -583,7 +723,8 @@ export async function submitReviewPayload(
 export async function validateStageOutput(
   cwd: string,
   stage: StageName,
-  prFiles?: Set<string>
+  prFiles?: Set<string>,
+  diffHunks?: Map<string, DiffFileHunks>
 ): Promise<ResultJson> {
   const result = await readResultFile(path.resolve(cwd, PROTOCOL_OUTPUT_DIR));
 
@@ -618,7 +759,8 @@ export async function validateStageOutput(
     await readReviewPayload(
       cwd,
       result.review_payload,
-      stage === 'pr_review' ? prFiles : undefined
+      stage === 'pr_review' ? prFiles : undefined,
+      stage === 'pr_review' ? diffHunks : undefined
     );
   }
 
@@ -661,17 +803,18 @@ export async function retryOnInvalidOutput(opts: {
   cwd: string;
   stage: StageName;
   prFiles?: Set<string>;
+  diffHunks?: Map<string, DiffFileHunks>;
   retry: (correctionMessage: string) => Promise<number>;
 }): Promise<ResultJson> {
   try {
-    return await validateStageOutput(opts.cwd, opts.stage, opts.prFiles);
+    return await validateStageOutput(opts.cwd, opts.stage, opts.prFiles, opts.diffHunks);
   } catch (error) {
     const errors =
       error instanceof ResultValidationError
         ? error.errors
         : [error instanceof Error ? error.message : String(error)];
     await opts.retry(formatCorrectionMessage(errors));
-    return await validateStageOutput(opts.cwd, opts.stage, opts.prFiles);
+    return await validateStageOutput(opts.cwd, opts.stage, opts.prFiles, opts.diffHunks);
   }
 }
 
