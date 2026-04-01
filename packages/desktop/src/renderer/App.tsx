@@ -581,6 +581,7 @@ interface IssueCardProps {
   isResetting?: boolean;
   isUnlocking?: boolean;
   isUnblocking?: boolean;
+  isSettingPriority?: boolean;
   onShip?: (issueNumber: number) => void;
   shipDisabled?: boolean;
   shippingStatus?: 'queued' | 'running';
@@ -603,6 +604,7 @@ function IssueCard({
   isResetting = false,
   isUnlocking = false,
   isUnblocking = false,
+  isSettingPriority = false,
   onShip,
   shipDisabled = false,
   shippingStatus,
@@ -616,6 +618,7 @@ function IssueCard({
   const priorityTier = getPriorityTier(issue.labels);
   const isShipping = !!shippingStatus;
   const isBusy = isResetting || isUnlocking || isUnblocking;
+  const isMenuDisabled = isBusy || isSettingPriority;
   const busyLabel = isResetting
     ? 'Resetting...'
     : isUnlocking
@@ -624,13 +627,14 @@ function IssueCard({
         ? 'Unblocking...'
         : null;
   const isGroomDisabled = groomDisabled || isBlocked || isLocked || isShipping;
-  const canUnlock = isLocked && !!onUnlock;
-  const canUnblock = isBlocked && !isLocked && !!onUnblock;
+  const canUnlock = isLocked && !!onUnlock && !isShipping;
+  const canUnblock = isBlocked && !isLocked && !!onUnblock && !isShipping;
   const canCloseNotPlanned = !!onCloseNotPlanned && !isLocked && !isShipping;
-  const hasResetMenu = onResetSelect !== undefined && resetTargets.length > 0;
+  const hasResetMenu = onResetSelect !== undefined && resetTargets.length > 0 && !isShipping;
   const hasPriorityMenu = onSetPriority !== undefined;
   const hasFlatActions = canCloseNotPlanned || canUnlock || canUnblock;
-  const showOverflowMenu = !isShipping && (hasResetMenu || hasFlatActions || hasPriorityMenu);
+  const showOverflowMenu = hasResetMenu || hasFlatActions || hasPriorityMenu;
+  const showStopShipButton = isShipping && onStopShip !== undefined;
   const isShipDisabled = shipDisabled || isBlocked || isLocked || isShipping;
 
   function handleUnlockSelect(): void {
@@ -651,107 +655,110 @@ function IssueCard({
     >
       <div className="flex items-start justify-between gap-3">
         <p className="text-sm font-medium text-muted-foreground">#{issue.number}</p>
-        {showOverflowMenu ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="size-8"
-                disabled={isBusy}
-                aria-label={`Issue #${issue.number} actions`}
-              >
-                <EllipsisVertical className="size-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {hasResetMenu ? (
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger>Reset</DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent>
-                    {resetTargets.map((targetStage) => (
-                      <DropdownMenuItem
-                        key={targetStage}
-                        onSelect={() => {
-                          onResetSelect(targetStage);
-                        }}
-                      >
-                        {getResetTargetLabel(targetStage)}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuSubContent>
-                </DropdownMenuSub>
-              ) : null}
-              {hasPriorityMenu ? (
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger>Priority</DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent>
-                    {(['high', 'normal', 'low'] as const).map((level) => {
-                      const tier = level === 'high' ? 0 : level === 'low' ? 2 : 1;
-                      const isActive = tier === priorityTier;
-
-                      return (
+        <div className="flex items-center gap-1">
+          {showOverflowMenu ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="size-8"
+                  disabled={isMenuDisabled}
+                  aria-label={`Issue #${issue.number} actions`}
+                >
+                  <EllipsisVertical className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {hasResetMenu ? (
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger>Reset</DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent>
+                      {resetTargets.map((targetStage) => (
                         <DropdownMenuItem
-                          key={level}
+                          key={targetStage}
                           onSelect={() => {
-                            if (isActive) {
-                              return;
-                            }
-
-                            onSetPriority(level);
+                            onResetSelect(targetStage);
                           }}
                         >
-                          {level.charAt(0).toUpperCase() + level.slice(1)}
-                          {isActive ? (
-                            <Check className="ml-auto size-4" aria-hidden="true" />
-                          ) : null}
+                          {getResetTargetLabel(targetStage)}
                         </DropdownMenuItem>
-                      );
-                    })}
-                  </DropdownMenuSubContent>
-                </DropdownMenuSub>
-              ) : null}
-              {hasFlatActions && (hasResetMenu || hasPriorityMenu) ? (
-                <DropdownMenuSeparator />
-              ) : null}
-              {canCloseNotPlanned ? (
-                <DropdownMenuItem
-                  onSelect={() => {
-                    onCloseNotPlanned();
-                  }}
-                  className="text-destructive focus:text-destructive"
-                >
-                  Close as not planned
-                </DropdownMenuItem>
-              ) : null}
-              {canUnlock ? (
-                <DropdownMenuItem onSelect={handleUnlockSelect}>Unlock</DropdownMenuItem>
-              ) : null}
-              {canUnblock ? (
-                <DropdownMenuItem
-                  onSelect={() => {
-                    onUnblock();
-                  }}
-                >
-                  Unblock
-                </DropdownMenuItem>
-              ) : null}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        ) : null}
-        {!showOverflowMenu && isShipping && onStopShip ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="size-7 text-muted-foreground hover:text-destructive"
-            aria-label={`Stop shipping #${issue.number}`}
-            onClick={onStopShip}
-          >
-            <Square className="size-3.5 fill-current" />
-          </Button>
-        ) : null}
+                      ))}
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
+                ) : null}
+                {hasPriorityMenu ? (
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger>Priority</DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent>
+                      {(['high', 'normal', 'low'] as const).map((level) => {
+                        const tier = level === 'high' ? 0 : level === 'low' ? 2 : 1;
+                        const isActive = tier === priorityTier;
+
+                        return (
+                          <DropdownMenuItem
+                            key={level}
+                            disabled={isSettingPriority}
+                            onSelect={() => {
+                              if (isActive) {
+                                return;
+                              }
+
+                              onSetPriority(level);
+                            }}
+                          >
+                            {level.charAt(0).toUpperCase() + level.slice(1)}
+                            {isActive ? (
+                              <Check className="ml-auto size-4" aria-hidden="true" />
+                            ) : null}
+                          </DropdownMenuItem>
+                        );
+                      })}
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
+                ) : null}
+                {hasFlatActions && (hasResetMenu || hasPriorityMenu) ? (
+                  <DropdownMenuSeparator />
+                ) : null}
+                {canCloseNotPlanned ? (
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      onCloseNotPlanned();
+                    }}
+                    className="text-destructive focus:text-destructive"
+                  >
+                    Close as not planned
+                  </DropdownMenuItem>
+                ) : null}
+                {canUnlock ? (
+                  <DropdownMenuItem onSelect={handleUnlockSelect}>Unlock</DropdownMenuItem>
+                ) : null}
+                {canUnblock ? (
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      onUnblock();
+                    }}
+                  >
+                    Unblock
+                  </DropdownMenuItem>
+                ) : null}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
+          {showStopShipButton ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-7 text-muted-foreground hover:text-destructive"
+              aria-label={`Stop shipping #${issue.number}`}
+              onClick={onStopShip}
+            >
+              <Square className="size-3.5 fill-current" />
+            </Button>
+          ) : null}
+        </div>
       </div>
       <h4 className="text-sm font-semibold leading-snug text-foreground">{issue.title}</h4>
       {priorityTier !== 1 || isBlocked || isLocked ? (
@@ -822,6 +829,7 @@ export default function App(): JSX.Element {
   const [resettingIssues, setResettingIssues] = useState<Set<number>>(new Set());
   const [unlockingIssues, setUnlockingIssues] = useState<Set<number>>(new Set());
   const [unblockingIssues, setUnblockingIssues] = useState<Set<number>>(new Set());
+  const [settingPriorityIssues, setSettingPriorityIssues] = useState<Set<number>>(new Set());
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [isNewIssueOpen, setIsNewIssueOpen] = useState(false);
@@ -960,6 +968,7 @@ export default function App(): JSX.Element {
     setResettingIssues(new Set());
     setUnlockingIssues(new Set());
     setUnblockingIssues(new Set());
+    setSettingPriorityIssues(new Set());
     setRepoInitialized(null);
     initVersionRef.current = 0;
   }
@@ -2099,6 +2108,18 @@ export default function App(): JSX.Element {
     });
   }
 
+  function trackSettingPriorityIssue(issueNumber: number): void {
+    setSettingPriorityIssues((current) => new Set(current).add(issueNumber));
+  }
+
+  function clearSettingPriorityIssue(issueNumber: number): void {
+    setSettingPriorityIssues((current) => {
+      const next = new Set(current);
+      next.delete(issueNumber);
+      return next;
+    });
+  }
+
   function isAutoUnblockIssue(repo: string, issueNumber: number): boolean {
     return autoUnblockIssuesRef.current.get(repo)?.has(issueNumber) ?? false;
   }
@@ -2207,12 +2228,15 @@ export default function App(): JSX.Element {
     issue: ListIssueItem,
     level: 'high' | 'normal' | 'low'
   ): Promise<void> {
-    if (!activeRepo) {
+    if (!activeRepo || settingPriorityIssues.has(issue.number)) {
       return;
     }
 
+    const repo = activeRepo;
+    trackSettingPriorityIssue(issue.number);
+
     try {
-      const result = await window.shipperAPI.setPriority(activeRepo, issue.number, level);
+      const result = await window.shipperAPI.setPriority(repo, issue.number, level);
       if (!result.ok) {
         pushToast({
           id: `set-priority-error-${issue.number}`,
@@ -2231,7 +2255,7 @@ export default function App(): JSX.Element {
         title: 'Priority updated',
         description: `#${issue.number} set to ${level}.`,
       });
-      await refreshIssuesForActiveRepo(activeRepo);
+      await refreshIssuesForActiveRepo(repo);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       pushToast({
@@ -2241,6 +2265,8 @@ export default function App(): JSX.Element {
         title: 'Failed to set priority',
         description: message,
       });
+    } finally {
+      clearSettingPriorityIssue(issue.number);
     }
   }
 
@@ -2929,6 +2955,7 @@ export default function App(): JSX.Element {
                                   void handleUnblockClick(issue);
                                 }}
                                 groomDisabled={!canFetch}
+                                isSettingPriority={settingPriorityIssues.has(issue.number)}
                                 isUnlocking={unlockingIssues.has(issue.number)}
                                 isUnblocking={unblockingIssues.has(issue.number)}
                               />
@@ -3026,6 +3053,7 @@ export default function App(): JSX.Element {
                                         }}
                                         resetTargets={resetTargets}
                                         isResetting={resettingIssues.has(issue.number)}
+                                        isSettingPriority={settingPriorityIssues.has(issue.number)}
                                         isUnlocking={unlockingIssues.has(issue.number)}
                                         isUnblocking={unblockingIssues.has(issue.number)}
                                         onShip={
