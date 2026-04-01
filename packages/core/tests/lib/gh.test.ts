@@ -204,6 +204,8 @@ describe('gh', () => {
     'could not resolve to a Repository',
     'validation failed',
     'No commit found on the pull request',
+    'merge already in progress',
+    'Already in progress',
   ])('does not retry permanent failure "%s"', async (stderr) => {
     const err = permanentError(stderr);
     execFileMock.mockImplementationOnce((_cmd: string, _args: string[], ...rest: unknown[]) => {
