@@ -7,7 +7,7 @@ import { Button } from './ui/button.js';
 interface RepoTabBarProps {
   repos: string[];
   activeRepo: string;
-  activeCommandRepos: Set<string>;
+  activeCommandRepos: ReadonlySet<string>;
   onSelectRepo: (repo: string) => void;
   onCloseRepo: (repo: string) => void;
   onAddRepo: () => void;
@@ -26,6 +26,7 @@ export function RepoTabBar({
       <div className="mx-auto flex max-w-7xl items-end gap-1 overflow-x-auto px-6 pt-2">
         {repos.map((repo) => {
           const isActive = repo === activeRepo;
+          const hasActiveCommands = activeCommandRepos.has(repo);
 
           return (
             <div
@@ -39,11 +40,12 @@ export function RepoTabBar({
               <button
                 type="button"
                 className="cursor-pointer flex min-w-0 items-center gap-2 px-3 py-2 text-sm font-medium outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label={hasActiveCommands ? `${repo} (active background work)` : repo}
                 onClick={() => {
                   onSelectRepo(repo);
                 }}
               >
-                {activeCommandRepos.has(repo) ? (
+                {hasActiveCommands ? (
                   <span className="size-2 shrink-0 rounded-full bg-primary" aria-hidden="true" />
                 ) : null}
                 <span className="block max-w-52 truncate">{repo}</span>
