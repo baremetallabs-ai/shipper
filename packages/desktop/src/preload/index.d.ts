@@ -49,7 +49,7 @@ interface PtyExitEvent {
   exitCode: number | null;
 }
 
-type BackgroundCommand = 'new' | 'ship' | 'init';
+type BackgroundCommand = 'new' | 'ship' | 'init' | 'unblock';
 type BackgroundStatus = 'queued' | 'running' | 'complete' | 'failed';
 
 interface BackgroundStatusMeta {
@@ -123,6 +123,7 @@ interface ShipperAPI {
     merge: boolean
   ) => Promise<{ sessionId: string }>;
   spawnBackgroundInit: (repo: string) => Promise<{ sessionId: string }>;
+  spawnBackgroundUnblock: (issueNumber: number, repo: string) => Promise<{ sessionId: string }>;
   killBackground: (sessionId: string) => Promise<void>;
   getBackgroundOutput: (sessionId: string) => Promise<string>;
   ptyWrite: (sessionId: string, data: string) => Promise<void>;

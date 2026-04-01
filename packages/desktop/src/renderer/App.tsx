@@ -75,12 +75,13 @@ type ResetSelection = {
   issue: ListIssueItem;
   targetStage: WorkflowStage;
 };
-type BackgroundCommandKind = 'new' | 'ship' | 'init';
+type BackgroundCommandKind = 'new' | 'ship' | 'init' | 'unblock';
 type BackgroundCommandStatus = 'queued' | 'running' | 'complete' | 'failed';
 type BackgroundRetryPayload =
   | { command: 'new'; repo: string; request: string }
   | { command: 'ship'; repo: string; issueNumber: number; merge: boolean }
-  | { command: 'init'; repo: string };
+  | { command: 'init'; repo: string }
+  | { command: 'unblock'; repo: string; issueNumber: number };
 
 interface BackgroundStatusMeta {
   issueNumber?: number;
@@ -220,6 +221,8 @@ export function getBackgroundTitle(
       return issueNumber ? `Ship #${issueNumber}${merge ? ' · merge' : ''}` : 'Ship';
     case 'init':
       return `Init ${repo}`;
+    case 'unblock':
+      return issueNumber ? `Unblock #${issueNumber}` : 'Unblock';
   }
 }
 
@@ -260,6 +263,8 @@ export function getBackgroundDetail({
         return merge ? 'Ship completed · merged' : 'Ship completed';
       case 'init':
         return 'Initialization complete';
+      case 'unblock':
+        return 'Unblock completed';
     }
   }
 
@@ -269,6 +274,10 @@ export function getBackgroundDetail({
 
   if (command === 'ship') {
     return latestOutput ?? (issueNumber ? `Shipping #${issueNumber}...` : 'Shipping...');
+  }
+
+  if (command === 'unblock') {
+    return latestOutput ?? (issueNumber ? `Unblocking #${issueNumber}...` : 'Unblocking...');
   }
 
   return latestOutput ?? `Initializing ${repo}...`;
@@ -288,6 +297,8 @@ export function getBackgroundRetryPayload(
       return issueNumber ? { command, repo, issueNumber, merge: merge ?? false } : undefined;
     case 'init':
       return { command, repo };
+    case 'unblock':
+      return issueNumber ? { command, repo, issueNumber } : undefined;
   }
 }
 
@@ -316,6 +327,8 @@ function getBackgroundLogTitle(
       return issueNumber ? `Ship #${issueNumber} logs` : `Ship logs — ${repo}`;
     case 'init':
       return `Init logs — ${repo}`;
+    case 'unblock':
+      return issueNumber ? `Unblock #${issueNumber} logs` : `Unblock logs — ${repo}`;
   }
 }
 
@@ -510,10 +523,12 @@ interface IssueCardProps {
   onResetSelect?: (targetStage: WorkflowStage) => void;
   onCloseNotPlanned?: () => void;
   onUnlock?: () => void;
+  onUnblock?: () => void;
   resetTargets?: WorkflowStage[];
   groomDisabled?: boolean;
   isResetting?: boolean;
   isUnlocking?: boolean;
+  isUnblocking?: boolean;
   onShip?: (issueNumber: number) => void;
   shipDisabled?: boolean;
   shippingStatus?: 'queued' | 'running';
@@ -529,10 +544,12 @@ function IssueCard({
   onResetSelect,
   onCloseNotPlanned,
   onUnlock,
+  onUnblock,
   resetTargets = [],
   groomDisabled = false,
   isResetting = false,
   isUnlocking = false,
+  isUnblocking = false,
   onShip,
   shipDisabled = false,
   shippingStatus,
@@ -544,13 +561,20 @@ function IssueCard({
   const isBlocked = issue.labels.includes(BLOCKED_LABEL);
   const isLocked = issue.labels.includes(LOCKED_LABEL);
   const isShipping = !!shippingStatus;
-  const isBusy = isResetting || isUnlocking;
-  const busyLabel = isResetting ? 'Resetting...' : isUnlocking ? 'Unlocking...' : null;
+  const isBusy = isResetting || isUnlocking || isUnblocking;
+  const busyLabel = isResetting
+    ? 'Resetting...'
+    : isUnlocking
+      ? 'Unlocking...'
+      : isUnblocking
+        ? 'Unblocking...'
+        : null;
   const isGroomDisabled = groomDisabled || isBlocked || isLocked || isShipping;
   const canUnlock = isLocked && !!onUnlock;
+  const canUnblock = isBlocked && !isLocked && !!onUnblock;
   const canCloseNotPlanned = !!onCloseNotPlanned && !isLocked && !isShipping;
   const hasResetMenu = onResetSelect !== undefined && resetTargets.length > 0;
-  const hasFlatActions = canCloseNotPlanned || canUnlock;
+  const hasFlatActions = canCloseNotPlanned || canUnlock || canUnblock;
   const showOverflowMenu = !isShipping && (hasResetMenu || hasFlatActions);
   const isShipDisabled = shipDisabled || isBlocked || isLocked || isShipping;
 
@@ -617,6 +641,15 @@ function IssueCard({
               ) : null}
               {canUnlock ? (
                 <DropdownMenuItem onSelect={handleUnlockSelect}>Unlock</DropdownMenuItem>
+              ) : null}
+              {canUnblock ? (
+                <DropdownMenuItem
+                  onSelect={() => {
+                    onUnblock();
+                  }}
+                >
+                  Unblock
+                </DropdownMenuItem>
               ) : null}
             </DropdownMenuContent>
           </DropdownMenu>
@@ -692,6 +725,7 @@ export default function App(): JSX.Element {
   const [unlockConfirmIssue, setUnlockConfirmIssue] = useState<ListIssueItem | null>(null);
   const [resettingIssues, setResettingIssues] = useState<Set<number>>(new Set());
   const [unlockingIssues, setUnlockingIssues] = useState<Set<number>>(new Set());
+  const [unblockingIssues, setUnblockingIssues] = useState<Set<number>>(new Set());
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [isNewIssueOpen, setIsNewIssueOpen] = useState(false);
@@ -725,6 +759,7 @@ export default function App(): JSX.Element {
   const backgroundCommandsRef = useRef<BackgroundCommandState[]>([]);
   const autoShipFailuresRef = useRef<Map<string, number>>(new Map());
   const autoShipSkippedRef = useRef<Map<string, Set<number>>>(new Map());
+  const autoUnblockQueueRef = useRef<Map<string, number[]>>(new Map());
   const autoMergeSaveInFlightRef = useRef(false);
   const sessionsRef = useRef<TerminalSession[]>([]);
   const activeSessionIdRef = useRef<string | null>(null);
@@ -819,6 +854,7 @@ export default function App(): JSX.Element {
     setUnlockConfirmIssue(null);
     setResettingIssues(new Set());
     setUnlockingIssues(new Set());
+    setUnblockingIssues(new Set());
     setRepoInitialized(null);
     initVersionRef.current = 0;
   }
@@ -835,6 +871,7 @@ export default function App(): JSX.Element {
     });
     autoShipFailuresRef.current.delete(repo);
     autoShipSkippedRef.current.delete(repo);
+    autoUnblockQueueRef.current.delete(repo);
   }
 
   function enableAutoShipForRepo(repo: string): void {
@@ -962,6 +999,11 @@ export default function App(): JSX.Element {
         return;
       }
 
+      if (command === 'unblock' && (status === 'complete' || status === 'failed')) {
+        await loadIssues(repo);
+        return;
+      }
+
       if (command === 'ship' && (status === 'complete' || status === 'failed')) {
         await loadIssues(repo);
       }
@@ -982,6 +1024,9 @@ export default function App(): JSX.Element {
         return;
       case 'init':
         await window.shipperAPI.spawnBackgroundInit(payload.repo);
+        return;
+      case 'unblock':
+        await window.shipperAPI.spawnBackgroundUnblock(payload.issueNumber, payload.repo);
     }
   });
 
@@ -1046,7 +1091,13 @@ export default function App(): JSX.Element {
 
     commitBackgroundCommands(postEventCommands);
 
-    if (event.status === 'complete') {
+    if (event.command === 'unblock' && (event.status === 'complete' || event.status === 'failed')) {
+      if (issueNumber !== undefined) {
+        clearUnblockIssue(issueNumber);
+      }
+    }
+
+    if (event.status === 'complete' && event.command !== 'unblock') {
       const successToast: BackgroundToastItem =
         event.command === 'new'
           ? {
@@ -1080,6 +1131,49 @@ export default function App(): JSX.Element {
             };
       pushToast(successToast);
       await refreshRepoAfterBackground(event.repo, event.command, event.status);
+    }
+
+    if (event.status === 'complete' && event.command === 'unblock') {
+      await refreshRepoAfterBackground(event.repo, event.command, event.status);
+
+      if (issueNumber !== undefined) {
+        try {
+          const freshIssues = await window.shipperAPI.listIssues(event.repo);
+          if (!freshIssues.ok) {
+            throw new Error(freshIssues.error);
+          }
+
+          const stillBlocked = freshIssues.issues.some(
+            (issue) => issue.number === issueNumber && issue.labels.includes(BLOCKED_LABEL)
+          );
+
+          if (stillBlocked) {
+            pushToast({
+              id: event.sessionId,
+              sessionId: event.sessionId,
+              variant: 'cancelled',
+              title: `#${issueNumber} remains blocked`,
+              description: 'The blocking dependencies have not been resolved.',
+            });
+          } else {
+            pushToast({
+              id: event.sessionId,
+              sessionId: event.sessionId,
+              variant: 'success',
+              title: `Unblocked #${issueNumber}`,
+              description: 'The issue is now eligible for shipping.',
+            });
+          }
+        } catch {
+          pushToast({
+            id: event.sessionId,
+            sessionId: event.sessionId,
+            variant: 'success',
+            title: `Unblock #${issueNumber} completed`,
+            description: 'The unblock agent finished.',
+          });
+        }
+      }
     }
 
     if (event.status === 'failed') {
@@ -1119,39 +1213,107 @@ export default function App(): JSX.Element {
     }
 
     if (
-      event.command !== 'ship' ||
+      event.command === 'ship' &&
+      (event.status === 'complete' || event.status === 'failed') &&
+      !cancelled &&
+      autoShipRepos.has(event.repo)
+    ) {
+      const currentFailures = autoShipFailuresRef.current.get(event.repo) ?? 0;
+      const currentSkipped = autoShipSkippedRef.current.get(event.repo) ?? new Set<number>();
+      const nextFailureState = getNextAutoShipFailureState(
+        event.status,
+        issueNumber,
+        currentFailures,
+        currentSkipped
+      );
+      autoShipFailuresRef.current.set(event.repo, nextFailureState.consecutiveFailures);
+      autoShipSkippedRef.current.set(event.repo, nextFailureState.skippedIssueNumbers);
+
+      if (nextFailureState.pauseAutoShip) {
+        clearAutoShipStateForRepo(event.repo);
+        pushToast({
+          id: `auto-ship-paused-${event.repo}-${Date.now()}`,
+          sessionId: event.sessionId,
+          variant: 'error',
+          title: 'Auto-ship paused',
+          description: `${MAX_AUTO_SHIP_CONSECUTIVE_FAILURES} consecutive failures disabled auto-ship for this repository.`,
+        });
+        return;
+      }
+
+      const activeIssueNumbers = getActiveShipIssueNumbers(postEventCommands, event.repo);
+      if (activeIssueNumbers.size > 0) {
+        return;
+      }
+
+      try {
+        const issueResult = await window.shipperAPI.listIssues(event.repo);
+        if (!issueResult.ok || !autoShipRepos.has(event.repo)) {
+          return;
+        }
+
+        const skippedIssueNumbers = autoShipSkippedRef.current.get(event.repo) ?? new Set<number>();
+        const nextIssue = selectNextAutoShipIssue(
+          issueResult.issues,
+          activeIssueNumbers,
+          skippedIssueNumbers
+        );
+
+        if (!nextIssue) {
+          const blockedIssues = issueResult.issues.filter(
+            (issue) => issue.labels.includes(BLOCKED_LABEL) && !issue.labels.includes(LOCKED_LABEL)
+          );
+
+          if (blockedIssues.length === 0) {
+            autoUnblockQueueRef.current.delete(event.repo);
+            return;
+          }
+
+          const firstBlocked = blockedIssues[0];
+          if (!firstBlocked) {
+            autoUnblockQueueRef.current.delete(event.repo);
+            return;
+          }
+
+          autoUnblockQueueRef.current.set(
+            event.repo,
+            blockedIssues.slice(1).map((issue) => issue.number)
+          );
+
+          await window.shipperAPI.spawnBackgroundUnblock(firstBlocked.number, event.repo);
+          pushToast({
+            id: `auto-unblock-${event.repo}-${firstBlocked.number}-${Date.now()}`,
+            sessionId: event.sessionId,
+            variant: 'success',
+            title: `Auto-ship: attempting unblock of #${firstBlocked.number}`,
+            description: firstBlocked.title,
+          });
+          return;
+        }
+
+        autoUnblockQueueRef.current.delete(event.repo);
+        await window.shipperAPI.spawnBackgroundShip(
+          nextIssue.number,
+          event.repo,
+          autoMergeRepos.has(event.repo)
+        );
+        pushToast({
+          id: `auto-ship-${event.repo}-${nextIssue.number}-${Date.now()}`,
+          sessionId: event.sessionId,
+          variant: 'success',
+          title: `Auto-ship: starting #${nextIssue.number}`,
+          description: nextIssue.title,
+        });
+      } catch {
+        // Auto-ship enqueue is best-effort; the user can still ship manually.
+      }
+    }
+
+    if (
+      event.command !== 'unblock' ||
       (event.status !== 'complete' && event.status !== 'failed') ||
-      cancelled ||
       !autoShipRepos.has(event.repo)
     ) {
-      return;
-    }
-
-    const currentFailures = autoShipFailuresRef.current.get(event.repo) ?? 0;
-    const currentSkipped = autoShipSkippedRef.current.get(event.repo) ?? new Set<number>();
-    const nextFailureState = getNextAutoShipFailureState(
-      event.status,
-      issueNumber,
-      currentFailures,
-      currentSkipped
-    );
-    autoShipFailuresRef.current.set(event.repo, nextFailureState.consecutiveFailures);
-    autoShipSkippedRef.current.set(event.repo, nextFailureState.skippedIssueNumbers);
-
-    if (nextFailureState.pauseAutoShip) {
-      clearAutoShipStateForRepo(event.repo);
-      pushToast({
-        id: `auto-ship-paused-${event.repo}-${Date.now()}`,
-        sessionId: event.sessionId,
-        variant: 'error',
-        title: 'Auto-ship paused',
-        description: `${MAX_AUTO_SHIP_CONSECUTIVE_FAILURES} consecutive failures disabled auto-ship for this repository.`,
-      });
-      return;
-    }
-
-    const activeIssueNumbers = getActiveShipIssueNumbers(postEventCommands, event.repo);
-    if (activeIssueNumbers.size > 0) {
       return;
     }
 
@@ -1161,31 +1323,84 @@ export default function App(): JSX.Element {
         return;
       }
 
+      const wasUnblocked =
+        issueNumber !== undefined &&
+        !issueResult.issues.some(
+          (issue) => issue.number === issueNumber && issue.labels.includes(BLOCKED_LABEL)
+        );
+
+      if (wasUnblocked) {
+        pushToast({
+          id: `auto-unblock-success-${event.repo}-${issueNumber}-${Date.now()}`,
+          sessionId: event.sessionId,
+          variant: 'success',
+          title: `Auto-ship: unblocked #${issueNumber}`,
+          description: 'The issue is now eligible for shipping.',
+        });
+      } else if (issueNumber !== undefined) {
+        pushToast({
+          id: `auto-unblock-still-blocked-${event.repo}-${issueNumber}-${Date.now()}`,
+          sessionId: event.sessionId,
+          variant: 'cancelled',
+          title: `Auto-ship: #${issueNumber} remains blocked`,
+          description: 'The blocking condition has not been resolved.',
+        });
+      }
+
       const skippedIssueNumbers = autoShipSkippedRef.current.get(event.repo) ?? new Set<number>();
-      const nextIssue = selectNextAutoShipIssue(
+      const activeIssueNumbers = getActiveShipIssueNumbers(postEventCommands, event.repo);
+      const candidate = selectNextAutoShipIssue(
         issueResult.issues,
         activeIssueNumbers,
         skippedIssueNumbers
       );
 
-      if (!nextIssue) {
+      if (candidate) {
+        autoUnblockQueueRef.current.delete(event.repo);
+        await window.shipperAPI.spawnBackgroundShip(
+          candidate.number,
+          event.repo,
+          autoMergeRepos.has(event.repo)
+        );
+        pushToast({
+          id: `auto-ship-${event.repo}-${candidate.number}-${Date.now()}`,
+          sessionId: event.sessionId,
+          variant: 'success',
+          title: `Auto-ship: starting #${candidate.number}`,
+          description: candidate.title,
+        });
         return;
       }
 
-      await window.shipperAPI.spawnBackgroundShip(
-        nextIssue.number,
-        event.repo,
-        autoMergeRepos.has(event.repo)
-      );
-      pushToast({
-        id: `auto-ship-${event.repo}-${nextIssue.number}-${Date.now()}`,
-        sessionId: event.sessionId,
-        variant: 'success',
-        title: `Auto-ship: starting #${nextIssue.number}`,
-        description: nextIssue.title,
-      });
+      const queue = autoUnblockQueueRef.current.get(event.repo) ?? [];
+      while (queue.length > 0) {
+        const nextIssueNumber = queue.shift();
+        if (nextIssueNumber === undefined) {
+          continue;
+        }
+
+        const nextBlockedIssue = issueResult.issues.find(
+          (issue) => issue.number === nextIssueNumber
+        );
+        if (!nextBlockedIssue || !nextBlockedIssue.labels.includes(BLOCKED_LABEL)) {
+          continue;
+        }
+
+        autoUnblockQueueRef.current.set(event.repo, queue);
+        await window.shipperAPI.spawnBackgroundUnblock(nextIssueNumber, event.repo);
+        pushToast({
+          id: `auto-unblock-${event.repo}-${nextIssueNumber}-${Date.now()}`,
+          sessionId: event.sessionId,
+          variant: 'success',
+          title: `Auto-ship: attempting unblock of #${nextIssueNumber}`,
+          description: nextBlockedIssue.title,
+        });
+        return;
+      }
+
+      autoUnblockQueueRef.current.delete(event.repo);
     } catch {
-      // Auto-ship enqueue is best-effort; the user can still ship manually.
+      autoUnblockQueueRef.current.delete(event.repo);
     }
   });
 
@@ -1640,6 +1855,18 @@ export default function App(): JSX.Element {
     });
   }
 
+  function trackUnblockIssue(issueNumber: number): void {
+    setUnblockingIssues((current) => new Set(current).add(issueNumber));
+  }
+
+  function clearUnblockIssue(issueNumber: number): void {
+    setUnblockingIssues((current) => {
+      const next = new Set(current);
+      next.delete(issueNumber);
+      return next;
+    });
+  }
+
   function handleResetSuccess(issueNumber: number): void {
     clearResetIssue(issueNumber);
     if (activeRepo) {
@@ -1758,6 +1985,28 @@ export default function App(): JSX.Element {
     }
 
     await handleUnlockExecute(unlockConfirmIssue);
+  }
+
+  async function handleUnblockClick(issue: ListIssueItem): Promise<void> {
+    if (!activeRepo) {
+      return;
+    }
+
+    trackUnblockIssue(issue.number);
+
+    try {
+      await window.shipperAPI.spawnBackgroundUnblock(issue.number, activeRepo);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      pushToast({
+        id: `unblock-spawn-error-${issue.number}`,
+        sessionId: '',
+        variant: 'error',
+        title: 'Failed to start unblock',
+        description: message,
+      });
+      clearUnblockIssue(issue.number);
+    }
   }
 
   function handleToggleDrawer(): void {
@@ -2366,8 +2615,12 @@ export default function App(): JSX.Element {
                                 onUnlock={() => {
                                   void handleUnlockClick(issue);
                                 }}
+                                onUnblock={() => {
+                                  void handleUnblockClick(issue);
+                                }}
                                 groomDisabled={!canFetch}
                                 isUnlocking={unlockingIssues.has(issue.number)}
+                                isUnblocking={unblockingIssues.has(issue.number)}
                               />
                             </div>
                           ))}
@@ -2455,9 +2708,13 @@ export default function App(): JSX.Element {
                                         onUnlock={() => {
                                           void handleUnlockClick(issue);
                                         }}
+                                        onUnblock={() => {
+                                          void handleUnblockClick(issue);
+                                        }}
                                         resetTargets={resetTargets}
                                         isResetting={resettingIssues.has(issue.number)}
                                         isUnlocking={unlockingIssues.has(issue.number)}
+                                        isUnblocking={unblockingIssues.has(issue.number)}
                                         onShip={
                                           !isReadyColumn
                                             ? (issueNumber) => void handleShipperShip(issueNumber)
@@ -2475,6 +2732,7 @@ export default function App(): JSX.Element {
                                         draggable={
                                           !resettingIssues.has(issue.number) &&
                                           !unlockingIssues.has(issue.number) &&
+                                          !unblockingIssues.has(issue.number) &&
                                           !shippingStatus
                                         }
                                         onDragStart={(e) => {

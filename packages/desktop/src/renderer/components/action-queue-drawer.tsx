@@ -14,7 +14,7 @@ import { cn } from '../lib/utils.js';
 import { Badge } from './ui/badge.js';
 import { Button } from './ui/button.js';
 
-export type ActionQueueCommand = 'new' | 'ship' | 'init';
+export type ActionQueueCommand = 'new' | 'ship' | 'init' | 'unblock';
 export type ActionQueueStatus = 'queued' | 'running' | 'complete' | 'failed';
 
 export interface ActionQueueItem {
@@ -85,6 +85,8 @@ function getCommandLabel(command: ActionQueueCommand): string {
       return 'Ship';
     case 'init':
       return 'Init';
+    case 'unblock':
+      return 'Unblock';
   }
 }
 

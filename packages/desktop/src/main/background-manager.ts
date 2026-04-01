@@ -5,7 +5,7 @@ import type { BrowserWindow } from 'electron';
 
 type BackgroundChildProcess = ChildProcessByStdio<null, Readable, Readable>;
 
-export type BackgroundCommand = 'new' | 'ship' | 'init';
+export type BackgroundCommand = 'new' | 'ship' | 'init' | 'unblock';
 export type BackgroundStatus = 'queued' | 'running' | 'complete' | 'failed';
 
 export interface BackgroundSessionMeta {

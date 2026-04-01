@@ -163,6 +163,40 @@ describe('BackgroundManager', () => {
     );
   });
 
+  it('starts unblock immediately even when a same-repo ship is already running', () => {
+    const manager = createManager();
+
+    manager.spawn({
+      sessionId: 'ship-1',
+      command: 'ship',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['ship', '41', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+      meta: { issueNumber: 41 },
+    });
+    manager.spawn({
+      sessionId: 'unblock-1',
+      command: 'unblock',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['unblock', '42', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+      meta: { issueNumber: 42 },
+    });
+
+    expect(mockSpawn).toHaveBeenCalledTimes(2);
+    expect(statusEvents()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ sessionId: 'ship-1', status: 'running' }),
+        expect.objectContaining({ sessionId: 'unblock-1', status: 'running' }),
+      ])
+    );
+    expect(
+      statusEvents().some((event) => event.sessionId === 'unblock-1' && event.status === 'queued')
+    ).toBe(false);
+  });
+
   it('captures buffered output for ship and init sessions', () => {
     const manager = createManager();
 
