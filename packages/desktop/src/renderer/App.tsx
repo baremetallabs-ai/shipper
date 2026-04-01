@@ -16,6 +16,7 @@ import {
   PR_OPEN_LABEL,
   PR_REVIEWED_LABEL,
   READY_LABEL,
+  STAGE_LABEL_NAMES,
 } from '../../../core/src/lib/labels.js';
 import type { ListIssueItem, WorkflowStage } from '@dnsquared/shipper-core';
 
@@ -431,6 +432,17 @@ export function getActiveShipIssueNumbers(
   return activeIssueNumbers;
 }
 
+export function getWorkflowStageDisplayName(labels: string[]): string | undefined {
+  for (let index = STAGE_LABEL_NAMES.length - 1; index >= 0; index -= 1) {
+    const label = STAGE_LABEL_NAMES[index];
+    if (label && labels.includes(label)) {
+      return DISPLAY_NAME_MAP[label];
+    }
+  }
+
+  return undefined;
+}
+
 export function selectNextAutoShipIssue(
   issues: ListIssueItem[],
   activeIssueNumbers: Set<number>,
@@ -802,9 +814,6 @@ export default function App(): JSX.Element {
   const canFetch = prerequisites !== null && prerequisiteMessage === null;
   const hasActiveRepo = activeRepo.length > 0 && isValidRepo(activeRepo);
   const hasSession = sessions.length > 0;
-  const visibleBackgroundCommands = backgroundCommands.filter(
-    (command) => command.status !== 'complete'
-  );
   const viewedBackgroundCommand =
     logViewer.sessionId === null
       ? null
@@ -1130,10 +1139,7 @@ export default function App(): JSX.Element {
       setActionQueueOpen(true);
     }
 
-    const postEventCommands =
-      event.status === 'complete'
-        ? nextCommands.filter((command) => command.id !== event.sessionId)
-        : nextCommands;
+    const postEventCommands = nextCommands;
 
     commitBackgroundCommands(postEventCommands);
 
@@ -1568,6 +1574,31 @@ export default function App(): JSX.Element {
       window.clearInterval(intervalId);
     };
   }, [activeRepo, canFetch, hasActiveRepo]);
+
+  useEffect(() => {
+    if (!canFetch || !hasActiveRepo) {
+      return;
+    }
+
+    const hasRunningShipCommand = backgroundCommands.some(
+      (command) =>
+        command.command === 'ship' &&
+        command.repo === activeRepo &&
+        command.status === 'running' &&
+        !command.cancelled
+    );
+    if (!hasRunningShipCommand) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void loadIssues(activeRepo);
+    }, 10_000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [activeRepo, backgroundCommands, canFetch, hasActiveRepo]);
 
   useEffect(() => {
     const drawerPanel = drawerPanelRef.current;
@@ -2488,20 +2519,28 @@ export default function App(): JSX.Element {
         <ActionQueueDrawer
           open={actionQueueOpen}
           onToggle={handleToggleActionQueue}
-          commands={visibleBackgroundCommands.map((command) => ({
-            id: command.id,
-            command: command.command,
-            status: command.status,
-            title: command.title,
-            repo: command.repo,
-            detail: command.detail,
-            canCancel: command.status === 'queued' || command.status === 'running',
-            canShowLogs:
-              command.command === 'new'
-                ? Boolean(command.logFile)
-                : command.output.length > 0 || command.status !== 'queued',
-            cancelled: command.cancelled,
-          }))}
+          commands={backgroundCommands.map((command) => {
+            const issue =
+              command.command === 'ship' && command.issueNumber !== undefined
+                ? issues.find((candidate) => candidate.number === command.issueNumber)
+                : undefined;
+
+            return {
+              id: command.id,
+              command: command.command,
+              status: command.status,
+              title: command.title,
+              repo: command.repo,
+              detail: command.detail,
+              canCancel: command.status === 'queued' || command.status === 'running',
+              canShowLogs:
+                command.command === 'new'
+                  ? Boolean(command.logFile)
+                  : command.output.length > 0 || command.status !== 'queued',
+              cancelled: command.cancelled,
+              workflowStage: issue ? getWorkflowStageDisplayName(issue.labels) : undefined,
+            };
+          })}
           onCancel={(sessionId) => {
             void handleCancelBackground(sessionId);
           }}
