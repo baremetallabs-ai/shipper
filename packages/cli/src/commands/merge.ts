@@ -681,10 +681,6 @@ async function processQueue(nwo: string, dryRun: boolean): Promise<void> {
   );
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 export async function mergeCommand(options: MergeOptions): Promise<void> {
   const nwo = await resolveRepo(options.repo);
 
@@ -741,7 +737,7 @@ export async function mergeCommand(options: MergeOptions): Promise<void> {
       console.log(`Polling every ${intervalSeconds}s. Press Ctrl+C to stop.`);
       for (;;) {
         await processQueue(nwo, options.dryRun);
-        await sleep(intervalSeconds * 1000);
+        await sleepMs(intervalSeconds * 1000);
       }
     }
   } finally {
