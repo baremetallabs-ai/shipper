@@ -566,11 +566,6 @@ function stripCodexHeadlessArgs(args: string[]): void {
   if (jsonIdx !== -1) {
     args.splice(jsonIdx, 1);
   }
-
-  const configIdx = findCodexSandboxConfigIndex(args);
-  if (configIdx !== -1) {
-    args.splice(configIdx, 2);
-  }
 }
 
 function normalizeCopilotHeadlessArgs(args: string[]): void {

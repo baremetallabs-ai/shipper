@@ -1392,8 +1392,8 @@ describe('runPrompt', () => {
     expect(spawnedArgs()).not.toContain('exec');
     expect(spawnedArgs()).toContain('--full-auto');
     expect(spawnedArgs()).not.toContain('--json');
-    expect(spawnedArgs()).not.toContain('-c');
-    expect(spawnedArgs()).not.toContain('sandbox_workspace_write.network_access=true');
+    expect(spawnedArgs()).toContain('-c');
+    expect(spawnedArgs()).toContain('sandbox_workspace_write.network_access=true');
     expect(spawnedArgs()).toContain('prompt body');
   });
 
@@ -1418,7 +1418,22 @@ describe('runPrompt', () => {
     expect(spawnedArgs()).toContain('config1');
     expect(spawnedArgs()).not.toContain('exec');
     expect(spawnedArgs()).toContain('--full-auto');
+    expect(spawnedArgs()).toContain('sandbox_workspace_write.network_access=true');
+  });
+
+  it('does not inject codex network config for prompts authored directly for interactive mode', async () => {
+    resolveAgentMock.mockReturnValue('codex');
+    resolveModeMock.mockReturnValue('interactive');
+    readFileMock.mockResolvedValueOnce(makePrompt('codex'));
+    mockSpawnResult();
+
+    await runPrompt('test', { mode: 'interactive' });
+
+    expect(spawnedArgs()).not.toContain('exec');
+    expect(spawnedArgs()).not.toContain('--json');
+    expect(spawnedArgs()).not.toContain('-c');
     expect(spawnedArgs()).not.toContain('sandbox_workspace_write.network_access=true');
+    expect(spawnedArgs()).toContain('prompt body');
   });
 });
 
