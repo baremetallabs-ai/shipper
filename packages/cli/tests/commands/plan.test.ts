@@ -20,6 +20,17 @@ const retryOnInvalidOutputMock = vi.fn<
 const resolveBaseBranchMock = vi.fn(() => Promise.resolve('main'));
 const runPromptMock = vi.fn(() => Promise.resolve(9));
 const scrubOutputDirMock = vi.fn(() => Promise.resolve());
+const loggerMock = {
+  log: (message: string) => {
+    console.log(`[shipper] ${message}`);
+  },
+  warn: (message: string) => {
+    console.warn(`[shipper] ${message}`);
+  },
+  error: (message: string) => {
+    console.error(`[shipper] ${message}`);
+  },
+};
 const withIssueLockMock = vi.fn((_repo: unknown, _issue: unknown, fn: () => Promise<unknown>) =>
   fn()
 );
@@ -31,6 +42,7 @@ const withWorktreeMock = vi.fn((_opts: unknown, fn: (wtPath: string) => Promise<
 );
 
 vi.mock('@dnsquared/shipper-core', () => ({
+  logger: loggerMock,
   autoSelectIssue: autoSelectIssueMock,
   generateBranchName: generateBranchNameMock,
   getRepoRoot: getRepoRootMock,
@@ -138,7 +150,7 @@ describe('planCommand', () => {
       'plan',
       'Invalid result.json'
     );
-    expect(consoleErrorSpy).toHaveBeenCalledWith('Invalid result.json');
+    expect(consoleErrorSpy).toHaveBeenCalledWith('[shipper] Invalid result.json');
     expect(process.exitCode).toBe(1);
   });
 

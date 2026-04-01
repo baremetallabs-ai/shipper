@@ -1,4 +1,10 @@
-import { resolveMode, runPrompt, type AgentName, type CommandMode } from '@dnsquared/shipper-core';
+import {
+  logger,
+  resolveMode,
+  runPrompt,
+  type AgentName,
+  type CommandMode,
+} from '@dnsquared/shipper-core';
 
 export async function newCommand(
   requestWords: string[],
@@ -8,8 +14,8 @@ export async function newCommand(
   if (!request) {
     const effectiveMode = resolveMode('new', options.mode);
     if (effectiveMode === 'headless') {
-      console.error('Error: A request is required when running in headless mode.');
-      console.error('Usage: shipper new <request...> --mode headless');
+      logger.error('Error: A request is required when running in headless mode.');
+      logger.error('Usage: shipper new <request...> --mode headless');
       process.exit(1);
       return;
     }

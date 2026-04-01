@@ -18,12 +18,24 @@ const retryOnInvalidOutputMock = vi.fn<
 const runPromptMock = vi.fn(() => Promise.resolve(0));
 const scrubOutputDirMock = vi.fn(() => Promise.resolve());
 const setupProtocolDirsMock = vi.fn(() => Promise.resolve());
+const loggerMock = {
+  log: (message: string) => {
+    console.log(`[shipper] ${message}`);
+  },
+  warn: (message: string) => {
+    console.warn(`[shipper] ${message}`);
+  },
+  error: (message: string) => {
+    console.error(`[shipper] ${message}`);
+  },
+};
 const withIssueLockMock = vi.fn((_repo: unknown, _issue: unknown, fn: () => Promise<unknown>) =>
   fn()
 );
 const writeContextFileMock = vi.fn(() => Promise.resolve());
 
 vi.mock('@dnsquared/shipper-core', () => ({
+  logger: loggerMock,
   fetchIssue: fetchIssueMock,
   gh: ghMock,
   handleAgentCrash: handleAgentCrashMock,
@@ -293,7 +305,7 @@ describe('unblockCommand', () => {
       'unblock',
       'Invalid result.json'
     );
-    expect(consoleErrorSpy).toHaveBeenCalledWith('Invalid result.json');
+    expect(consoleErrorSpy).toHaveBeenCalledWith('[shipper] Invalid result.json');
     expect(process.exitCode).toBe(1);
   });
 });

@@ -5,6 +5,17 @@ const { mockGh } = vi.hoisted(() => ({
 }));
 
 vi.mock('@dnsquared/shipper-core', () => ({
+  logger: {
+    error: (message: string) => {
+      console.error(`[shipper] ${message}`);
+    },
+    log: (message: string) => {
+      console.log(`[shipper] ${message}`);
+    },
+    warn: (message: string) => {
+      console.warn(`[shipper] ${message}`);
+    },
+  },
   gh: (args: string[]) => mockGh(args),
 }));
 
@@ -38,7 +49,9 @@ describe('adoptCommand', () => {
     await adoptCommand('42');
 
     expect(mockGh).toHaveBeenCalledWith(['issue', 'edit', '42', '--add-label', 'shipper:new']);
-    expect(mockConsoleLog).toHaveBeenCalledWith('Issue #42 adopted into shipper workflow.');
+    expect(mockConsoleLog).toHaveBeenCalledWith(
+      '[shipper] Issue #42 adopted into shipper workflow.'
+    );
   });
 
   it('warns and does not modify an issue that already has shipper labels', async () => {
@@ -58,7 +71,7 @@ describe('adoptCommand', () => {
     await adoptCommand('42');
 
     expect(mockConsoleWarn).toHaveBeenCalledWith(
-      'Warning: Issue #42 already has shipper label(s): shipper:groomed. No changes made.'
+      '[shipper] Warning: Issue #42 already has shipper label(s): shipper:groomed. No changes made.'
     );
     // Should not call gh issue edit
     const editCalls = mockGh.mock.calls.filter(
@@ -76,7 +89,7 @@ describe('adoptCommand', () => {
     });
 
     await expect(adoptCommand('9999')).rejects.toThrow('process.exit');
-    expect(mockConsoleError).toHaveBeenCalledWith('Error: Issue #9999 not found.');
+    expect(mockConsoleError).toHaveBeenCalledWith('[shipper] Error: Issue #9999 not found.');
   });
 
   it('exits with error when issue number is a pull request', async () => {
@@ -91,7 +104,9 @@ describe('adoptCommand', () => {
     });
 
     await expect(adoptCommand('42')).rejects.toThrow('process.exit');
-    expect(mockConsoleError).toHaveBeenCalledWith('Error: #42 is a pull request, not an issue.');
+    expect(mockConsoleError).toHaveBeenCalledWith(
+      '[shipper] Error: #42 is a pull request, not an issue.'
+    );
   });
 
   it('strips # prefix from issue number', async () => {
@@ -112,7 +127,9 @@ describe('adoptCommand', () => {
 
   it('exits with error for non-numeric input', async () => {
     await expect(adoptCommand('abc')).rejects.toThrow('process.exit');
-    expect(mockConsoleError).toHaveBeenCalledWith('Error: Please provide a valid issue number.');
+    expect(mockConsoleError).toHaveBeenCalledWith(
+      '[shipper] Error: Please provide a valid issue number.'
+    );
   });
 });
 
@@ -141,7 +158,9 @@ describe('adoptAllCommand', () => {
     expect(editCalls[0]?.[0]).toEqual(['issue', 'edit', '10', '--add-label', 'shipper:new']);
     expect(editCalls[1]?.[0]).toEqual(['issue', 'edit', '12', '--add-label', 'shipper:new']);
     expect(editCalls[2]?.[0]).toEqual(['issue', 'edit', '13', '--add-label', 'shipper:new']);
-    expect(mockConsoleLog).toHaveBeenCalledWith('Adopted #10, #12, #13 into shipper workflow.');
+    expect(mockConsoleLog).toHaveBeenCalledWith(
+      '[shipper] Adopted #10, #12, #13 into shipper workflow.'
+    );
   });
 
   it('prints message when no eligible issues found', async () => {
@@ -157,7 +176,7 @@ describe('adoptAllCommand', () => {
 
     await adoptAllCommand();
 
-    expect(mockConsoleLog).toHaveBeenCalledWith('No eligible issues found.');
+    expect(mockConsoleLog).toHaveBeenCalledWith('[shipper] No eligible issues found.');
     const editCalls = mockGh.mock.calls.filter(
       ([args]) => args[0] === 'issue' && args[1] === 'edit'
     );
@@ -173,7 +192,7 @@ describe('adoptAllCommand', () => {
     });
 
     await expect(adoptAllCommand()).rejects.toThrow('process.exit');
-    expect(mockConsoleError).toHaveBeenCalledWith('Error: Failed to fetch issues.');
+    expect(mockConsoleError).toHaveBeenCalledWith('[shipper] Error: Failed to fetch issues.');
   });
 
   it('continues labeling remaining issues when one fails', async () => {
@@ -195,9 +214,11 @@ describe('adoptAllCommand', () => {
 
     await expect(adoptAllCommand()).rejects.toThrow('process.exit');
     expect(mockConsoleError).toHaveBeenCalledWith(
-      "Error: Failed to add 'shipper:new' label to issue #12."
+      "[shipper] Error: Failed to add 'shipper:new' label to issue #12."
     );
-    expect(mockConsoleLog).toHaveBeenCalledWith('Adopted #10, #13 into shipper workflow.');
+    expect(mockConsoleLog).toHaveBeenCalledWith(
+      '[shipper] Adopted #10, #13 into shipper workflow.'
+    );
   });
 
   it('handles empty repo with no issues', async () => {
@@ -210,7 +231,7 @@ describe('adoptAllCommand', () => {
 
     await adoptAllCommand();
 
-    expect(mockConsoleLog).toHaveBeenCalledWith('No eligible issues found.');
+    expect(mockConsoleLog).toHaveBeenCalledWith('[shipper] No eligible issues found.');
     const editCalls = mockGh.mock.calls.filter(
       ([args]) => args[0] === 'issue' && args[1] === 'edit'
     );

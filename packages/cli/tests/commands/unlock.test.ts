@@ -7,6 +7,17 @@ const mockReleaseIssueLock = vi.fn<(repo: string, issue: string) => Promise<void
 const repo = 'owner/repo';
 
 vi.mock('@dnsquared/shipper-core', () => ({
+  logger: {
+    error: (message: string) => {
+      console.error(`[shipper] ${message}`);
+    },
+    log: (message: string) => {
+      console.log(`[shipper] ${message}`);
+    },
+    warn: (message: string) => {
+      console.warn(`[shipper] ${message}`);
+    },
+  },
   listIssues: (repo: string, options: { label: string }) => mockListIssues(repo, options),
   isLockStale: (repo: string, issue: string) => mockIsLockStale(repo, issue),
   releaseIssueLock: (repo: string, issue: string) => mockReleaseIssueLock(repo, issue),
@@ -46,10 +57,10 @@ describe('unlockCommand', () => {
     expect(mockExit).toHaveBeenCalledWith(1);
     expect(mockConsoleError).toHaveBeenNthCalledWith(
       1,
-      'Error: Please provide an issue number or use --stale.'
+      '[shipper] Error: Please provide an issue number or use --stale.'
     );
-    expect(mockConsoleError).toHaveBeenNthCalledWith(2, 'Usage: shipper unlock <issue>');
-    expect(mockConsoleError).toHaveBeenNthCalledWith(3, '   or: shipper unlock --stale');
+    expect(mockConsoleError).toHaveBeenNthCalledWith(2, '[shipper] Usage: shipper unlock <issue>');
+    expect(mockConsoleError).toHaveBeenNthCalledWith(3, '[shipper]    or: shipper unlock --stale');
     expect(mockListIssues).not.toHaveBeenCalled();
     expect(mockIsLockStale).not.toHaveBeenCalled();
     expect(mockReleaseIssueLock).not.toHaveBeenCalled();
@@ -60,10 +71,10 @@ describe('unlockCommand', () => {
     expect(mockExit).toHaveBeenCalledWith(1);
     expect(mockConsoleError).toHaveBeenNthCalledWith(
       1,
-      'Error: --stale cannot be used with an issue number.'
+      '[shipper] Error: --stale cannot be used with an issue number.'
     );
-    expect(mockConsoleError).toHaveBeenNthCalledWith(2, 'Usage: shipper unlock <issue>');
-    expect(mockConsoleError).toHaveBeenNthCalledWith(3, '   or: shipper unlock --stale');
+    expect(mockConsoleError).toHaveBeenNthCalledWith(2, '[shipper] Usage: shipper unlock <issue>');
+    expect(mockConsoleError).toHaveBeenNthCalledWith(3, '[shipper]    or: shipper unlock --stale');
     expect(mockListIssues).not.toHaveBeenCalled();
     expect(mockIsLockStale).not.toHaveBeenCalled();
     expect(mockReleaseIssueLock).not.toHaveBeenCalled();
@@ -78,7 +89,7 @@ describe('unlockCommand', () => {
     expect(mockIsLockStale).not.toHaveBeenCalled();
     expect(mockReleaseIssueLock).not.toHaveBeenCalled();
     expect(mockConsoleError).toHaveBeenCalledTimes(1);
-    expect(mockConsoleError).toHaveBeenCalledWith('No stale locks found.');
+    expect(mockConsoleError).toHaveBeenCalledWith('[shipper] No stale locks found.');
   });
 
   it('releases only stale locks and prints ordered per-issue status plus summary', async () => {
@@ -92,11 +103,11 @@ describe('unlockCommand', () => {
     expect(mockIsLockStale).toHaveBeenNthCalledWith(2, repo, '43');
     expect(mockReleaseIssueLock).toHaveBeenCalledTimes(1);
     expect(mockReleaseIssueLock).toHaveBeenCalledWith(repo, '42');
-    expect(mockConsoleError).toHaveBeenNthCalledWith(1, '#42: stale — released');
-    expect(mockConsoleError).toHaveBeenNthCalledWith(2, '#43: active — skipped');
+    expect(mockConsoleError).toHaveBeenNthCalledWith(1, '[shipper] #42: stale — released');
+    expect(mockConsoleError).toHaveBeenNthCalledWith(2, '[shipper] #43: active — skipped');
     expect(mockConsoleError).toHaveBeenNthCalledWith(
       3,
-      'Released 1 stale lock(s) (1 active lock(s) skipped).'
+      '[shipper] Released 1 stale lock(s) (1 active lock(s) skipped).'
     );
   });
 
@@ -109,11 +120,11 @@ describe('unlockCommand', () => {
     expect(mockIsLockStale).toHaveBeenNthCalledWith(1, repo, '42');
     expect(mockIsLockStale).toHaveBeenNthCalledWith(2, repo, '43');
     expect(mockReleaseIssueLock).not.toHaveBeenCalled();
-    expect(mockConsoleError).toHaveBeenNthCalledWith(1, '#42: active — skipped');
-    expect(mockConsoleError).toHaveBeenNthCalledWith(2, '#43: active — skipped');
-    expect(mockConsoleError).toHaveBeenNthCalledWith(3, 'No stale locks found.');
+    expect(mockConsoleError).toHaveBeenNthCalledWith(1, '[shipper] #42: active — skipped');
+    expect(mockConsoleError).toHaveBeenNthCalledWith(2, '[shipper] #43: active — skipped');
+    expect(mockConsoleError).toHaveBeenNthCalledWith(3, '[shipper] No stale locks found.');
     expect(mockConsoleError).not.toHaveBeenCalledWith(
-      'Released 0 stale lock(s) (2 active lock(s) skipped).'
+      '[shipper] Released 0 stale lock(s) (2 active lock(s) skipped).'
     );
   });
 });

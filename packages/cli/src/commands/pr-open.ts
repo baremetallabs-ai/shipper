@@ -1,4 +1,4 @@
-import { findBranchForIssue, getRepoRoot } from '@dnsquared/shipper-core';
+import { logger, findBranchForIssue, getRepoRoot } from '@dnsquared/shipper-core';
 import { autoSelectIssue, resolveBaseBranch, resolveRef } from '@dnsquared/shipper-core';
 import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
 import { formatConflictContext } from '@dnsquared/shipper-core';
@@ -22,10 +22,10 @@ export async function prOpenCommand(
   if (!issue) {
     const selected = await autoSelectIssue(repo, 'shipper:implemented');
     if (!selected) {
-      console.error("No issues ready for PR. Run 'shipper implement' first.");
+      logger.error("No issues ready for PR. Run 'shipper implement' first.");
       process.exit(1);
     }
-    console.error(`Auto-selected #${selected.number}: ${selected.title}`);
+    logger.error(`Auto-selected #${selected.number}: ${selected.title}`);
     issue = String(selected.number);
   } else {
     const resolved = await resolveRef(repo, issue, 'issue');
@@ -114,7 +114,7 @@ export async function prOpenCommand(
             });
           } catch (error) {
             const detail = error instanceof Error ? error.message : String(error);
-            console.error(detail);
+            logger.error(detail);
             await handleAgentCrash(repo, issue, 'pr_open', detail);
             process.exitCode = 1;
             return;

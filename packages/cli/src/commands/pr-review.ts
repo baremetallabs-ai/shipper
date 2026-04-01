@@ -1,4 +1,5 @@
 import {
+  logger,
   autoSelectPrForStage,
   getBranchForPR,
   getRepoRoot,
@@ -34,7 +35,7 @@ export async function prReviewCommand(
       'shipper:pr-open',
       "No PRs ready for review. Run 'shipper pr open' first."
     );
-    console.error(
+    logger.error(
       `Auto-selected PR #${selected.pr} (issue #${selected.issue.number}: ${selected.issue.title})`
     );
     pr = selected.pr;
@@ -119,7 +120,7 @@ export async function prReviewCommand(
             });
           } catch (error) {
             const detail = error instanceof Error ? error.message : String(error);
-            console.error(detail);
+            logger.error(detail);
             await handleAgentCrash(repo, issueNumber, 'pr_review', detail);
             process.exitCode = 1;
           }

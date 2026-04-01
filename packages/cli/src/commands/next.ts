@@ -1,4 +1,5 @@
 import {
+  logger,
   gh,
   resolveRef,
   tryResolvePrForIssue,
@@ -37,7 +38,7 @@ interface IssueData {
 async function resolvePrForIssue(repo: string, issueNumber: number): Promise<string> {
   const pr = await tryResolvePrForIssue(repo, issueNumber);
   if (!pr) {
-    console.error(
+    logger.error(
       `No open PR found for issue #${issueNumber}. Run \`shipper pr open ${issueNumber}\` first.`
     );
     process.exit(1);
@@ -53,8 +54,8 @@ export async function nextCommand(
   model?: string
 ): Promise<void> {
   if (!ref) {
-    console.error('Error: Please provide an issue or PR number.');
-    console.error('Usage: shipper next <issue-or-pr>');
+    logger.error('Error: Please provide an issue or PR number.');
+    logger.error('Usage: shipper next <issue-or-pr>');
     process.exit(1);
   }
 
@@ -80,7 +81,7 @@ export async function nextCommand(
   const isFailed = allLabels.includes(FAILED_LABEL);
 
   if (isFailed) {
-    console.error(`Issue #${issueNumber} has the shipper:failed label.`);
+    logger.error(`Issue #${issueNumber} has the shipper:failed label.`);
     process.exit(1);
   }
 
@@ -90,14 +91,14 @@ export async function nextCommand(
 
   // Validate labels
   if (shipperLabels.length === 0) {
-    console.error(
+    logger.error(
       `No shipper label found on issue #${issueNumber}. Use \`shipper new\` to start the workflow.`
     );
     process.exit(1);
   }
 
   if (shipperLabels.length > 1) {
-    console.error(
+    logger.error(
       `Multiple shipper labels found on issue #${issueNumber}. Please resolve manually.`
     );
     process.exit(1);
@@ -105,14 +106,14 @@ export async function nextCommand(
 
   const label = shipperLabels[0];
   if (!label) {
-    console.error(
+    logger.error(
       `No shipper label found on issue #${issueNumber}. Use \`shipper new\` to start the workflow.`
     );
     process.exit(1);
   }
 
   if (isBlocked && label !== NEW_LABEL) {
-    console.error(
+    logger.error(
       `Issue #${issueNumber} is blocked. Run 'shipper unblock ${issueNumber}' to check if it can proceed.`
     );
     process.exit(1);
@@ -124,42 +125,42 @@ export async function nextCommand(
   await withIssueLock(repo, issueStr, async () => {
     switch (label) {
       case NEW_LABEL:
-        console.log(`Running: shipper groom ${issueStr}`);
+        logger.log(`Running: shipper groom ${issueStr}`);
         await groomCommand(repo, issueStr, { auto: false, mode, agent, model });
         break;
       case GROOMED_LABEL:
-        console.log(`Running: shipper design ${issueStr}`);
+        logger.log(`Running: shipper design ${issueStr}`);
         await designCommand(repo, issueStr, mode, agent, model);
         break;
       case DESIGNED_LABEL:
-        console.log(`Running: shipper plan ${issueStr}`);
+        logger.log(`Running: shipper plan ${issueStr}`);
         await planCommand(repo, issueStr, mode, agent, model);
         break;
       case PLANNED_LABEL:
-        console.log(`Running: shipper implement ${issueStr}`);
+        logger.log(`Running: shipper implement ${issueStr}`);
         await implementCommand(repo, issueStr, mode, agent, model);
         break;
       case IMPLEMENTED_LABEL:
-        console.log(`Running: shipper pr open ${issueStr}`);
+        logger.log(`Running: shipper pr open ${issueStr}`);
         await prOpenCommand(repo, issueStr, mode, agent, model);
         break;
       case PR_OPEN_LABEL: {
         const prNum = await resolvePrForIssue(repo, issueNumber);
-        console.log(`Running: shipper pr review ${prNum}`);
+        logger.log(`Running: shipper pr review ${prNum}`);
         await prReviewCommand(repo, prNum, mode, agent, model);
         break;
       }
       case PR_REVIEWED_LABEL: {
         const prNum = await resolvePrForIssue(repo, issueNumber);
-        console.log(`Running: shipper pr remediate ${prNum}`);
+        logger.log(`Running: shipper pr remediate ${prNum}`);
         await prRemediateCommand(repo, prNum, mode, agent, model);
         break;
       }
       case READY_LABEL:
-        console.log(`Issue #${issueNumber} is ready — no remaining workflow steps.`);
+        logger.log(`Issue #${issueNumber} is ready — no remaining workflow steps.`);
         break;
       default:
-        console.error(`Unrecognized shipper label "${label}" on issue #${issueNumber}.`);
+        logger.error(`Unrecognized shipper label "${label}" on issue #${issueNumber}.`);
         process.exit(1);
     }
   });

@@ -97,6 +97,17 @@ vi.mock('node:child_process', async () => {
 });
 
 vi.mock('@dnsquared/shipper-core', () => ({
+  logger: {
+    log: (message: string) => {
+      console.log(`[shipper] ${message}`);
+    },
+    warn: (message: string) => {
+      console.warn(`[shipper] ${message}`);
+    },
+    error: (message: string) => {
+      console.error(`[shipper] ${message}`);
+    },
+  },
   gh: (args: string[]) => mockGh(args),
   scripts: {},
   LABELS: canonicalLabels,
@@ -239,7 +250,7 @@ describe('initCommand label sync', () => {
         ],
       ])
     );
-    expect(console.log).toHaveBeenCalledWith(`Synced ${expectedLabels.length} labels`);
+    expect(console.log).toHaveBeenCalledWith(`[shipper] Synced ${expectedLabels.length} labels`);
     expect(console.log).not.toHaveBeenCalledWith(
       expect.stringMatching(/^Created \d+ new label\(s\)$/)
     );
@@ -250,7 +261,9 @@ describe('initCommand label sync', () => {
     mockGh.mockRejectedValueOnce(new Error('label sync failed'));
 
     await expect(initCommand({ agent: 'claude' })).rejects.toThrow('label sync failed');
-    expect(console.log).not.toHaveBeenCalledWith(`Synced ${expectedLabels.length} labels`);
+    expect(console.log).not.toHaveBeenCalledWith(
+      `[shipper] Synced ${expectedLabels.length} labels`
+    );
   });
 });
 
@@ -423,7 +436,7 @@ describe('initCommand stored agent', () => {
     existsSyncMock.mockImplementation((p: string) => p === settingsPath);
     await initCommand({});
     expect(questionMock).not.toHaveBeenCalled();
-    expect(console.log).toHaveBeenCalledWith('Using agent: claude (from settings)');
+    expect(console.log).toHaveBeenCalledWith('[shipper] Using agent: claude (from settings)');
   });
 
   it('uses stored agent from legacy agent key', async () => {
@@ -434,7 +447,7 @@ describe('initCommand stored agent', () => {
     existsSyncMock.mockImplementation((p: string) => p === settingsPath);
     await initCommand({});
     expect(questionMock).not.toHaveBeenCalled();
-    expect(console.log).toHaveBeenCalledWith('Using agent: claude (from settings)');
+    expect(console.log).toHaveBeenCalledWith('[shipper] Using agent: claude (from settings)');
   });
 
   it('settings.local.json overrides settings.json', async () => {
@@ -445,7 +458,7 @@ describe('initCommand stored agent', () => {
     });
     await initCommand({});
     expect(questionMock).not.toHaveBeenCalled();
-    expect(console.log).toHaveBeenCalledWith('Using agent: copilot (from settings)');
+    expect(console.log).toHaveBeenCalledWith('[shipper] Using agent: copilot (from settings)');
     const written = parseWrittenSettings();
     expect(written.commands).toEqual({ default: { agent: 'copilot' } });
   });
@@ -505,7 +518,7 @@ describe('initCommand agent selection', () => {
   it('--agent invalid prints validation error and exits', async () => {
     await initCommand({ agent: 'invalid' });
     expect(console.error).toHaveBeenCalledWith(
-      'Error: Invalid agent "invalid". Must be one of: claude, codex, copilot'
+      '[shipper] Error: Invalid agent "invalid". Must be one of: claude, codex, copilot'
     );
     expect(exitMock).toHaveBeenCalledWith(1);
   });
@@ -517,7 +530,7 @@ describe('initCommand agent selection', () => {
       return '';
     });
     await initCommand({ agent: 'claude' });
-    expect(console.log).toHaveBeenCalledWith('Switching agent from codex to claude');
+    expect(console.log).toHaveBeenCalledWith('[shipper] Switching agent from codex to claude');
   });
 
   it('re-init migrates legacy agent key to commands', async () => {
@@ -604,7 +617,7 @@ describe('initCommand commit and push', () => {
       false
     );
     expect(console.log).toHaveBeenCalledWith(
-      "Tip: run 'git add .shipper/ && git commit' to commit your changes, then push to your default branch."
+      "[shipper] Tip: run 'git add .shipper/ && git commit' to commit your changes, then push to your default branch."
     );
   });
 
@@ -646,10 +659,10 @@ describe('initCommand commit and push', () => {
       '.shipper/output/result.json',
       '.shipper/input/example.txt',
     ]);
-    expect(console.log).toHaveBeenCalledWith('Untracked: .shipper/output/result.json');
-    expect(console.log).toHaveBeenCalledWith('Untracked: .shipper/input/example.txt');
+    expect(console.log).toHaveBeenCalledWith('[shipper] Untracked: .shipper/output/result.json');
+    expect(console.log).toHaveBeenCalledWith('[shipper] Untracked: .shipper/input/example.txt');
     expect(console.log).toHaveBeenCalledWith(
-      'These files were tracked by git but should be gitignored. Commit the changes to complete the fix.'
+      '[shipper] These files were tracked by git but should be gitignored. Commit the changes to complete the fix.'
     );
     expect(
       (console.log as ReturnType<typeof vi.fn>).mock.calls.filter(
@@ -725,7 +738,7 @@ describe('initCommand commit and push', () => {
     expect(mockExecFileAsync).not.toHaveBeenCalledWith('git', ['add', '--', '.shipper/']);
     expect(console.log).not.toHaveBeenCalledWith(expect.stringContaining('Untracked:'));
     expect(console.log).toHaveBeenCalledWith(
-      "Tip: run 'git add .shipper/ && git commit' to commit your changes, then push to your default branch."
+      "[shipper] Tip: run 'git add .shipper/ && git commit' to commit your changes, then push to your default branch."
     );
   });
 
@@ -789,7 +802,7 @@ describe('initCommand commit and push', () => {
       encoding: 'utf-8',
     });
     expect(mockExecFileAsync).not.toHaveBeenCalledWith('git', expect.arrayContaining(['push']));
-    expect(console.log).toHaveBeenCalledWith('Committed .shipper/ files.');
+    expect(console.log).toHaveBeenCalledWith('[shipper] Committed .shipper/ files.');
   });
 
   it('stages, commits, and pushes the current branch when autocommit and push are enabled', async () => {
@@ -821,7 +834,7 @@ describe('initCommand commit and push', () => {
     );
     expect(mockExecFileAsync).toHaveBeenCalledWith('git', ['push', 'origin', 'feature/init']);
     expect(console.log).toHaveBeenCalledWith(
-      'Committed and pushed .shipper/ files to feature/init'
+      '[shipper] Committed and pushed .shipper/ files to feature/init'
     );
   });
 
@@ -847,7 +860,7 @@ describe('initCommand commit and push', () => {
   it('errors when push is requested without autocommit', async () => {
     await initCommand({ agent: 'claude', push: true });
 
-    expect(console.error).toHaveBeenCalledWith('Error: --push requires --autocommit.');
+    expect(console.error).toHaveBeenCalledWith('[shipper] Error: --push requires --autocommit.');
     expect(exitMock).toHaveBeenCalledWith(1);
     expect(mockExecFileAsync).not.toHaveBeenCalled();
   });
@@ -858,7 +871,9 @@ describe('initCommand commit and push', () => {
     expect(mockExecFileAsync).toHaveBeenCalledWith('git', ['add', '--', '.shipper/']);
     expect(mockExecFileAsync).not.toHaveBeenCalledWith('git', expect.arrayContaining(['commit']));
     expect(mockExecFileAsync).not.toHaveBeenCalledWith('git', expect.arrayContaining(['push']));
-    expect(console.log).toHaveBeenCalledWith('.shipper/ files are unchanged — nothing to commit.');
+    expect(console.log).toHaveBeenCalledWith(
+      '[shipper] .shipper/ files are unchanged — nothing to commit.'
+    );
   });
 
   it('errors and exits on detached HEAD only for the push path', async () => {
@@ -875,7 +890,7 @@ describe('initCommand commit and push', () => {
     await initCommand({ agent: 'claude', autocommit: true, push: true });
 
     expect(console.error).toHaveBeenCalledWith(
-      'Error: Failed to push from detached HEAD.\nCheck out a branch and retry with --push.'
+      '[shipper] Error: Failed to push from detached HEAD.\nCheck out a branch and retry with --push.'
     );
     expect(exitMock).toHaveBeenCalledWith(1);
     expect(mockExecFileAsync).not.toHaveBeenCalledWith('git', expect.arrayContaining(['commit']));

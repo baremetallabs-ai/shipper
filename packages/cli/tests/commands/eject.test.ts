@@ -61,6 +61,17 @@ vi.mock('node:fs', async () => {
 });
 
 vi.mock('@dnsquared/shipper-core', () => ({
+  logger: {
+    error: (message: string) => {
+      console.error(`[shipper] ${message}`);
+    },
+    log: (message: string) => {
+      console.log(`[shipper] ${message}`);
+    },
+    warn: (message: string) => {
+      console.warn(`[shipper] ${message}`);
+    },
+  },
   getSettings: () => getSettingsMock(),
   agentPrompts: {
     claude: claudePrompts,
@@ -93,7 +104,7 @@ describe('ejectCommand', () => {
 
     expect(mkdirSyncMock).toHaveBeenCalledWith(targetDir, { recursive: true });
     expect(writeFileSyncMock).toHaveBeenCalledWith(targetPath, 'claude groom');
-    expect(logSpy).toHaveBeenCalledWith(`Wrote ${targetPath}`);
+    expect(logSpy).toHaveBeenCalledWith(`[shipper] Wrote ${targetPath}`);
   });
 
   it('maps kebab-case CLI names to underscore filenames', () => {
@@ -128,7 +139,9 @@ describe('ejectCommand', () => {
     ejectCommand('pr-open');
 
     expect(writeFileSyncMock).not.toHaveBeenCalled();
-    expect(logSpy).toHaveBeenCalledWith(`Skipping pr-open — already exists at ${targetPath}`);
+    expect(logSpy).toHaveBeenCalledWith(
+      `[shipper] Skipping pr-open — already exists at ${targetPath}`
+    );
   });
 
   it('writes all workflow prompts and excludes setup.md when no name is provided', () => {
@@ -149,7 +162,7 @@ describe('ejectCommand', () => {
       path.resolve('.shipper', 'prompts', 'claude', 'unblock.md'),
     ]);
     expect(writtenPaths.some((writtenPath) => writtenPath.endsWith('setup.md'))).toBe(false);
-    expect(logSpy).toHaveBeenCalledWith('Summary: wrote 9, skipped 0');
+    expect(logSpy).toHaveBeenCalledWith('[shipper] Summary: wrote 9, skipped 0');
   });
 
   it('prints a helpful error and exits 1 for invalid prompt names', () => {
@@ -158,7 +171,7 @@ describe('ejectCommand', () => {
     }).toThrow('process.exit:1');
 
     expect(errorSpy).toHaveBeenCalledWith(
-      'Error: Invalid prompt name "not-a-prompt". Valid prompt names: new, groom, design, plan, implement, pr-open, pr-review, pr-remediate, unblock'
+      '[shipper] Error: Invalid prompt name "not-a-prompt". Valid prompt names: new, groom, design, plan, implement, pr-open, pr-review, pr-remediate, unblock'
     );
     expect(writeFileSyncMock).not.toHaveBeenCalled();
   });
@@ -170,6 +183,6 @@ describe('ejectCommand', () => {
 
     expect(writeFileSyncMock).not.toHaveBeenCalled();
     expect(exitMock).not.toHaveBeenCalledWith(1);
-    expect(logSpy).toHaveBeenCalledWith('Summary: wrote 0, skipped 9');
+    expect(logSpy).toHaveBeenCalledWith('[shipper] Summary: wrote 0, skipped 9');
   });
 });

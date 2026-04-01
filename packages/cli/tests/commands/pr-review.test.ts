@@ -22,6 +22,17 @@ const retryOnInvalidOutputMock = vi.fn<
 const resolveRefMock = vi.fn(() => Promise.resolve({ prNumber: '42', issueNumber: '10' }));
 const runPromptMock = vi.fn(() => Promise.resolve(0));
 const scrubOutputDirMock = vi.fn(() => Promise.resolve());
+const loggerMock = {
+  log: (message: string) => {
+    console.log(`[shipper] ${message}`);
+  },
+  warn: (message: string) => {
+    console.warn(`[shipper] ${message}`);
+  },
+  error: (message: string) => {
+    console.error(`[shipper] ${message}`);
+  },
+};
 const withIssueLockMock = vi.fn((_repo: unknown, _issue: unknown, fn: () => Promise<unknown>) =>
   fn()
 );
@@ -55,6 +66,7 @@ const parsedDiffHunks = new Map([
 const parseDiffHunksMock = vi.fn(() => parsedDiffHunks);
 
 vi.mock('@dnsquared/shipper-core', () => ({
+  logger: loggerMock,
   autoSelectPrForStage: autoSelectPrForStageMock,
   getBranchForPR: getBranchForPRMock,
   getRepoRoot: getRepoRootMock,
@@ -221,7 +233,7 @@ describe('prReviewCommand', () => {
       'pr_review',
       'Missing result.json'
     );
-    expect(consoleErrorSpy).toHaveBeenCalledWith('Missing result.json');
+    expect(consoleErrorSpy).toHaveBeenCalledWith('[shipper] Missing result.json');
     expect(process.exitCode).toBe(1);
   });
 

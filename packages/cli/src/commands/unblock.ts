@@ -1,5 +1,6 @@
 import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
 import {
+  logger,
   fetchIssue,
   gh,
   handleAgentCrash,
@@ -106,8 +107,8 @@ export async function unblockCommand(
   model?: string
 ): Promise<void> {
   if (!issue) {
-    console.error('Error: Please provide an issue number.');
-    console.error('Usage: shipper unblock <issue>');
+    logger.error('Error: Please provide an issue number.');
+    logger.error('Usage: shipper unblock <issue>');
     process.exit(1);
   }
 
@@ -126,7 +127,7 @@ export async function unblockCommand(
       await processResult({ repo, issueNumber: issue, stage: 'unblock', cwd, result });
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
-      console.error(detail);
+      logger.error(detail);
       await handleAgentCrash(repo, issue, 'unblock', detail);
       process.exitCode = 1;
       return;

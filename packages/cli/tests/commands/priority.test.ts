@@ -5,6 +5,17 @@ const { mockGh } = vi.hoisted(() => ({
 }));
 
 vi.mock('@dnsquared/shipper-core', () => ({
+  logger: {
+    error: (message: string) => {
+      console.error(`[shipper] ${message}`);
+    },
+    log: (message: string) => {
+      console.log(`[shipper] ${message}`);
+    },
+    warn: (message: string) => {
+      console.warn(`[shipper] ${message}`);
+    },
+  },
   gh: (args: string[]) => mockGh(args),
   PRIORITY_HIGH_LABEL: 'shipper:priority-high',
   PRIORITY_LOW_LABEL: 'shipper:priority-low',
@@ -71,7 +82,7 @@ describe('priorityCommand', () => {
       '--remove-label',
       'shipper:priority-low',
     ]);
-    expect(logSpy).toHaveBeenCalledWith('Issue #42 priority set to high.');
+    expect(logSpy).toHaveBeenCalledWith('[shipper] Issue #42 priority set to high.');
   });
 
   it('sets low priority and removes high priority', async () => {
@@ -90,7 +101,7 @@ describe('priorityCommand', () => {
       '--remove-label',
       'shipper:priority-high',
     ]);
-    expect(logSpy).toHaveBeenCalledWith('Issue #42 priority set to low.');
+    expect(logSpy).toHaveBeenCalledWith('[shipper] Issue #42 priority set to low.');
   });
 
   it('removes both priority labels when setting normal priority', async () => {
@@ -109,7 +120,7 @@ describe('priorityCommand', () => {
       '--remove-label',
       'shipper:priority-low',
     ]);
-    expect(logSpy).toHaveBeenCalledWith('Issue #42 priority set to normal.');
+    expect(logSpy).toHaveBeenCalledWith('[shipper] Issue #42 priority set to normal.');
   });
 
   it('prints a no-op message when the issue is already normal priority', async () => {
@@ -117,7 +128,7 @@ describe('priorityCommand', () => {
 
     await priorityCommand(repo, '42', 'normal');
 
-    expect(logSpy).toHaveBeenCalledWith('Issue #42 is already at normal priority.');
+    expect(logSpy).toHaveBeenCalledWith('[shipper] Issue #42 is already at normal priority.');
     const editCalls = mockGh.mock.calls.filter(
       ([args]) => args[0] === 'issue' && args[1] === 'edit'
     );
@@ -164,26 +175,30 @@ describe('priorityCommand', () => {
     });
 
     await expect(priorityCommand(repo, '42', 'high')).rejects.toThrow('process.exit');
-    expect(errorSpy).toHaveBeenCalledWith('Error: #42 is a pull request, not an issue.');
+    expect(errorSpy).toHaveBeenCalledWith('[shipper] Error: #42 is a pull request, not an issue.');
   });
 
   it('rejects closed issues', async () => {
     mockOpenIssue(['shipper:planned'], 'CLOSED');
 
     await expect(priorityCommand(repo, '42', 'high')).rejects.toThrow('process.exit');
-    expect(errorSpy).toHaveBeenCalledWith('Error: Issue #42 is not open.');
+    expect(errorSpy).toHaveBeenCalledWith('[shipper] Error: Issue #42 is not open.');
   });
 
   it('rejects open issues that are not in the shipper workflow', async () => {
     mockOpenIssue(['bug']);
 
     await expect(priorityCommand(repo, '42', 'high')).rejects.toThrow('process.exit');
-    expect(errorSpy).toHaveBeenCalledWith('Error: Issue #42 is not in the shipper workflow.');
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[shipper] Error: Issue #42 is not in the shipper workflow.'
+    );
   });
 
   it('rejects invalid issue numbers', async () => {
     await expect(priorityCommand(repo, 'abc', 'high')).rejects.toThrow('process.exit');
-    expect(errorSpy).toHaveBeenCalledWith('Error: Please provide a valid issue number.');
-    expect(errorSpy).toHaveBeenCalledWith('Usage: shipper priority <issue> <high|normal|low>');
+    expect(errorSpy).toHaveBeenCalledWith('[shipper] Error: Please provide a valid issue number.');
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[shipper] Usage: shipper priority <issue> <high|normal|low>'
+    );
   });
 });

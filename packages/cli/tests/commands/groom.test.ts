@@ -10,6 +10,17 @@ const printAutoSummaryMock = vi.fn();
 const resolveBaseBranchMock = vi.fn(() => Promise.resolve('main'));
 const resolveModeMock = vi.fn((_step: string, override?: string) => override ?? 'default');
 const runPromptMock = vi.fn(() => Promise.resolve(0));
+const loggerMock = {
+  log: (message: string) => {
+    console.log(`[shipper] ${message}`);
+  },
+  warn: (message: string) => {
+    console.warn(`[shipper] ${message}`);
+  },
+  error: (message: string) => {
+    console.error(`[shipper] ${message}`);
+  },
+};
 const withIssueLockMock = vi.fn((_repo: unknown, _issue: unknown, fn: () => Promise<unknown>) =>
   fn()
 );
@@ -21,6 +32,7 @@ const withWorktreeMock = vi.fn((_opts: unknown, fn: (wtPath: string) => Promise<
 );
 
 vi.mock('@dnsquared/shipper-core', () => ({
+  logger: loggerMock,
   autoSelectIssue: autoSelectIssueMock,
   generateBranchName: generateBranchNameMock,
   getSettings: getSettingsMock,
@@ -151,7 +163,7 @@ describe('groomCommand', () => {
     ).rejects.toThrow('exit:1');
 
     expect(errorSpy).toHaveBeenCalledWith(
-      'Error: groom does not support headless mode. Grooming requires interactive input.'
+      '[shipper] Error: groom does not support headless mode. Grooming requires interactive input.'
     );
     expect(autoSelectIssueMock).not.toHaveBeenCalled();
     expect(withWorktreeMock).not.toHaveBeenCalled();
@@ -168,7 +180,7 @@ describe('groomCommand', () => {
     await expect(groomCommand('owner/repo', '123', { auto: false })).rejects.toThrow('exit:1');
 
     expect(errorSpy).toHaveBeenCalledWith(
-      'Error: groom does not support headless mode. Grooming requires interactive input.'
+      '[shipper] Error: groom does not support headless mode. Grooming requires interactive input.'
     );
     expect(autoSelectIssueMock).not.toHaveBeenCalled();
     expect(withWorktreeMock).not.toHaveBeenCalled();
@@ -190,7 +202,7 @@ describe('groomCommand', () => {
     ).resolves.toBeUndefined();
 
     expect(errorSpy).toHaveBeenCalledWith(
-      'Error: groom does not support headless mode. Grooming requires interactive input.'
+      '[shipper] Error: groom does not support headless mode. Grooming requires interactive input.'
     );
     expect(autoSelectIssueMock).not.toHaveBeenCalled();
     expect(withWorktreeMock).not.toHaveBeenCalled();

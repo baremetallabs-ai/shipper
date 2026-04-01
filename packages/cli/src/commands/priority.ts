@@ -1,5 +1,6 @@
 import {
   gh,
+  logger,
   PRIORITY_HIGH_LABEL,
   PRIORITY_LOW_LABEL,
   STAGE_LABEL_NAMES,
@@ -16,7 +17,7 @@ interface IssueData {
 }
 
 function printUsage(): void {
-  console.error('Usage: shipper priority <issue> <high|normal|low>');
+  logger.error('Usage: shipper priority <issue> <high|normal|low>');
 }
 
 export async function priorityCommand(
@@ -26,7 +27,7 @@ export async function priorityCommand(
 ): Promise<void> {
   const issueStr = issue.replace(/^#/, '');
   if (!/^\d+$/.test(issueStr)) {
-    console.error('Error: Please provide a valid issue number.');
+    logger.error('Error: Please provide a valid issue number.');
     printUsage();
     process.exit(1);
   }
@@ -44,7 +45,7 @@ export async function priorityCommand(
     ]);
     issueData = JSON.parse(stdout.trim()) as IssueData;
   } catch {
-    console.error(`Error: Issue #${issueStr} not found.`);
+    logger.error(`Error: Issue #${issueStr} not found.`);
     process.exit(1);
   }
 
@@ -57,19 +58,19 @@ export async function priorityCommand(
   }
 
   if (isPr) {
-    console.error(`Error: #${issueStr} is a pull request, not an issue.`);
+    logger.error(`Error: #${issueStr} is a pull request, not an issue.`);
     process.exit(1);
   }
 
   if (issueData.state !== 'OPEN') {
-    console.error(`Error: Issue #${issueStr} is not open.`);
+    logger.error(`Error: Issue #${issueStr} is not open.`);
     process.exit(1);
   }
 
   const labels = issueData.labels.map((candidate) => candidate.name);
   const stageLabel = labels.find((label) => STAGE_LABEL_NAMES.includes(label));
   if (!stageLabel) {
-    console.error(`Error: Issue #${issueStr} is not in the shipper workflow.`);
+    logger.error(`Error: Issue #${issueStr} is not in the shipper workflow.`);
     process.exit(1);
   }
 
@@ -77,7 +78,7 @@ export async function priorityCommand(
   const hasLow = labels.includes(PRIORITY_LOW_LABEL);
 
   if (level === 'normal' && !hasHigh && !hasLow) {
-    console.log(`Issue #${issueStr} is already at normal priority.`);
+    logger.log(`Issue #${issueStr} is already at normal priority.`);
     return;
   }
 
@@ -96,5 +97,5 @@ export async function priorityCommand(
   }
 
   await gh(args);
-  console.log(message);
+  logger.log(message);
 }

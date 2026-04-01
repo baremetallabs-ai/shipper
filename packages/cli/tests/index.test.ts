@@ -1,9 +1,32 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+const { mockLoggerError, mockLoggerLog, mockLoggerWarn } = vi.hoisted(() => ({
+  mockLoggerError: vi.fn((message: string) => {
+    console.error(`[shipper] ${message}`);
+  }),
+  mockLoggerLog: vi.fn((message: string) => {
+    console.log(`[shipper] ${message}`);
+  }),
+  mockLoggerWarn: vi.fn((message: string) => {
+    console.warn(`[shipper] ${message}`);
+  }),
+}));
+
 vi.mock('@dnsquared/shipper-core', () => ({
   runPreflight: vi.fn(),
   warnTrackedOutputFiles: vi.fn(),
   loadSettings: vi.fn(),
+  logger: {
+    error: (message: string) => {
+      mockLoggerError(message);
+    },
+    log: (message: string) => {
+      mockLoggerLog(message);
+    },
+    warn: (message: string) => {
+      mockLoggerWarn(message);
+    },
+  },
   CLI_VERSION: '0.1.0-test',
   checkVersionFreshness: vi.fn(),
   getRepoNwo: vi.fn(() => Promise.resolve('owner/repo')),
@@ -388,7 +411,7 @@ describe('shipper-cli', () => {
 
       await expect(importEntrypoint()).rejects.toThrow('process.exit:1');
 
-      expect(errorSpy).toHaveBeenCalledWith('boom');
+      expect(errorSpy).toHaveBeenCalledWith('[shipper] boom');
       expect(exitSpy).toHaveBeenCalledWith(1);
     });
   });
@@ -514,6 +537,7 @@ describe('shipper-cli', () => {
       mockShipCommand.mockReset();
       mockShipCommand.mockResolvedValue(undefined);
       mockNextCommand.mockReset();
+      mockLoggerError.mockClear();
       errorSpy.mockClear();
       mockGetRepoNwo.mockClear();
       exitSpy.mockClear();
@@ -533,6 +557,7 @@ describe('shipper-cli', () => {
 
       await expect(importEntrypoint()).rejects.toThrow('process.exit:1');
       expect(mockShipCommand).not.toHaveBeenCalled();
+      expect(mockLoggerError).toHaveBeenCalledWith('Error: --parallel requires --auto');
     });
 
     it('errors when --parallel is missing its numeric value', async () => {
@@ -540,6 +565,7 @@ describe('shipper-cli', () => {
 
       await expect(importEntrypoint()).rejects.toThrow('process.exit:1');
       expect(mockShipCommand).not.toHaveBeenCalled();
+      expect(mockLoggerError).toHaveBeenCalledWith('Error: --parallel requires a number');
     });
 
     it('normalizes --parallel 1 back to the sequential path', async () => {
@@ -630,6 +656,9 @@ describe('shipper-cli', () => {
 
         await expect(importEntrypoint()).rejects.toThrow('process.exit:1');
         expect(mockShipCommand).not.toHaveBeenCalled();
+        expect(mockLoggerError).toHaveBeenCalledWith(
+          'Error: --auto and --mode are mutually exclusive.'
+        );
       }
     );
 
@@ -637,7 +666,7 @@ describe('shipper-cli', () => {
       process.argv = ['node', 'src/index.ts', 'groom', '--parallel'];
 
       await expect(importEntrypoint()).rejects.toThrow('process.exit:1');
-      expect(errorSpy).not.toHaveBeenCalledWith('Error: --parallel requires a number');
+      expect(errorSpy).not.toHaveBeenCalledWith('[shipper] Error: --parallel requires a number');
       expect(mockShipCommand).not.toHaveBeenCalled();
     });
   });

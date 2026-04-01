@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { agentPrompts } from '@dnsquared/shipper-core';
+import { agentPrompts, logger } from '@dnsquared/shipper-core';
 import { getSettings } from '@dnsquared/shipper-core';
 
 function filenameToCliName(filename: string): string {
@@ -15,7 +15,7 @@ export function ejectCommand(name?: string) {
   const agent = getSettings().commands.default.agent;
   const promptSet = agentPrompts[agent];
   if (!promptSet) {
-    console.error(`Error: No bundled prompts found for agent "${agent}".`);
+    logger.error(`Error: No bundled prompts found for agent "${agent}".`);
     process.exit(1);
   }
   const allFilenames = Object.keys(promptSet).filter((filename) => filename !== 'setup.md');
@@ -25,7 +25,7 @@ export function ejectCommand(name?: string) {
 
   if (name) {
     if (!cliNames.includes(name)) {
-      console.error(
+      logger.error(
         `Error: Invalid prompt name "${name}". Valid prompt names: ${cliNames.join(', ')}`
       );
       process.exit(1);
@@ -44,21 +44,21 @@ export function ejectCommand(name?: string) {
 
     if (existsSync(targetPath)) {
       skippedCount += 1;
-      console.log(`Skipping ${cliName} — already exists at ${targetPath}`);
+      logger.log(`Skipping ${cliName} — already exists at ${targetPath}`);
       continue;
     }
 
     if (prompt === undefined) {
-      console.error(`Error: No bundled prompt found for "${cliName}".`);
+      logger.error(`Error: No bundled prompt found for "${cliName}".`);
       process.exit(1);
     }
 
     writeFileSync(targetPath, prompt);
     wroteCount += 1;
-    console.log(`Wrote ${targetPath}`);
+    logger.log(`Wrote ${targetPath}`);
   }
 
   if (!name) {
-    console.log(`Summary: wrote ${wroteCount}, skipped ${skippedCount}`);
+    logger.log(`Summary: wrote ${wroteCount}, skipped ${skippedCount}`);
   }
 }
