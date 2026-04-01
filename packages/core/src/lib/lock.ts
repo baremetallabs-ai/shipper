@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { gh } from './gh.js';
+import { logger } from './logger.js';
 import { getSettings } from './settings.js';
 
 export async function isLockStale(repo: string, issueNumber: string): Promise<boolean> {
@@ -64,7 +65,7 @@ export async function acquireIssueLock(repo: string, issueNumber: string): Promi
 
   if (labels.includes('shipper:locked')) {
     if (await isLockStale(repo, issueNumber)) {
-      console.error(`Issue #${issueNumber} lock is stale — clearing.`);
+      logger.error(`Issue #${issueNumber} lock is stale — clearing.`);
       await releaseIssueLock(repo, issueNumber);
     } else {
       throw new Error(
@@ -114,7 +115,7 @@ export async function renewIssueLock(
     await gh(['issue', 'edit', issueNumber, '-R', repo, '--remove-label', 'shipper:locked']);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`Warning: lock renewal failed for issue #${issueNumber}: ${msg}`);
+    logger.error(`Warning: lock renewal failed for issue #${issueNumber}: ${msg}`);
     return;
   }
 
@@ -125,10 +126,10 @@ export async function renewIssueLock(
   // Re-add the label to create a fresh timeline event.
   try {
     await gh(['issue', 'edit', issueNumber, '-R', repo, '--add-label', 'shipper:locked']);
-    console.error(`Lock renewed for issue #${issueNumber}`);
+    logger.error(`Lock renewed for issue #${issueNumber}`);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(
+    logger.error(
       `Warning: lock re-add failed for issue #${issueNumber} — lock is absent until next heartbeat: ${msg}`
     );
   }

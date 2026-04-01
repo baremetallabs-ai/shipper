@@ -14,6 +14,7 @@ import {
   type AgentName,
   type CommandMode,
 } from './settings.js';
+import { logger } from './logger.js';
 import { formatUsageLine, parseAgentUsage, type TokenUsage } from './usage.js';
 
 export interface RunPromptOpts {
@@ -76,14 +77,14 @@ function resolveWorktreeGitDir(cwd: string): WorktreeDirs | undefined {
     const content = readFileSync(dotGit, 'utf-8');
     const match = content.match(/^gitdir:\s*(.+)$/m);
     if (!match?.[1]) {
-      console.warn(`Warning: .git file at ${dotGit} has no gitdir: line. Skipping --add-dir.`);
+      logger.warn(`Warning: .git file at ${dotGit} has no gitdir: line. Skipping --add-dir.`);
       return undefined;
     }
     const resolved = path.resolve(cwd, match[1].trim());
     try {
       statSync(resolved);
     } catch {
-      console.warn(`Warning: gitdir path ${resolved} does not exist. Skipping --add-dir.`);
+      logger.warn(`Warning: gitdir path ${resolved} does not exist. Skipping --add-dir.`);
       return undefined;
     }
 
@@ -97,7 +98,7 @@ function resolveWorktreeGitDir(cwd: string): WorktreeDirs | undefined {
         statSync(commonDirResolved);
         commonDir = commonDirResolved;
       } catch {
-        console.warn(
+        logger.warn(
           `Warning: commondir path ${commonDirResolved} does not exist. Skipping common --add-dir.`
         );
       }
@@ -107,7 +108,7 @@ function resolveWorktreeGitDir(cwd: string): WorktreeDirs | undefined {
 
     return { gitDir: resolved, commonDir };
   } catch {
-    console.warn(`Warning: Failed to read .git file at ${dotGit}. Skipping --add-dir.`);
+    logger.warn(`Warning: Failed to read .git file at ${dotGit}. Skipping --add-dir.`);
     return undefined;
   }
 }
@@ -186,7 +187,7 @@ function spawnAsync(
         stdout.pipe(logStream);
       } catch (err) {
         stdout.resume();
-        console.warn(`Warning: Session log capture failed: ${asError(err).message}`);
+        logger.warn(`Warning: Session log capture failed: ${asError(err).message}`);
       }
     }
 
@@ -199,7 +200,7 @@ function spawnAsync(
       killTimer = setTimeout(() => {
         timedOut = true;
         const minutes = Math.round(timeoutMs / 60_000);
-        console.error(`Agent timed out after ${minutes} minutes`);
+        logger.error(`Agent timed out after ${minutes} minutes`);
         child.kill('SIGTERM');
         graceTimer = setTimeout(() => {
           child.kill('SIGKILL');
@@ -222,7 +223,7 @@ function spawnAsync(
         try {
           await logCompletion;
         } catch (err) {
-          console.warn(`Warning: Session log capture failed: ${asError(err).message}`);
+          logger.warn(`Warning: Session log capture failed: ${asError(err).message}`);
         }
       }
       resolve(timedOut ? code || 1 : (code ?? 1));
@@ -285,7 +286,7 @@ async function resolvePromptCommand(
     GH_MUTATION_PATTERNS.some((pattern) => pattern.test(body))
   ) {
     warnedPromptPaths.add(promptPath);
-    console.warn(
+    logger.warn(
       `Warning: Ejected prompt '${name}' contains gh commands for state mutations.\nThese are now handled by shipper. Re-eject with 'shipper eject ${name}' or manually update.`
     );
   }
@@ -442,7 +443,7 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
   try {
     resolved = await resolvePromptCommand(name, opts, effectiveMode);
   } catch (err) {
-    console.error(`Error: ${asError(err).message}`);
+    logger.error(`Error: ${asError(err).message}`);
     return 1;
   }
 
@@ -470,7 +471,7 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
   } catch (err) {
     sessionRepo = undefined;
     sessionTimestamp = undefined;
-    console.warn(`Warning: Failed to initialize session logging: ${asError(err).message}`);
+    logger.warn(`Warning: Failed to initialize session logging: ${asError(err).message}`);
   }
 
   const effectiveModel = getEffectiveModel(agent, args);
@@ -501,7 +502,7 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
       }
 
       if (usage) {
-        console.log(formatUsageLine(usage));
+        logger.log(formatUsageLine(usage));
       }
     }
 
@@ -520,14 +521,14 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        console.warn(`Warning: Failed to write session metadata: ${message}`);
+        logger.warn(`Warning: Failed to write session metadata: ${message}`);
       }
     }
 
     return exitCode;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error(`Error: Failed to spawn ${agent}: ${message}`);
+    logger.error(`Error: Failed to spawn ${agent}: ${message}`);
     return 1;
   }
 }

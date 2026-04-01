@@ -114,7 +114,7 @@ describe('acquireIssueLock', () => {
 
     await acquireIssueLock(repo, '42');
 
-    expect(stderrMock).toHaveBeenCalledWith('Issue #42 lock is stale — clearing.');
+    expect(stderrMock).toHaveBeenCalledWith('[shipper] Issue #42 lock is stale — clearing.');
     expect(execFileMock).toHaveBeenCalledWith(
       'gh',
       ['issue', 'edit', '42', '-R', repo, '--remove-label', 'shipper:locked'],
@@ -230,7 +230,7 @@ describe('withIssueLock', () => {
         expect.objectContaining({ encoding: 'utf-8' }),
         expect.any(Function)
       );
-      expect(stderrMock).toHaveBeenCalledWith('Lock renewed for issue #42');
+      expect(stderrMock).toHaveBeenCalledWith('[shipper] Lock renewed for issue #42');
 
       resolve();
       await resultPromise;
@@ -262,7 +262,7 @@ describe('withIssueLock', () => {
       await vi.advanceTimersByTimeAsync(10 * 60_000);
 
       expect(stderrMock).toHaveBeenCalledWith(
-        expect.stringContaining('Warning: lock renewal failed for issue #42')
+        expect.stringContaining('[shipper] Warning: lock renewal failed for issue #42')
       );
 
       resolve();
@@ -334,7 +334,7 @@ describe('withIssueLock', () => {
       await vi.advanceTimersByTimeAsync(10 * 60_000);
 
       expect(stderrMock).toHaveBeenCalledWith(
-        expect.stringContaining('lock re-add failed for issue #42')
+        expect.stringContaining('[shipper] Warning: lock re-add failed for issue #42')
       );
 
       resolve();

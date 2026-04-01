@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { access, constants, stat } from 'node:fs/promises';
 import { performance } from 'node:perf_hooks';
 import path from 'node:path';
-import { createLogger } from './logger.js';
+import { createLogger, logger } from './logger.js';
 
 const HOOKS_DIR = path.join('.shipper', 'hooks');
 const WORKTREE_HOOK_META = {
@@ -77,10 +77,10 @@ export async function runAdvisoryHook(
 ): Promise<void> {
   try {
     await spawnAsync(command, [], { env, cwd, shell: true });
-    console.log(`  ${label} hook completed.`);
+    logger.log(`  ${label} hook completed.`);
   } catch (err) {
     const { code, stderr } = extractExecError(err);
-    console.warn(`  Warning: ${label} hook exited with code ${code}${stderr ? ': ' + stderr : ''}`);
+    logger.warn(`  Warning: ${label} hook exited with code ${code}${stderr ? ': ' + stderr : ''}`);
   }
 }
 
@@ -103,7 +103,7 @@ async function hookIsExecutable(hookPath: string): Promise<boolean> {
 }
 
 function warnNonExecutableHook(foundPath: string, chmodPath = foundPath): void {
-  console.warn(
+  logger.warn(
     `  Warning: Found ${foundPath} but it is not executable — skipping. Run \`chmod +x ${chmodPath}\` to enable.`
   );
 }
@@ -123,7 +123,7 @@ async function runFileHook(
 
   try {
     await spawnAsync(hookPath, [], { env, cwd: options.cwd });
-    console.log(`  ${label} hook completed.`);
+    logger.log(`  ${label} hook completed.`);
   } catch (err) {
     const { code, stderr } = extractExecError(err);
     const resultLabel = options.resultLabel ?? label;
@@ -133,7 +133,7 @@ async function runFileHook(
       throw new Error(message);
     }
 
-    console.warn(`  Warning: ${message}`);
+    logger.warn(`  Warning: ${message}`);
   }
 }
 
@@ -179,24 +179,24 @@ export async function withStageHooks<T>(
   env: { issueNumber?: string; branchName?: string },
   fn: () => Promise<T>
 ): Promise<T> {
-  const logger = createLogger();
+  const stageLogger = createLogger();
   const issueNumber = env.issueNumber ?? '';
   const hookEnv = {
     SHIPPER_STAGE: stage,
     SHIPPER_ISSUE_NUMBER: issueNumber,
     SHIPPER_BRANCH_NAME: env.branchName ?? '',
   };
-  logger.stageStart(stage, issueNumber);
+  stageLogger.stageStart(stage, issueNumber);
   const startedAt = performance.now();
 
   try {
     await runPreHook(stage, hookEnv);
     const result = await fn();
     await runPostHook(stage, hookEnv);
-    logger.stageComplete(stage, issueNumber, performance.now() - startedAt);
+    stageLogger.stageComplete(stage, issueNumber, performance.now() - startedAt);
     return result;
   } catch (error) {
-    logger.stageFailed(stage, issueNumber, performance.now() - startedAt);
+    stageLogger.stageFailed(stage, issueNumber, performance.now() - startedAt);
     throw error;
   }
 }

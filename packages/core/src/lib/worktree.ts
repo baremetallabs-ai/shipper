@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { runAdvisoryHook, runWorktreeHook } from './hooks.js';
-import { createLogger } from './logger.js';
+import { createLogger, logger } from './logger.js';
 import { getSettings } from './settings.js';
 
 const WORKTREES_DIR = path.join(homedir(), '.shipper', 'worktrees');
@@ -458,7 +458,7 @@ async function stripProtectedPaths(opts: WorktreeGitOpts): Promise<void> {
     throw formatTransportError(opts, formatCommandFailure('git', amendArgs, amendResult));
   }
 
-  console.error(
+  logger.error(
     `Stripped ${committedTrackedFiles.length} tracked .shipper/ artifact files from git index before push`
   );
 }
@@ -475,7 +475,7 @@ async function pushWorktreeBranch(
       commitsAhead = await getCommitsAheadCount(opts.wtPath, opts.baseBranch);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error(
+      logger.error(
         `Commit-count safety check failed before force-push; proceeding with push.\n${errorMessage}`
       );
     }
@@ -566,7 +566,7 @@ export async function pushWithRetry(
           for (let attempt = 1; attempt <= MAX_REBASE_ATTEMPTS; attempt++) {
             const agentCode = await runAgent(conflictContext);
             if (agentCode !== 0) {
-              console.error(`Agent exited with code ${agentCode} — skipping push.`);
+              logger.error(`Agent exited with code ${agentCode} — skipping push.`);
               return agentCode;
             }
 
@@ -623,7 +623,7 @@ export async function pushWithRetry(
 
     const agentCode = await runAgent(undefined, pushError);
     if (agentCode !== 0) {
-      console.error(`Agent exited with code ${agentCode} while handling push failure; retrying.`);
+      logger.error(`Agent exited with code ${agentCode} while handling push failure; retrying.`);
     }
 
     retries += 1;
@@ -854,7 +854,7 @@ export async function withGitTransport(
     for (let attempt = 1; attempt <= MAX_REBASE_ATTEMPTS; attempt++) {
       const agentCode = await runAgent(conflictContext);
       if (agentCode !== 0) {
-        console.error(`Agent exited with code ${agentCode} — skipping push.`);
+        logger.error(`Agent exited with code ${agentCode} — skipping push.`);
         return agentCode;
       }
 
@@ -868,7 +868,7 @@ export async function withGitTransport(
           runAgent(undefined, undefined, installError)
         );
         if (installCode !== undefined) {
-          console.error(`Agent exited with code ${installCode} — skipping push.`);
+          logger.error(`Agent exited with code ${installCode} — skipping push.`);
           return installCode;
         }
         return await pushWithRetry(opts, runAgent);
@@ -896,7 +896,7 @@ export async function withGitTransport(
             runAgent(undefined, undefined, installError)
           );
           if (installCode !== undefined) {
-            console.error(`Agent exited with code ${installCode} — skipping push.`);
+            logger.error(`Agent exited with code ${installCode} — skipping push.`);
             return installCode;
           }
           return await pushWithRetry(opts, runAgent);
@@ -923,13 +923,13 @@ export async function withGitTransport(
     runAgent(undefined, undefined, installError)
   );
   if (installCode !== undefined) {
-    console.error(`Agent exited with code ${installCode} — skipping push.`);
+    logger.error(`Agent exited with code ${installCode} — skipping push.`);
     return installCode;
   }
 
   const agentCode = await runAgent();
   if (agentCode !== 0) {
-    console.error(`Agent exited with code ${agentCode} — proceeding to push.`);
+    logger.error(`Agent exited with code ${agentCode} — proceeding to push.`);
   }
 
   return await pushWithRetry(opts, runAgent);
@@ -1038,8 +1038,8 @@ export async function withWorktree<T>(
   opts: CreateWorktreeOpts,
   fn: (wtPath: string) => Promise<T>
 ): Promise<T> {
-  const logger = createLogger();
-  logger.worktreeStep('creating branch');
+  const worktreeLogger = createLogger();
+  worktreeLogger.worktreeStep('creating branch');
   const wtPath = await createWorktree(opts);
   const hookEnv = {
     SHIPPER_STAGE: opts.stage ?? '',
@@ -1066,7 +1066,7 @@ export async function withWorktree<T>(
       try {
         await runWorktreeHook('worktree-teardown', hookEnv, wtPath);
         await removeWorktree(opts.repoRoot, wtPath);
-        logger.worktreeStep('teardown complete');
+        worktreeLogger.worktreeStep('teardown complete');
       } finally {
         for (const [key, value] of originalEnv) {
           if (value === undefined) {
@@ -1091,13 +1091,13 @@ export async function withWorktree<T>(
   const { installCommand } = settings;
   try {
     if (installCommand) {
-      logger.worktreeStep('installing dependencies');
+      worktreeLogger.worktreeStep('installing dependencies');
       await runAdvisoryHook('Install dependencies', installCommand, hookEnv, wtPath);
     }
 
-    logger.worktreeStep('running setup hooks');
+    worktreeLogger.worktreeStep('running setup hooks');
     await runWorktreeHook('worktree-setup', hookEnv, wtPath);
-    logger.worktreeStep('running agent');
+    worktreeLogger.worktreeStep('running agent');
     return await fn(wtPath);
   } finally {
     process.removeListener('SIGINT', cleanupWithoutAwait);

@@ -1,7 +1,9 @@
 import { PassThrough } from 'node:stream';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createLogger, formatDuration } from '../../src/lib/logger.js';
+import { createLogger, formatDuration, logger as defaultLogger } from '../../src/lib/logger.js';
 
+const logMock = vi.spyOn(console, 'log').mockImplementation(() => {});
+const warnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
 const errorMock = vi.spyOn(console, 'error').mockImplementation(() => {});
 
 describe('formatDuration', () => {
@@ -25,6 +27,8 @@ describe('formatDuration', () => {
 
 describe('createLogger', () => {
   beforeEach(() => {
+    logMock.mockClear();
+    warnMock.mockClear();
     errorMock.mockClear();
   });
 
@@ -86,5 +90,75 @@ describe('createLogger', () => {
       logger.stageStart('plan', '42');
     }).not.toThrow();
     expect(errorMock.mock.calls).toEqual([['[shipper] ▶ stage:plan #42 starting']]);
+  });
+
+  it('writes log messages to stdout with the shipper prefix', () => {
+    const logger = createLogger();
+
+    logger.log('hello');
+
+    expect(logMock.mock.calls).toEqual([['[shipper] hello']]);
+    expect(warnMock).not.toHaveBeenCalled();
+    expect(errorMock).not.toHaveBeenCalled();
+  });
+
+  it('writes warn messages to console.warn with the shipper prefix', () => {
+    const logger = createLogger();
+
+    logger.warn('careful');
+
+    expect(warnMock.mock.calls).toEqual([['[shipper] careful']]);
+    expect(logMock).not.toHaveBeenCalled();
+    expect(errorMock).not.toHaveBeenCalled();
+  });
+
+  it('writes error messages to stderr with the shipper prefix', () => {
+    const logger = createLogger();
+
+    logger.error('broken');
+
+    expect(errorMock.mock.calls).toEqual([['[shipper] broken']]);
+    expect(logMock).not.toHaveBeenCalled();
+    expect(warnMock).not.toHaveBeenCalled();
+  });
+
+  it('mirrors general-purpose messages to the optional stream', () => {
+    const stream = new PassThrough();
+    let captured = '';
+    stream.on('data', (chunk: Buffer | string) => {
+      captured += chunk.toString();
+    });
+
+    const logger = createLogger({ stream });
+    logger.log('hello');
+    logger.warn('careful');
+    logger.error('broken');
+
+    expect(logMock.mock.calls).toEqual([['[shipper] hello']]);
+    expect(warnMock.mock.calls).toEqual([['[shipper] careful']]);
+    expect(errorMock.mock.calls).toEqual([['[shipper] broken']]);
+    expect(captured).toBe('[shipper] hello\n[shipper] careful\n[shipper] broken\n');
+  });
+
+  it('skips writes to a destroyed optional stream for general-purpose messages', () => {
+    const stream = new PassThrough();
+    const logger = createLogger({ stream });
+
+    stream.destroy();
+
+    expect(() => {
+      logger.log('hello');
+      logger.warn('careful');
+      logger.error('broken');
+    }).not.toThrow();
+    expect(logMock.mock.calls).toEqual([['[shipper] hello']]);
+    expect(warnMock.mock.calls).toEqual([['[shipper] careful']]);
+    expect(errorMock.mock.calls).toEqual([['[shipper] broken']]);
+  });
+
+  it('exports a default logger instance', () => {
+    defaultLogger.log('from default');
+
+    expect(logMock.mock.calls).toEqual([['[shipper] from default']]);
   });
 });

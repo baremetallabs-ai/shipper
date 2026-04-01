@@ -4,6 +4,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 import { gh } from './gh.js';
+import { logger } from './logger.js';
 import { STAGE_LABEL_NAMES } from './labels.js';
 
 const execFileAsync = promisify(execFile);
@@ -135,7 +136,7 @@ export async function runPrereqChecks(checks: Array<() => Promise<CheckResult>>)
   for (const check of checks) {
     const result = await check();
     if (!result.ok) {
-      console.error(`Prereq failed: ${result.message}`);
+      logger.error(`Prereq failed: ${result.message}`);
       return false;
     }
   }

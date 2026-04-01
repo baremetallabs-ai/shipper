@@ -95,7 +95,7 @@ describe('gh', () => {
     await Promise.resolve();
     expect(errorSpy).toHaveBeenNthCalledWith(
       1,
-      'gh issue view 42 failed: HTTP 500, retrying (attempt 2/3)...'
+      '[shipper] gh issue view 42 failed: HTTP 500, retrying (attempt 2/3)...'
     );
     expect(sleepMsMock).toHaveBeenNthCalledWith(1, 1000);
 
@@ -103,7 +103,7 @@ describe('gh', () => {
     expect(execFileMock).toHaveBeenCalledTimes(3);
     expect(errorSpy).toHaveBeenNthCalledWith(
       2,
-      'gh issue view 42 failed: temporary network failure, retrying (attempt 3/3)...'
+      '[shipper] gh issue view 42 failed: temporary network failure, retrying (attempt 3/3)...'
     );
     expect(sleepMsMock).toHaveBeenNthCalledWith(2, 2000);
   });
@@ -138,11 +138,11 @@ describe('gh', () => {
     expect(errorSpy).toHaveBeenCalledTimes(2);
     expect(errorSpy).toHaveBeenNthCalledWith(
       1,
-      'gh pr view 42 failed: HTTP 500 first, retrying (attempt 2/3)...'
+      '[shipper] gh pr view 42 failed: HTTP 500 first, retrying (attempt 2/3)...'
     );
     expect(errorSpy).toHaveBeenNthCalledWith(
       2,
-      'gh pr view 42 failed: HTTP 500 second, retrying (attempt 3/3)...'
+      '[shipper] gh pr view 42 failed: HTTP 500 second, retrying (attempt 3/3)...'
     );
     expect(sleepMsMock).toHaveBeenNthCalledWith(1, 1000);
     expect(sleepMsMock).toHaveBeenNthCalledWith(2, 2000);
@@ -163,7 +163,9 @@ describe('gh', () => {
 
     await Promise.resolve();
     expect(errorSpy).toHaveBeenCalledOnce();
-    expect(errorSpy).toHaveBeenCalledWith('gh repo list failed, retrying (attempt 2/3)...');
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[shipper] gh repo list failed, retrying (attempt 2/3)...'
+    );
 
     await expect(promise).resolves.toEqual({ stdout: 'ok\n', stderr: '' });
   });
@@ -191,7 +193,7 @@ describe('gh', () => {
     await Promise.resolve();
     expect(errorSpy).toHaveBeenCalledOnce();
     expect(errorSpy).toHaveBeenCalledWith(
-      'gh issue list --search "-label:shipper:blocked -label:shipper:locked" --jq ".[] | .title" failed: line 1\\nline 2, retrying (attempt 2/3)...'
+      '[shipper] gh issue list --search "-label:shipper:blocked -label:shipper:locked" --jq ".[] | .title" failed: line 1\\nline 2, retrying (attempt 2/3)...'
     );
 
     await expect(promise).resolves.toEqual({ stdout: 'ok\n', stderr: '' });

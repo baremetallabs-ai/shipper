@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
+import { logger } from './logger.js';
 import { sleepMs } from './sleep.js';
 
 const execFileAsync = promisify(execFile);
@@ -74,7 +75,7 @@ export async function gh(
 
       const command = formatCommandForLog(args);
       const reason = formatStderrForLog(stderr);
-      console.error(
+      logger.error(
         `${command} failed${reason ? `: ${reason}` : ''}, retrying (attempt ${attempt + 1}/${MAX_ATTEMPTS})...`
       );
       await sleepMs(BASE_DELAY_MS * 2 ** (attempt - 1));

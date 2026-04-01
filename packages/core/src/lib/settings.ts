@@ -1,6 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { logger } from './logger.js';
+
 export type AgentName = 'claude' | 'codex' | 'copilot';
 export type CommandMode = 'headless' | 'interactive' | 'default';
 
@@ -128,7 +130,7 @@ export async function loadSettings(): Promise<void> {
   };
 
   if ((isPlainObject(base) && 'hooks' in base) || (isPlainObject(local) && 'hooks' in local)) {
-    console.warn(
+    logger.warn(
       'Warning: Unknown setting "hooks" — settings-based hooks have been removed. Use file-based hooks in .shipper/hooks/ instead.'
     );
   }
@@ -139,7 +141,7 @@ export async function loadSettings(): Promise<void> {
 
   for (const command of Object.keys(settings.commands)) {
     if (command !== 'default' && !KNOWN_PROMPT_COMMANDS.has(command)) {
-      console.warn(`Warning: Unknown command "${command}" in settings.commands.`);
+      logger.warn(`Warning: Unknown command "${command}" in settings.commands.`);
     }
   }
 }

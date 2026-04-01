@@ -2,6 +2,7 @@ import { promisify } from 'node:util';
 import { beforeEach, describe, it, expect, vi } from 'vitest';
 
 const execFileMock = vi.fn();
+const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 function normalizeError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
@@ -36,6 +37,7 @@ const repo = 'owner/repo';
 
 beforeEach(() => {
   execFileMock.mockReset();
+  errorSpy.mockClear();
   execFileMock.mockImplementation((_cmd: string, args: string[], ...rest: unknown[]) => {
     const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
     if (args.includes('--jq')) {
@@ -176,6 +178,12 @@ describe('findBranchForIssue', () => {
 
     const result = await findBranchForIssue('84');
     expect(result).toBe('shipper/84-only-require-reason-for-late-filing-when-filing-af');
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[shipper] Multiple branches found for issue 84:\n' +
+        '  origin/shipper/84-fix-make-late-filing-reason-conditional-with-three\n' +
+        '  origin/shipper/84-only-require-reason-for-late-filing-when-filing-af\n' +
+        'Using most recent: origin/shipper/84-only-require-reason-for-late-filing-when-filing-af'
+    );
   });
 
   it('picks the most recently committed local branch when multiple match', async () => {
@@ -208,5 +216,11 @@ describe('findBranchForIssue', () => {
 
     const result = await findBranchForIssue('84');
     expect(result).toBe('shipper/84-fix-make-late-filing');
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[shipper] Multiple local branches found for issue 84:\n' +
+        '  shipper/84-fix-make-late-filing\n' +
+        '  shipper/84-only-require-reason\n' +
+        'Using most recent: shipper/84-fix-make-late-filing'
+    );
   });
 });

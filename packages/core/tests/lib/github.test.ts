@@ -780,7 +780,7 @@ describe('selectIssuesForStage', () => {
 
     expect(result).toEqual([{ number: 1, title: 'Normal', priority: 1 }]);
     expect(stderrSpy).toHaveBeenCalledWith(
-      'Warning: Could not check for stale-locked issues. Proceeding without them.'
+      '[shipper] Warning: Could not check for stale-locked issues. Proceeding without them.'
     );
     stderrSpy.mockRestore();
   });
@@ -922,7 +922,7 @@ describe('autoSelectIssue', () => {
 
     expect(result).toEqual({ number: 42, title: 'Stale issue' });
     expect(mockReleaseIssueLock).toHaveBeenCalledWith(repo, '42');
-    expect(stderrSpy).toHaveBeenCalledWith('Issue #42 lock is stale \u2014 clearing.');
+    expect(stderrSpy).toHaveBeenCalledWith('[shipper] Issue #42 lock is stale \u2014 clearing.');
   });
 
   it('does not clear lock for non-stale selected issue', async () => {
