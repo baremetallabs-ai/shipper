@@ -216,6 +216,7 @@ describe('gh', () => {
     await expect(gh(['issue', 'view', '42'])).rejects.toBe(err);
     expect(execFileMock).toHaveBeenCalledTimes(1);
     expect(errorSpy).not.toHaveBeenCalled();
+    expect(sleepMsMock).not.toHaveBeenCalled();
   });
 
   it('does not retry when gh is missing from PATH', async () => {
