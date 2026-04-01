@@ -29,6 +29,10 @@ export function formatDuration(ms: number): string {
 
 type LoggerChannel = 'log' | 'warn' | 'error';
 
+function prefixMessage(message: string): string {
+  return message.replace(/^(\n*)/, '$1[shipper] ');
+}
+
 function writeLine(channel: LoggerChannel, message: string, stream?: Writable): void {
   switch (channel) {
     case 'log':
@@ -80,13 +84,13 @@ export function createLogger(options?: { stream?: Writable }): Logger {
       writeLine('error', `[shipper]   worktree: ${step}`, options?.stream);
     },
     log(message: string) {
-      writeLine('log', `[shipper] ${message}`, options?.stream);
+      writeLine('log', prefixMessage(message), options?.stream);
     },
     warn(message: string) {
-      writeLine('warn', `[shipper] ${message}`, options?.stream);
+      writeLine('warn', prefixMessage(message), options?.stream);
     },
     error(message: string) {
-      writeLine('error', `[shipper] ${message}`, options?.stream);
+      writeLine('error', prefixMessage(message), options?.stream);
     },
   };
 }
