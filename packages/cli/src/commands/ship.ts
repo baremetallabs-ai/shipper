@@ -8,9 +8,11 @@ import {
   aggregateSessionUsage,
   classifyChecks,
   clearStaleLockIfNeeded,
+  createLogger,
   fetchChecks,
   fetchIssueTimelines,
   handleAgentCrash,
+  logger,
   selectIssuesForStage,
   sleepMs,
   sortIssuesByLabelTime,
@@ -35,7 +37,7 @@ import {
   LOCKED_LABEL,
   FAILED_LABEL,
 } from '@dnsquared/shipper-core';
-import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
+import type { AgentName, CommandMode, Logger } from '@dnsquared/shipper-core';
 import { pollPrMerged, postMerge } from './merge.js';
 import type { QueuedPR } from './merge.js';
 import { buildReadyCheck, SKIP_PR_REMEDIATE_WAIT_ENV_VAR } from './pr-remediate.js';
@@ -189,16 +191,6 @@ function summarizeChildStderr(stderrOutput: string): string {
   return stderrOutput.trim();
 }
 
-function logBoth(logStream: WriteStream | undefined, message: string): void {
-  console.log(message);
-  logStream?.write(`${message}\n`);
-}
-
-function errorBoth(logStream: WriteStream | undefined, message: string): void {
-  console.error(message);
-  logStream?.write(`${message}\n`);
-}
-
 function writeStdoutBoth(logStream: WriteStream | undefined, chunk: string | Buffer): void {
   process.stdout.write(chunk);
   logStream?.write(chunk);
@@ -308,18 +300,18 @@ async function getCurrentLabel(repo: string, issueStr: string): Promise<string |
   return stageLabels[0];
 }
 
-function printSummary(results: StageResult[], logStream?: WriteStream): void {
-  logBoth(logStream, '\nStage summary:');
+function printSummary(results: StageResult[], issueLogger: Logger): void {
+  issueLogger.log('\nStage summary:');
   for (const r of results) {
     const icon = r.status === 'pass' ? '✓' : '✗';
     const suffix = r.status === 'fail' ? ' — failed' : '';
-    logBoth(logStream, `  ${icon} ${r.stage}${suffix}`);
+    issueLogger.log(`  ${icon} ${r.stage}${suffix}`);
   }
 }
 
 export function printAutoSummary(results: AutoResult[]): void {
   if (results.length === 0) {
-    console.log('\nAuto run complete. No eligible issues found.');
+    logger.log('\nAuto run complete. No eligible issues found.');
     return;
   }
 
@@ -330,8 +322,8 @@ export function printAutoSummary(results: AutoResult[]): void {
     )
   );
 
-  console.log('\nAuto run complete.\n');
-  console.log(
+  logger.log('\nAuto run complete.\n');
+  logger.log(
     `  #    Issue                                          ${'Tokens'.padStart(tokenWidth)}  Outcome`
   );
   for (const r of results) {
@@ -344,7 +336,7 @@ export function printAutoSummary(results: AutoResult[]): void {
         ? '—'.padStart(tokenWidth)
         : tokenFormatter.format(r.totalTokens).padStart(tokenWidth);
     const outcome = r.outcome === 'pass' ? '✓ pass' : `✗ fail — ${r.error ?? 'unknown error'}`;
-    console.log(`  ${num}${title} ${tokens}  ${outcome}`);
+    logger.log(`  ${num}${title} ${tokens}  ${outcome}`);
   }
 }
 
@@ -514,9 +506,9 @@ async function remediateMergeFailure(
   issueNumber: number,
   nwo: string,
   reason: string,
-  logStream?: WriteStream
+  issueLogger: Logger
 ): Promise<void> {
-  errorBoth(logStream, `\n${formatMergeFailureMessage(pr.number, reason)}`);
+  issueLogger.error(`\n${formatMergeFailureMessage(pr.number, reason)}`);
 
   try {
     await gh([
@@ -531,7 +523,7 @@ async function remediateMergeFailure(
       PR_REVIEWED_LABEL,
     ]);
   } catch {
-    errorBoth(logStream, `Warning: Failed to update labels on PR #${pr.number}`);
+    issueLogger.error(`Warning: Failed to update labels on PR #${pr.number}`);
   }
 
   try {
@@ -547,7 +539,7 @@ async function remediateMergeFailure(
       PR_REVIEWED_LABEL,
     ]);
   } catch {
-    errorBoth(logStream, `Warning: Failed to update labels on issue #${issueNumber}`);
+    issueLogger.error(`Warning: Failed to update labels on issue #${issueNumber}`);
   }
 
   const comment = [
@@ -561,7 +553,7 @@ async function remediateMergeFailure(
   try {
     await gh(['pr', 'comment', String(pr.number), '-R', nwo, '--body', comment]);
   } catch {
-    errorBoth(logStream, `Warning: Failed to post failure comment on PR #${pr.number}`);
+    issueLogger.error(`Warning: Failed to post failure comment on PR #${pr.number}`);
   }
 }
 
@@ -569,10 +561,11 @@ async function mergePr(
   pr: QueuedPR,
   issueNumber: number,
   nwo: string,
+  issueLogger: Logger,
   logStream?: WriteStream
 ): Promise<void> {
   const completePostMerge = async (message: string): Promise<void> => {
-    logBoth(logStream, message);
+    issueLogger.log(message);
     await postMerge(pr, issueNumber, nwo, false);
   };
 
@@ -581,7 +574,7 @@ async function mergePr(
     let rebased = false;
 
     if (mergeState === 'BEHIND') {
-      logBoth(logStream, `PR #${pr.number} is behind its base branch. Rebasing before merge.`);
+      issueLogger.log(`PR #${pr.number} is behind its base branch. Rebasing before merge.`);
       try {
         const { stdout } = await gh([
           'pr',
@@ -605,7 +598,7 @@ async function mergePr(
     }
 
     if (mergeState === 'UNKNOWN') {
-      logBoth(logStream, `PR #${pr.number} merge state is UNKNOWN. Polling for resolution...`);
+      issueLogger.log(`PR #${pr.number} merge state is UNKNOWN. Polling for resolution...`);
       for (let i = 0; i < UNKNOWN_STATE_POLL_MAX && mergeState === 'UNKNOWN'; i++) {
         await sleepMs(UNKNOWN_STATE_POLL_DELAY_MS);
         mergeState = await getMergeStateStatus(pr.number, nwo);
@@ -643,7 +636,7 @@ async function mergePr(
     }
   } catch (err) {
     const reason = normalizeError(err).message;
-    await remediateMergeFailure(pr, issueNumber, nwo, reason, logStream);
+    await remediateMergeFailure(pr, issueNumber, nwo, reason, issueLogger);
     throw new Error(formatMergeFailureMessage(pr.number, reason));
   }
 }
@@ -662,6 +655,7 @@ async function shipOneIssue(
   const issueStartTime = new Date();
   const isAutoChildRun = process.env[AUTO_CHILD_RUN_ENV_VAR] === '1';
   const logStream = logFile ? createWriteStream(logFile) : undefined;
+  const issueLogger = createLogger({ stream: logStream });
   let logStreamError: string | undefined;
 
   if (logStream && logFile) {
@@ -679,19 +673,19 @@ async function shipOneIssue(
 
       if (label === FAILED_LABEL) {
         const msg = `Issue #${issueStr} is marked ${FAILED_LABEL} and requires manual intervention before it can re-enter the pipeline.`;
-        errorBoth(logStream, msg);
+        issueLogger.error(msg);
         return { success: false, error: msg };
       }
 
       if (!label) {
         const msg = `Issue #${issueStr} has no shipper label. Run \`shipper next\` or add a label first.`;
-        errorBoth(logStream, msg);
+        issueLogger.error(msg);
         return { success: false, error: msg };
       }
 
       if (label === READY_LABEL) {
         if (!merge) {
-          logBoth(logStream, `Issue #${issueStr} is already at ${READY_LABEL}.`);
+          issueLogger.log(`Issue #${issueStr} is already at ${READY_LABEL}.`);
           return { success: true };
         }
         // Fall through to merge logic below the loop
@@ -699,16 +693,16 @@ async function shipOneIssue(
 
       if (label !== READY_LABEL && !(label in STAGE_NAME)) {
         const msg = `Unrecognized shipper label "${label}" on issue #${issueStr}.`;
-        errorBoth(logStream, msg);
+        issueLogger.error(msg);
         return { success: false, error: msg };
       }
 
       const results: StageResult[] = [];
       const transitionHistory: string[] = [label];
       const failCurrentStage = (stage: string, message: string): ShipIssueResult => {
-        errorBoth(logStream, message);
+        issueLogger.error(message);
         results.push({ stage, status: 'fail' });
-        printSummary(results, logStream);
+        printSummary(results, issueLogger);
         return { success: false, error: message };
       };
 
@@ -724,8 +718,8 @@ async function shipOneIssue(
           const stageName = STAGE_NAME[label];
           if (!stageName) {
             const msg = `Unrecognized shipper label "${label}" on issue #${issueStr}.`;
-            errorBoth(logStream, msg);
-            printSummary(results, logStream);
+            issueLogger.error(msg);
+            printSummary(results, issueLogger);
             return { success: false, error: msg };
           }
           const previousLabel: string | undefined = label;
@@ -761,14 +755,13 @@ async function shipOneIssue(
 
           const stageMode = resolveMode(getStageModeKey(stageName), mode);
           if (isAutoChildRun && stageMode === 'interactive') {
-            logBoth(
-              logStream,
+            issueLogger.log(
               `Skipping issue #${issueStr}: stage "${stageName}" requires interactive mode.`
             );
             return { success: true };
           }
 
-          logBoth(logStream, `Running stage: ${stageName}`);
+          issueLogger.log(`Running stage: ${stageName}`);
 
           const nextArgs = [cliEntrypoint, 'next', issueStr];
           if (stageMode !== 'default') {
@@ -796,7 +789,7 @@ async function shipOneIssue(
 
           if (status !== 0) {
             results.push({ stage: stageName, status: 'fail' });
-            printSummary(results, logStream);
+            printSummary(results, issueLogger);
             return { success: false, error: `stage "${stageName}" failed` };
           }
 
@@ -806,36 +799,33 @@ async function shipOneIssue(
 
           if (!label || (label !== READY_LABEL && !(label in STAGE_NAME))) {
             if (!label) {
-              errorBoth(
-                logStream,
+              issueLogger.error(
                 `Issue #${issueStr} has no shipper label after stage "${stageName}".`
               );
             } else if (label === FAILED_LABEL) {
-              errorBoth(
-                logStream,
+              issueLogger.error(
                 `Issue #${issueStr} entered terminal state ${FAILED_LABEL} after stage "${stageName}".`
               );
             } else {
-              errorBoth(
-                logStream,
+              issueLogger.error(
                 `Unrecognized shipper label "${label}" on issue #${issueStr} after stage "${stageName}".`
               );
             }
-            printSummary(results, logStream);
+            printSummary(results, issueLogger);
             return { success: false, error: `unexpected label after stage "${stageName}"` };
           }
 
           if (label === NEW_LABEL && previousLabel !== NEW_LABEL && (parkHooks || isAutoChildRun)) {
             const msg = `Issue #${issueStr} was reset to ${NEW_LABEL} by stage "${stageName}" - stopping to avoid interactive groom stage.`;
-            errorBoth(logStream, msg);
-            printSummary(results, logStream);
+            issueLogger.error(msg);
+            printSummary(results, issueLogger);
             return { success: false, error: msg };
           }
 
           if (label === previousLabel) {
             const msg = `Label did not advance after stage "${stageName}" (still "${label}"). Aborting to avoid infinite loop.`;
-            errorBoth(logStream, msg);
-            printSummary(results, logStream);
+            issueLogger.error(msg);
+            printSummary(results, issueLogger);
             return { success: false, error: msg };
           }
 
@@ -845,7 +835,7 @@ async function shipOneIssue(
           if (transitions >= MAX_TRANSITIONS) {
             const history = transitionHistory.join(' → ');
             const msg = `Issue #${issueStr} hit transition cap (${MAX_TRANSITIONS}): ${history}`;
-            errorBoth(logStream, msg);
+            issueLogger.error(msg);
 
             try {
               await gh([
@@ -861,14 +851,13 @@ async function shipOneIssue(
               ]);
             } catch (err) {
               const relabelError = err instanceof Error ? err.message : String(err);
-              errorBoth(
-                logStream,
+              issueLogger.error(
                 `Warning: Failed to update labels on issue #${issueStr}: ${relabelError}`
               );
             }
 
             results.push({ stage: STAGE_NAME[label] ?? label, status: 'fail' });
-            printSummary(results, logStream);
+            printSummary(results, issueLogger);
             return { success: false, error: msg };
           }
 
@@ -879,7 +868,7 @@ async function shipOneIssue(
       }
 
       if (merge) {
-        logBoth(logStream, 'Running stage: merge');
+        issueLogger.log('Running stage: merge');
         const issueNumber = Number(issueStr);
         const nwo = repo;
 
@@ -888,9 +877,9 @@ async function shipOneIssue(
           pr = await resolvePrForIssue(issueNumber, nwo);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
-          errorBoth(logStream, msg);
+          issueLogger.error(msg);
           results.push({ stage: 'merge', status: 'fail' });
-          printSummary(results, logStream);
+          printSummary(results, issueLogger);
           return { success: false, error: msg };
         }
 
@@ -899,19 +888,19 @@ async function shipOneIssue(
             'merge',
             { issueNumber: issueStr, branchName: pr.headRefName },
             async () => {
-              await mergePr(pr, issueNumber, nwo, logStream);
+              await mergePr(pr, issueNumber, nwo, issueLogger, logStream);
             }
           );
           results.push({ stage: 'merge', status: 'pass' });
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           results.push({ stage: 'merge', status: 'fail' });
-          printSummary(results, logStream);
+          printSummary(results, issueLogger);
           return { success: false, error: msg, retriable: isRetriableMergeFailure(msg) };
         }
       }
 
-      printSummary(results, logStream);
+      printSummary(results, issueLogger);
       return { success: true };
     });
     if (isAutoChildRun) {
@@ -1221,7 +1210,7 @@ async function attemptUnblock(
       return result.verdict === 'accept';
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
-      console.error(detail);
+      logger.error(detail);
       await handleAgentCrash(repo, issueStr, 'unblock', detail);
       return false;
     }
@@ -1401,8 +1390,8 @@ async function resumeParkedIssue(
 }
 
 export function printUnblockSummary(attempts: UnblockAttempt[], homeDir = homedir()): void {
-  console.log('\n  Unblock attempts:\n');
-  console.log('  Ref              Issue                                          Outcome');
+  logger.log('\n  Unblock attempts:\n');
+  logger.log('  Ref              Issue                                          Outcome');
   const finalByIssue = new Map<number, UnblockAttempt>();
   for (const a of attempts) {
     finalByIssue.delete(a.issue);
@@ -1416,16 +1405,16 @@ export function printUnblockSummary(attempts: UnblockAttempt[], homeDir = homedi
     const title =
       titleChars.length > 45 ? titleChars.slice(0, 42).join('') + '...' : a.title.padEnd(45);
     const outcome = a.outcome === 'unblocked' ? '✓ unblocked' : '— still blocked';
-    console.log(`  ${num}${title} ${outcome}`);
+    logger.log(`  ${num}${title} ${outcome}`);
   }
 
   const withLogFiles = attempts.filter(
     (a): a is UnblockAttempt & { logFile: string } => !!a.logFile
   );
   if (withLogFiles.length > 0) {
-    console.log('\n  Unblock log files:');
+    logger.log('\n  Unblock log files:');
     for (const a of withLogFiles) {
-      console.log(`  unblock #${a.issue}   ${formatLogDisplayPath(a.logFile, homeDir)}`);
+      logger.log(`  unblock #${a.issue}   ${formatLogDisplayPath(a.logFile, homeDir)}`);
     }
   }
 }
@@ -1462,7 +1451,7 @@ async function shipAutoSequential(repo: string, agent?: AgentName, model?: strin
         break;
       }
 
-      console.log(`\nAuto: advancing issue #${candidate.number} — ${candidate.title}`);
+      logger.log(`\nAuto: advancing issue #${candidate.number} — ${candidate.title}`);
       const logFile = path.join(logsDir, `ship-${candidate.number}-${formatLogTimestamp()}.log`);
       logFiles.set(candidate.number, logFile);
       const run = startSequentialIssueRun(
@@ -1495,7 +1484,7 @@ async function shipAutoSequential(repo: string, agent?: AgentName, model?: strin
 
     let progress = false;
     for (const issue of blocked) {
-      console.log(`\nAuto: attempting unblock of #${issue.number} — ${issue.title}`);
+      logger.log(`\nAuto: attempting unblock of #${issue.number} — ${issue.title}`);
       const unblockLogFile = path.join(
         logsDir,
         `unblock-${issue.number}-${formatLogTimestamp()}.log`
@@ -1533,11 +1522,11 @@ async function shipAutoSequential(repo: string, agent?: AgentName, model?: strin
     printUnblockSummary(allUnblockAttempts, homeDir);
   }
   if (results.length > 0) {
-    console.log('\n  Log files:');
+    logger.log('\n  Log files:');
     for (const result of results) {
       const logFile = logFiles.get(result.issue);
       if (!logFile) continue;
-      console.log(`  #${result.issue}   ${formatLogDisplayPath(logFile, homeDir)}`);
+      logger.log(`  #${result.issue}   ${formatLogDisplayPath(logFile, homeDir)}`);
     }
   }
   process.exit(0);
@@ -1614,7 +1603,7 @@ async function shipAutoParallel(
         if (!candidate) break;
 
         const logFile = path.join(logsDir, `ship-${candidate.number}-${formatLogTimestamp()}.log`);
-        console.log(
+        logger.log(
           `\n[#${candidate.number}] Auto: advancing issue #${candidate.number} — ${candidate.title}`
         );
         const run = shipOneIssueAsync(String(candidate.number), logFile, agent, model);
@@ -1635,7 +1624,7 @@ async function shipAutoParallel(
 
         let progress = false;
         for (const issue of blocked) {
-          console.log(
+          logger.log(
             `\n[#${issue.number}] Auto: attempting unblock of #${issue.number} — ${issue.title}`
           );
           const unblockLogFile = path.join(
@@ -1672,7 +1661,7 @@ async function shipAutoParallel(
         issueStartTime === undefined
           ? undefined
           : await resolveIssueTotalTokens(repo, String(completed.issue.number), issueStartTime);
-      console.log(`[#${completed.issue.number}] ${completed.result.success ? '✓ pass' : '✗ fail'}`);
+      logger.log(`[#${completed.issue.number}] ${completed.result.success ? '✓ pass' : '✗ fail'}`);
 
       if (completed.result.success) {
         skippedIssues.add(completed.issue.number);
@@ -1705,11 +1694,11 @@ async function shipAutoParallel(
     printUnblockSummary(allUnblockAttempts, homeDir);
   }
   if (results.length > 0) {
-    console.log('\n  Log files:');
+    logger.log('\n  Log files:');
     for (const result of results) {
       const logFile = logFiles.get(result.issue);
       if (!logFile) continue;
-      console.log(`  #${result.issue}   ${formatLogDisplayPath(logFile, homeDir)}`);
+      logger.log(`  #${result.issue}   ${formatLogDisplayPath(logFile, homeDir)}`);
     }
   }
   process.exit(0);
@@ -1756,7 +1745,7 @@ export async function shipCommand(
 
   // Non-auto path: issue is required (validated in index.ts)
   if (!issue) {
-    console.error('Error: an issue number is required unless --auto is used.');
+    logger.error('Error: an issue number is required unless --auto is used.');
     process.exit(1);
   }
   const homeDir = homedir();
@@ -1773,6 +1762,6 @@ export async function shipCommand(
     undefined,
     logFile
   );
-  console.log(`\nLog file: ${formatLogDisplayPath(logFile, homeDir)}`);
+  logger.log(`\nLog file: ${formatLogDisplayPath(logFile, homeDir)}`);
   process.exit(result.success ? 0 : 1);
 }

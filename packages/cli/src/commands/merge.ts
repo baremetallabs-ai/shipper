@@ -1,7 +1,7 @@
 import { openSync, closeSync, readFileSync, writeFileSync, unlinkSync, constants } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fetchChecks, classifyChecks } from '@dnsquared/shipper-core';
+import { logger, fetchChecks, classifyChecks } from '@dnsquared/shipper-core';
 import { gh } from '@dnsquared/shipper-core';
 import { getSettings } from '@dnsquared/shipper-core';
 import { tryResolvePrForIssue } from '@dnsquared/shipper-core';
@@ -214,25 +214,25 @@ export async function lookupPR(ref: string, nwo: string): Promise<QueuedPR> {
     // Not a PR — try resolving as an issue number
     const resolved = await tryResolvePrForIssue(nwo, Number(ref));
     if (!resolved) {
-      console.error(`Error: #${ref} is not a PR and no linked PR was found.`);
+      logger.error(`Error: #${ref} is not a PR and no linked PR was found.`);
       process.exit(1);
     }
     try {
       data = await fetchPRView(resolved, nwo);
     } catch {
-      console.error(`Error: Failed to fetch resolved PR #${resolved}.`);
+      logger.error(`Error: Failed to fetch resolved PR #${resolved}.`);
       process.exit(1);
     }
   }
 
   if (data.state !== 'OPEN') {
-    console.error(`Error: PR #${data.number} is not open (state: ${data.state}).`);
+    logger.error(`Error: PR #${data.number} is not open (state: ${data.state}).`);
     process.exit(1);
   }
 
   const hasReadyLabel = data.labels.some((l) => l.name === 'shipper:ready');
   if (!hasReadyLabel) {
-    console.error(`Error: PR #${data.number} does not have the shipper:ready label.`);
+    logger.error(`Error: PR #${data.number} does not have the shipper:ready label.`);
     process.exit(1);
   }
 
@@ -288,11 +288,11 @@ function acquireLock(lockPath: string): void {
   // Check if the process is still running
   try {
     process.kill(pid, 0); // Throws if process doesn't exist
-    console.error(`Error: Another merge queue is running (PID ${pid}). Lock: ${lockPath}`);
+    logger.error(`Error: Another merge queue is running (PID ${pid}). Lock: ${lockPath}`);
     process.exit(1);
   } catch {
     // Process doesn't exist — stale lock
-    console.log(`Removing stale lock (PID ${pid} no longer running).`);
+    logger.log(`Removing stale lock (PID ${pid} no longer running).`);
     try {
       unlinkSync(lockPath);
     } catch {
@@ -354,7 +354,7 @@ async function getQueue(nwo: string): Promise<QueuedPR[]> {
       output = result.stdout;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`Error: Failed to query merge queue: ${msg}`);
+      logger.error(`Error: Failed to query merge queue: ${msg}`);
       return [];
     }
 
@@ -386,9 +386,9 @@ async function getQueue(nwo: string): Promise<QueuedPR[]> {
 }
 
 async function failPR(pr: QueuedPR, reason: string, nwo: string, dryRun: boolean): Promise<void> {
-  console.log(`  PR #${pr.number} failed: ${reason}`);
+  logger.log(`  PR #${pr.number} failed: ${reason}`);
   if (dryRun) {
-    console.log(`  [dry-run] Would remove shipper:ready, add shipper:pr-reviewed, comment on PR`);
+    logger.log(`  [dry-run] Would remove shipper:ready, add shipper:pr-reviewed, comment on PR`);
     return;
   }
 
@@ -398,13 +398,13 @@ async function failPR(pr: QueuedPR, reason: string, nwo: string, dryRun: boolean
   try {
     await gh(['pr', 'edit', prRef, ...repoArgs, '--remove-label', 'shipper:ready']);
   } catch {
-    console.error(`  Warning: Failed to remove shipper:ready label from PR #${pr.number}`);
+    logger.error(`  Warning: Failed to remove shipper:ready label from PR #${pr.number}`);
   }
 
   try {
     await gh(['pr', 'edit', prRef, ...repoArgs, '--add-label', 'shipper:pr-reviewed']);
   } catch {
-    console.error(`  Warning: Failed to add shipper:pr-reviewed label to PR #${pr.number}`);
+    logger.error(`  Warning: Failed to add shipper:pr-reviewed label to PR #${pr.number}`);
   }
 
   try {
@@ -417,7 +417,7 @@ async function failPR(pr: QueuedPR, reason: string, nwo: string, dryRun: boolean
       `Merge queue removed this PR from the queue.\n\n**Reason:** ${reason}\n\nThe \`shipper:pr-reviewed\` label has been re-applied so the PR can be remediated and re-queued.`,
     ]);
   } catch {
-    console.error(`  Warning: Failed to comment on PR #${pr.number}`);
+    logger.error(`  Warning: Failed to comment on PR #${pr.number}`);
   }
 }
 
@@ -448,7 +448,7 @@ export async function postMerge(
 ): Promise<void> {
   // Clean up label and close issue
   if (dryRun) {
-    console.log(`  [dry-run] Would remove shipper:ready and close issue #${issueNumber}`);
+    logger.log(`  [dry-run] Would remove shipper:ready and close issue #${issueNumber}`);
     return;
   }
 
@@ -464,24 +464,24 @@ export async function postMerge(
     ]);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.warn(
+    logger.warn(
       `  Warning: Failed to remove shipper:ready label from issue #${issueNumber}: ${msg}`
     );
   }
 
   try {
     await gh(['issue', 'close', String(issueNumber), ...repoArgs]);
-    console.log(`  Issue #${issueNumber} closed.`);
+    logger.log(`  Issue #${issueNumber} closed.`);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`  Warning: Failed to close issue #${issueNumber}: ${msg}`);
+    logger.warn(`  Warning: Failed to close issue #${issueNumber}: ${msg}`);
   }
 }
 
 async function runPostMergeActions(pr: QueuedPR, nwo: string, dryRun: boolean): Promise<void> {
   const issueNumber = await getLinkedIssueNumber(pr.number, nwo);
   if (issueNumber === null) {
-    console.warn(
+    logger.warn(
       `  Warning: Could not determine linked issue for PR #${pr.number}. Skipping post-merge actions.`
     );
     return;
@@ -491,12 +491,12 @@ async function runPostMergeActions(pr: QueuedPR, nwo: string, dryRun: boolean): 
 
 async function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): Promise<boolean> {
   const completePostMerge = async (message: string): Promise<boolean> => {
-    console.log(message);
+    logger.log(message);
     await runPostMergeActions(pr, nwo, false);
     return true;
   };
 
-  console.log(`  Processing PR #${pr.number}: ${pr.title}`);
+  logger.log(`  Processing PR #${pr.number}: ${pr.title}`);
 
   // Check merge state
   let mergeState: string;
@@ -518,12 +518,12 @@ async function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): Promise<bo
     return false;
   }
 
-  console.log(`  Merge state: ${mergeState}`);
+  logger.log(`  Merge state: ${mergeState}`);
 
   if (mergeState === 'BEHIND') {
-    console.log(`  Branch is behind base — updating...`);
+    logger.log(`  Branch is behind base — updating...`);
     if (dryRun) {
-      console.log(`  [dry-run] Would run: gh pr update-branch --rebase`);
+      logger.log(`  [dry-run] Would run: gh pr update-branch --rebase`);
       return false;
     }
     try {
@@ -538,7 +538,7 @@ async function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): Promise<bo
       if (stdout.trim()) {
         process.stdout.write(stdout);
       }
-      console.log(`  Branch updated. Will check again next cycle.`);
+      logger.log(`  Branch updated. Will check again next cycle.`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       await failPR(pr, `Failed to update branch: ${msg}`, nwo, dryRun);
@@ -572,22 +572,22 @@ async function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): Promise<bo
 
     if (pending.length > 0) {
       const names = pending.map((c) => c.name).join(', ');
-      console.log(`  Checks still running: ${names}. Will retry next cycle.`);
+      logger.log(`  Checks still running: ${names}. Will retry next cycle.`);
       return false;
     }
 
     // Blocked but no failing/pending checks — might be review requirements
-    console.log(`  PR is blocked (possibly awaiting review approval). Will retry next cycle.`);
+    logger.log(`  PR is blocked (possibly awaiting review approval). Will retry next cycle.`);
     return false;
   }
 
   if (mergeState === 'UNKNOWN') {
-    console.log(`  Merge state not yet computed by GitHub. Will retry next cycle.`);
+    logger.log(`  Merge state not yet computed by GitHub. Will retry next cycle.`);
     return false;
   }
 
   if (mergeState !== 'CLEAN' && mergeState !== 'HAS_HOOKS' && mergeState !== 'UNSTABLE') {
-    console.log(`  Unexpected merge state: ${mergeState}. Will retry next cycle.`);
+    logger.log(`  Unexpected merge state: ${mergeState}. Will retry next cycle.`);
     return false;
   }
 
@@ -613,7 +613,7 @@ async function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): Promise<bo
 
       if (pending.length > 0) {
         const names = pending.map((c) => c.name).join(', ');
-        console.log(`  Checks still running: ${names}. Will retry next cycle.`);
+        logger.log(`  Checks still running: ${names}. Will retry next cycle.`);
         return false;
       }
     }
@@ -621,7 +621,7 @@ async function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): Promise<bo
 
   // Ready to merge
   if (dryRun) {
-    console.log(`  [dry-run] Would merge PR #${pr.number} with --rebase --delete-branch`);
+    logger.log(`  [dry-run] Would merge PR #${pr.number} with --rebase --delete-branch`);
     await runPostMergeActions(pr, nwo, true);
     return true;
   }
@@ -657,13 +657,13 @@ async function processQueue(nwo: string, dryRun: boolean): Promise<void> {
   const queue = await getQueue(nwo);
 
   if (queue.length === 0) {
-    console.log('No PRs in merge queue.');
+    logger.log('No PRs in merge queue.');
     return;
   }
 
-  console.log(`Merge queue: ${queue.length} PR(s)`);
+  logger.log(`Merge queue: ${queue.length} PR(s)`);
   for (const pr of queue) {
-    console.log(`  #${pr.number} — ${pr.title} (labeled ${pr.labeledAt})`);
+    logger.log(`  #${pr.number} — ${pr.title} (labeled ${pr.labeledAt})`);
   }
 
   const first = queue[0];
@@ -687,13 +687,13 @@ export async function mergeCommand(options: MergeOptions): Promise<void> {
   if (options.number) {
     const cleaned = options.number.replace(/^#/, '');
     if (!/^\d+$/.test(cleaned)) {
-      console.error('Error: argument must be a numeric issue or PR number.');
+      logger.error('Error: argument must be a numeric issue or PR number.');
       process.exit(1);
     }
-    console.log(`Merge queue for ${nwo}`);
-    if (options.dryRun) console.log('[dry-run mode]');
+    logger.log(`Merge queue for ${nwo}`);
+    if (options.dryRun) logger.log('[dry-run mode]');
     const pr = await lookupPR(cleaned, nwo);
-    console.log(`Targeting PR #${pr.number}: ${pr.title}`);
+    logger.log(`Targeting PR #${pr.number}: ${pr.title}`);
     const merged = await withStageHooks(
       'merge',
       {
@@ -707,18 +707,18 @@ export async function mergeCommand(options: MergeOptions): Promise<void> {
   }
 
   if (!/^\d+$/.test(options.interval)) {
-    console.error('Error: --interval must be a positive integer (seconds).');
+    logger.error('Error: --interval must be a positive integer (seconds).');
     process.exit(1);
   }
   const intervalSeconds = Number(options.interval);
 
   if (intervalSeconds < 1) {
-    console.error('Error: --interval must be a positive integer (seconds).');
+    logger.error('Error: --interval must be a positive integer (seconds).');
     process.exit(1);
   }
 
-  console.log(`Merge queue for ${nwo}`);
-  if (options.dryRun) console.log('[dry-run mode]');
+  logger.log(`Merge queue for ${nwo}`);
+  if (options.dryRun) logger.log('[dry-run mode]');
 
   const lockPath = getLockPath(nwo);
   acquireLock(lockPath);
@@ -734,7 +734,7 @@ export async function mergeCommand(options: MergeOptions): Promise<void> {
     if (options.once) {
       await processQueue(nwo, options.dryRun);
     } else {
-      console.log(`Polling every ${intervalSeconds}s. Press Ctrl+C to stop.`);
+      logger.log(`Polling every ${intervalSeconds}s. Press Ctrl+C to stop.`);
       for (;;) {
         await processQueue(nwo, options.dryRun);
         await sleepMs(intervalSeconds * 1000);
