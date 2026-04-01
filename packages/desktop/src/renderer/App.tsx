@@ -2105,6 +2105,7 @@ export default function App(): JSX.Element {
             command: command.command,
             status: command.status,
             title: command.title,
+            repo: command.repo,
             detail: command.detail,
             canCancel: command.status === 'queued' || command.status === 'running',
             canShowLogs:
