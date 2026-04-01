@@ -22,6 +22,7 @@ export interface ActionQueueItem {
   command: ActionQueueCommand;
   status: ActionQueueStatus;
   title: string;
+  repo: string;
   detail?: string;
   canCancel: boolean;
   canShowLogs: boolean;
@@ -182,6 +183,7 @@ export function ActionQueueDrawer({
                         {getStatusLabel(item.status, item.cancelled)}
                       </Badge>
                     </div>
+                    <p className="truncate text-xs text-muted-foreground">{item.repo}</p>
                     {item.detail ? (
                       <p className="truncate text-xs text-muted-foreground">{item.detail}</p>
                     ) : null}
