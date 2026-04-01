@@ -161,4 +161,16 @@ describe('createLogger', () => {
 
     expect(logMock.mock.calls).toEqual([['[shipper] from default']]);
   });
+
+  it('preserves leading newlines before the shipper prefix', () => {
+    const logger = createLogger();
+
+    logger.log('\nhello');
+    logger.warn('\ncareful');
+    logger.error('\nbroken');
+
+    expect(logMock.mock.calls).toEqual([['\n[shipper] hello']]);
+    expect(warnMock.mock.calls).toEqual([['\n[shipper] careful']]);
+    expect(errorMock.mock.calls).toEqual([['\n[shipper] broken']]);
+  });
 });

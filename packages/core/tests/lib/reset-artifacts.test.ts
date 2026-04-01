@@ -163,6 +163,10 @@ function ghCalls(): string[][] {
 }
 
 beforeEach(() => {
+  vi.spyOn(console, 'log').mockImplementation(() => {});
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+
   mockGh.mockReset();
   mockExecFileSync.mockReset();
   mockExistsSync.mockReset();
@@ -587,7 +591,6 @@ describe('executeReset', () => {
   });
 
   it('logs the reset summary with the shipper prefix', async () => {
-    const logMock = vi.spyOn(console, 'log').mockImplementation(() => {});
     mockGh.mockImplementation((args: string[]) => {
       if (args[0] === 'issue' && args[1] === 'comment') {
         return Promise.resolve(ok());
@@ -606,8 +609,8 @@ describe('executeReset', () => {
       'owner/repo'
     );
 
-    expect(logMock.mock.calls).toEqual([
-      ['[shipper] \nReset complete for issue #18:'],
+    expect(vi.mocked(console.log).mock.calls).toEqual([
+      ['\n[shipper] Reset complete for issue #18:'],
       ['[shipper]   ✓ Removed labels: shipper:planned'],
       ['[shipper]   ✓ Added label: shipper:groomed'],
       ['[shipper]   ✓ Posted reset notice comment'],
@@ -615,7 +618,6 @@ describe('executeReset', () => {
   });
 
   it('warns with the shipper prefix when branch verification fails during reset', async () => {
-    const warnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
     mockGh.mockImplementation((args: string[]) => {
       if (
         args[0] === 'pr' &&
@@ -643,7 +645,7 @@ describe('executeReset', () => {
       'owner/repo'
     );
 
-    expect(warnMock).toHaveBeenCalledWith(
+    expect(vi.mocked(console.warn)).toHaveBeenCalledWith(
       '[shipper]   Warning: Could not verify open PR state for branch shipper/18-open-pr: lookup failed'
     );
   });
