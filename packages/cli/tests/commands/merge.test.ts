@@ -24,6 +24,8 @@ const classifyChecksMock = vi.fn<
     total: number;
   }
 >();
+const sleepMsMock = vi.fn<(ms: number) => Promise<void>>(() => Promise.resolve());
+
 vi.mock('@dnsquared/shipper-core', () => ({
   getSettings: () => getSettingsMock(),
   gh: (args: string[]) => ghMock(args),
@@ -33,6 +35,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   withStageHooks: vi.fn((_stage: unknown, _env: unknown, fn: () => Promise<unknown>) => fn()),
   fetchChecks: (repo: string, pr: string) => fetchChecksMock(repo, pr),
   classifyChecks: (checks: MockCheck[]) => classifyChecksMock(checks),
+  sleepMs: (ms: number) => sleepMsMock(ms),
 }));
 
 const logMock = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -45,6 +48,8 @@ beforeEach(() => {
   tryResolvePrForIssueMock.mockReset();
   fetchChecksMock.mockReset();
   classifyChecksMock.mockReset();
+  sleepMsMock.mockReset();
+  sleepMsMock.mockResolvedValue(undefined);
   logMock.mockClear();
   warnMock.mockClear();
   errorMock.mockClear();
@@ -54,8 +59,43 @@ beforeEach(() => {
   });
 });
 
-const { getLinkedIssueNumber, postMerge, lookupPR, mergeCommand } =
+const { getLinkedIssueNumber, postMerge, lookupPR, mergeCommand, pollPrMerged } =
   await import('../../src/commands/merge.js');
+
+describe('pollPrMerged', () => {
+  it('returns true after exponential backoff when a later check observes MERGED', async () => {
+    const verificationStates = ['OPEN', 'OPEN', 'MERGED'];
+    let verificationAttempt = 0;
+    ghMock.mockImplementation((args: string[]) => {
+      if (args[0] === 'pr' && args[1] === 'view' && args[args.indexOf('--json') + 1] === 'state') {
+        const state =
+          verificationStates[Math.min(verificationAttempt, verificationStates.length - 1)];
+        verificationAttempt += 1;
+        return Promise.resolve({ stdout: JSON.stringify({ state }), stderr: '' });
+      }
+
+      return Promise.resolve({ stdout: '', stderr: '' });
+    });
+
+    await expect(pollPrMerged(42, 'owner/repo')).resolves.toBe(true);
+    expect(findPrStateViewCalls()).toHaveLength(3);
+    expect(sleepMsMock.mock.calls).toEqual([[1_000], [2_000]]);
+  });
+
+  it('returns false after exhausting all polling attempts', async () => {
+    ghMock.mockImplementation((args: string[]) => {
+      if (args[0] === 'pr' && args[1] === 'view' && args[args.indexOf('--json') + 1] === 'state') {
+        return Promise.resolve({ stdout: JSON.stringify({ state: 'OPEN' }), stderr: '' });
+      }
+
+      return Promise.resolve({ stdout: '', stderr: '' });
+    });
+
+    await expect(pollPrMerged(42, 'owner/repo')).resolves.toBe(false);
+    expect(findPrStateViewCalls()).toHaveLength(5);
+    expect(sleepMsMock.mock.calls).toEqual([[1_000], [2_000], [4_000], [8_000]]);
+  });
+});
 
 const mockPR = {
   number: 42,
@@ -251,6 +291,7 @@ describe('requirePassingChecks', () => {
     options?: {
       mergeError?: Error;
       verificationState?: string;
+      verificationStates?: string[];
       verificationError?: Error;
       verificationStdout?: string;
     }
@@ -258,9 +299,11 @@ describe('requirePassingChecks', () => {
     const {
       mergeError,
       verificationState = 'OPEN',
+      verificationStates,
       verificationError,
       verificationStdout,
     } = options ?? {};
+    let verificationAttempt = 0;
 
     ghMock.mockImplementation((args: string[]) => {
       if (args[0] === 'pr' && args[1] === 'view') {
@@ -272,8 +315,12 @@ describe('requirePassingChecks', () => {
           if (verificationError) {
             return Promise.reject(verificationError);
           }
+          const state =
+            verificationStates?.[Math.min(verificationAttempt, verificationStates.length - 1)] ??
+            verificationState;
+          verificationAttempt += 1;
           return Promise.resolve({
-            stdout: verificationStdout ?? JSON.stringify({ state: verificationState }),
+            stdout: verificationStdout ?? JSON.stringify({ state }),
             stderr: '',
           });
         }
@@ -414,22 +461,15 @@ describe('requirePassingChecks', () => {
   it('runs post-merge cleanup when merge reports an error but verification confirms MERGED', async () => {
     mockPRLookup('CLEAN', {
       mergeError: new Error('merge request timed out'),
-      verificationState: 'MERGED',
+      verificationStates: ['MERGED'],
     });
     fetchChecksMock.mockResolvedValue([]);
     classifyChecksMock.mockReturnValue({ pending: [], failed: [], passed: [], total: 0 });
 
     await mergeCommand({ interval: '30', once: true, dryRun: false, number: '42' });
 
-    expect(ghMock).toHaveBeenCalledWith([
-      'pr',
-      'view',
-      '42',
-      '-R',
-      'owner/repo',
-      '--json',
-      'state',
-    ]);
+    expect(findPrStateViewCalls()).toHaveLength(1);
+    expect(sleepMsMock).not.toHaveBeenCalled();
     expect(ghMock).toHaveBeenCalledWith([
       'issue',
       'edit',
@@ -451,7 +491,7 @@ describe('requirePassingChecks', () => {
   it('remediates when merge reports an error and verification confirms the PR is still open', async () => {
     mockPRLookup('CLEAN', {
       mergeError: new Error('merge failed'),
-      verificationState: 'OPEN',
+      verificationStates: ['OPEN'],
     });
     fetchChecksMock.mockResolvedValue([]);
     classifyChecksMock.mockReturnValue({ pending: [], failed: [], passed: [], total: 0 });
@@ -460,15 +500,8 @@ describe('requirePassingChecks', () => {
       mergeCommand({ interval: '30', once: true, dryRun: false, number: '42' })
     ).rejects.toThrow('exit:1');
 
-    expect(ghMock).toHaveBeenCalledWith([
-      'pr',
-      'view',
-      '42',
-      '-R',
-      'owner/repo',
-      '--json',
-      'state',
-    ]);
+    expect(findPrStateViewCalls()).toHaveLength(5);
+    expect(sleepMsMock.mock.calls).toEqual([[1_000], [2_000], [4_000], [8_000]]);
     expect(findCalls('pr', 'edit')).toHaveLength(2);
     expect(findCalls('pr', 'comment')).toHaveLength(1);
     expect(findCalls('issue', 'edit')).toHaveLength(0);
@@ -488,15 +521,8 @@ describe('requirePassingChecks', () => {
       mergeCommand({ interval: '30', once: true, dryRun: false, number: '42' })
     ).rejects.toThrow('exit:1');
 
-    expect(ghMock).toHaveBeenCalledWith([
-      'pr',
-      'view',
-      '42',
-      '-R',
-      'owner/repo',
-      '--json',
-      'state',
-    ]);
+    expect(findPrStateViewCalls()).toHaveLength(5);
+    expect(sleepMsMock.mock.calls).toEqual([[1_000], [2_000], [4_000], [8_000]]);
     expect(findCalls('pr', 'edit')).toHaveLength(2);
     expect(findCalls('pr', 'comment')).toHaveLength(1);
     expect(findCalls('issue', 'edit')).toHaveLength(0);
@@ -509,4 +535,16 @@ function findCalls(command: string, subcommand: string): string[][] {
   return ghMock.mock.calls
     .map(([args]) => args)
     .filter((args) => args[0] === command && args[1] === subcommand);
+}
+
+function findPrStateViewCalls(): string[][] {
+  return ghMock.mock.calls
+    .map(([args]) => args)
+    .filter(
+      (args) =>
+        args[0] === 'pr' &&
+        args[1] === 'view' &&
+        args.includes('--json') &&
+        args[args.indexOf('--json') + 1] === 'state'
+    );
 }

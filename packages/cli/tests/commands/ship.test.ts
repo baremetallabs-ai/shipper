@@ -50,8 +50,8 @@ const postMergeMock = vi.hoisted(() =>
     (_pr: unknown, issueNumber: number | string, repo: string, dryRun: boolean) => Promise<void>
   >(() => Promise.resolve())
 );
-const isPrMergedMock = vi.hoisted(() =>
-  vi.fn<(prNumber: number, repo: string) => Promise<boolean | null>>(() => Promise.resolve(false))
+const pollPrMergedMock = vi.hoisted(() =>
+  vi.fn<(prNumber: number, repo: string) => Promise<boolean>>(() => Promise.resolve(false))
 );
 const prepareUnblockContextMock = vi.hoisted(() =>
   vi.fn<(repo: string, issue: string, cwd: string) => Promise<void>>(() => Promise.resolve())
@@ -105,7 +105,7 @@ vi.mock('../../src/commands/pr-remediate.js', () => ({
 vi.mock('../../src/commands/merge.js', () => ({
   postMerge: (_pr: unknown, issueNumber: number | string, repo: string, dryRun: boolean) =>
     postMergeMock(_pr, issueNumber, repo, dryRun),
-  isPrMerged: (prNumber: number, repo: string) => isPrMergedMock(prNumber, repo),
+  pollPrMerged: (prNumber: number, repo: string) => pollPrMergedMock(prNumber, repo),
 }));
 
 vi.mock('../../src/commands/unblock.js', () => ({
@@ -1717,8 +1717,8 @@ describe('shipCommand merge path', () => {
     mockSpawn.mockReset();
     postMergeMock.mockClear();
     postMergeMock.mockResolvedValue(undefined);
-    isPrMergedMock.mockReset();
-    isPrMergedMock.mockResolvedValue(false);
+    pollPrMergedMock.mockReset();
+    pollPrMergedMock.mockResolvedValue(false);
     exitSpy.mockClear();
   });
 
@@ -1751,7 +1751,7 @@ describe('shipCommand merge path', () => {
     expect(stderrOutput).toContain(
       'Merge failed for PR #456: Failed to rebase PR #456 onto its base branch: rebase conflict'
     );
-    expect(isPrMergedMock).not.toHaveBeenCalled();
+    expect(pollPrMergedMock).not.toHaveBeenCalled();
     expect(findGhCalls('pr', 'merge')).toHaveLength(0);
     expect(findGhCalls('pr', 'edit')).toHaveLength(1);
     expect(findGhCalls('issue', 'edit')).toHaveLength(1);
@@ -1949,12 +1949,12 @@ describe('shipCommand merge path', () => {
       mergeStates: ['CLEAN'],
       mergeError: new Error('merge timed out'),
     });
-    isPrMergedMock.mockResolvedValue(true);
+    pollPrMergedMock.mockResolvedValue(true);
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     await shipCommand(repo, '123', { merge: true, auto: false });
 
-    expect(isPrMergedMock).toHaveBeenCalledWith(456, repo);
+    expect(pollPrMergedMock).toHaveBeenCalledWith(456, repo);
     expect(postMergeMock).toHaveBeenCalledTimes(1);
     expect(findGhCalls('pr', 'edit')).toHaveLength(0);
     expect(findGhCalls('issue', 'edit')).toHaveLength(0);
@@ -1972,12 +1972,12 @@ describe('shipCommand merge path', () => {
       mergeStates: ['CLEAN'],
       mergeError: new Error('merge failed'),
     });
-    isPrMergedMock.mockResolvedValue(false);
+    pollPrMergedMock.mockResolvedValue(false);
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     await shipCommand(repo, '123', { merge: true, auto: false });
 
-    expect(isPrMergedMock).toHaveBeenCalledWith(456, repo);
+    expect(pollPrMergedMock).toHaveBeenCalledWith(456, repo);
     expect(postMergeMock).not.toHaveBeenCalled();
     expect(findGhCalls('pr', 'edit')).toHaveLength(1);
     expect(findGhCalls('issue', 'edit')).toHaveLength(1);
@@ -1988,17 +1988,17 @@ describe('shipCommand merge path', () => {
     errorSpy.mockRestore();
   });
 
-  it('remediates when merge verification is inconclusive after a reported merge error', async () => {
+  it('remediates when polling exhausts without confirming merge after a reported merge error', async () => {
     setupReadyMergeFlow({
       mergeStates: ['CLEAN'],
       mergeError: new Error('merge failed'),
     });
-    isPrMergedMock.mockResolvedValue(null);
+    pollPrMergedMock.mockResolvedValue(false);
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     await shipCommand(repo, '123', { merge: true, auto: false });
 
-    expect(isPrMergedMock).toHaveBeenCalledWith(456, repo);
+    expect(pollPrMergedMock).toHaveBeenCalledWith(456, repo);
     expect(postMergeMock).not.toHaveBeenCalled();
     expect(findGhCalls('pr', 'edit')).toHaveLength(1);
     expect(findGhCalls('issue', 'edit')).toHaveLength(1);
