@@ -786,8 +786,13 @@ export default function App(): JSX.Element {
     };
   }, [issues]);
   const shippingCommands = new Map<number, ActiveShippingCommand>();
+  const activeCommandRepos = new Set<string>();
 
   for (const command of backgroundCommands) {
+    if ((command.status === 'queued' || command.status === 'running') && !command.cancelled) {
+      activeCommandRepos.add(command.repo);
+    }
+
     if (isActiveShippingCommand(command, activeRepo)) {
       shippingCommands.set(command.issueNumber, command);
     }
@@ -2141,6 +2146,7 @@ export default function App(): JSX.Element {
               <RepoTabBar
                 repos={repos}
                 activeRepo={activeRepo}
+                activeCommandRepos={activeCommandRepos}
                 onSelectRepo={(repo) => {
                   void handleSwitchRepo(repo);
                 }}
