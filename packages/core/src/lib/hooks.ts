@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { access, constants, stat } from 'node:fs/promises';
+import { performance } from 'node:perf_hooks';
 import path from 'node:path';
 import { createLogger } from './logger.js';
 
@@ -186,16 +187,16 @@ export async function withStageHooks<T>(
     SHIPPER_BRANCH_NAME: env.branchName ?? '',
   };
   logger.stageStart(stage, issueNumber);
-  const startedAt = Date.now();
+  const startedAt = performance.now();
 
   try {
     await runPreHook(stage, hookEnv);
     const result = await fn();
     await runPostHook(stage, hookEnv);
-    logger.stageComplete(stage, issueNumber, Date.now() - startedAt);
+    logger.stageComplete(stage, issueNumber, performance.now() - startedAt);
     return result;
   } catch (error) {
-    logger.stageFailed(stage, issueNumber, Date.now() - startedAt);
+    logger.stageFailed(stage, issueNumber, performance.now() - startedAt);
     throw error;
   }
 }

@@ -63,4 +63,28 @@ describe('createLogger', () => {
       '[shipper] ▶ stage:plan #42 starting\n[shipper]   worktree: creating branch\n'
     );
   });
+
+  it('omits the issue marker when no issue number is provided', () => {
+    const logger = createLogger();
+
+    logger.stageStart('merge', '');
+    logger.stageFailed('merge', '', 5_000);
+
+    expect(errorMock.mock.calls).toEqual([
+      ['[shipper] ▶ stage:merge starting'],
+      ['[shipper] ✗ stage:merge failed (5s)'],
+    ]);
+  });
+
+  it('skips writes to an ended optional stream', () => {
+    const stream = new PassThrough();
+    const logger = createLogger({ stream });
+
+    stream.end();
+
+    expect(() => {
+      logger.stageStart('plan', '42');
+    }).not.toThrow();
+    expect(errorMock.mock.calls).toEqual([['[shipper] ▶ stage:plan #42 starting']]);
+  });
 });

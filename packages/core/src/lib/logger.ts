@@ -26,23 +26,31 @@ export function formatDuration(ms: number): string {
 
 function writeLine(message: string, stream?: Writable): void {
   console.error(message);
-  stream?.write(`${message}\n`);
+  if (!stream || !stream.writable || stream.writableEnded || stream.destroyed) {
+    return;
+  }
+
+  stream.write(`${message}\n`);
+}
+
+function formatIssueSegment(issue: string): string {
+  return issue ? ` #${issue}` : '';
 }
 
 export function createLogger(options?: { stream?: Writable }): Logger {
   return {
     stageStart(stage: string, issue: string) {
-      writeLine(`[shipper] ▶ stage:${stage} #${issue} starting`, options?.stream);
+      writeLine(`[shipper] ▶ stage:${stage}${formatIssueSegment(issue)} starting`, options?.stream);
     },
     stageComplete(stage: string, issue: string, durationMs: number) {
       writeLine(
-        `[shipper] ✓ stage:${stage} #${issue} complete (${formatDuration(durationMs)})`,
+        `[shipper] ✓ stage:${stage}${formatIssueSegment(issue)} complete (${formatDuration(durationMs)})`,
         options?.stream
       );
     },
     stageFailed(stage: string, issue: string, durationMs: number) {
       writeLine(
-        `[shipper] ✗ stage:${stage} #${issue} failed (${formatDuration(durationMs)})`,
+        `[shipper] ✗ stage:${stage}${formatIssueSegment(issue)} failed (${formatDuration(durationMs)})`,
         options?.stream
       );
     },
