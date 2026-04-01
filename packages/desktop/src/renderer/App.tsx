@@ -486,6 +486,38 @@ export function selectNextAutoShipIssue(
   return candidates[0]?.issue ?? null;
 }
 
+export function selectNextAutoUnblockIssue(
+  issues: ListIssueItem[],
+  queuedIssueNumbers: number[]
+): {
+  issue: ListIssueItem | null;
+  remainingIssueNumbers: number[];
+} {
+  const remainingIssueNumbers = [...queuedIssueNumbers];
+
+  while (remainingIssueNumbers.length > 0) {
+    const nextIssueNumber = remainingIssueNumbers.shift();
+    if (nextIssueNumber === undefined) {
+      continue;
+    }
+
+    const issue = issues.find((currentIssue) => currentIssue.number === nextIssueNumber);
+    if (!issue || !issue.labels.includes(BLOCKED_LABEL) || issue.labels.includes(LOCKED_LABEL)) {
+      continue;
+    }
+
+    return {
+      issue,
+      remainingIssueNumbers,
+    };
+  }
+
+  return {
+    issue: null,
+    remainingIssueNumbers: [],
+  };
+}
+
 export function getNextAutoShipFailureState(
   status: 'complete' | 'failed',
   issueNumber: number | undefined,
@@ -760,6 +792,7 @@ export default function App(): JSX.Element {
   const autoShipFailuresRef = useRef<Map<string, number>>(new Map());
   const autoShipSkippedRef = useRef<Map<string, Set<number>>>(new Map());
   const autoUnblockQueueRef = useRef<Map<string, number[]>>(new Map());
+  const autoUnblockIssuesRef = useRef<Map<string, Set<number>>>(new Map());
   const autoMergeSaveInFlightRef = useRef(false);
   const sessionsRef = useRef<TerminalSession[]>([]);
   const activeSessionIdRef = useRef<string | null>(null);
@@ -872,6 +905,7 @@ export default function App(): JSX.Element {
     autoShipFailuresRef.current.delete(repo);
     autoShipSkippedRef.current.delete(repo);
     autoUnblockQueueRef.current.delete(repo);
+    autoUnblockIssuesRef.current.delete(repo);
   }
 
   function enableAutoShipForRepo(repo: string): void {
@@ -922,23 +956,25 @@ export default function App(): JSX.Element {
     try {
       const result = await window.shipperAPI.listIssues(repo);
       if (requestVersion !== requestVersionRef.current) {
-        return;
+        return null;
       }
 
       if (!result.ok) {
         setFetchError(result.error);
-        return;
+        return result;
       }
 
       setIssues(result.issues);
       setLastUpdated(new Date());
+      return result;
     } catch (error) {
       if (requestVersion !== requestVersionRef.current) {
-        return;
+        return null;
       }
 
       const message = error instanceof Error ? error.message : String(error);
       setFetchError(message);
+      return null;
     } finally {
       if (requestVersion === requestVersionRef.current) {
         setIsLoading(false);
@@ -985,28 +1021,27 @@ export default function App(): JSX.Element {
   const refreshRepoAfterBackground = useEffectEvent(
     async (repo: string, command: BackgroundCommandKind, status: BackgroundCommandStatus) => {
       if (repo !== activeRepo) {
-        return;
+        return null;
       }
 
       if (command === 'new' && status === 'complete') {
-        await loadIssues(repo);
-        return;
+        return loadIssues(repo);
       }
 
       if (command === 'init' && status === 'complete') {
         void checkInitState(repo);
-        await loadIssues(repo);
-        return;
+        return loadIssues(repo);
       }
 
       if (command === 'unblock' && (status === 'complete' || status === 'failed')) {
-        await loadIssues(repo);
-        return;
+        return loadIssues(repo);
       }
 
       if (command === 'ship' && (status === 'complete' || status === 'failed')) {
-        await loadIssues(repo);
+        return loadIssues(repo);
       }
+
+      return null;
     }
   );
 
@@ -1026,7 +1061,14 @@ export default function App(): JSX.Element {
         await window.shipperAPI.spawnBackgroundInit(payload.repo);
         return;
       case 'unblock':
-        await window.shipperAPI.spawnBackgroundUnblock(payload.issueNumber, payload.repo);
+        trackUnblockIssue(payload.issueNumber);
+        try {
+          await window.shipperAPI.spawnBackgroundUnblock(payload.issueNumber, payload.repo);
+        } catch (error) {
+          clearUnblockIssue(payload.issueNumber);
+          throw error;
+        }
+        return;
     }
   });
 
@@ -1049,6 +1091,10 @@ export default function App(): JSX.Element {
     const issueUrl = event.meta?.issueUrl ?? previousCommand?.issueUrl;
     const logFile = event.meta?.logFile ?? previousCommand?.logFile;
     const cancelled = event.meta?.cancelled ?? previousCommand?.cancelled ?? false;
+    const isAutoUnblock =
+      issueNumber !== undefined && event.command === 'unblock'
+        ? isAutoUnblockIssue(event.repo, issueNumber)
+        : false;
     const nextCommand: BackgroundCommandState = {
       id: event.sessionId,
       command: event.command,
@@ -1094,6 +1140,7 @@ export default function App(): JSX.Element {
     if (event.command === 'unblock' && (event.status === 'complete' || event.status === 'failed')) {
       if (issueNumber !== undefined) {
         clearUnblockIssue(issueNumber);
+        clearAutoUnblockIssue(event.repo, issueNumber);
       }
     }
 
@@ -1134,44 +1181,123 @@ export default function App(): JSX.Element {
     }
 
     if (event.status === 'complete' && event.command === 'unblock') {
-      await refreshRepoAfterBackground(event.repo, event.command, event.status);
+      const refreshedIssues = await refreshRepoAfterBackground(
+        event.repo,
+        event.command,
+        event.status
+      );
 
       if (issueNumber !== undefined) {
         try {
-          const freshIssues = await window.shipperAPI.listIssues(event.repo);
-          if (!freshIssues.ok) {
-            throw new Error(freshIssues.error);
+          const issueResult = refreshedIssues ?? (await window.shipperAPI.listIssues(event.repo));
+          if (!issueResult.ok) {
+            throw new Error(issueResult.error);
           }
 
-          const stillBlocked = freshIssues.issues.some(
+          const stillBlocked = issueResult.issues.some(
             (issue) => issue.number === issueNumber && issue.labels.includes(BLOCKED_LABEL)
           );
+          const shouldHandleAutoUnblock = isAutoUnblock && autoShipRepos.has(event.repo);
+
+          if (!shouldHandleAutoUnblock) {
+            pushToast({
+              id: event.sessionId,
+              sessionId: event.sessionId,
+              variant: stillBlocked ? 'cancelled' : 'success',
+              title: stillBlocked ? `#${issueNumber} remains blocked` : `Unblocked #${issueNumber}`,
+              description: stillBlocked
+                ? 'The blocking dependencies have not been resolved.'
+                : 'The issue is now eligible for shipping.',
+            });
+            return;
+          }
 
           if (stillBlocked) {
+            pushToast({
+              id: `auto-unblock-still-blocked-${event.repo}-${issueNumber}-${Date.now()}`,
+              sessionId: event.sessionId,
+              variant: 'cancelled',
+              title: `Auto-ship: #${issueNumber} remains blocked`,
+              description: 'The blocking condition has not been resolved.',
+            });
+          } else {
+            pushToast({
+              id: `auto-unblock-success-${event.repo}-${issueNumber}-${Date.now()}`,
+              sessionId: event.sessionId,
+              variant: 'success',
+              title: `Auto-ship: unblocked #${issueNumber}`,
+              description: 'The issue is now eligible for shipping.',
+            });
+          }
+
+          const skippedIssueNumbers =
+            autoShipSkippedRef.current.get(event.repo) ?? new Set<number>();
+          const activeIssueNumbers = getActiveShipIssueNumbers(postEventCommands, event.repo);
+          const candidate = selectNextAutoShipIssue(
+            issueResult.issues,
+            activeIssueNumbers,
+            skippedIssueNumbers
+          );
+
+          if (candidate) {
+            autoUnblockQueueRef.current.delete(event.repo);
+            await window.shipperAPI.spawnBackgroundShip(
+              candidate.number,
+              event.repo,
+              autoMergeRepos.has(event.repo)
+            );
+            pushToast({
+              id: `auto-ship-${event.repo}-${candidate.number}-${Date.now()}`,
+              sessionId: event.sessionId,
+              variant: 'success',
+              title: `Auto-ship: starting #${candidate.number}`,
+              description: candidate.title,
+            });
+            return;
+          }
+
+          const queue = autoUnblockQueueRef.current.get(event.repo) ?? [];
+          const nextQueuedIssue = selectNextAutoUnblockIssue(issueResult.issues, queue);
+          if (!nextQueuedIssue.issue) {
+            autoUnblockQueueRef.current.delete(event.repo);
+            return;
+          }
+
+          trackAutoUnblockIssue(event.repo, nextQueuedIssue.issue.number);
+          try {
+            await window.shipperAPI.spawnBackgroundUnblock(
+              nextQueuedIssue.issue.number,
+              event.repo
+            );
+          } catch {
+            clearUnblockIssue(nextQueuedIssue.issue.number);
+            clearAutoUnblockIssue(event.repo, nextQueuedIssue.issue.number);
+            autoUnblockQueueRef.current.delete(event.repo);
+            return;
+          }
+
+          autoUnblockQueueRef.current.set(event.repo, nextQueuedIssue.remainingIssueNumbers);
+          pushToast({
+            id: `auto-unblock-${event.repo}-${nextQueuedIssue.issue.number}-${Date.now()}`,
+            sessionId: event.sessionId,
+            variant: 'success',
+            title: `Auto-ship: attempting unblock of #${nextQueuedIssue.issue.number}`,
+            description: nextQueuedIssue.issue.title,
+          });
+        } catch {
+          if (!isAutoUnblock || !autoShipRepos.has(event.repo)) {
             pushToast({
               id: event.sessionId,
               sessionId: event.sessionId,
               variant: 'cancelled',
-              title: `#${issueNumber} remains blocked`,
-              description: 'The blocking dependencies have not been resolved.',
+              title: `Unblock #${issueNumber} completed`,
+              description:
+                'The unblock agent finished, but the latest issue state could not be confirmed.',
             });
-          } else {
-            pushToast({
-              id: event.sessionId,
-              sessionId: event.sessionId,
-              variant: 'success',
-              title: `Unblocked #${issueNumber}`,
-              description: 'The issue is now eligible for shipping.',
-            });
+            return;
           }
-        } catch {
-          pushToast({
-            id: event.sessionId,
-            sessionId: event.sessionId,
-            variant: 'success',
-            title: `Unblock #${issueNumber} completed`,
-            description: 'The unblock agent finished.',
-          });
+
+          autoUnblockQueueRef.current.delete(event.repo);
         }
       }
     }
@@ -1275,12 +1401,18 @@ export default function App(): JSX.Element {
             return;
           }
 
-          autoUnblockQueueRef.current.set(
-            event.repo,
-            blockedIssues.slice(1).map((issue) => issue.number)
-          );
+          const remainingIssueNumbers = blockedIssues.slice(1).map((issue) => issue.number);
+          trackAutoUnblockIssue(event.repo, firstBlocked.number);
+          try {
+            await window.shipperAPI.spawnBackgroundUnblock(firstBlocked.number, event.repo);
+          } catch {
+            clearUnblockIssue(firstBlocked.number);
+            clearAutoUnblockIssue(event.repo, firstBlocked.number);
+            autoUnblockQueueRef.current.delete(event.repo);
+            return;
+          }
 
-          await window.shipperAPI.spawnBackgroundUnblock(firstBlocked.number, event.repo);
+          autoUnblockQueueRef.current.set(event.repo, remainingIssueNumbers);
           pushToast({
             id: `auto-unblock-${event.repo}-${firstBlocked.number}-${Date.now()}`,
             sessionId: event.sessionId,
@@ -1311,7 +1443,9 @@ export default function App(): JSX.Element {
 
     if (
       event.command !== 'unblock' ||
-      (event.status !== 'complete' && event.status !== 'failed') ||
+      event.status !== 'failed' ||
+      cancelled ||
+      !isAutoUnblock ||
       !autoShipRepos.has(event.repo)
     ) {
       return;
@@ -1321,30 +1455,6 @@ export default function App(): JSX.Element {
       const issueResult = await window.shipperAPI.listIssues(event.repo);
       if (!issueResult.ok || !autoShipRepos.has(event.repo)) {
         return;
-      }
-
-      const wasUnblocked =
-        issueNumber !== undefined &&
-        !issueResult.issues.some(
-          (issue) => issue.number === issueNumber && issue.labels.includes(BLOCKED_LABEL)
-        );
-
-      if (wasUnblocked) {
-        pushToast({
-          id: `auto-unblock-success-${event.repo}-${issueNumber}-${Date.now()}`,
-          sessionId: event.sessionId,
-          variant: 'success',
-          title: `Auto-ship: unblocked #${issueNumber}`,
-          description: 'The issue is now eligible for shipping.',
-        });
-      } else if (issueNumber !== undefined) {
-        pushToast({
-          id: `auto-unblock-still-blocked-${event.repo}-${issueNumber}-${Date.now()}`,
-          sessionId: event.sessionId,
-          variant: 'cancelled',
-          title: `Auto-ship: #${issueNumber} remains blocked`,
-          description: 'The blocking condition has not been resolved.',
-        });
       }
 
       const skippedIssueNumbers = autoShipSkippedRef.current.get(event.repo) ?? new Set<number>();
@@ -1373,32 +1483,30 @@ export default function App(): JSX.Element {
       }
 
       const queue = autoUnblockQueueRef.current.get(event.repo) ?? [];
-      while (queue.length > 0) {
-        const nextIssueNumber = queue.shift();
-        if (nextIssueNumber === undefined) {
-          continue;
-        }
-
-        const nextBlockedIssue = issueResult.issues.find(
-          (issue) => issue.number === nextIssueNumber
-        );
-        if (!nextBlockedIssue || !nextBlockedIssue.labels.includes(BLOCKED_LABEL)) {
-          continue;
-        }
-
-        autoUnblockQueueRef.current.set(event.repo, queue);
-        await window.shipperAPI.spawnBackgroundUnblock(nextIssueNumber, event.repo);
-        pushToast({
-          id: `auto-unblock-${event.repo}-${nextIssueNumber}-${Date.now()}`,
-          sessionId: event.sessionId,
-          variant: 'success',
-          title: `Auto-ship: attempting unblock of #${nextIssueNumber}`,
-          description: nextBlockedIssue.title,
-        });
+      const nextQueuedIssue = selectNextAutoUnblockIssue(issueResult.issues, queue);
+      if (!nextQueuedIssue.issue) {
+        autoUnblockQueueRef.current.delete(event.repo);
         return;
       }
 
-      autoUnblockQueueRef.current.delete(event.repo);
+      trackAutoUnblockIssue(event.repo, nextQueuedIssue.issue.number);
+      try {
+        await window.shipperAPI.spawnBackgroundUnblock(nextQueuedIssue.issue.number, event.repo);
+      } catch {
+        clearUnblockIssue(nextQueuedIssue.issue.number);
+        clearAutoUnblockIssue(event.repo, nextQueuedIssue.issue.number);
+        autoUnblockQueueRef.current.delete(event.repo);
+        return;
+      }
+
+      autoUnblockQueueRef.current.set(event.repo, nextQueuedIssue.remainingIssueNumbers);
+      pushToast({
+        id: `auto-unblock-${event.repo}-${nextQueuedIssue.issue.number}-${Date.now()}`,
+        sessionId: event.sessionId,
+        variant: 'success',
+        title: `Auto-ship: attempting unblock of #${nextQueuedIssue.issue.number}`,
+        description: nextQueuedIssue.issue.title,
+      });
     } catch {
       autoUnblockQueueRef.current.delete(event.repo);
     }
@@ -1865,6 +1973,32 @@ export default function App(): JSX.Element {
       next.delete(issueNumber);
       return next;
     });
+  }
+
+  function isAutoUnblockIssue(repo: string, issueNumber: number): boolean {
+    return autoUnblockIssuesRef.current.get(repo)?.has(issueNumber) ?? false;
+  }
+
+  function trackAutoUnblockIssue(repo: string, issueNumber: number): void {
+    const currentIssues = autoUnblockIssuesRef.current.get(repo) ?? new Set<number>();
+    currentIssues.add(issueNumber);
+    autoUnblockIssuesRef.current.set(repo, currentIssues);
+    trackUnblockIssue(issueNumber);
+  }
+
+  function clearAutoUnblockIssue(repo: string, issueNumber: number): void {
+    const currentIssues = autoUnblockIssuesRef.current.get(repo);
+    if (!currentIssues) {
+      return;
+    }
+
+    currentIssues.delete(issueNumber);
+    if (currentIssues.size === 0) {
+      autoUnblockIssuesRef.current.delete(repo);
+      return;
+    }
+
+    autoUnblockIssuesRef.current.set(repo, currentIssues);
   }
 
   function handleResetSuccess(issueNumber: number): void {
