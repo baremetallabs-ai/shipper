@@ -64,6 +64,8 @@ const shipperAPI = {
     ipcRenderer.invoke('unlock-issue', { repo, issueNumber }),
   closeNotPlanned: (repo: string, issueNumber: number) =>
     ipcRenderer.invoke('close-not-planned', { repo, issueNumber }),
+  setPriority: (repo: string, issueNumber: number, level: 'high' | 'normal' | 'low') =>
+    ipcRenderer.invoke('set-priority', { repo, issueNumber, level }),
 
   spawnShipperGroom: (issueNumber: number, repo: string, cols: number, rows: number) =>
     ipcRenderer.invoke('pty-spawn-shipper-groom', { issueNumber, repo, cols, rows }),
