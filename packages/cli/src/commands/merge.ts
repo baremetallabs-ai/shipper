@@ -6,6 +6,7 @@ import { gh } from '@dnsquared/shipper-core';
 import { getSettings } from '@dnsquared/shipper-core';
 import { tryResolvePrForIssue } from '@dnsquared/shipper-core';
 import { getRepoNwo } from '@dnsquared/shipper-core';
+import { sleepMs } from '@dnsquared/shipper-core';
 import { withStageHooks } from '@dnsquared/shipper-core';
 
 interface MergeOptions {
@@ -56,6 +57,9 @@ interface PRViewData {
 interface PRStateViewData {
   state: string;
 }
+
+const MERGE_POLL_MAX_ATTEMPTS = 5;
+const MERGE_POLL_BASE_DELAY_MS = 1_000;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -185,6 +189,20 @@ export async function isPrMerged(prNumber: number, nwo: string): Promise<boolean
   } catch {
     return null;
   }
+}
+
+export async function pollPrMerged(prNumber: number, nwo: string): Promise<boolean> {
+  for (let attempt = 0; attempt < MERGE_POLL_MAX_ATTEMPTS; attempt++) {
+    if (attempt > 0) {
+      await sleepMs(MERGE_POLL_BASE_DELAY_MS * 2 ** (attempt - 1));
+    }
+
+    if ((await isPrMerged(prNumber, nwo)) === true) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 export async function lookupPR(ref: string, nwo: string): Promise<QueuedPR> {
@@ -623,8 +641,8 @@ async function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): Promise<bo
     }
     return await completePostMerge(`  PR #${pr.number} merged successfully.`);
   } catch (err) {
-    const merged = await isPrMerged(pr.number, nwo);
-    if (merged === true) {
+    const merged = await pollPrMerged(pr.number, nwo);
+    if (merged) {
       return await completePostMerge(
         `  PR #${pr.number} merge succeeded despite reported error. Proceeding with post-merge cleanup.`
       );
