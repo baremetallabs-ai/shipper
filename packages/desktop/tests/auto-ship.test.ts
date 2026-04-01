@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   BLOCKED_LABEL,
+  DESIGNED_LABEL,
   FAILED_LABEL,
   GROOMED_LABEL,
   IMPLEMENTED_LABEL,
@@ -29,6 +30,7 @@ const {
   getBackgroundTitle,
   getNextAutoShipFailureState,
   selectNextAutoUnblockIssue,
+  getWorkflowStageDisplayName,
   selectNextAutoShipIssue,
 } = autoShipModule as {
   getActiveShipIssueNumbers: (commands: BackgroundCommandLike[], repo: string) => Set<number>;
@@ -69,6 +71,7 @@ const {
     skippedIssueNumbers: Set<number>;
     pauseAutoShip: boolean;
   };
+  getWorkflowStageDisplayName: (labels: string[]) => string | undefined;
   selectNextAutoShipIssue: (
     issues: ListIssueItem[],
     activeIssueNumbers: Set<number>,
@@ -356,5 +359,17 @@ describe('selectNextAutoUnblockIssue', () => {
       issue: null,
       remainingIssueNumbers: [],
     });
+  });
+});
+
+describe('getWorkflowStageDisplayName', () => {
+  it('returns the most advanced workflow stage display name when multiple stage labels are present', () => {
+    expect(
+      getWorkflowStageDisplayName([GROOMED_LABEL, DESIGNED_LABEL, PLANNED_LABEL, LOCKED_LABEL])
+    ).toBe('Planned');
+  });
+
+  it('returns undefined when labels contain no workflow stage', () => {
+    expect(getWorkflowStageDisplayName([FAILED_LABEL, LOCKED_LABEL])).toBeUndefined();
   });
 });

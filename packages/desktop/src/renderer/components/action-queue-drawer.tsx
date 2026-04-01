@@ -24,6 +24,7 @@ export interface ActionQueueItem {
   title: string;
   repo: string;
   detail?: string;
+  workflowStage?: string;
   canCancel: boolean;
   canShowLogs: boolean;
   cancelled?: boolean;
@@ -184,6 +185,11 @@ export function ActionQueueDrawer({
                       <Badge variant={getStatusBadgeVariant(item.status)}>
                         {getStatusLabel(item.status, item.cancelled)}
                       </Badge>
+                      {item.workflowStage ? (
+                        <Badge variant="secondary" className="text-[10px]">
+                          {item.workflowStage}
+                        </Badge>
+                      ) : null}
                     </div>
                     <p className="truncate text-xs text-muted-foreground">{item.repo}</p>
                     {item.detail ? (
@@ -217,7 +223,7 @@ export function ActionQueueDrawer({
                           <Square className="size-3.5 fill-current" />
                         </Button>
                       ) : null}
-                      {item.status === 'failed' ? (
+                      {item.status === 'failed' || item.status === 'complete' ? (
                         <Button
                           type="button"
                           variant="ghost"
