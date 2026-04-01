@@ -499,6 +499,33 @@ describe('output protocol helpers', () => {
         right: [],
       });
     });
+
+    it('parses quoted file headers with metadata and ignores hunk lines that look like headers', () => {
+      const diff = [
+        'diff --git "a/src/file with space.ts" "b/src/file with space.ts"',
+        '--- "a/src/file with space.ts"\t2026-04-01 00:00:00 +0000\r',
+        '+++ "b/src/file with space.ts"\t2026-04-01 00:00:00 +0000\r',
+        '@@ -1 +1,2 @@',
+        ' context',
+        '+++ this is file content, not a header',
+        '@@ -10 +11 @@',
+        ' context',
+      ].join('\n');
+
+      const diffHunks = parseDiffHunks(diff);
+
+      expect(diffHunks.get('src/file with space.ts')).toEqual({
+        left: [
+          [1, 1],
+          [10, 10],
+        ],
+        right: [
+          [1, 2],
+          [11, 11],
+        ],
+      });
+      expect(diffHunks.has('this is file content, not a header')).toBe(false);
+    });
   });
 
   describe('validateStageOutput', () => {
@@ -762,6 +789,40 @@ describe('output protocol helpers', () => {
         )
       ).rejects.toThrow(
         "comments[0].line 4 (side RIGHT) is not within any diff hunk for 'src/old.ts'. Valid ranges — LEFT: 4-5"
+      );
+    });
+
+    it('preserves the original comment index in diff-hunk validation errors', async () => {
+      const result = buildResult({ review_payload: outputRelative('review-payload-248.json') });
+      const diffHunks = parseDiffHunks(buildReviewDiffFixture());
+      await writeResultFile(result);
+      await writeOutputJson('review-payload-248.json', {
+        ...buildReviewPayload(),
+        comments: [
+          {
+            path: 'src/file.ts',
+            line: 'twelve',
+            side: 'RIGHT',
+            body: 'Schema-invalid comment that should not shift indexes.',
+          },
+          {
+            path: 'src/file.ts',
+            line: 45,
+            side: 'RIGHT',
+            body: 'This line is outside any hunk.',
+          },
+        ],
+      });
+
+      await expect(
+        validateStageOutput(
+          tempDir,
+          'pr_review',
+          new Set(['src/file.ts', 'src/new.ts', 'src/old.ts']),
+          diffHunks
+        )
+      ).rejects.toThrow(
+        "comments[1].line 45 (side RIGHT) is not within any diff hunk for 'src/file.ts'. Valid ranges — LEFT: 10-14, 30-30; RIGHT: 10-15, 31-31"
       );
     });
 

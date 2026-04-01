@@ -1,7 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { parseDiffHunks } from '../../../core/src/lib/output-protocol.js';
-
 const autoSelectPrForStageMock = vi.fn();
 const getBranchForPRMock = vi.fn(() => Promise.resolve('shipper/10-feature'));
 const getRepoRootMock = vi.fn(() => Promise.resolve('/tmp/fake-repo'));
@@ -45,6 +43,16 @@ const diffFixture = [
   ' line 3',
   '+line 4',
 ].join('\n');
+const parsedDiffHunks = new Map([
+  [
+    'src/file.ts',
+    {
+      left: [[1, 3]] as Array<[number, number]>,
+      right: [[1, 4]] as Array<[number, number]>,
+    },
+  ],
+]);
+const parseDiffHunksMock = vi.fn(() => parsedDiffHunks);
 
 vi.mock('@dnsquared/shipper-core', () => ({
   autoSelectPrForStage: autoSelectPrForStageMock,
@@ -52,7 +60,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   getRepoRoot: getRepoRootMock,
   gh: ghMock,
   handleAgentCrash: handleAgentCrashMock,
-  parseDiffHunks,
+  parseDiffHunks: parseDiffHunksMock,
   processResult: processResultMock,
   retryOnInvalidOutput: retryOnInvalidOutputMock,
   resolveRef: resolveRefMock,
@@ -148,6 +156,7 @@ describe('prReviewCommand', () => {
       'pr-metadata.json',
       '{"headRefOid":"abc123","author":{"login":"author"},"title":"PR","headRefName":"branch"}'
     );
+    expect(parseDiffHunksMock).toHaveBeenCalledWith(diffFixture);
     expect(runPromptMock).toHaveBeenCalledWith('pr_review', {
       repo,
       issueRef: '10',
@@ -172,17 +181,7 @@ describe('prReviewCommand', () => {
     expect(retryCall?.cwd).toBe('/tmp/fake-wt');
     expect(retryCall?.stage).toBe('pr_review');
     expect(retryCall?.prFiles).toEqual(new Set(['src/file.ts']));
-    expect(retryCall?.diffHunks).toEqual(
-      new Map([
-        [
-          'src/file.ts',
-          {
-            left: [[1, 3]],
-            right: [[1, 4]],
-          },
-        ],
-      ])
-    );
+    expect(retryCall?.diffHunks).toEqual(parsedDiffHunks);
     expect(retryCall?.retry).toEqual(expect.any(Function));
     expect(ghMock).toHaveBeenCalledTimes(3);
     expect(processResultMock).toHaveBeenCalledWith({
