@@ -1,5 +1,5 @@
 import { Plus, X } from 'lucide-react';
-import { useState, type DragEvent, type JSX } from 'react';
+import { useRef, useState, type DragEvent, type JSX } from 'react';
 
 import { cn } from '../lib/utils.js';
 import { Button } from './ui/button.js';
@@ -25,10 +25,20 @@ export function RepoTabBar({
 }: RepoTabBarProps): JSX.Element {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
+  const dropIndexRef = useRef<number | null>(null);
+
+  function setNextDropIndex(nextDropIndex: number | null): void {
+    if (dropIndexRef.current === nextDropIndex) {
+      return;
+    }
+
+    dropIndexRef.current = nextDropIndex;
+    setDropIndex(nextDropIndex);
+  }
 
   function clearDragState(): void {
     setDragIndex(null);
-    setDropIndex(null);
+    setNextDropIndex(null);
   }
 
   function handleDragStart(event: DragEvent<HTMLDivElement>, index: number, repo: string): void {
@@ -36,8 +46,14 @@ export function RepoTabBar({
       return;
     }
 
+    if (event.target instanceof Element && event.target.closest('[data-no-drag="true"]')) {
+      event.preventDefault();
+      clearDragState();
+      return;
+    }
+
     setDragIndex(index);
-    setDropIndex(null);
+    setNextDropIndex(null);
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData('text/plain', repo);
   }
@@ -52,19 +68,16 @@ export function RepoTabBar({
 
     const { left, width } = event.currentTarget.getBoundingClientRect();
     const nextDropIndex = event.clientX < left + width / 2 ? index : index + 1;
-
-    if (nextDropIndex === dragIndex || nextDropIndex === dragIndex + 1) {
-      setDropIndex(null);
-      return;
-    }
-
-    setDropIndex(nextDropIndex);
+    const finalDropIndex =
+      nextDropIndex === dragIndex || nextDropIndex === dragIndex + 1 ? null : nextDropIndex;
+    setNextDropIndex(finalDropIndex);
   }
 
   function handleDrop(event: DragEvent<HTMLDivElement>): void {
     event.preventDefault();
 
-    if (dragIndex === null || dropIndex === null) {
+    const currentDropIndex = dropIndexRef.current;
+    if (dragIndex === null || currentDropIndex === null) {
       clearDragState();
       return;
     }
@@ -76,7 +89,8 @@ export function RepoTabBar({
       return;
     }
 
-    const adjustedDropIndex = dropIndex > dragIndex ? dropIndex - 1 : dropIndex;
+    const adjustedDropIndex =
+      currentDropIndex > dragIndex ? currentDropIndex - 1 : currentDropIndex;
     nextRepos.splice(adjustedDropIndex, 0, draggedRepo);
 
     if (nextRepos.some((repo, index) => repo !== repos[index])) {
@@ -94,7 +108,7 @@ export function RepoTabBar({
           const hasActiveCommands = activeCommandRepos.has(repo);
           const isDragged = dragIndex === index;
           const showBeforeIndicator = dropIndex === index;
-          const showAfterIndicator = dropIndex === index + 1;
+          const showAfterIndicator = index === repos.length - 1 && dropIndex === repos.length;
 
           return (
             <div
@@ -125,7 +139,11 @@ export function RepoTabBar({
               ) : null}
               <button
                 type="button"
-                className="cursor-pointer flex min-w-0 items-center gap-2 px-3 py-2 text-sm font-medium outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                draggable={false}
+                className={cn(
+                  'flex min-w-0 items-center gap-2 px-3 py-2 text-sm font-medium outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring',
+                  repos.length > 1 ? 'cursor-grab' : 'cursor-pointer'
+                )}
                 aria-label={hasActiveCommands ? `${repo} (active background work)` : repo}
                 onClick={() => {
                   onSelectRepo(repo);
@@ -138,6 +156,8 @@ export function RepoTabBar({
               </button>
               <button
                 type="button"
+                draggable={false}
+                data-no-drag="true"
                 className="cursor-pointer rounded-sm px-1.5 py-2 opacity-60 transition-colors hover:opacity-100 hover:bg-foreground/10"
                 aria-label={`Remove ${repo}`}
                 onClick={(event) => {

@@ -1764,6 +1764,26 @@ export default function App(): JSX.Element {
       return;
     }
 
+    const currentRepoKeys = new Set(repos.map((repo) => toRepoKey(repo)));
+    const nextRepoKeys = new Set(nextRepos.map((repo) => toRepoKey(repo)));
+    if (
+      currentRepoKeys.size !== repos.length ||
+      nextRepoKeys.size !== nextRepos.length ||
+      currentRepoKeys.size !== nextRepoKeys.size
+    ) {
+      return;
+    }
+
+    for (const repoKey of currentRepoKeys) {
+      if (!nextRepoKeys.has(repoKey)) {
+        return;
+      }
+    }
+
+    if (activeRepo && !nextRepos.some((repo) => toRepoKey(repo) === toRepoKey(activeRepo))) {
+      return;
+    }
+
     try {
       await persistConfig({ repos: nextRepos, activeRepo, autoMergeRepos: [...autoMergeRepos] });
       setRepos(nextRepos);
