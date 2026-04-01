@@ -22,6 +22,7 @@ const runAdvisoryHookMock =
 const runWorktreeHookMock =
   vi.fn<(event: string, env: Record<string, string>, cwd: string) => Promise<void>>();
 const getSettingsMock = vi.fn<() => Record<string, unknown>>();
+const errorMock = vi.spyOn(console, 'error').mockImplementation(() => {});
 
 vi.mock('node:child_process', async () => {
   const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
@@ -148,6 +149,8 @@ beforeEach(() => {
   runAdvisoryHookMock.mockReset();
   runWorktreeHookMock.mockReset();
   getSettingsMock.mockReset();
+  errorMock.mockClear();
+  errorMock.mockImplementation(() => {});
 
   accessMock.mockRejectedValue(new Error('ENOENT'));
   mkdirMock.mockResolvedValue(undefined);
@@ -238,6 +241,43 @@ describe('createWorktree', () => {
 });
 
 describe('withWorktree', () => {
+  it('emits the full worktree marker sequence on the happy path', async () => {
+    getSettingsMock.mockReturnValue({
+      installCommand: 'npm ci',
+    });
+
+    const callOrder: string[] = [];
+    errorMock.mockImplementation((message?: unknown) => {
+      callOrder.push(String(message));
+    });
+    runAdvisoryHookMock.mockImplementation((label: string) => {
+      callOrder.push(label);
+      return Promise.resolve();
+    });
+    runWorktreeHookMock.mockImplementation((event: string) => {
+      callOrder.push(event);
+      return Promise.resolve();
+    });
+
+    const result = await withWorktree(defaultOpts, () => {
+      callOrder.push('callback');
+      return Promise.resolve('ok');
+    });
+
+    expect(result).toBe('ok');
+    expect(callOrder).toEqual([
+      '[shipper]   worktree: creating branch',
+      '[shipper]   worktree: installing dependencies',
+      'Install dependencies',
+      '[shipper]   worktree: running setup hooks',
+      'worktree-setup',
+      '[shipper]   worktree: running agent',
+      'callback',
+      'worktree-teardown',
+      '[shipper]   worktree: teardown complete',
+    ]);
+  });
+
   it('runs setup before the callback and teardown after it', async () => {
     const callOrder: string[] = [];
     runWorktreeHookMock.mockImplementation((event: string) => {
@@ -295,6 +335,17 @@ describe('withWorktree', () => {
       'worktree-setup',
       'callback',
       'worktree-teardown',
+    ]);
+  });
+
+  it('omits the install marker when no install command is configured', async () => {
+    await withWorktree(defaultOpts, () => Promise.resolve(undefined));
+
+    expect(errorMock.mock.calls).toEqual([
+      ['[shipper]   worktree: creating branch'],
+      ['[shipper]   worktree: running setup hooks'],
+      ['[shipper]   worktree: running agent'],
+      ['[shipper]   worktree: teardown complete'],
     ]);
   });
 
@@ -388,6 +439,11 @@ describe('withWorktree', () => {
 
     expect(
       runWorktreeHookMock.mock.calls.filter(([event]) => event === 'worktree-teardown')
+    ).toHaveLength(1);
+    expect(
+      errorMock.mock.calls.filter(
+        ([message]) => message === '[shipper]   worktree: teardown complete'
+      )
     ).toHaveLength(1);
     expect(process.env.NPM_CONFIG_CACHE).toBe('/before-signal');
     expect(process.env.XDG_CACHE_HOME).toBe('/before-signal-xdg-cache');

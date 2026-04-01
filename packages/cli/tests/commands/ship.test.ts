@@ -1358,7 +1358,9 @@ describe('shipCommand single-issue path', () => {
     mockSpawn.mockImplementationOnce(() => {
       const child = new FakeChildProcess();
       globalThis.queueMicrotask(() => {
+        child.stderr.write('[shipper] ▶ stage:implement #42 starting\n');
         child.stdout.write('agent output\n');
+        child.stderr.write('[shipper] ✓ stage:implement #42 complete (45s)\n');
         child.finish(0, null, 'agent error\n');
       });
       return child as never;
@@ -1378,9 +1380,16 @@ describe('shipCommand single-issue path', () => {
 
     const output = getConsoleOutput(logSpy);
     expect(output).toContain('Log file: ~/.shipper/logs/ship-42-20260306T023000.log');
-    expect(fsMockState.capturedLogs.get(logFile)).toContain('Running stage: implement');
+    expect(fsMockState.capturedLogs.get(logFile)).toContain(
+      '[shipper] ▶ stage:implement #42 starting'
+    );
+    expect(fsMockState.capturedLogs.get(logFile)).toContain(
+      '[shipper] ✓ stage:implement #42 complete (45s)'
+    );
     expect(fsMockState.capturedLogs.get(logFile)).toContain('agent output');
     expect(fsMockState.capturedLogs.get(logFile)).toContain('agent error');
+    expect(fsMockState.capturedLogs.get(logFile)).not.toContain('[shipper] agent output');
+    expect(fsMockState.capturedLogs.get(logFile)).not.toContain('[shipper] agent error');
 
     stdoutWriteSpy.mockRestore();
     stderrWriteSpy.mockRestore();
@@ -2335,8 +2344,19 @@ describe('shipCommand sequential auto runner parking', () => {
     installSequentialCliMocks({
       stageOutput: (issueNumber) =>
         issueNumber === 1
-          ? { stdout: 'first stdout\n', stderr: 'first stderr\n' }
-          : { stdout: 'second stdout\n' },
+          ? {
+              stdout: 'first stdout\n',
+              stderr:
+                '[shipper] ▶ stage:implement #1 starting\n' +
+                '[shipper] ✓ stage:implement #1 complete (12s)\n' +
+                'first stderr\n',
+            }
+          : {
+              stdout: 'second stdout\n',
+              stderr:
+                '[shipper] ▶ stage:implement #2 starting\n' +
+                '[shipper] ✓ stage:implement #2 complete (8s)\n',
+            },
     });
 
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -2360,9 +2380,22 @@ describe('shipCommand sequential auto runner parking', () => {
     expect(output).toContain('  Log files:');
     expect(output).toContain('  #1   ~/.shipper/logs/ship-1-20260306T023000.log');
     expect(output).toContain('  #2   ~/.shipper/logs/ship-2-20260306T023000.log');
-    expect(fsMockState.capturedLogs.get(logFile1)).toContain('Running stage: implement');
+    expect(fsMockState.capturedLogs.get(logFile1)).toContain(
+      '[shipper] ▶ stage:implement #1 starting'
+    );
+    expect(fsMockState.capturedLogs.get(logFile1)).toContain(
+      '[shipper] ✓ stage:implement #1 complete (12s)'
+    );
     expect(fsMockState.capturedLogs.get(logFile1)).toContain('first stdout');
     expect(fsMockState.capturedLogs.get(logFile1)).toContain('first stderr');
+    expect(fsMockState.capturedLogs.get(logFile1)).not.toContain('[shipper] first stdout');
+    expect(fsMockState.capturedLogs.get(logFile1)).not.toContain('[shipper] first stderr');
+    expect(fsMockState.capturedLogs.get(logFile2)).toContain(
+      '[shipper] ▶ stage:implement #2 starting'
+    );
+    expect(fsMockState.capturedLogs.get(logFile2)).toContain(
+      '[shipper] ✓ stage:implement #2 complete (8s)'
+    );
     expect(fsMockState.capturedLogs.get(logFile2)).toContain('second stdout');
 
     stdoutWriteSpy.mockRestore();
@@ -2997,14 +3030,16 @@ describe('shipCommand parallel auto runner', () => {
     expect(mockCreateWriteStream).toHaveBeenCalledWith(logFile2);
 
     plannedIssues = plannedIssues.filter((issue) => issue.number !== 1);
-    child1.stdout.write('Running stage: implement\n');
+    child1.stdout.write('[shipper] ▶ stage:implement #1 starting\n');
     child1.stderr.write('lock acquired\n');
+    child1.stdout.write('[shipper] ✓ stage:implement #1 complete (12s)\n');
     child1.finish(0);
     await flushMicrotasks();
 
     plannedIssues = plannedIssues.filter((issue) => issue.number !== 2);
-    child2.stdout.write('Running stage: merge\n');
+    child2.stdout.write('[shipper] ▶ stage:merge #2 starting\n');
     child2.stderr.write('boom\n');
+    child2.stdout.write('[shipper] ✗ stage:merge #2 failed (5s)\n');
     child2.finish(1);
     await runPromise;
 
@@ -3031,9 +3066,17 @@ describe('shipCommand parallel auto runner', () => {
     expect(output).not.toContain('[#7] Unblock attempts:');
     expect(output).not.toContain('lock acquired');
 
-    expect(fsMockState.capturedLogs.get(logFile1)).toContain('Running stage: implement');
+    expect(fsMockState.capturedLogs.get(logFile1)).toContain(
+      '[shipper] ▶ stage:implement #1 starting'
+    );
+    expect(fsMockState.capturedLogs.get(logFile1)).toContain(
+      '[shipper] ✓ stage:implement #1 complete (12s)'
+    );
     expect(fsMockState.capturedLogs.get(logFile1)).toContain('lock acquired');
-    expect(fsMockState.capturedLogs.get(logFile2)).toContain('Running stage: merge');
+    expect(fsMockState.capturedLogs.get(logFile2)).toContain('[shipper] ▶ stage:merge #2 starting');
+    expect(fsMockState.capturedLogs.get(logFile2)).toContain(
+      '[shipper] ✗ stage:merge #2 failed (5s)'
+    );
     expect(fsMockState.capturedLogs.get(logFile2)).toContain('boom');
 
     logSpy.mockRestore();

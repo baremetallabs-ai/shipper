@@ -25,6 +25,7 @@ vi.mock('node:fs/promises', async () => {
 
 const logMock = vi.spyOn(console, 'log').mockImplementation(() => {});
 const warnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
+const errorMock = vi.spyOn(console, 'error').mockImplementation(() => {});
 
 function mockSpawnResult(opts: { code?: number; stderr?: string; error?: Error } = {}): void {
   const { code = 0, stderr = '', error } = opts;
@@ -54,6 +55,8 @@ beforeEach(() => {
   accessMock.mockReset();
   logMock.mockClear();
   warnMock.mockClear();
+  errorMock.mockClear();
+  errorMock.mockImplementation(() => {});
   statMock.mockResolvedValue({});
   accessMock.mockResolvedValue(undefined);
 });
@@ -161,8 +164,13 @@ describe('runWorktreeHook', () => {
 });
 
 describe('withStageHooks', () => {
-  it('runs pre hook before fn and post hook after fn', async () => {
+  it('runs pre hook before fn and post hook after fn, with markers wrapped around them', async () => {
     const callOrder: string[] = [];
+    const dateNowSpy = vi.spyOn(Date, 'now').mockReturnValueOnce(1_000).mockReturnValueOnce(62_000);
+    errorMock.mockImplementation((message?: unknown) => {
+      callOrder.push(String(message));
+    });
+
     spawnMock.mockImplementation((command: string) => {
       const child = new EventEmitter() as HookChild;
       child.stderr = new EventEmitter();
@@ -183,7 +191,15 @@ describe('withStageHooks', () => {
     });
 
     expect(result).toBe(42);
-    expect(callOrder).toEqual(['pre', 'fn', 'post']);
+    expect(callOrder).toEqual([
+      '[shipper] ▶ stage:groom #10 starting',
+      'pre',
+      'fn',
+      'post',
+      '[shipper] ✓ stage:groom #10 complete (1m 1s)',
+    ]);
+
+    dateNowSpy.mockRestore();
   });
 
   it('passes stage env through to the hook process', async () => {
@@ -208,5 +224,64 @@ describe('withStageHooks', () => {
         SHIPPER_BRANCH_NAME: 'shipper/42-feature',
       })
     );
+  });
+
+  it('logs a failed stage and rethrows when the callback rejects', async () => {
+    const dateNowSpy = vi.spyOn(Date, 'now').mockReturnValueOnce(2_000).mockReturnValueOnce(47_000);
+    mockSpawnResult();
+
+    await expect(
+      withStageHooks('implement', { issueNumber: '42' }, () =>
+        Promise.reject(new Error('callback failed'))
+      )
+    ).rejects.toThrow('callback failed');
+
+    expect(errorMock.mock.calls).toEqual([
+      ['[shipper] ▶ stage:implement #42 starting'],
+      ['[shipper] ✗ stage:implement #42 failed (45s)'],
+    ]);
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+
+    dateNowSpy.mockRestore();
+  });
+
+  it('logs a failed stage when the pre hook rejects', async () => {
+    const dateNowSpy = vi.spyOn(Date, 'now').mockReturnValueOnce(5_000).mockReturnValueOnce(6_000);
+    mockSpawnResult({ code: 1, stderr: 'pre failed' });
+
+    await expect(
+      withStageHooks('plan', { issueNumber: '529' }, () => Promise.resolve())
+    ).rejects.toThrow('pre-plan hook exited with code 1: pre failed');
+
+    expect(errorMock.mock.calls).toEqual([
+      ['[shipper] ▶ stage:plan #529 starting'],
+      ['[shipper] ✗ stage:plan #529 failed (1s)'],
+    ]);
+
+    dateNowSpy.mockRestore();
+  });
+
+  it('preserves warning-only post hook behavior and still logs completion', async () => {
+    const dateNowSpy = vi
+      .spyOn(Date, 'now')
+      .mockReturnValueOnce(10_000)
+      .mockReturnValueOnce(70_000);
+    mockSpawnResult();
+    mockSpawnResult({ code: 3, stderr: 'post failed' });
+
+    const result = await withStageHooks('design', { issueNumber: '77' }, () =>
+      Promise.resolve('ok')
+    );
+
+    expect(result).toBe('ok');
+    expect(warnMock).toHaveBeenCalledWith(
+      '  Warning: post-design hook exited with code 3: post failed'
+    );
+    expect(errorMock.mock.calls).toEqual([
+      ['[shipper] ▶ stage:design #77 starting'],
+      ['[shipper] ✓ stage:design #77 complete (1m 0s)'],
+    ]);
+
+    dateNowSpy.mockRestore();
   });
 });
