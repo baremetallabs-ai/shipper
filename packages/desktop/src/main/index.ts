@@ -1179,6 +1179,26 @@ function registerIpcHandlers(): void {
     });
   });
 
+  ipcMain.handle('bg-spawn-unblock', async (_event, payload: unknown) => {
+    const parsedPayload = parseAdoptIssuePayload(payload);
+    if (parsedPayload === null) {
+      throw new Error('Invalid bg-spawn-unblock payload.');
+    }
+
+    const repoPath = await ensureRepoClone(parsedPayload.repo);
+    const sessionId = randomUUID();
+
+    return backgroundManager.spawn({
+      sessionId,
+      command: 'unblock',
+      repo: parsedPayload.repo,
+      commandName: 'shipper',
+      args: ['unblock', String(parsedPayload.issueNumber), '--mode', 'headless'],
+      cwd: repoPath,
+      meta: { issueNumber: parsedPayload.issueNumber },
+    });
+  });
+
   ipcMain.handle('bg-kill', (_event, payload: unknown) => {
     const parsedPayload = parseSessionIdPayload(payload);
     if (parsedPayload === null) {

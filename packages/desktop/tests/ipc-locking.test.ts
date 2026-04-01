@@ -368,6 +368,24 @@ describe('desktop IPC locking', () => {
     expect(state.ptySpawnMock).not.toHaveBeenCalled();
   });
 
+  it('spawns `unblock` through the background manager in headless mode', async () => {
+    await loadHandlers();
+    const handler = getHandler('bg-spawn-unblock');
+
+    const result = parseSessionResult(await handler({}, { repo: 'owner/repo', issueNumber: 42 }));
+    const spawnCall = parseBackgroundSpawnCall();
+
+    expect(result.sessionId).toEqual(expect.any(String));
+    expect(spawnCall.sessionId).toBe(result.sessionId);
+    expect(spawnCall.command).toBe('unblock');
+    expect(spawnCall.repo).toBe('owner/repo');
+    expect(spawnCall.commandName).toBe('shipper');
+    expect(spawnCall.cwd).toBe('/tmp/repo');
+    expect(spawnCall.args).toEqual(['unblock', '42', '--mode', 'headless']);
+    expect(spawnCall.meta).toEqual({ issueNumber: 42 });
+    expect(state.ptySpawnMock).not.toHaveBeenCalled();
+  });
+
   it('defaults missing auto-merge repos to an empty array on get-config', async () => {
     await loadHandlers();
     mkdirSync(mockUserDataPath, { recursive: true });
@@ -857,5 +875,6 @@ describe('desktop IPC locking', () => {
     expect(state.handlers.has('bg-spawn-new')).toBe(true);
     expect(state.handlers.has('bg-spawn-ship')).toBe(true);
     expect(state.handlers.has('bg-spawn-init')).toBe(true);
+    expect(state.handlers.has('bg-spawn-unblock')).toBe(true);
   });
 });

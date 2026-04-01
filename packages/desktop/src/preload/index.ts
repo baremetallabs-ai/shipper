@@ -18,7 +18,7 @@ interface PtyExitEvent {
   exitCode: number | null;
 }
 
-type BackgroundCommand = 'new' | 'ship' | 'init';
+type BackgroundCommand = 'new' | 'ship' | 'init' | 'unblock';
 type BackgroundStatus = 'queued' | 'running' | 'complete' | 'failed';
 
 interface BackgroundStatusMeta {
@@ -72,6 +72,8 @@ const shipperAPI = {
   spawnBackgroundShip: (issueNumber: number, repo: string, merge: boolean) =>
     ipcRenderer.invoke('bg-spawn-ship', { issueNumber, repo, merge }),
   spawnBackgroundInit: (repo: string) => ipcRenderer.invoke('bg-spawn-init', { repo }),
+  spawnBackgroundUnblock: (issueNumber: number, repo: string) =>
+    ipcRenderer.invoke('bg-spawn-unblock', { issueNumber, repo }),
   killBackground: (sessionId: string) => ipcRenderer.invoke('bg-kill', { sessionId }),
   getBackgroundOutput: (sessionId: string) => ipcRenderer.invoke('bg-get-output', { sessionId }),
   ptyWrite: (sessionId: string, data: string) =>

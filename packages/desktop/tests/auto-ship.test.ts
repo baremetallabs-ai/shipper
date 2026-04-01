@@ -15,7 +15,7 @@ import type { ListIssueItem } from '../../core/src/lib/github.js';
 import * as autoShipModule from '../src/renderer/App.js';
 
 type BackgroundCommandLike = {
-  command: 'new' | 'ship' | 'init';
+  command: 'new' | 'ship' | 'init' | 'unblock';
   repo: string;
   status: 'queued' | 'running' | 'complete' | 'failed';
   issueNumber?: number;
@@ -32,7 +32,7 @@ const {
 } = autoShipModule as {
   getActiveShipIssueNumbers: (commands: BackgroundCommandLike[], repo: string) => Set<number>;
   getBackgroundDetail: (input: {
-    command: 'new' | 'ship' | 'init';
+    command: 'new' | 'ship' | 'init' | 'unblock';
     status: 'queued' | 'running' | 'complete' | 'failed';
     repo: string;
     issueNumber?: number;
@@ -41,7 +41,7 @@ const {
     cancelled?: boolean;
   }) => string;
   getBackgroundRetryPayload: (
-    command: 'new' | 'ship' | 'init',
+    command: 'new' | 'ship' | 'init' | 'unblock',
     repo: string,
     request?: string,
     issueNumber?: number,
@@ -50,9 +50,10 @@ const {
     | { command: 'new'; repo: string; request: string }
     | { command: 'ship'; repo: string; issueNumber: number; merge: boolean }
     | { command: 'init'; repo: string }
+    | { command: 'unblock'; repo: string; issueNumber: number }
     | undefined;
   getBackgroundTitle: (
-    command: 'new' | 'ship' | 'init',
+    command: 'new' | 'ship' | 'init' | 'unblock',
     repo: string,
     issueNumber?: number,
     merge?: boolean
@@ -213,6 +214,17 @@ describe('getActiveShipIssueNumbers', () => {
         output: '',
         cancelled: false,
       },
+      {
+        id: 'unblock-command',
+        command: 'unblock',
+        repo: 'owner/repo',
+        status: 'running',
+        title: 'Unblock #57',
+        detail: 'Running',
+        output: '',
+        issueNumber: 57,
+        cancelled: false,
+      },
     ];
 
     expect(getActiveShipIssueNumbers(commands, 'owner/repo')).toEqual(new Set([51, 52]));
@@ -220,6 +232,26 @@ describe('getActiveShipIssueNumbers', () => {
 });
 
 describe('merge-aware background helpers', () => {
+  it('renders unblock titles and detail copy', () => {
+    expect(getBackgroundTitle('unblock', 'owner/repo', 70)).toBe('Unblock #70');
+    expect(
+      getBackgroundDetail({
+        command: 'unblock',
+        status: 'running',
+        repo: 'owner/repo',
+        issueNumber: 70,
+      })
+    ).toBe('Unblocking #70...');
+    expect(
+      getBackgroundDetail({
+        command: 'unblock',
+        status: 'complete',
+        repo: 'owner/repo',
+        issueNumber: 70,
+      })
+    ).toBe('Unblock completed');
+  });
+
   it('adds the merge suffix to ship titles only when merge is enabled', () => {
     expect(getBackgroundTitle('ship', 'owner/repo', 71, true)).toBe('Ship #71 · merge');
     expect(getBackgroundTitle('ship', 'owner/repo', 71, false)).toBe('Ship #71');
@@ -258,6 +290,14 @@ describe('merge-aware background helpers', () => {
       repo: 'owner/repo',
       issueNumber: 74,
       merge: false,
+    });
+  });
+
+  it('builds unblock retry payloads from the issue number', () => {
+    expect(getBackgroundRetryPayload('unblock', 'owner/repo', undefined, 75)).toEqual({
+      command: 'unblock',
+      repo: 'owner/repo',
+      issueNumber: 75,
     });
   });
 });
