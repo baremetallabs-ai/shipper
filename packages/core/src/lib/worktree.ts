@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { runAdvisoryHook, runWorktreeHook } from './hooks.js';
+import { createLogger } from './logger.js';
 import { getSettings } from './settings.js';
 
 const WORKTREES_DIR = path.join(homedir(), '.shipper', 'worktrees');
@@ -1037,6 +1038,8 @@ export async function withWorktree<T>(
   opts: CreateWorktreeOpts,
   fn: (wtPath: string) => Promise<T>
 ): Promise<T> {
+  const logger = createLogger();
+  logger.worktreeStep('creating branch');
   const wtPath = await createWorktree(opts);
   const hookEnv = {
     SHIPPER_STAGE: opts.stage ?? '',
@@ -1063,6 +1066,7 @@ export async function withWorktree<T>(
       try {
         await runWorktreeHook('worktree-teardown', hookEnv, wtPath);
         await removeWorktree(opts.repoRoot, wtPath);
+        logger.worktreeStep('teardown complete');
       } finally {
         for (const [key, value] of originalEnv) {
           if (value === undefined) {
@@ -1087,10 +1091,13 @@ export async function withWorktree<T>(
   const { installCommand } = settings;
   try {
     if (installCommand) {
+      logger.worktreeStep('installing dependencies');
       await runAdvisoryHook('Install dependencies', installCommand, hookEnv, wtPath);
     }
 
+    logger.worktreeStep('running setup hooks');
     await runWorktreeHook('worktree-setup', hookEnv, wtPath);
+    logger.worktreeStep('running agent');
     return await fn(wtPath);
   } finally {
     process.removeListener('SIGINT', cleanupWithoutAwait);

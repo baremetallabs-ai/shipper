@@ -7,6 +7,7 @@ export * from './lib/github.js';
 export * from './lib/hooks.js';
 export * from './lib/labels.js';
 export * from './lib/lock.js';
+export * from './lib/logger.js';
 export * from './lib/output-protocol.js';
 export * from './lib/prerequisites.js';
 export * from './lib/prompt-runner.js';

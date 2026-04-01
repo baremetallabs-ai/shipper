@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { access, constants, stat } from 'node:fs/promises';
 import path from 'node:path';
+import { createLogger } from './logger.js';
 
 const HOOKS_DIR = path.join('.shipper', 'hooks');
 const WORKTREE_HOOK_META = {
@@ -177,13 +178,24 @@ export async function withStageHooks<T>(
   env: { issueNumber?: string; branchName?: string },
   fn: () => Promise<T>
 ): Promise<T> {
+  const logger = createLogger();
+  const issueNumber = env.issueNumber ?? '';
   const hookEnv = {
     SHIPPER_STAGE: stage,
-    SHIPPER_ISSUE_NUMBER: env.issueNumber ?? '',
+    SHIPPER_ISSUE_NUMBER: issueNumber,
     SHIPPER_BRANCH_NAME: env.branchName ?? '',
   };
-  await runPreHook(stage, hookEnv);
-  const result = await fn();
-  await runPostHook(stage, hookEnv);
-  return result;
+  logger.stageStart(stage, issueNumber);
+  const startedAt = Date.now();
+
+  try {
+    await runPreHook(stage, hookEnv);
+    const result = await fn();
+    await runPostHook(stage, hookEnv);
+    logger.stageComplete(stage, issueNumber, Date.now() - startedAt);
+    return result;
+  } catch (error) {
+    logger.stageFailed(stage, issueNumber, Date.now() - startedAt);
+    throw error;
+  }
 }
