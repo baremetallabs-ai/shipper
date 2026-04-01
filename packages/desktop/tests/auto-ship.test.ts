@@ -28,6 +28,7 @@ const {
   getBackgroundRetryPayload,
   getBackgroundTitle,
   getNextAutoShipFailureState,
+  selectNextAutoUnblockIssue,
   selectNextAutoShipIssue,
 } = autoShipModule as {
   getActiveShipIssueNumbers: (commands: BackgroundCommandLike[], repo: string) => Set<number>;
@@ -73,6 +74,13 @@ const {
     activeIssueNumbers: Set<number>,
     skippedIssueNumbers: Set<number>
   ) => ListIssueItem | null;
+  selectNextAutoUnblockIssue: (
+    issues: ListIssueItem[],
+    queuedIssueNumbers: number[]
+  ) => {
+    issue: ListIssueItem | null;
+    remainingIssueNumbers: number[];
+  };
 };
 
 function createIssue(number: number, labels: string[]): ListIssueItem {
@@ -325,5 +333,28 @@ describe('getNextAutoShipFailureState', () => {
     expect(result.consecutiveFailures).toBe(3);
     expect(result.skippedIssueNumbers).toEqual(new Set([61, 62, 63]));
     expect(result.pauseAutoShip).toBe(true);
+  });
+});
+
+describe('selectNextAutoUnblockIssue', () => {
+  it('skips queued issues that are locked by the time they are retried', () => {
+    const issues = [
+      createIssue(80, [PLANNED_LABEL, BLOCKED_LABEL, LOCKED_LABEL]),
+      createIssue(81, [PLANNED_LABEL, BLOCKED_LABEL]),
+    ];
+
+    expect(selectNextAutoUnblockIssue(issues, [80, 81])).toEqual({
+      issue: issues[1],
+      remainingIssueNumbers: [],
+    });
+  });
+
+  it('drops queue entries that are no longer blocked or no longer present', () => {
+    const issues = [createIssue(91, [PLANNED_LABEL, BLOCKED_LABEL])];
+
+    expect(selectNextAutoUnblockIssue(issues, [90, 92])).toEqual({
+      issue: null,
+      remainingIssueNumbers: [],
+    });
   });
 });
