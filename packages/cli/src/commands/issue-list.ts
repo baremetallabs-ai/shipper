@@ -1,5 +1,6 @@
 import {
   gh,
+  logger,
   STAGE_LABEL_NAMES,
   DISPLAY_NAME_MAP,
   BLOCKED_LABEL,
@@ -27,7 +28,7 @@ interface ControlIssue {
 export async function issueListCommand(options: { status?: string }): Promise<void> {
   if (options.status) {
     if (!VALID_SHORT_NAMES.includes(options.status)) {
-      console.error(
+      logger.error(
         `Error: Invalid status '${options.status}'. Valid values: ${VALID_SHORT_NAMES.join(', ')}`
       );
       process.exit(1);
@@ -50,7 +51,7 @@ export async function issueListCommand(options: { status?: string }): Promise<vo
     ]);
     issues = JSON.parse(output) as Issue[];
   } catch {
-    console.error('Error: Failed to fetch issues.');
+    logger.error('Error: Failed to fetch issues.');
     process.exit(1);
   }
 
@@ -135,13 +136,13 @@ export async function issueListCommand(options: { status?: string }): Promise<vo
       return false;
     }
 
-    console.log(`\n${heading} (${filteredItems.length})`);
+    logger.log(`\n${heading} (${filteredItems.length})`);
     for (const { issue, stageLabel } of filteredItems) {
       const stageSuffix = stageLabel ? ` [${stageLabel.replace('shipper:', '')}]` : '';
       const lockedSuffix = issue.labels.some((label) => label.name === LOCKED_LABEL)
         ? ' [locked]'
         : '';
-      console.log(`  #${issue.number} ${issue.title}${stageSuffix}${lockedSuffix}`);
+      logger.log(`  #${issue.number} ${issue.title}${stageSuffix}${lockedSuffix}`);
     }
 
     return true;
@@ -161,13 +162,13 @@ export async function issueListCommand(options: { status?: string }): Promise<vo
       }
 
       hasOutput = true;
-      console.log(`\n${DISPLAY_NAME_MAP[label]} (${group.length})`);
+      logger.log(`\n${DISPLAY_NAME_MAP[label]} (${group.length})`);
 
       for (const issue of group) {
         const lockedSuffix = issue.labels.some((label) => label.name === LOCKED_LABEL)
           ? ' [locked]'
           : '';
-        console.log(`  #${issue.number} ${issue.title}${lockedSuffix}`);
+        logger.log(`  #${issue.number} ${issue.title}${lockedSuffix}`);
       }
     }
   }
@@ -181,6 +182,6 @@ export async function issueListCommand(options: { status?: string }): Promise<vo
   }
 
   if (!hasOutput) {
-    console.log('No shipper-managed issues found.');
+    logger.log('No shipper-managed issues found.');
   }
 }

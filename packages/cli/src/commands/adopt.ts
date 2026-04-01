@@ -1,4 +1,4 @@
-import { gh } from '@dnsquared/shipper-core';
+import { gh, logger } from '@dnsquared/shipper-core';
 
 interface IssueLabel {
   name: string;
@@ -12,8 +12,8 @@ interface IssueData {
 export async function adoptCommand(issue: string): Promise<void> {
   const cleanRef = issue.replace(/^#/, '');
   if (!/^\d+$/.test(cleanRef)) {
-    console.error('Error: Please provide a valid issue number.');
-    console.error('Usage: shipper adopt <issue>');
+    logger.error('Error: Please provide a valid issue number.');
+    logger.error('Usage: shipper adopt <issue>');
     process.exit(1);
   }
 
@@ -24,7 +24,7 @@ export async function adoptCommand(issue: string): Promise<void> {
     const output = stdout.trim();
     issueData = JSON.parse(output) as IssueData;
   } catch {
-    console.error(`Error: Issue #${cleanRef} not found.`);
+    logger.error(`Error: Issue #${cleanRef} not found.`);
     process.exit(1);
   }
 
@@ -37,7 +37,7 @@ export async function adoptCommand(issue: string): Promise<void> {
     // Not a PR — continue
   }
   if (isPr) {
-    console.error(`Error: #${cleanRef} is a pull request, not an issue.`);
+    logger.error(`Error: #${cleanRef} is a pull request, not an issue.`);
     process.exit(1);
   }
 
@@ -47,7 +47,7 @@ export async function adoptCommand(issue: string): Promise<void> {
     .filter((name) => name.startsWith('shipper:'));
 
   if (shipperLabels.length > 0) {
-    console.warn(
+    logger.warn(
       `Warning: Issue #${cleanRef} already has shipper label(s): ${shipperLabels.join(', ')}. No changes made.`
     );
     return;
@@ -57,11 +57,11 @@ export async function adoptCommand(issue: string): Promise<void> {
   try {
     await gh(['issue', 'edit', cleanRef, '--add-label', 'shipper:new']);
   } catch {
-    console.error(`Error: Failed to add 'shipper:new' label to issue #${cleanRef}.`);
+    logger.error(`Error: Failed to add 'shipper:new' label to issue #${cleanRef}.`);
     process.exit(1);
   }
 
-  console.log(`Issue #${cleanRef} adopted into shipper workflow.`);
+  logger.log(`Issue #${cleanRef} adopted into shipper workflow.`);
 }
 
 export async function adoptAllCommand(): Promise<void> {
@@ -80,7 +80,7 @@ export async function adoptAllCommand(): Promise<void> {
     const output = stdout.trim();
     issues = JSON.parse(output) as IssueData[];
   } catch {
-    console.error('Error: Failed to fetch issues.');
+    logger.error('Error: Failed to fetch issues.');
     process.exit(1);
   }
 
@@ -89,7 +89,7 @@ export async function adoptAllCommand(): Promise<void> {
   );
 
   if (eligible.length === 0) {
-    console.log('No eligible issues found.');
+    logger.log('No eligible issues found.');
     return;
   }
 
@@ -101,14 +101,14 @@ export async function adoptAllCommand(): Promise<void> {
       await gh(['issue', 'edit', String(issue.number), '--add-label', 'shipper:new']);
       adopted.push(issue.number);
     } catch {
-      console.error(`Error: Failed to add 'shipper:new' label to issue #${issue.number}.`);
+      logger.error(`Error: Failed to add 'shipper:new' label to issue #${issue.number}.`);
       failed.push(issue.number);
     }
   }
 
   if (adopted.length > 0) {
     const nums = adopted.map((n) => `#${n}`).join(', ');
-    console.log(`Adopted ${nums} into shipper workflow.`);
+    logger.log(`Adopted ${nums} into shipper workflow.`);
   }
 
   if (failed.length > 0) {

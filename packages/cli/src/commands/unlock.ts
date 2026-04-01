@@ -1,8 +1,8 @@
-import { isLockStale, listIssues, releaseIssueLock } from '@dnsquared/shipper-core';
+import { isLockStale, listIssues, logger, releaseIssueLock } from '@dnsquared/shipper-core';
 
 function printUsage(): void {
-  console.error('Usage: shipper unlock <issue>');
-  console.error('   or: shipper unlock --stale');
+  logger.error('Usage: shipper unlock <issue>');
+  logger.error('   or: shipper unlock --stale');
 }
 
 export async function unlockCommand(
@@ -11,7 +11,7 @@ export async function unlockCommand(
   options: { stale?: boolean } = {}
 ): Promise<void> {
   if (options.stale && issue) {
-    console.error('Error: --stale cannot be used with an issue number.');
+    logger.error('Error: --stale cannot be used with an issue number.');
     printUsage();
     process.exit(1);
   }
@@ -20,7 +20,7 @@ export async function unlockCommand(
     const lockedIssues = await listIssues(repo, { label: 'shipper:locked' });
 
     if (lockedIssues.length === 0) {
-      console.error('No stale locks found.');
+      logger.error('No stale locks found.');
       return;
     }
 
@@ -33,26 +33,26 @@ export async function unlockCommand(
 
       if (stale) {
         await releaseIssueLock(repo, issueNumber);
-        console.error(`#${issueNumber}: stale — released`);
+        logger.error(`#${issueNumber}: stale — released`);
         released += 1;
         continue;
       }
 
-      console.error(`#${issueNumber}: active — skipped`);
+      logger.error(`#${issueNumber}: active — skipped`);
       skipped += 1;
     }
 
     if (released === 0) {
-      console.error('No stale locks found.');
+      logger.error('No stale locks found.');
       return;
     }
 
-    console.error(`Released ${released} stale lock(s) (${skipped} active lock(s) skipped).`);
+    logger.error(`Released ${released} stale lock(s) (${skipped} active lock(s) skipped).`);
     return;
   }
 
   if (!issue) {
-    console.error('Error: Please provide an issue number or use --stale.');
+    logger.error('Error: Please provide an issue number or use --stale.');
     printUsage();
     process.exit(1);
   }

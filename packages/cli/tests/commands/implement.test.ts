@@ -21,6 +21,17 @@ const retryOnInvalidOutputMock = vi.fn<
 const resolveBaseBranchMock = vi.fn(() => Promise.resolve('main'));
 const runPromptMock = vi.fn(() => Promise.resolve(0));
 const scrubOutputDirMock = vi.fn(() => Promise.resolve());
+const loggerMock = {
+  log: (message: string) => {
+    console.log(`[shipper] ${message}`);
+  },
+  warn: (message: string) => {
+    console.warn(`[shipper] ${message}`);
+  },
+  error: (message: string) => {
+    console.error(`[shipper] ${message}`);
+  },
+};
 const truncateLargeInputMock = vi.fn((_: string, text: string, filename: string) =>
   Promise.resolve(`truncated:${filename}:${text}`)
 );
@@ -50,6 +61,7 @@ const withWorktreeMock = vi.fn((_opts: unknown, fn: (wtPath: string) => Promise<
 );
 
 vi.mock('@dnsquared/shipper-core', () => ({
+  logger: loggerMock,
   autoSelectIssue: autoSelectIssueMock,
   formatConflictContext: formatConflictContextMock,
   generateBranchName: generateBranchNameMock,
@@ -263,7 +275,7 @@ describe('implementCommand', () => {
       'implement',
       'Missing result.json'
     );
-    expect(consoleErrorSpy).toHaveBeenCalledWith('Missing result.json');
+    expect(consoleErrorSpy).toHaveBeenCalledWith('[shipper] Missing result.json');
     expect(process.exitCode).toBe(1);
   });
 

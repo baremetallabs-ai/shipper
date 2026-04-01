@@ -4,6 +4,7 @@ import path from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { promisify } from 'node:util';
 import {
+  logger,
   gh,
   scripts,
   DEFAULTS,
@@ -107,7 +108,7 @@ export async function initCommand(options: {
   }
 
   if (options.push && !options.autocommit) {
-    console.error('Error: --push requires --autocommit.');
+    logger.error('Error: --push requires --autocommit.');
     process.exit(1);
     return;
   }
@@ -116,7 +117,7 @@ export async function initCommand(options: {
   let agent: string;
   if (options.agent) {
     if (!VALID_AGENTS.includes(options.agent as (typeof VALID_AGENTS)[number])) {
-      console.error(
+      logger.error(
         `Error: Invalid agent "${options.agent}". Must be one of: ${VALID_AGENTS.join(', ')}`
       );
       process.exit(1);
@@ -127,7 +128,7 @@ export async function initCommand(options: {
     const stored = getStoredAgent();
     if (stored && VALID_AGENTS.includes(stored as (typeof VALID_AGENTS)[number])) {
       agent = stored;
-      console.log(`Using agent: ${stored} (from settings)`);
+      logger.log(`Using agent: ${stored} (from settings)`);
     } else {
       const rl = createInterface({ input: process.stdin, output: process.stdout });
       const answer = await rl.question(
@@ -146,7 +147,7 @@ export async function initCommand(options: {
       ) {
         agent = 'copilot';
       } else {
-        console.error(
+        logger.error(
           `Error: Unrecognized agent "${answer.trim()}". Expected "Claude Code", "Codex CLI", or "Copilot CLI".`
         );
         process.exit(1);
@@ -198,14 +199,14 @@ export async function initCommand(options: {
         await execFileAsync('git', ['rm', '--cached', '--', ...trackedFiles]);
         removedTrackedArtifactPaths = trackedFiles;
         for (const file of trackedFiles) {
-          console.log(`Untracked: ${file}`);
+          logger.log(`Untracked: ${file}`);
         }
-        console.log(
+        logger.log(
           'These files were tracked by git but should be gitignored. Commit the changes to complete the fix.'
         );
       } catch (err) {
         const stderr = getErrorStderr(err);
-        console.error(
+        logger.error(
           'Warning: Failed to untrack tracked files under .shipper/output/ and .shipper/input.' +
             (stderr ? `\n${stderr}` : '')
         );
@@ -277,7 +278,7 @@ export async function initCommand(options: {
       };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`Error: Malformed JSON in ${settingsPath}: ${message}`);
+      logger.error(`Error: Malformed JSON in ${settingsPath}: ${message}`);
       process.exit(1);
       return;
     }
@@ -285,7 +286,7 @@ export async function initCommand(options: {
 
   // Re-init warning
   if (existingAgent && existingAgent !== agent) {
-    console.log(`Switching agent from ${existingAgent} to ${agent}`);
+    logger.log(`Switching agent from ${existingAgent} to ${agent}`);
   }
 
   const mergedCommands = isPlainObject(merged.commands) ? merged.commands : {};
@@ -300,19 +301,19 @@ export async function initCommand(options: {
   delete merged.hooks;
   merged.cliVersion = CLI_VERSION;
   writeFileSync(settingsPath, JSON.stringify(merged, null, 2) + '\n');
-  console.log('Wrote .shipper/settings.json with default settings:');
+  logger.log('Wrote .shipper/settings.json with default settings:');
   for (const [key, value] of Object.entries(DEFAULTS)) {
     if (typeof value === 'object' && value !== null) continue;
     const desc = SETTING_DESCRIPTIONS[key];
-    console.log(`  ${key}: ${value}${desc ? `  — ${desc}` : ''}`);
+    logger.log(`  ${key}: ${value}${desc ? `  — ${desc}` : ''}`);
   }
   for (const [key, desc] of Object.entries(SETTING_DESCRIPTIONS)) {
     if (key in DEFAULTS) continue;
     const value = key.includes('.') ? getNestedValue(merged, key) : merged[key];
     if (value !== undefined) {
-      console.log(`  ${key}: ${formatSettingValue(value)}  — ${desc}`);
+      logger.log(`  ${key}: ${formatSettingValue(value)}  — ${desc}`);
     } else {
-      console.log(`  ${key}: (not set)  — ${desc}`);
+      logger.log(`  ${key}: (not set)  — ${desc}`);
     }
   }
 
@@ -324,12 +325,12 @@ export async function initCommand(options: {
     chmodSync(dest, 0o755);
     scriptCount++;
   }
-  console.log(`Wrote ${scriptCount} script files to .shipper/scripts/`);
+  logger.log(`Wrote ${scriptCount} script files to .shipper/scripts/`);
 
   // Write README
   const readmePath = path.resolve('.shipper', 'README.md');
   writeFileSync(readmePath, readmeTemplate);
-  console.log('Wrote .shipper/README.md');
+  logger.log('Wrote .shipper/README.md');
 
   // Ensure labels match the canonical shipper definitions
   for (const label of LABELS) {
@@ -344,10 +345,10 @@ export async function initCommand(options: {
       label.description,
     ]);
   }
-  console.log(`Synced ${LABELS.length} labels`);
+  logger.log(`Synced ${LABELS.length} labels`);
 
   if (!options.autocommit) {
-    console.log(
+    logger.log(
       "Tip: run 'git add .shipper/ && git commit' to commit your changes, then push to your default branch."
     );
   } else {
@@ -362,7 +363,7 @@ export async function initCommand(options: {
     }
 
     if (!hasChanges) {
-      console.log('.shipper/ files are unchanged — nothing to commit.');
+      logger.log('.shipper/ files are unchanged — nothing to commit.');
     } else {
       let currentBranch = '';
       if (options.push) {
@@ -372,7 +373,7 @@ export async function initCommand(options: {
         currentBranch = currentOut.trim();
 
         if (!currentBranch) {
-          console.error(
+          logger.error(
             'Error: Failed to push from detached HEAD.\nCheck out a branch and retry with --push.'
           );
           process.exit(1);
@@ -408,7 +409,7 @@ export async function initCommand(options: {
       }
 
       if (!options.push) {
-        console.log('Committed .shipper/ files.');
+        logger.log('Committed .shipper/ files.');
       } else {
         const pushBranch = currentBranch;
 
@@ -431,7 +432,7 @@ export async function initCommand(options: {
           await execFileAsync('git', ['push', remote, pushBranch]);
         } catch (err) {
           const stderr = getErrorStderr(err);
-          console.error(
+          logger.error(
             `Error: Failed to push to ${pushBranch}.` +
               (stderr ? `\n${stderr}` : '') +
               '\n\nThis may be due to branch protection rules.' +
@@ -442,7 +443,7 @@ export async function initCommand(options: {
           return;
         }
 
-        console.log(`Committed and pushed .shipper/ files to ${pushBranch}`);
+        logger.log(`Committed and pushed .shipper/ files to ${pushBranch}`);
       }
     }
   }
@@ -452,15 +453,15 @@ export async function initCommand(options: {
   if (existsSync(rootGitignore)) {
     const content = readGitignore(rootGitignore);
     if (!content.includes('.shipper/tmp')) {
-      console.log('\nTip: .shipper/tmp/ is gitignored within .shipper/.');
+      logger.log('\nTip: .shipper/tmp/ is gitignored within .shipper/.');
     }
   }
 
-  console.log('\nshipper initialized! You can now run:');
-  console.log('  shipper setup          — configure install command and get onboarding help');
-  console.log('  shipper new <request>  — create a new issue from an idea');
-  console.log('  shipper adopt <issue>  — bring an existing issue into the workflow');
-  console.log('  shipper groom <issue>  — groom an issue for implementation');
+  logger.log('\nshipper initialized! You can now run:');
+  logger.log('  shipper setup          — configure install command and get onboarding help');
+  logger.log('  shipper new <request>  — create a new issue from an idea');
+  logger.log('  shipper adopt <issue>  — bring an existing issue into the workflow');
+  logger.log('  shipper groom <issue>  — groom an issue for implementation');
 }
 
 function readGitignore(filepath: string): string {

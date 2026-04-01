@@ -1,4 +1,4 @@
-import { autoSelectIssue, generateBranchName, getRepoRoot } from '@dnsquared/shipper-core';
+import { logger, autoSelectIssue, generateBranchName, getRepoRoot } from '@dnsquared/shipper-core';
 import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
 import { getSettings, resolveBaseBranch } from '@dnsquared/shipper-core';
 import { handleAgentCrash, processResult, scrubOutputDir } from '@dnsquared/shipper-core';
@@ -18,10 +18,10 @@ export async function designCommand(
   if (!issue) {
     const selected = await autoSelectIssue(repo, 'shipper:groomed');
     if (!selected) {
-      console.error("No issues ready for design. Run 'shipper groom' first.");
+      logger.error("No issues ready for design. Run 'shipper groom' first.");
       process.exit(1);
     }
-    console.error(`Auto-selected #${selected.number}: ${selected.title}`);
+    logger.error(`Auto-selected #${selected.number}: ${selected.title}`);
     issue = String(selected.number);
   }
 
@@ -68,7 +68,7 @@ export async function designCommand(
             });
           } catch (error) {
             const detail = error instanceof Error ? error.message : String(error);
-            console.error(detail);
+            logger.error(detail);
             await handleAgentCrash(repo, issue, 'design', detail);
             process.exitCode = 1;
             return;

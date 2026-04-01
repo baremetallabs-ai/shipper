@@ -9,6 +9,17 @@ import { prReviewCommand } from '../../src/commands/pr-review.js';
 import { prRemediateCommand } from '../../src/commands/pr-remediate.js';
 
 vi.mock('@dnsquared/shipper-core', () => ({
+  logger: {
+    log: (message: string) => {
+      console.log(`[shipper] ${message}`);
+    },
+    warn: (message: string) => {
+      console.warn(`[shipper] ${message}`);
+    },
+    error: (message: string) => {
+      console.error(`[shipper] ${message}`);
+    },
+  },
   gh: vi.fn(),
   resolveRef: vi.fn(),
   tryResolvePrForIssue: vi.fn(),
@@ -219,7 +230,7 @@ describe('nextCommand', () => {
     await expect(nextCommand(repo, '159')).rejects.toThrow('exit:1');
 
     expect(errorSpy).toHaveBeenCalledWith(
-      "Issue #159 is blocked. Run 'shipper unblock 159' to check if it can proceed."
+      "[shipper] Issue #159 is blocked. Run 'shipper unblock 159' to check if it can proceed."
     );
     expect(mockWithIssueLock).not.toHaveBeenCalled();
     expect(mockGroomCommand).not.toHaveBeenCalled();
@@ -251,7 +262,7 @@ describe('nextCommand', () => {
 
     await expect(nextCommand(repo, '159')).rejects.toThrow('exit:1');
 
-    expect(errorSpy).toHaveBeenCalledWith('Issue #159 has the shipper:failed label.');
+    expect(errorSpy).toHaveBeenCalledWith('[shipper] Issue #159 has the shipper:failed label.');
     expect(mockWithIssueLock).not.toHaveBeenCalled();
     expect(mockGroomCommand).not.toHaveBeenCalled();
     expect(mockDesignCommand).not.toHaveBeenCalled();
@@ -273,7 +284,7 @@ describe('nextCommand', () => {
 
     await expect(nextCommand(repo, '159')).rejects.toThrow('exit:1');
 
-    expect(errorSpy).toHaveBeenCalledWith('Issue #159 has the shipper:failed label.');
+    expect(errorSpy).toHaveBeenCalledWith('[shipper] Issue #159 has the shipper:failed label.');
     expect(mockWithIssueLock).not.toHaveBeenCalled();
     expect(mockGroomCommand).not.toHaveBeenCalled();
     expect(mockDesignCommand).not.toHaveBeenCalled();
@@ -299,7 +310,7 @@ describe('nextCommand', () => {
 
     await expect(nextCommand(repo, '159')).rejects.toThrow('exit:1');
 
-    expect(errorSpy).toHaveBeenCalledWith('Issue #159 has the shipper:failed label.');
+    expect(errorSpy).toHaveBeenCalledWith('[shipper] Issue #159 has the shipper:failed label.');
     expect(mockWithIssueLock).not.toHaveBeenCalled();
     expect(mockGroomCommand).not.toHaveBeenCalled();
     expect(mockDesignCommand).not.toHaveBeenCalled();

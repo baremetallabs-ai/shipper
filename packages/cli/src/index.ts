@@ -2,7 +2,7 @@ import { Argument, Command, CommanderError, Option } from 'commander';
 import { writeSync } from 'node:fs';
 import { runPreflight } from '@dnsquared/shipper-core';
 import { getRepoNwo } from '@dnsquared/shipper-core';
-import { loadSettings, type AgentName, type CommandMode } from '@dnsquared/shipper-core';
+import { loadSettings, logger, type AgentName, type CommandMode } from '@dnsquared/shipper-core';
 import { CLI_VERSION, checkVersionFreshness } from '@dnsquared/shipper-core';
 import { warnTrackedOutputFiles } from '@dnsquared/shipper-core';
 import { initCommand } from './commands/init.js';
@@ -73,7 +73,7 @@ program.configureOutput({
 });
 
 function exitWithError(err: unknown): never {
-  console.error(err instanceof Error ? err.message : String(err));
+  logger.error(err instanceof Error ? err.message : String(err));
   process.exit(1);
 }
 
@@ -186,11 +186,11 @@ program
   .action(
     wrapAction(async (issue: string | undefined, options: { all: boolean }) => {
       if (options.all && issue) {
-        console.error('Error: --all and an explicit issue number are mutually exclusive.');
+        logger.error('Error: --all and an explicit issue number are mutually exclusive.');
         process.exit(1);
       }
       if (!options.all && !issue) {
-        console.error('Error: an issue number is required unless --all is used.');
+        logger.error('Error: an issue number is required unless --all is used.');
         process.exit(1);
       }
       if (options.all) {
@@ -260,20 +260,20 @@ addModelOption(
               }
             ) => {
               if (options.auto && issue) {
-                console.error('Error: --auto and an explicit issue number are mutually exclusive.');
+                logger.error('Error: --auto and an explicit issue number are mutually exclusive.');
                 process.exit(1);
               }
               if (!options.auto && !issue) {
-                console.error('Error: an issue number is required unless --auto is used.');
+                logger.error('Error: an issue number is required unless --auto is used.');
                 process.exit(1);
               }
               if (options.auto && options.mode !== 'default') {
-                console.error('Error: --auto and --mode are mutually exclusive.');
+                logger.error('Error: --auto and --mode are mutually exclusive.');
                 process.exit(1);
               }
 
               if (options.parallel !== undefined && !options.auto) {
-                console.error('Error: --parallel requires --auto');
+                logger.error('Error: --parallel requires --auto');
                 process.exit(1);
               }
 
@@ -281,7 +281,7 @@ addModelOption(
               if (options.parallel !== undefined) {
                 parallel = Number(options.parallel);
                 if (!Number.isInteger(parallel) || parallel < 1) {
-                  console.error('Error: --parallel requires a number');
+                  logger.error('Error: --parallel requires a number');
                   process.exit(1);
                 }
                 if (parallel === 1) {
@@ -319,7 +319,7 @@ addModelOption(
               options: { auto: boolean; mode: string; agent?: string; model?: string }
             ) => {
               if (options.auto && issue) {
-                console.error('Error: --auto and an explicit issue number are mutually exclusive.');
+                logger.error('Error: --auto and an explicit issue number are mutually exclusive.');
                 process.exit(1);
               }
               await groomCommand(requireResolvedRepo(), issue, {
@@ -594,7 +594,7 @@ if (argv[0] === 'ship') {
 
     const next = argv[i + 1];
     if (!next || next.startsWith('-')) {
-      console.error('Error: --parallel requires a number');
+      logger.error('Error: --parallel requires a number');
       process.exit(1);
     }
   }

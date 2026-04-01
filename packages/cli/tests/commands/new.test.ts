@@ -17,6 +17,17 @@ const { mockResolveMode, mockRunPrompt } = vi.hoisted(() => ({
 }));
 
 vi.mock('@dnsquared/shipper-core', () => ({
+  logger: {
+    error: (message: string) => {
+      console.error(`[shipper] ${message}`);
+    },
+    log: (message: string) => {
+      console.log(`[shipper] ${message}`);
+    },
+    warn: (message: string) => {
+      console.warn(`[shipper] ${message}`);
+    },
+  },
   resolveMode: (step: string, override?: string) => mockResolveMode(step, override),
   runPrompt: (
     name: string,
@@ -120,9 +131,11 @@ describe('newCommand', () => {
 
     expect(mockResolveMode).toHaveBeenCalledWith('new', 'headless');
     expect(errorMock).toHaveBeenCalledWith(
-      'Error: A request is required when running in headless mode.'
+      '[shipper] Error: A request is required when running in headless mode.'
     );
-    expect(errorMock).toHaveBeenCalledWith('Usage: shipper new <request...> --mode headless');
+    expect(errorMock).toHaveBeenCalledWith(
+      '[shipper] Usage: shipper new <request...> --mode headless'
+    );
     expect(mockRunPrompt).not.toHaveBeenCalled();
   });
 
@@ -133,9 +146,11 @@ describe('newCommand', () => {
 
     expect(mockResolveMode).toHaveBeenCalledWith('new', undefined);
     expect(errorMock).toHaveBeenCalledWith(
-      'Error: A request is required when running in headless mode.'
+      '[shipper] Error: A request is required when running in headless mode.'
     );
-    expect(errorMock).toHaveBeenCalledWith('Usage: shipper new <request...> --mode headless');
+    expect(errorMock).toHaveBeenCalledWith(
+      '[shipper] Usage: shipper new <request...> --mode headless'
+    );
     expect(mockRunPrompt).not.toHaveBeenCalled();
   });
 
@@ -147,9 +162,11 @@ describe('newCommand', () => {
     await expect(newCommand([], { mode: 'headless' })).resolves.toBeUndefined();
 
     expect(errorMock).toHaveBeenCalledWith(
-      'Error: A request is required when running in headless mode.'
+      '[shipper] Error: A request is required when running in headless mode.'
     );
-    expect(errorMock).toHaveBeenCalledWith('Usage: shipper new <request...> --mode headless');
+    expect(errorMock).toHaveBeenCalledWith(
+      '[shipper] Usage: shipper new <request...> --mode headless'
+    );
     expect(mockRunPrompt).not.toHaveBeenCalled();
   });
 

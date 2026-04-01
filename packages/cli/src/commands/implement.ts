@@ -1,4 +1,4 @@
-import { generateBranchName, getRepoRoot } from '@dnsquared/shipper-core';
+import { logger, generateBranchName, getRepoRoot } from '@dnsquared/shipper-core';
 import { autoSelectIssue } from '@dnsquared/shipper-core';
 import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
 import { formatConflictContext } from '@dnsquared/shipper-core';
@@ -22,10 +22,10 @@ export async function implementCommand(
   if (!issue) {
     const selected = await autoSelectIssue(repo, 'shipper:planned');
     if (!selected) {
-      console.error("No issues ready for implementation. Run 'shipper plan' first.");
+      logger.error("No issues ready for implementation. Run 'shipper plan' first.");
       process.exit(1);
     }
-    console.error(`Auto-selected #${selected.number}: ${selected.title}`);
+    logger.error(`Auto-selected #${selected.number}: ${selected.title}`);
     issue = String(selected.number);
   }
 
@@ -115,7 +115,7 @@ export async function implementCommand(
             });
           } catch (error) {
             const detail = error instanceof Error ? error.message : String(error);
-            console.error(detail);
+            logger.error(detail);
             await handleAgentCrash(repo, issue, 'implement', detail);
             process.exitCode = 1;
             return;
