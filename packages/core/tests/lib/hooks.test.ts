@@ -1,3 +1,4 @@
+import { performance } from 'node:perf_hooks';
 import { EventEmitter } from 'node:events';
 import path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -166,7 +167,10 @@ describe('runWorktreeHook', () => {
 describe('withStageHooks', () => {
   it('runs pre hook before fn and post hook after fn, with markers wrapped around them', async () => {
     const callOrder: string[] = [];
-    const dateNowSpy = vi.spyOn(Date, 'now').mockReturnValueOnce(1_000).mockReturnValueOnce(62_000);
+    const performanceNowSpy = vi
+      .spyOn(performance, 'now')
+      .mockReturnValueOnce(1_000)
+      .mockReturnValueOnce(62_000);
     errorMock.mockImplementation((message?: unknown) => {
       callOrder.push(String(message));
     });
@@ -199,7 +203,7 @@ describe('withStageHooks', () => {
       '[shipper] ✓ stage:groom #10 complete (1m 1s)',
     ]);
 
-    dateNowSpy.mockRestore();
+    performanceNowSpy.mockRestore();
   });
 
   it('passes stage env through to the hook process', async () => {
@@ -227,7 +231,10 @@ describe('withStageHooks', () => {
   });
 
   it('logs a failed stage and rethrows when the callback rejects', async () => {
-    const dateNowSpy = vi.spyOn(Date, 'now').mockReturnValueOnce(2_000).mockReturnValueOnce(47_000);
+    const performanceNowSpy = vi
+      .spyOn(performance, 'now')
+      .mockReturnValueOnce(2_000)
+      .mockReturnValueOnce(47_000);
     mockSpawnResult();
 
     await expect(
@@ -242,11 +249,14 @@ describe('withStageHooks', () => {
     ]);
     expect(spawnMock).toHaveBeenCalledTimes(1);
 
-    dateNowSpy.mockRestore();
+    performanceNowSpy.mockRestore();
   });
 
   it('logs a failed stage when the pre hook rejects', async () => {
-    const dateNowSpy = vi.spyOn(Date, 'now').mockReturnValueOnce(5_000).mockReturnValueOnce(6_000);
+    const performanceNowSpy = vi
+      .spyOn(performance, 'now')
+      .mockReturnValueOnce(5_000)
+      .mockReturnValueOnce(6_000);
     mockSpawnResult({ code: 1, stderr: 'pre failed' });
 
     await expect(
@@ -258,12 +268,12 @@ describe('withStageHooks', () => {
       ['[shipper] ✗ stage:plan #529 failed (1s)'],
     ]);
 
-    dateNowSpy.mockRestore();
+    performanceNowSpy.mockRestore();
   });
 
   it('preserves warning-only post hook behavior and still logs completion', async () => {
-    const dateNowSpy = vi
-      .spyOn(Date, 'now')
+    const performanceNowSpy = vi
+      .spyOn(performance, 'now')
       .mockReturnValueOnce(10_000)
       .mockReturnValueOnce(70_000);
     mockSpawnResult();
@@ -282,6 +292,24 @@ describe('withStageHooks', () => {
       ['[shipper] ✓ stage:design #77 complete (1m 0s)'],
     ]);
 
-    dateNowSpy.mockRestore();
+    performanceNowSpy.mockRestore();
+  });
+
+  it('omits the issue marker when the stage has no linked issue number', async () => {
+    const performanceNowSpy = vi
+      .spyOn(performance, 'now')
+      .mockReturnValueOnce(100)
+      .mockReturnValueOnce(5_100);
+    mockSpawnResult();
+    mockSpawnResult();
+
+    await withStageHooks('merge', {}, () => Promise.resolve());
+
+    expect(errorMock.mock.calls).toEqual([
+      ['[shipper] ▶ stage:merge starting'],
+      ['[shipper] ✓ stage:merge complete (5s)'],
+    ]);
+
+    performanceNowSpy.mockRestore();
   });
 });

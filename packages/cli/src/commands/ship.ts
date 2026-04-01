@@ -176,6 +176,19 @@ function formatLogDisplayPath(logFile: string, homeDir = homedir()): string {
   return logFile.startsWith(homeDir) ? `~${logFile.slice(homeDir.length)}` : logFile;
 }
 
+function summarizeChildStderr(stderrOutput: string): string {
+  const nonLifecycleLines = stderrOutput
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '' && !line.startsWith('[shipper] '));
+
+  if (nonLifecycleLines.length > 0) {
+    return nonLifecycleLines.join('\n');
+  }
+
+  return stderrOutput.trim();
+}
+
 function logBoth(logStream: WriteStream | undefined, message: string): void {
   console.log(message);
   logStream?.write(`${message}\n`);
@@ -1024,7 +1037,7 @@ function shipOneIssueAsync(
 
         const stderrOutput = stderr.join('').trim();
         if (stderrOutput) {
-          resolveResult({ success: false, error: stderrOutput });
+          resolveResult({ success: false, error: summarizeChildStderr(stderrOutput) });
           return;
         }
 

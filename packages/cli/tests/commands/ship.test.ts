@@ -3030,16 +3030,16 @@ describe('shipCommand parallel auto runner', () => {
     expect(mockCreateWriteStream).toHaveBeenCalledWith(logFile2);
 
     plannedIssues = plannedIssues.filter((issue) => issue.number !== 1);
-    child1.stdout.write('[shipper] ▶ stage:implement #1 starting\n');
+    child1.stderr.write('[shipper] ▶ stage:implement #1 starting\n');
     child1.stderr.write('lock acquired\n');
-    child1.stdout.write('[shipper] ✓ stage:implement #1 complete (12s)\n');
+    child1.stderr.write('[shipper] ✓ stage:implement #1 complete (12s)\n');
     child1.finish(0);
     await flushMicrotasks();
 
     plannedIssues = plannedIssues.filter((issue) => issue.number !== 2);
-    child2.stdout.write('[shipper] ▶ stage:merge #2 starting\n');
+    child2.stderr.write('[shipper] ▶ stage:merge #2 starting\n');
     child2.stderr.write('boom\n');
-    child2.stdout.write('[shipper] ✗ stage:merge #2 failed (5s)\n');
+    child2.stderr.write('[shipper] ✗ stage:merge #2 failed (5s)\n');
     child2.finish(1);
     await runPromise;
 
