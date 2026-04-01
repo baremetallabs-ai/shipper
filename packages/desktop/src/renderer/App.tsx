@@ -1755,6 +1755,24 @@ export default function App(): JSX.Element {
     }
   }
 
+  async function handleReorderRepos(nextRepos: string[]): Promise<void> {
+    if (
+      repos.length < 2 ||
+      nextRepos.length !== repos.length ||
+      nextRepos.every((repo, index) => repo === repos[index])
+    ) {
+      return;
+    }
+
+    try {
+      await persistConfig({ repos: nextRepos, activeRepo, autoMergeRepos: [...autoMergeRepos] });
+      setRepos(nextRepos);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setFetchError(`Failed to save repositories: ${message}`);
+    }
+  }
+
   useEffect(() => {
     const unsubscribe = window.shipperAPI.onPtyOutput((event) => {
       const outputAt = Date.now();
@@ -2582,6 +2600,9 @@ export default function App(): JSX.Element {
                 }}
                 onAddRepo={() => {
                   setIsPickerOpen(true);
+                }}
+                onReorderRepos={(nextRepos) => {
+                  void handleReorderRepos(nextRepos);
                 }}
               />
             ) : null}
