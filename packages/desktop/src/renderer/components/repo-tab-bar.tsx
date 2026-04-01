@@ -7,6 +7,7 @@ import { Button } from './ui/button.js';
 interface RepoTabBarProps {
   repos: string[];
   activeRepo: string;
+  activeCommandRepos: Set<string>;
   onSelectRepo: (repo: string) => void;
   onCloseRepo: (repo: string) => void;
   onAddRepo: () => void;
@@ -15,6 +16,7 @@ interface RepoTabBarProps {
 export function RepoTabBar({
   repos,
   activeRepo,
+  activeCommandRepos,
   onSelectRepo,
   onCloseRepo,
   onAddRepo,
@@ -36,11 +38,14 @@ export function RepoTabBar({
             >
               <button
                 type="button"
-                className="cursor-pointer min-w-0 px-3 py-2 text-sm font-medium outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                className="cursor-pointer flex min-w-0 items-center gap-2 px-3 py-2 text-sm font-medium outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                 onClick={() => {
                   onSelectRepo(repo);
                 }}
               >
+                {activeCommandRepos.has(repo) ? (
+                  <span className="size-2 shrink-0 rounded-full bg-primary" aria-hidden="true" />
+                ) : null}
                 <span className="block max-w-52 truncate">{repo}</span>
               </button>
               <button
