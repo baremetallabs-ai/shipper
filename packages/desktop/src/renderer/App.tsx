@@ -1,6 +1,13 @@
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import type { DragEvent, JSX, SetStateAction } from 'react';
-import { ChevronLeft, ChevronRight, EllipsisVertical, LoaderCircle, Square } from 'lucide-react';
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  EllipsisVertical,
+  LoaderCircle,
+  Square,
+} from 'lucide-react';
 
 import {
   BLOCKED_LABEL,
@@ -565,6 +572,7 @@ interface IssueCardProps {
   issue: ListIssueItem;
   onGroom?: (issueNumber: number) => void;
   onResetSelect?: (targetStage: WorkflowStage) => void;
+  onSetPriority?: (level: 'high' | 'normal' | 'low') => void;
   onCloseNotPlanned?: () => void;
   onUnlock?: () => void;
   onUnblock?: () => void;
@@ -586,6 +594,7 @@ function IssueCard({
   issue,
   onGroom,
   onResetSelect,
+  onSetPriority,
   onCloseNotPlanned,
   onUnlock,
   onUnblock,
@@ -604,6 +613,7 @@ function IssueCard({
 }: IssueCardProps): JSX.Element {
   const isBlocked = issue.labels.includes(BLOCKED_LABEL);
   const isLocked = issue.labels.includes(LOCKED_LABEL);
+  const priorityTier = getPriorityTier(issue.labels);
   const isShipping = !!shippingStatus;
   const isBusy = isResetting || isUnlocking || isUnblocking;
   const busyLabel = isResetting
@@ -618,8 +628,9 @@ function IssueCard({
   const canUnblock = isBlocked && !isLocked && !!onUnblock;
   const canCloseNotPlanned = !!onCloseNotPlanned && !isLocked && !isShipping;
   const hasResetMenu = onResetSelect !== undefined && resetTargets.length > 0;
+  const hasPriorityMenu = onSetPriority !== undefined;
   const hasFlatActions = canCloseNotPlanned || canUnlock || canUnblock;
-  const showOverflowMenu = !isShipping && (hasResetMenu || hasFlatActions);
+  const showOverflowMenu = !isShipping && (hasResetMenu || hasFlatActions || hasPriorityMenu);
   const isShipDisabled = shipDisabled || isBlocked || isLocked || isShipping;
 
   function handleUnlockSelect(): void {
@@ -672,7 +683,38 @@ function IssueCard({
                   </DropdownMenuSubContent>
                 </DropdownMenuSub>
               ) : null}
-              {hasResetMenu && hasFlatActions ? <DropdownMenuSeparator /> : null}
+              {hasPriorityMenu ? (
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>Priority</DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent>
+                    {(['high', 'normal', 'low'] as const).map((level) => {
+                      const tier = level === 'high' ? 0 : level === 'low' ? 2 : 1;
+                      const isActive = tier === priorityTier;
+
+                      return (
+                        <DropdownMenuItem
+                          key={level}
+                          onSelect={() => {
+                            if (isActive) {
+                              return;
+                            }
+
+                            onSetPriority(level);
+                          }}
+                        >
+                          {level.charAt(0).toUpperCase() + level.slice(1)}
+                          {isActive ? (
+                            <Check className="ml-auto size-4" aria-hidden="true" />
+                          ) : null}
+                        </DropdownMenuItem>
+                      );
+                    })}
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+              ) : null}
+              {hasFlatActions && (hasResetMenu || hasPriorityMenu) ? (
+                <DropdownMenuSeparator />
+              ) : null}
               {canCloseNotPlanned ? (
                 <DropdownMenuItem
                   onSelect={() => {
@@ -712,8 +754,18 @@ function IssueCard({
         ) : null}
       </div>
       <h4 className="text-sm font-semibold leading-snug text-foreground">{issue.title}</h4>
-      {isBlocked || isLocked ? (
+      {priorityTier !== 1 || isBlocked || isLocked ? (
         <div className="flex flex-wrap gap-2">
+          {priorityTier === 0 ? (
+            <Badge variant="outline" className="border-orange-500 text-orange-600">
+              High
+            </Badge>
+          ) : null}
+          {priorityTier === 2 ? (
+            <Badge variant="outline" className="text-muted-foreground">
+              Low
+            </Badge>
+          ) : null}
           {isBlocked ? <Badge variant="outline">Blocked</Badge> : null}
           {isLocked ? <Badge variant="outline">Locked</Badge> : null}
         </div>
@@ -2151,6 +2203,47 @@ export default function App(): JSX.Element {
     }
   }
 
+  async function handleSetPriority(
+    issue: ListIssueItem,
+    level: 'high' | 'normal' | 'low'
+  ): Promise<void> {
+    if (!activeRepo) {
+      return;
+    }
+
+    try {
+      const result = await window.shipperAPI.setPriority(activeRepo, issue.number, level);
+      if (!result.ok) {
+        pushToast({
+          id: `set-priority-error-${issue.number}`,
+          sessionId: '',
+          variant: 'error',
+          title: 'Failed to set priority',
+          description: result.error,
+        });
+        return;
+      }
+
+      pushToast({
+        id: `set-priority-${issue.number}`,
+        sessionId: '',
+        variant: 'success',
+        title: 'Priority updated',
+        description: `#${issue.number} set to ${level}.`,
+      });
+      await refreshIssuesForActiveRepo(activeRepo);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      pushToast({
+        id: `set-priority-error-${issue.number}`,
+        sessionId: '',
+        variant: 'error',
+        title: 'Failed to set priority',
+        description: message,
+      });
+    }
+  }
+
   async function handleUnlockClick(issue: ListIssueItem): Promise<void> {
     if (!activeRepo) {
       return;
@@ -2826,6 +2919,9 @@ export default function App(): JSX.Element {
                                 onCloseNotPlanned={() => {
                                   setCloseNotPlannedIssue(issue);
                                 }}
+                                onSetPriority={(level) => {
+                                  void handleSetPriority(issue, level);
+                                }}
                                 onUnlock={() => {
                                   void handleUnlockClick(issue);
                                 }}
@@ -2918,6 +3014,9 @@ export default function App(): JSX.Element {
                                         }}
                                         onCloseNotPlanned={() => {
                                           setCloseNotPlannedIssue(issue);
+                                        }}
+                                        onSetPriority={(level) => {
+                                          void handleSetPriority(issue, level);
                                         }}
                                         onUnlock={() => {
                                           void handleUnlockClick(issue);

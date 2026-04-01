@@ -22,6 +22,8 @@ import {
   listIssues,
   LOCKED_LABEL,
   parseStage,
+  PRIORITY_HIGH_LABEL,
+  PRIORITY_LOW_LABEL,
   releaseIssueLock,
   renewIssueLock,
   scanArtifacts,
@@ -1026,6 +1028,39 @@ function registerIpcHandlers(): void {
         ]);
       }
 
+      return { ok: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { ok: false, error: message };
+    }
+  });
+
+  ipcMain.handle('set-priority', async (_event, payload: unknown) => {
+    const parsedPayload = parseAdoptIssuePayload(payload);
+    if (parsedPayload === null) {
+      return {
+        ok: false,
+        error: 'Enter a repository in owner/repo format and a positive issue number.',
+      };
+    }
+
+    const level =
+      typeof payload === 'object' && payload !== null && 'level' in payload ? payload.level : null;
+    if (level !== 'high' && level !== 'normal' && level !== 'low') {
+      return { ok: false, error: 'Invalid priority level.' };
+    }
+
+    try {
+      const args = ['issue', 'edit', String(parsedPayload.issueNumber), '-R', parsedPayload.repo];
+      if (level === 'high') {
+        args.push('--add-label', PRIORITY_HIGH_LABEL, '--remove-label', PRIORITY_LOW_LABEL);
+      } else if (level === 'low') {
+        args.push('--add-label', PRIORITY_LOW_LABEL, '--remove-label', PRIORITY_HIGH_LABEL);
+      } else {
+        args.push('--remove-label', PRIORITY_HIGH_LABEL, '--remove-label', PRIORITY_LOW_LABEL);
+      }
+
+      await gh(args);
       return { ok: true };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

@@ -109,6 +109,11 @@ interface ShipperAPI {
     repo: string,
     issueNumber: number
   ) => Promise<{ ok: true } | { ok: false; error: string }>;
+  setPriority: (
+    repo: string,
+    issueNumber: number,
+    level: 'high' | 'normal' | 'low'
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
 
   spawnShipperGroom: (
     issueNumber: number,

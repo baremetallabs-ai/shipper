@@ -105,6 +105,8 @@ vi.mock('@dnsquared/shipper-core', () => {
     listIssues: state.listIssuesMock,
     LOCKED_LABEL: 'shipper:locked',
     parseStage,
+    PRIORITY_HIGH_LABEL: 'shipper:priority-high',
+    PRIORITY_LOW_LABEL: 'shipper:priority-low',
     releaseIssueLock: state.releaseIssueLockMock,
     renewIssueLock: state.renewIssueLockMock,
     scanArtifacts: state.scanArtifactsMock,
@@ -868,6 +870,114 @@ describe('desktop IPC locking', () => {
     expect(state.releaseIssueLockMock).not.toHaveBeenCalled();
   });
 
+  it('sets high priority by adding the high label and removing the low label', async () => {
+    await loadHandlers();
+    state.ghMock.mockResolvedValueOnce({ stdout: '', stderr: '' });
+    const handler = getHandler('set-priority');
+
+    await expect(
+      handler({}, { repo: 'owner/repo', issueNumber: 42, level: 'high' })
+    ).resolves.toEqual({
+      ok: true,
+    });
+    expect(state.ghMock).toHaveBeenCalledWith([
+      'issue',
+      'edit',
+      '42',
+      '-R',
+      'owner/repo',
+      '--add-label',
+      'shipper:priority-high',
+      '--remove-label',
+      'shipper:priority-low',
+    ]);
+  });
+
+  it('sets low priority by adding the low label and removing the high label', async () => {
+    await loadHandlers();
+    state.ghMock.mockResolvedValueOnce({ stdout: '', stderr: '' });
+    const handler = getHandler('set-priority');
+
+    await expect(
+      handler({}, { repo: 'owner/repo', issueNumber: 42, level: 'low' })
+    ).resolves.toEqual({
+      ok: true,
+    });
+    expect(state.ghMock).toHaveBeenCalledWith([
+      'issue',
+      'edit',
+      '42',
+      '-R',
+      'owner/repo',
+      '--add-label',
+      'shipper:priority-low',
+      '--remove-label',
+      'shipper:priority-high',
+    ]);
+  });
+
+  it('sets normal priority by removing both priority labels', async () => {
+    await loadHandlers();
+    state.ghMock.mockResolvedValueOnce({ stdout: '', stderr: '' });
+    const handler = getHandler('set-priority');
+
+    await expect(
+      handler({}, { repo: 'owner/repo', issueNumber: 42, level: 'normal' })
+    ).resolves.toEqual({
+      ok: true,
+    });
+    expect(state.ghMock).toHaveBeenCalledWith([
+      'issue',
+      'edit',
+      '42',
+      '-R',
+      'owner/repo',
+      '--remove-label',
+      'shipper:priority-high',
+      '--remove-label',
+      'shipper:priority-low',
+    ]);
+  });
+
+  it('returns an inline error for set-priority requests with invalid payloads', async () => {
+    await loadHandlers();
+    const handler = getHandler('set-priority');
+
+    await expect(
+      handler({}, { repo: 'owner/repo', issueNumber: 0, level: 'high' })
+    ).resolves.toEqual({
+      ok: false,
+      error: 'Enter a repository in owner/repo format and a positive issue number.',
+    });
+    expect(state.ghMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects invalid priority levels without calling gh', async () => {
+    await loadHandlers();
+    const handler = getHandler('set-priority');
+
+    await expect(
+      handler({}, { repo: 'owner/repo', issueNumber: 42, level: 'urgent' })
+    ).resolves.toEqual({
+      ok: false,
+      error: 'Invalid priority level.',
+    });
+    expect(state.ghMock).not.toHaveBeenCalled();
+  });
+
+  it('surfaces gh failures when setting priority', async () => {
+    await loadHandlers();
+    state.ghMock.mockRejectedValueOnce(new Error('gh failed'));
+    const handler = getHandler('set-priority');
+
+    await expect(
+      handler({}, { repo: 'owner/repo', issueNumber: 42, level: 'high' })
+    ).resolves.toEqual({
+      ok: false,
+      error: 'gh failed',
+    });
+  });
+
   it('still registers groom on the PTY path with lock acquisition intact', async () => {
     await loadHandlers();
 
@@ -876,5 +986,6 @@ describe('desktop IPC locking', () => {
     expect(state.handlers.has('bg-spawn-ship')).toBe(true);
     expect(state.handlers.has('bg-spawn-init')).toBe(true);
     expect(state.handlers.has('bg-spawn-unblock')).toBe(true);
+    expect(state.handlers.has('set-priority')).toBe(true);
   });
 });
