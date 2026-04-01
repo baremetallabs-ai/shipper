@@ -80,7 +80,7 @@ describe('runAdvisoryHook', () => {
       })
     );
     expect(spawnOptions?.env).toEqual(expect.objectContaining({ FOO: 'bar' }));
-    expect(logMock).toHaveBeenCalledWith('  Test hook completed.');
+    expect(logMock).toHaveBeenCalledWith('[shipper]   Test hook completed.');
   });
 
   it('warns on non-zero exit and includes stderr', async () => {
@@ -88,7 +88,9 @@ describe('runAdvisoryHook', () => {
 
     await runAdvisoryHook('Test', 'exit 2', {});
 
-    expect(warnMock).toHaveBeenCalledWith('  Warning: Test hook exited with code 2: boom');
+    expect(warnMock).toHaveBeenCalledWith(
+      '[shipper]   Warning: Test hook exited with code 2: boom'
+    );
   });
 });
 
@@ -108,7 +110,7 @@ describe('runPreHook', () => {
     await runPreHook('groom', { SHIPPER_STAGE: 'groom' });
 
     expect(warnMock).toHaveBeenCalledWith(
-      `  Warning: Found ${hookPath} but it is not executable — skipping. Run \`chmod +x ${hookPath}\` to enable.`
+      `[shipper]   Warning: Found ${hookPath} but it is not executable — skipping. Run \`chmod +x ${hookPath}\` to enable.`
     );
   });
 
@@ -128,7 +130,7 @@ describe('runPostHook', () => {
     await runPostHook('groom', { SHIPPER_STAGE: 'groom' });
 
     expect(warnMock).toHaveBeenCalledWith(
-      '  Warning: post-groom hook exited with code 3: post failed'
+      '[shipper]   Warning: post-groom hook exited with code 3: post failed'
     );
   });
 });
@@ -285,7 +287,7 @@ describe('withStageHooks', () => {
 
     expect(result).toBe('ok');
     expect(warnMock).toHaveBeenCalledWith(
-      '  Warning: post-design hook exited with code 3: post failed'
+      '[shipper]   Warning: post-design hook exited with code 3: post failed'
     );
     expect(errorMock.mock.calls).toEqual([
       ['[shipper] ▶ stage:design #77 starting'],

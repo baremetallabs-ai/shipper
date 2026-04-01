@@ -955,7 +955,7 @@ describe('pushWorktree', () => {
       ).resolves.toBeUndefined();
 
       expect(consoleErrorSpy).toHaveBeenCalledWith(
-        'Commit-count safety check failed before force-push; proceeding with push.\n' +
+        '[shipper] Commit-count safety check failed before force-push; proceeding with push.\n' +
           'git rev-list --count origin/main..HEAD exited with code 128:\n' +
           'fatal: bad revision'
       );
@@ -1057,7 +1057,7 @@ describe('pushWorktree', () => {
       });
       expect(execFileMock.mock.calls[4]?.[2]).toHaveProperty('env.GIT_EDITOR', 'true');
       expect(consoleErrorSpy).toHaveBeenCalledWith(
-        'Stripped 3 tracked .shipper/ artifact files from git index before push'
+        '[shipper] Stripped 3 tracked .shipper/ artifact files from git index before push'
       );
     } finally {
       consoleErrorSpy.mockRestore();
@@ -1143,7 +1143,7 @@ describe('pushWorktree', () => {
         ['push', '-u', 'origin', 'HEAD'],
       ]);
       expect(consoleErrorSpy).toHaveBeenCalledWith(
-        'Stripped 1 tracked .shipper/ artifact files from git index before push'
+        '[shipper] Stripped 1 tracked .shipper/ artifact files from git index before push'
       );
     } finally {
       consoleErrorSpy.mockRestore();
@@ -1922,7 +1922,7 @@ describe('withGitTransport', () => {
         ],
       ]);
       expect(consoleErrorSpy).toHaveBeenCalledWith(
-        'Agent exited with code 17 while handling push failure; retrying.'
+        '[shipper] Agent exited with code 17 while handling push failure; retrying.'
       );
       expect(gitArgsFromSpawnCalls()).toEqual([['fetch', 'origin']]);
       expect(gitArgsFromExecCalls()).toEqual([

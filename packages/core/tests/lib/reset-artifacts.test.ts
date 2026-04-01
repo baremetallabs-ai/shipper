@@ -178,9 +178,6 @@ beforeEach(() => {
   mockRm.mockResolvedValue(undefined);
   mockHomedir.mockReturnValue('/home/test');
   mockRemoveWorktree.mockResolvedValue(undefined);
-
-  vi.spyOn(console, 'log').mockImplementation(() => {});
-  vi.spyOn(console, 'warn').mockImplementation(() => {});
 });
 
 afterEach(() => {
@@ -587,5 +584,67 @@ describe('executeReset', () => {
     );
 
     expect(ghCalls().some((args) => args[0] === 'api' && args[2] === 'DELETE')).toBe(false);
+  });
+
+  it('logs the reset summary with the shipper prefix', async () => {
+    const logMock = vi.spyOn(console, 'log').mockImplementation(() => {});
+    mockGh.mockImplementation((args: string[]) => {
+      if (args[0] === 'issue' && args[1] === 'comment') {
+        return Promise.resolve(ok());
+      }
+
+      return Promise.reject(new Error(`Unexpected gh call: ${args.join(' ')}`));
+    });
+
+    await executeReset(
+      18,
+      makeScan({
+        labelsToRemove: ['shipper:planned'],
+        addTarget: true,
+        targetLabel: 'shipper:groomed',
+      }),
+      'owner/repo'
+    );
+
+    expect(logMock.mock.calls).toEqual([
+      ['[shipper] \nReset complete for issue #18:'],
+      ['[shipper]   ✓ Removed labels: shipper:planned'],
+      ['[shipper]   ✓ Added label: shipper:groomed'],
+      ['[shipper]   ✓ Posted reset notice comment'],
+    ]);
+  });
+
+  it('warns with the shipper prefix when branch verification fails during reset', async () => {
+    const warnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockGh.mockImplementation((args: string[]) => {
+      if (
+        args[0] === 'pr' &&
+        args[1] === 'list' &&
+        args[2] === '-R' &&
+        args[3] === 'owner/repo' &&
+        args[4] === '--head' &&
+        args[5] === 'shipper/18-open-pr'
+      ) {
+        return Promise.reject(new Error('lookup failed'));
+      }
+
+      if (args[0] === 'issue' && args[1] === 'comment') {
+        return Promise.resolve(ok());
+      }
+
+      return Promise.reject(new Error(`Unexpected gh call: ${args.join(' ')}`));
+    });
+
+    await executeReset(
+      18,
+      makeScan({
+        branchesToDelete: ['shipper/18-open-pr'],
+      }),
+      'owner/repo'
+    );
+
+    expect(warnMock).toHaveBeenCalledWith(
+      '[shipper]   Warning: Could not verify open PR state for branch shipper/18-open-pr: lookup failed'
+    );
   });
 });

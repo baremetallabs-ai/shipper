@@ -301,7 +301,9 @@ describe('enrichFailedChecks', () => {
 
     const logDumps = await enrichFailedChecks(repo, failedChecks);
 
-    expect(warnSpy).toHaveBeenCalledWith('Warning: Failed to enrich CI check "build": gh exploded');
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[shipper] Warning: Failed to enrich CI check "build": gh exploded'
+    );
     expect(failedChecks[0]?.failedSteps).toBeUndefined();
     expect(logDumps).toEqual(new Map());
 
@@ -665,7 +667,7 @@ describe('rerunFailedChecks', () => {
     await expect(rerunFailedChecks(repo, failedChecks)).resolves.toBeUndefined();
 
     expect(warnSpy).toHaveBeenCalledWith(
-      'Warning: Failed to re-run workflow 123456789: rerun exploded'
+      '[shipper] Warning: Failed to re-run workflow 123456789: rerun exploded'
     );
     expect(execFileMock).toHaveBeenCalledTimes(2);
 

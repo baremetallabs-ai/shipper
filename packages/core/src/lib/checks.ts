@@ -1,4 +1,5 @@
 import { gh } from './gh.js';
+import { logger } from './logger.js';
 
 export interface FailedStep {
   name: string;
@@ -95,7 +96,7 @@ export async function enrichFailedChecks(
       logDumps.set(logDumpName, logOutput);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.warn(`Warning: Failed to enrich CI check "${check.name}": ${message}`);
+      logger.warn(`Warning: Failed to enrich CI check "${check.name}": ${message}`);
     }
   }
 
@@ -121,7 +122,7 @@ export async function rerunFailedChecks(repo: string, failedChecks: PRChecksLine
       await gh(['run', 'rerun', runId, '--failed', '-R', repo]);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.warn(`Warning: Failed to re-run workflow ${runId}: ${message}`);
+      logger.warn(`Warning: Failed to re-run workflow ${runId}: ${message}`);
     }
   }
 }

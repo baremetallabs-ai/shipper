@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 import { gh } from './gh.js';
+import { logger } from './logger.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -113,7 +114,7 @@ export async function findBranchForIssue(issueRef: string): Promise<string> {
 
     if (branches.length > 1) {
       const picked = await pickMostRecent(branches);
-      console.error(
+      logger.error(
         `Multiple branches found for issue ${issueRef}:\n` +
           branches.map((b) => `  ${b}`).join('\n') +
           `\nUsing most recent: ${picked}`
@@ -150,7 +151,7 @@ export async function findBranchForIssue(issueRef: string): Promise<string> {
 
   if (localBranches.length > 1) {
     const picked = await pickMostRecent(localBranches);
-    console.error(
+    logger.error(
       `Multiple local branches found for issue ${issueRef}:\n` +
         localBranches.map((b) => `  ${b}`).join('\n') +
         `\nUsing most recent: ${picked}`

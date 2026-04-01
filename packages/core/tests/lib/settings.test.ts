@@ -187,7 +187,7 @@ describe('loadSettings', () => {
     await loadSettings();
 
     expect(warnMock).toHaveBeenCalledWith(
-      'Warning: Unknown command "banana" in settings.commands.'
+      '[shipper] Warning: Unknown command "banana" in settings.commands.'
     );
   });
 
@@ -205,7 +205,7 @@ describe('loadSettings', () => {
     await loadSettings();
 
     expect(warnMock).toHaveBeenCalledWith(
-      'Warning: Unknown setting "hooks" — settings-based hooks have been removed. Use file-based hooks in .shipper/hooks/ instead.'
+      '[shipper] Warning: Unknown setting "hooks" — settings-based hooks have been removed. Use file-based hooks in .shipper/hooks/ instead.'
     );
   });
 
@@ -228,7 +228,7 @@ describe('loadSettings', () => {
       merge: { requirePassingChecks: true },
     });
     expect(warnMock).not.toHaveBeenCalledWith(
-      'Warning: Unknown setting "hooks" — settings-based hooks have been removed. Use file-based hooks in .shipper/hooks/ instead.'
+      '[shipper] Warning: Unknown setting "hooks" — settings-based hooks have been removed. Use file-based hooks in .shipper/hooks/ instead.'
     );
   });
 

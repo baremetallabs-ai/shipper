@@ -11,6 +11,7 @@ import {
   STAGE_LABEL_NAMES,
 } from './labels.js';
 import { gh } from './gh.js';
+import { logger } from './logger.js';
 import { removeWorktree } from './worktree.js';
 
 const IMPLEMENTED_STAGE_INDEX = STAGE_LABEL_NAMES.indexOf(IMPLEMENTED_LABEL);
@@ -223,14 +224,14 @@ export async function scanArtifacts(
         .map(Number);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.warn(`Warning: Could not fetch comments for issue #${issueNum}: ${message}`);
+      logger.warn(`Warning: Could not fetch comments for issue #${issueNum}: ${message}`);
     }
   } else {
     const stageTimestamp = await getStageTimestamp(issueNum, nwo, targetStage);
     if (stageTimestamp) {
       const cutoffDate = new Date(stageTimestamp);
       if (Number.isNaN(cutoffDate.getTime())) {
-        console.warn(
+        logger.warn(
           `Warning: Could not determine when ${targetLabel} was applied. Skipping comment cleanup.`
         );
       } else {
@@ -255,11 +256,11 @@ export async function scanArtifacts(
           }
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          console.warn(`Warning: Could not fetch comments for issue #${issueNum}: ${message}`);
+          logger.warn(`Warning: Could not fetch comments for issue #${issueNum}: ${message}`);
         }
       }
     } else {
-      console.warn(
+      logger.warn(
         `Warning: Could not determine when ${targetLabel} was applied. Skipping comment cleanup.`
       );
     }
@@ -289,7 +290,7 @@ export async function scanArtifacts(
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.warn(`Warning: Could not fetch PRs for issue #${issueNum}: ${message}`);
+    logger.warn(`Warning: Could not fetch PRs for issue #${issueNum}: ${message}`);
   }
 
   let remoteBranches: string[] = [];
@@ -302,7 +303,7 @@ export async function scanArtifacts(
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        console.warn(`Warning: Could not fetch remote branches for issue #${issueNum}: ${message}`);
+        logger.warn(`Warning: Could not fetch remote branches for issue #${issueNum}: ${message}`);
       }
 
       try {
@@ -321,7 +322,7 @@ export async function scanArtifacts(
           .map((branchName) => branchName.replace(/^origin\//, ''));
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        console.warn(`Warning: Could not scan remote branches for issue #${issueNum}: ${message}`);
+        logger.warn(`Warning: Could not scan remote branches for issue #${issueNum}: ${message}`);
       }
     } else {
       try {
@@ -337,7 +338,7 @@ export async function scanArtifacts(
           );
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        console.warn(`Warning: Could not scan remote branches for issue #${issueNum}: ${message}`);
+        logger.warn(`Warning: Could not scan remote branches for issue #${issueNum}: ${message}`);
       }
     }
   }
@@ -368,7 +369,7 @@ export async function scanArtifacts(
     const errnoError = error as ErrnoError;
     if (errnoError.code !== 'ENOENT') {
       const message = error instanceof Error ? error.message : String(error);
-      console.warn(`Warning: Could not scan local worktrees for issue #${issueNum}: ${message}`);
+      logger.warn(`Warning: Could not scan local worktrees for issue #${issueNum}: ${message}`);
     }
   }
 
@@ -394,7 +395,7 @@ export async function scanArtifacts(
         .filter((branchName) => branchName !== '');
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.warn(`Warning: Could not scan local branches for issue #${issueNum}: ${message}`);
+      logger.warn(`Warning: Could not scan local branches for issue #${issueNum}: ${message}`);
     }
 
     if (localBranches.length > 0) {
@@ -405,17 +406,17 @@ export async function scanArtifacts(
         }).trim();
 
         if (currentBranch && localBranches.includes(currentBranch)) {
-          console.warn(
+          logger.warn(
             `Warning: Skipping local branch ${currentBranch} because it is currently checked out.`
           );
           localBranches = localBranches.filter((branchName) => branchName !== currentBranch);
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        console.warn(
+        logger.warn(
           `Warning: Could not determine the current branch for issue #${issueNum}: ${message}`
         );
-        console.warn(
+        logger.warn(
           'Warning: Skipping local branch deletion because the checked-out branch is unknown.'
         );
         localBranches = [];
@@ -466,14 +467,14 @@ export async function executeReset(
       }
 
       if (existsSync(worktreePath)) {
-        console.warn(`  Warning: Failed to remove local worktree ${worktreePath}.`);
+        logger.warn(`  Warning: Failed to remove local worktree ${worktreePath}.`);
         continue;
       }
 
       removedWorktrees.push(worktreePath);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.warn(`  Warning: Failed to remove local worktree ${worktreePath}: ${message}`);
+      logger.warn(`  Warning: Failed to remove local worktree ${worktreePath}: ${message}`);
     }
   }
   if (removedWorktrees.length > 0) {
@@ -491,7 +492,7 @@ export async function executeReset(
         deletedLocalBranches.push(branch);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        console.warn(`  Warning: Failed to delete local branch ${branch}: ${message}`);
+        logger.warn(`  Warning: Failed to delete local branch ${branch}: ${message}`);
       }
     }
   }
@@ -506,7 +507,7 @@ export async function executeReset(
       closedPrBranches.add(pr.headRefName);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.warn(`  Warning: Failed to close PR #${pr.number}: ${message}`);
+      logger.warn(`  Warning: Failed to close PR #${pr.number}: ${message}`);
     }
   }
   if (scan.prs.length > 0) {
@@ -544,16 +545,14 @@ export async function executeReset(
         continue;
       }
 
-      console.warn(
+      logger.warn(
         `  Warning: Skipping branch ${branchName} because it still has an open PR: ${branchPrs
           .map((pr) => `#${pr.number}`)
           .join(', ')}`
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.warn(
-        `  Warning: Could not verify open PR state for branch ${branchName}: ${message}`
-      );
+      logger.warn(`  Warning: Could not verify open PR state for branch ${branchName}: ${message}`);
     }
   }
   for (const branch of deletableBranches) {
@@ -561,7 +560,7 @@ export async function executeReset(
       await gh(['api', '-X', 'DELETE', `repos/${nwo}/git/refs/heads/${branch}`]);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.warn(`  Warning: Failed to delete branch ${branch}: ${message}`);
+      logger.warn(`  Warning: Failed to delete branch ${branch}: ${message}`);
     }
   }
   if (deletableBranches.length > 0) {
@@ -573,7 +572,7 @@ export async function executeReset(
       await gh(['api', '-X', 'DELETE', `repos/${nwo}/issues/comments/${commentId}`]);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.warn(`  Warning: Failed to delete comment ${commentId}: ${message}`);
+      logger.warn(`  Warning: Failed to delete comment ${commentId}: ${message}`);
     }
   }
   if (scan.commentIds.length > 0) {
@@ -593,7 +592,7 @@ export async function executeReset(
       await gh(args);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.warn(`  Warning: Failed to update labels: ${message}`);
+      logger.warn(`  Warning: Failed to update labels: ${message}`);
     }
   }
   if (scan.labelsToRemove.length > 0) {
@@ -617,11 +616,11 @@ export async function executeReset(
     actions.push('Posted reset notice comment');
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.warn(`  Warning: Failed to post reset comment: ${message}`);
+    logger.warn(`  Warning: Failed to post reset comment: ${message}`);
   }
 
-  console.log(`\nReset complete for issue #${issueNum}:`);
+  logger.log(`\nReset complete for issue #${issueNum}:`);
   for (const action of actions) {
-    console.log(`  ✓ ${action}`);
+    logger.log(`  ✓ ${action}`);
   }
 }

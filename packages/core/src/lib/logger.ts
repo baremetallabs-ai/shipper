@@ -5,6 +5,9 @@ export interface Logger {
   stageComplete(stage: string, issue: string, durationMs: number): void;
   stageFailed(stage: string, issue: string, durationMs: number): void;
   worktreeStep(step: string): void;
+  log(message: string): void;
+  warn(message: string): void;
+  error(message: string): void;
 }
 
 export function formatDuration(ms: number): string {
@@ -24,8 +27,21 @@ export function formatDuration(ms: number): string {
   return `${seconds}s`;
 }
 
-function writeLine(message: string, stream?: Writable): void {
-  console.error(message);
+type LoggerChannel = 'log' | 'warn' | 'error';
+
+function writeLine(channel: LoggerChannel, message: string, stream?: Writable): void {
+  switch (channel) {
+    case 'log':
+      console.log(message);
+      break;
+    case 'warn':
+      console.warn(message);
+      break;
+    case 'error':
+      console.error(message);
+      break;
+  }
+
   if (!stream || !stream.writable || stream.writableEnded || stream.destroyed) {
     return;
   }
@@ -40,22 +56,39 @@ function formatIssueSegment(issue: string): string {
 export function createLogger(options?: { stream?: Writable }): Logger {
   return {
     stageStart(stage: string, issue: string) {
-      writeLine(`[shipper] ▶ stage:${stage}${formatIssueSegment(issue)} starting`, options?.stream);
+      writeLine(
+        'error',
+        `[shipper] ▶ stage:${stage}${formatIssueSegment(issue)} starting`,
+        options?.stream
+      );
     },
     stageComplete(stage: string, issue: string, durationMs: number) {
       writeLine(
+        'error',
         `[shipper] ✓ stage:${stage}${formatIssueSegment(issue)} complete (${formatDuration(durationMs)})`,
         options?.stream
       );
     },
     stageFailed(stage: string, issue: string, durationMs: number) {
       writeLine(
+        'error',
         `[shipper] ✗ stage:${stage}${formatIssueSegment(issue)} failed (${formatDuration(durationMs)})`,
         options?.stream
       );
     },
     worktreeStep(step: string) {
-      writeLine(`[shipper]   worktree: ${step}`, options?.stream);
+      writeLine('error', `[shipper]   worktree: ${step}`, options?.stream);
+    },
+    log(message: string) {
+      writeLine('log', `[shipper] ${message}`, options?.stream);
+    },
+    warn(message: string) {
+      writeLine('warn', `[shipper] ${message}`, options?.stream);
+    },
+    error(message: string) {
+      writeLine('error', `[shipper] ${message}`, options?.stream);
     },
   };
 }
+
+export const logger = createLogger();

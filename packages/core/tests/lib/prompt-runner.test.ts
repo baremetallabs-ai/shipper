@@ -516,7 +516,7 @@ describe('runPrompt', () => {
 
     expect(errorSpy).toHaveBeenCalledWith(
       expect.stringMatching(
-        /Error: Total prompt input size \(\d+ bytes\) exceeds the 200000-byte budget/
+        /\[shipper\] Error: Total prompt input size \(\d+ bytes\) exceeds the 200000-byte budget/
       )
     );
     expect(spawnMock).not.toHaveBeenCalled();
@@ -603,7 +603,7 @@ describe('runPrompt', () => {
 
     expect(warnMock).toHaveBeenCalledTimes(1);
     expect(warnMock).toHaveBeenCalledWith(
-      "Warning: Ejected prompt 'test' contains gh commands for state mutations.\nThese are now handled by shipper. Re-eject with 'shipper eject test' or manually update."
+      "[shipper] Warning: Ejected prompt 'test' contains gh commands for state mutations.\nThese are now handled by shipper. Re-eject with 'shipper eject test' or manually update."
     );
     expect(spawnMock).toHaveBeenCalled();
     warnMock.mockRestore();
@@ -1147,7 +1147,9 @@ describe('runPrompt', () => {
 
     await expect(runPrompt('test', { mode: 'headless', repo: 'owner/repo' })).resolves.toBe(17);
 
-    expect(warnMock).toHaveBeenCalledWith('Warning: Failed to write session metadata: disk full');
+    expect(warnMock).toHaveBeenCalledWith(
+      '[shipper] Warning: Failed to write session metadata: disk full'
+    );
     warnMock.mockRestore();
   });
 
@@ -1160,7 +1162,9 @@ describe('runPrompt', () => {
 
     await expect(runPrompt('test', { mode: 'headless', repo: 'owner/repo' })).resolves.toBe(9);
 
-    expect(warnMock).toHaveBeenCalledWith('Warning: Failed to initialize session logging: EACCES');
+    expect(warnMock).toHaveBeenCalledWith(
+      '[shipper] Warning: Failed to initialize session logging: EACCES'
+    );
     expect(createWriteStreamMock).not.toHaveBeenCalled();
     expect(writeSessionMetaMock).not.toHaveBeenCalled();
     expect(spawnMock.mock.calls[0]?.[2]).toMatchObject({
@@ -1178,7 +1182,9 @@ describe('runPrompt', () => {
 
     await expect(runPrompt('test', { mode: 'headless', repo: 'owner/repo' })).resolves.toBe(23);
 
-    expect(warnMock).toHaveBeenCalledWith('Warning: Session log capture failed: disk full');
+    expect(warnMock).toHaveBeenCalledWith(
+      '[shipper] Warning: Session log capture failed: disk full'
+    );
     expect(writeSessionMetaMock).toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({ exitCode: 23 })
@@ -1220,7 +1226,7 @@ describe('runPrompt', () => {
       cacheWriteTokens: 2,
     });
     expect(logMock).toHaveBeenCalledWith(
-      'Usage: 45 input │ 12 output │ 8 cache read │ 2 cache write tokens'
+      '[shipper] Usage: 45 input │ 12 output │ 8 cache read │ 2 cache write tokens'
     );
     expect(writeSessionMetaMock).toHaveBeenCalledWith(
       expect.any(String),
@@ -1524,7 +1530,7 @@ describe('worktree --add-dir', () => {
     await runPrompt('test', { cwd: '/tmp/wt' });
 
     expect(spawnedArgs()).not.toContain('--add-dir');
-    expect(warnMock).toHaveBeenCalledWith(expect.stringContaining('no gitdir: line'));
+    expect(warnMock).toHaveBeenCalledWith(expect.stringContaining('[shipper] Warning: .git file'));
     expect(spawnMock).toHaveBeenCalled();
     warnMock.mockRestore();
   });
@@ -1550,7 +1556,9 @@ describe('worktree --add-dir', () => {
     await runPrompt('test', { cwd: '/tmp/wt' });
 
     expect(spawnedArgs()).not.toContain('--add-dir');
-    expect(warnMock).toHaveBeenCalledWith(expect.stringContaining('does not exist'));
+    expect(warnMock).toHaveBeenCalledWith(
+      expect.stringContaining('[shipper] Warning: gitdir path')
+    );
     expect(spawnMock).toHaveBeenCalled();
     warnMock.mockRestore();
   });
@@ -1566,7 +1574,7 @@ describe('worktree --add-dir', () => {
     await expect(runPrompt('test', {})).resolves.toBe(1);
 
     expect(errorMock).toHaveBeenCalledWith(
-      'Error: copilot binary not found on PATH.\nInstall the GitHub Copilot CLI: https://docs.github.com/copilot/cli'
+      '[shipper] Error: copilot binary not found on PATH.\nInstall the GitHub Copilot CLI: https://docs.github.com/copilot/cli'
     );
     expect(spawnMock).not.toHaveBeenCalled();
     errorMock.mockRestore();
@@ -1594,7 +1602,7 @@ describe('worktree --add-dir', () => {
 
     await expect(runPrompt('test', {})).resolves.toBe(1);
 
-    expect(errorMock).toHaveBeenCalledWith('Error: permission denied');
+    expect(errorMock).toHaveBeenCalledWith('[shipper] Error: permission denied');
     expect(spawnMock).not.toHaveBeenCalled();
     errorMock.mockRestore();
   });
@@ -1629,7 +1637,7 @@ describe('agent timeout', () => {
     await vi.advanceTimersByTimeAsync(60 * 60_000);
 
     expect(child.kill).toHaveBeenCalledWith('SIGTERM');
-    expect(errorMock).toHaveBeenCalledWith('Agent timed out after 60 minutes');
+    expect(errorMock).toHaveBeenCalledWith('[shipper] Agent timed out after 60 minutes');
 
     child.emit('close', 143);
     child.finishLog();

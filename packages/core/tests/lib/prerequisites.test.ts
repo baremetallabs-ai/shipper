@@ -33,11 +33,15 @@ vi.mock('node:child_process', async () => {
   return { ...actual, execFile };
 });
 
-const { checkLabels, warnTrackedOutputFiles } = await import('../../src/lib/prerequisites.js');
+const stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+const { checkLabels, runPrereqChecks, warnTrackedOutputFiles } =
+  await import('../../src/lib/prerequisites.js');
 
 beforeEach(() => {
   mockGh.mockReset();
   mockExecFileAsync.mockReset();
+  stderrSpy.mockClear();
 });
 
 describe('checkLabels', () => {
@@ -158,5 +162,27 @@ describe('warnTrackedOutputFiles', () => {
     expect(stderrSpy).not.toHaveBeenCalled();
 
     stderrSpy.mockRestore();
+  });
+});
+
+describe('runPrereqChecks', () => {
+  it('logs the failing prerequisite message and returns false', async () => {
+    const result = await runPrereqChecks([
+      () => Promise.resolve({ ok: true, message: 'fine' }),
+      () => Promise.resolve({ ok: false, message: 'gh is not installed' }),
+    ]);
+
+    expect(result).toBe(false);
+    expect(stderrSpy).toHaveBeenCalledWith('[shipper] Prereq failed: gh is not installed');
+  });
+
+  it('returns true without logging when all prerequisites pass', async () => {
+    const result = await runPrereqChecks([
+      () => Promise.resolve({ ok: true, message: 'fine' }),
+      () => Promise.resolve({ ok: true, message: 'also fine' }),
+    ]);
+
+    expect(result).toBe(true);
+    expect(stderrSpy).not.toHaveBeenCalled();
   });
 });

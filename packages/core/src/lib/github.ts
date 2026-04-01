@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import { gh } from './gh.js';
 import { getPriorityTier } from './labels.js';
 import { isLockStale, releaseIssueLock } from './lock.js';
+import { logger } from './logger.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -580,7 +581,7 @@ export async function selectIssuesForStage(
       }
     }
   } catch {
-    console.error('Warning: Could not check for stale-locked issues. Proceeding without them.');
+    logger.error('Warning: Could not check for stale-locked issues. Proceeding without them.');
   }
 
   if (issues.length <= 1 || options?.skipTimeline) {
@@ -614,7 +615,7 @@ export async function clearStaleLockIfNeeded(
   staleLocked: Set<number>
 ): Promise<void> {
   if (staleLocked.has(issueNumber)) {
-    console.error(`Issue #${issueNumber} lock is stale — clearing.`);
+    logger.error(`Issue #${issueNumber} lock is stale — clearing.`);
     await releaseIssueLock(repo, String(issueNumber));
   }
 }
