@@ -125,6 +125,47 @@ import {
 import type { UnblockAttempt } from '../../src/commands/ship.js';
 
 vi.mock('@dnsquared/shipper-core', () => ({
+  ...(() => {
+    const writeToStream = (
+      stream:
+        | { destroyed?: boolean; writableEnded?: boolean; write?: (chunk: string) => void }
+        | undefined,
+      line: string
+    ) => {
+      if (!stream || stream.destroyed || stream.writableEnded) {
+        return;
+      }
+      stream.write?.(`${line}\n`);
+    };
+
+    const createMockLogger = (stream?: {
+      destroyed?: boolean;
+      writableEnded?: boolean;
+      write?: (chunk: string) => void;
+    }) => ({
+      log: (message: string) => {
+        const line = `[shipper] ${message}`;
+        console.log(line);
+        writeToStream(stream, line);
+      },
+      warn: (message: string) => {
+        const line = `[shipper] ${message}`;
+        console.warn(line);
+        writeToStream(stream, line);
+      },
+      error: (message: string) => {
+        const line = `[shipper] ${message}`;
+        console.error(line);
+        writeToStream(stream, line);
+      },
+    });
+
+    return {
+      logger: createMockLogger(),
+      createLogger: ({ stream }: { stream?: { write?: (chunk: string) => void } } = {}) =>
+        createMockLogger(stream),
+    };
+  })(),
   selectIssuesForStage: vi.fn<
     (
       _repo: string,
@@ -432,6 +473,10 @@ function getConsoleEntries(spy: { mock: { calls: readonly unknown[][] } }): stri
 
 function getConsoleOutput(spy: { mock: { calls: readonly unknown[][] } }): string {
   return getConsoleEntries(spy).join('\n');
+}
+
+function prefixed(message: string): string {
+  return `[shipper] ${message}`;
 }
 
 function getIssueArg(call: readonly unknown[]): string | undefined {
@@ -1166,7 +1211,7 @@ describe('shipCommand single-issue path', () => {
     const capMessage = getConsoleEntries(errorSpy).find((message) =>
       message.includes('hit transition cap')
     );
-    expect(capMessage).toBe(`Issue #42 hit transition cap (15): ${labels.join(' → ')}`);
+    expect(capMessage).toBe(prefixed(`Issue #42 hit transition cap (15): ${labels.join(' → ')}`));
 
     errorSpy.mockRestore();
     logSpy.mockRestore();
@@ -1211,7 +1256,7 @@ describe('shipCommand single-issue path', () => {
 
     expect(exitSpy).toHaveBeenCalledWith(1);
     expect(errorSpy).toHaveBeenCalledWith(
-      'Warning: Failed to update labels on issue #42: gh edit failed'
+      prefixed('Warning: Failed to update labels on issue #42: gh edit failed')
     );
 
     errorSpy.mockRestore();
@@ -1490,7 +1535,9 @@ describe('shipCommand single-issue path', () => {
     expect(mockSpawn).toHaveBeenCalledTimes(1);
     expect(exitSpy).toHaveBeenCalledWith(1);
     expect(errorSpy).toHaveBeenCalledWith(
-      'Label did not advance after stage "groom" (still "shipper:new"). Aborting to avoid infinite loop.'
+      prefixed(
+        'Label did not advance after stage "groom" (still "shipper:new"). Aborting to avoid infinite loop.'
+      )
     );
     expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining('was reset to shipper:new'));
 
@@ -1589,7 +1636,9 @@ describe('shipCommand single-issue path', () => {
       expect(mockSpawn).toHaveBeenCalledTimes(1);
       expect(exitSpy).toHaveBeenCalledWith(1);
       expect(errorSpy).toHaveBeenCalledWith(
-        'Issue #42 was reset to shipper:new by stage "implement" - stopping to avoid interactive groom stage.'
+        prefixed(
+          'Issue #42 was reset to shipper:new by stage "implement" - stopping to avoid interactive groom stage.'
+        )
       );
     } finally {
       if (previousAutoChild === undefined) {
@@ -1703,7 +1752,9 @@ describe('shipCommand single-issue path', () => {
     expect(mockSpawn).not.toHaveBeenCalled();
     expect(exitSpy).toHaveBeenCalledWith(1);
     expect(errorSpy).toHaveBeenCalledWith(
-      'Issue #42 is marked shipper:failed and requires manual intervention before it can re-enter the pipeline.'
+      prefixed(
+        'Issue #42 is marked shipper:failed and requires manual intervention before it can re-enter the pipeline.'
+      )
     );
 
     errorSpy.mockRestore();
@@ -3168,7 +3219,7 @@ describe('shipCommand parallel auto runner', () => {
 
     const output = getConsoleOutput(logSpy);
     expect(output).toContain('still blocked');
-    expect(errorSpy).toHaveBeenCalledWith('Missing result.json');
+    expect(errorSpy).toHaveBeenCalledWith(prefixed('Missing result.json'));
     expect(mockHandleAgentCrash).toHaveBeenCalledWith(repo, '7', 'unblock', 'Missing result.json');
 
     errorSpy.mockRestore();

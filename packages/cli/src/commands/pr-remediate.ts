@@ -2,6 +2,7 @@ import path from 'node:path';
 
 import { getBranchForPR, getRepoRoot } from '@dnsquared/shipper-core';
 import {
+  logger,
   fetchChecks,
   classifyChecks,
   enrichFailedChecks,
@@ -71,7 +72,7 @@ async function waitForChecks(repo: string, pr: string, timeoutMinutes: number): 
 
   const sigHandler = () => {
     interrupted = true;
-    console.log('\nCheck polling interrupted.');
+    logger.log('\nCheck polling interrupted.');
   };
   const isInterrupted = (): boolean => interrupted;
   process.on('SIGINT', sigHandler);
@@ -89,7 +90,7 @@ async function waitForChecks(repo: string, pr: string, timeoutMinutes: number): 
         if (checks !== null && checks.length > 0) break;
       }
       if (!isInterrupted() && (checks === null || checks.length === 0)) {
-        console.log('No CI checks found. Proceeding.');
+        logger.log('No CI checks found. Proceeding.');
         return;
       }
     }
@@ -98,7 +99,7 @@ async function waitForChecks(repo: string, pr: string, timeoutMinutes: number): 
     for (;;) {
       if (isInterrupted()) break;
       if (Date.now() >= deadline) {
-        console.log('Check polling timed out. Proceeding.');
+        logger.log('Check polling timed out. Proceeding.');
         break;
       }
 
@@ -106,7 +107,7 @@ async function waitForChecks(repo: string, pr: string, timeoutMinutes: number): 
       if (checks === null) {
         consecutiveFailures += 1;
         if (consecutiveFailures >= MAX_CONSECUTIVE_FETCH_FAILURES) {
-          console.log('Check polling stopped: persistent fetch failures. Proceeding.');
+          logger.log('Check polling stopped: persistent fetch failures. Proceeding.');
           break;
         }
       } else {
@@ -116,10 +117,10 @@ async function waitForChecks(repo: string, pr: string, timeoutMinutes: number): 
 
         if (completed !== previousCompleted) {
           if (pending.length === 0) {
-            console.log(`All checks complete. (${completed}/${total})`);
+            logger.log(`All checks complete. (${completed}/${total})`);
             break;
           }
-          console.log(`Waiting for checks... ${completed}/${total} complete`);
+          logger.log(`Waiting for checks... ${completed}/${total} complete`);
           previousCompleted = completed;
         }
       }
@@ -143,7 +144,7 @@ async function fetchChecksGraceful(
     return await fetchChecks(repo, pr);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`Warning: Failed to fetch CI checks: ${msg}`);
+    logger.warn(`Warning: Failed to fetch CI checks: ${msg}`);
     return null;
   }
 }
@@ -153,7 +154,7 @@ async function getGitRevParseGraceful(cwd: string, ref: string): Promise<string 
     return await getGitRevParse(cwd, ref);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`Warning: Failed to resolve git ref ${ref}: ${msg}`);
+    logger.warn(`Warning: Failed to resolve git ref ${ref}: ${msg}`);
     return null;
   }
 }
@@ -327,7 +328,7 @@ export async function prRemediateCommand(
       'shipper:pr-reviewed',
       "No PRs ready for remediation. Run 'shipper pr review' first."
     );
-    console.error(
+    logger.error(
       `Auto-selected PR #${selected.pr} (issue #${selected.issue.number}: ${selected.issue.title})`
     );
     pr = selected.pr;
@@ -340,7 +341,7 @@ export async function prRemediateCommand(
 
   const prRef = pr;
   if (!prRef) {
-    console.error('Error: No PR selected for remediation.');
+    logger.error('Error: No PR selected for remediation.');
     process.exit(1);
   }
 
@@ -371,7 +372,7 @@ export async function prRemediateCommand(
 
             if (remainingMs > 0) {
               const remainingMin = Math.ceil(remainingMs / 60_000);
-              console.log(
+              logger.log(
                 `PR #${pr} is ${Math.floor(elapsedMs / 60_000)} minutes old. ` +
                   `Waiting ${remainingMin} more minute(s) for reviewers (prReviewWait.durationMinutes: ${prReviewWait.durationMinutes})...`
               );
@@ -396,7 +397,7 @@ export async function prRemediateCommand(
 
             if (remainingMs > 0) {
               const remainingMin = Math.ceil(remainingMs / 60_000);
-              console.log(
+              logger.log(
                 `Wait complete. Waiting ${remainingMin} more minute(s) for minimum review window (prReviewWait.minDurationMinutes: ${prReviewWait.minDurationMinutes})...`
               );
               await sleepMs(remainingMs);
@@ -504,7 +505,7 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
               });
             } catch (error) {
               const detail = error instanceof Error ? error.message : String(error);
-              console.error(detail);
+              logger.error(detail);
               await handleAgentCrash(repo, issueNumber, 'pr_remediate', detail);
               return 1;
             }
@@ -521,7 +522,7 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
                 return 0;
               } catch (error) {
                 const detail = error instanceof Error ? error.message : String(error);
-                console.error(detail);
+                logger.error(detail);
                 await handleAgentCrash(repo, issueNumber, 'pr_remediate', detail);
                 return 1;
               }
@@ -532,7 +533,7 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
                 return await validateStageOutput(wtPath, 'pr_remediate');
               } catch (error) {
                 const detail = error instanceof Error ? error.message : String(error);
-                console.warn(
+                logger.warn(
                   `Failed to refresh pr_remediate result after push retry; using previously validated output: ${detail}`
                 );
                 return result;
@@ -569,7 +570,7 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
               try {
                 await postReplies(repo, prRef, wtPath, postingResult.replies);
               } catch (postRepliesError) {
-                console.warn(
+                logger.warn(
                   `Failed to post replies during push failure handling: ${
                     postRepliesError instanceof Error
                       ? postRepliesError.message
@@ -581,7 +582,7 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
               try {
                 await postComment(repo, issueNumber, path.resolve(wtPath, postingResult.comment));
               } catch (postCommentError) {
-                console.warn(
+                logger.warn(
                   `Failed to post comment during push failure handling: ${
                     postCommentError instanceof Error
                       ? postCommentError.message
@@ -612,13 +613,13 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
             ) {
               const staleChecks = await fetchChecksGraceful(repo, prRef);
               if (staleChecks === null) {
-                console.warn(
+                logger.warn(
                   `Pass ${pass}/${MAX_REMEDIATION_PASSES}: Failed to fetch CI checks before potential re-run.`
                 );
               } else {
                 const { failed: staleFailures } = classifyChecks(staleChecks);
                 if (staleFailures.length > 0) {
-                  console.log(
+                  logger.log(
                     `Pass ${pass}/${MAX_REMEDIATION_PASSES}: No new commits pushed. ` +
                       `Re-running ${staleFailures.length} failed CI check(s)...`
                   );
@@ -631,7 +632,7 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
             await waitForChecks(repo, prRef, CI_WAIT_TIMEOUT_MINUTES);
             const checks = await fetchChecksGraceful(repo, prRef);
             if (checks === null) {
-              console.error(
+              logger.error(
                 `Pass ${pass}/${MAX_REMEDIATION_PASSES}: Failed to fetch CI checks after waiting. Continuing to next pass.`
               );
               continue;
@@ -647,13 +648,13 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
               return 0;
             }
 
-            console.error(
+            logger.error(
               `Pass ${pass}/${MAX_REMEDIATION_PASSES}: CI not green yet ` +
                 `(${checks.length} total, ${failed.length} failing, ${pending.length} pending).`
             );
           }
 
-          console.error(`Remediation exhausted ${MAX_REMEDIATION_PASSES} passes without green CI.`);
+          logger.error(`Remediation exhausted ${MAX_REMEDIATION_PASSES} passes without green CI.`);
           return 0;
         }
       );

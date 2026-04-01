@@ -34,6 +34,17 @@ vi.mock('../../src/lib/confirm.js', () => ({
 }));
 
 vi.mock('@dnsquared/shipper-core', () => {
+  const logger = {
+    log: (message: string) => {
+      console.log(`[shipper] ${message}`);
+    },
+    warn: (message: string) => {
+      console.warn(`[shipper] ${message}`);
+    },
+    error: (message: string) => {
+      console.error(`[shipper] ${message}`);
+    },
+  };
   const STAGE_LABEL_NAMES = [
     'shipper:new',
     'shipper:groomed',
@@ -442,6 +453,7 @@ vi.mock('@dnsquared/shipper-core', () => {
   }
 
   return {
+    logger,
     getRepoNwo: () => mockGetRepoNwo(),
     getRepoRoot: () => mockGetRepoRoot(),
     gh: (args: string[]) => mockGh(args),
@@ -484,6 +496,7 @@ const _mockExit = vi.spyOn(process, 'exit').mockImplementation((() => {
 const mockConsoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
 const mockConsoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
 const mockConsoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+const prefixed = (message: string) => `[shipper] ${message}`;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -694,20 +707,26 @@ function getLocalWorktreePath(name: string): string {
 describe('resetCommand', () => {
   it('exits with error for invalid issue number', async () => {
     await expect(resetCommand('abc', { force: true })).rejects.toThrow('process.exit');
-    expect(mockConsoleError).toHaveBeenCalledWith('Error: Please provide a valid issue number.');
-    expect(mockConsoleError).toHaveBeenCalledWith('Usage: shipper reset <issue> [--to <stage>]');
+    expect(mockConsoleError).toHaveBeenCalledWith(
+      prefixed('Error: Please provide a valid issue number.')
+    );
+    expect(mockConsoleError).toHaveBeenCalledWith(
+      prefixed('Usage: shipper reset <issue> [--to <stage>]')
+    );
   });
 
   it('rejects partial numeric input like 18foo', async () => {
     await expect(resetCommand('18foo', { force: true })).rejects.toThrow('process.exit');
-    expect(mockConsoleError).toHaveBeenCalledWith('Error: Please provide a valid issue number.');
+    expect(mockConsoleError).toHaveBeenCalledWith(
+      prefixed('Error: Please provide a valid issue number.')
+    );
   });
 
   it('exits with error for closed issues', async () => {
     setupExecMock({ issueJson: mockIssueView('CLOSED', ['shipper:groomed']) });
     await expect(resetCommand('18', { force: true })).rejects.toThrow('process.exit');
     expect(mockConsoleError).toHaveBeenCalledWith(
-      'Issue #18 is closed. Reset only works on open issues.'
+      prefixed('Issue #18 is closed. Reset only works on open issues.')
     );
   });
 
@@ -735,7 +754,7 @@ describe('resetCommand', () => {
 
     await expect(resetCommand('18', { force: false, to: 'new' })).rejects.toThrow('process.exit');
     expect(mockConsoleError).toHaveBeenCalledWith(
-      'Issue #18 is locked by another shipper instance. Use --force to override.'
+      prefixed('Issue #18 is locked by another shipper instance. Use --force to override.')
     );
   });
 
@@ -787,7 +806,7 @@ describe('resetCommand', () => {
 
     await resetCommand('18', { force: true, to: 'groomed' });
 
-    expect(mockConsoleLog).toHaveBeenCalledWith('  Target: shipper:groomed');
+    expect(mockConsoleLog).toHaveBeenCalledWith(prefixed('  Target: shipper:groomed'));
     const editArgs = getIssueEditArgs();
     expect(editArgs).toContain('--remove-label');
     expect(editArgs[editArgs.indexOf('--remove-label') + 1]).toBe(
@@ -809,7 +828,7 @@ describe('resetCommand', () => {
 
     await resetCommand('18', { force: true, to: 'shipper:designed' });
 
-    expect(mockConsoleLog).toHaveBeenCalledWith('  Target: shipper:designed');
+    expect(mockConsoleLog).toHaveBeenCalledWith(prefixed('  Target: shipper:designed'));
     const editArgs = getIssueEditArgs();
     expect(editArgs[editArgs.indexOf('--remove-label') + 1]).toBe('shipper:planned');
   });
@@ -865,10 +884,10 @@ describe('resetCommand', () => {
 
     await resetCommand('18', { force: false });
 
-    expect(mockConsoleLog).toHaveBeenCalledWith('\nReset targets:');
-    expect(mockConsoleLog).toHaveBeenCalledWith('  1) new');
-    expect(mockConsoleLog).toHaveBeenCalledWith('  2) groomed');
-    expect(mockConsoleLog).toHaveBeenCalledWith('  3) designed');
+    expect(mockConsoleLog).toHaveBeenCalledWith(prefixed('\nReset targets:'));
+    expect(mockConsoleLog).toHaveBeenCalledWith(prefixed('  1) new'));
+    expect(mockConsoleLog).toHaveBeenCalledWith(prefixed('  2) groomed'));
+    expect(mockConsoleLog).toHaveBeenCalledWith(prefixed('  3) designed'));
     expect(mockPromptChoice).toHaveBeenCalledWith('Select [1-3]: ', ['1', '2', '3']);
   });
 
@@ -880,7 +899,7 @@ describe('resetCommand', () => {
 
     await resetCommand('18', { force: false });
 
-    expect(mockConsoleLog).toHaveBeenCalledWith('  1) new');
+    expect(mockConsoleLog).toHaveBeenCalledWith(prefixed('  1) new'));
     expect(mockPromptChoice).toHaveBeenCalledWith('Select [1-1]: ', ['1']);
   });
 
@@ -894,11 +913,11 @@ describe('resetCommand', () => {
 
     await resetCommand('18', { force: false });
 
-    expect(mockConsoleLog).toHaveBeenCalledWith('  1) new');
-    expect(mockConsoleLog).toHaveBeenCalledWith('  2) groomed');
-    expect(mockConsoleLog).toHaveBeenCalledWith('  3) designed');
-    expect(mockConsoleLog).toHaveBeenCalledWith('  4) planned');
-    expect(mockConsoleLog).toHaveBeenCalledWith('  5) implemented');
+    expect(mockConsoleLog).toHaveBeenCalledWith(prefixed('  1) new'));
+    expect(mockConsoleLog).toHaveBeenCalledWith(prefixed('  2) groomed'));
+    expect(mockConsoleLog).toHaveBeenCalledWith(prefixed('  3) designed'));
+    expect(mockConsoleLog).toHaveBeenCalledWith(prefixed('  4) planned'));
+    expect(mockConsoleLog).toHaveBeenCalledWith(prefixed('  5) implemented'));
     expect(mockPromptChoice).toHaveBeenCalledWith('Select [1-5]: ', ['1', '2', '3', '4', '5']);
   });
 
@@ -912,11 +931,11 @@ describe('resetCommand', () => {
 
     await resetCommand('18', { force: false });
 
-    expect(mockConsoleLog).toHaveBeenCalledWith('  1) new');
-    expect(mockConsoleLog).toHaveBeenCalledWith('  2) groomed');
-    expect(mockConsoleLog).toHaveBeenCalledWith('  3) designed');
-    expect(mockConsoleLog).toHaveBeenCalledWith('  4) planned');
-    expect(mockConsoleLog).toHaveBeenCalledWith('  5) implemented');
+    expect(mockConsoleLog).toHaveBeenCalledWith(prefixed('  1) new'));
+    expect(mockConsoleLog).toHaveBeenCalledWith(prefixed('  2) groomed'));
+    expect(mockConsoleLog).toHaveBeenCalledWith(prefixed('  3) designed'));
+    expect(mockConsoleLog).toHaveBeenCalledWith(prefixed('  4) planned'));
+    expect(mockConsoleLog).toHaveBeenCalledWith(prefixed('  5) implemented'));
     expect(mockPromptChoice).toHaveBeenCalledWith('Select [1-5]: ', ['1', '2', '3', '4', '5']);
   });
 
@@ -965,7 +984,7 @@ describe('resetCommand', () => {
 
     await resetCommand('18', { force: false });
 
-    expect(mockConsoleLog).toHaveBeenCalledWith('Reset cancelled.');
+    expect(mockConsoleLog).toHaveBeenCalledWith(prefixed('Reset cancelled.'));
     const deleteCalls = mockGh.mock.calls.filter(([args]) => args.includes('DELETE'));
     expect(deleteCalls).toHaveLength(0);
   });
@@ -991,18 +1010,22 @@ describe('resetCommand', () => {
 
     await resetCommand('18', { force: false });
 
-    expect(mockConsoleLog).toHaveBeenCalledWith('\nReset summary for issue #18:');
-    expect(mockConsoleLog).toHaveBeenCalledWith('  Target: shipper:groomed');
+    expect(mockConsoleLog).toHaveBeenCalledWith(prefixed('\nReset summary for issue #18:'));
+    expect(mockConsoleLog).toHaveBeenCalledWith(prefixed('  Target: shipper:groomed'));
     expect(mockConsoleLog).toHaveBeenCalledWith(
-      '  Labels to remove: shipper:designed, shipper:planned'
+      prefixed('  Labels to remove: shipper:designed, shipper:planned')
     );
-    expect(mockConsoleLog).toHaveBeenCalledWith('  Comments to delete: 2');
-    expect(mockConsoleLog).toHaveBeenCalledWith('  PRs to close: #42');
+    expect(mockConsoleLog).toHaveBeenCalledWith(prefixed('  Comments to delete: 2'));
+    expect(mockConsoleLog).toHaveBeenCalledWith(prefixed('  PRs to close: #42'));
     expect(mockConsoleLog).toHaveBeenCalledWith(
-      '  Remote branches to delete: shipper/18-add-reset'
+      prefixed('  Remote branches to delete: shipper/18-add-reset')
     );
-    expect(mockConsoleLog).toHaveBeenCalledWith(`  Local worktrees to remove: ${localWorktree}`);
-    expect(mockConsoleLog).toHaveBeenCalledWith('  Local branches to delete: shipper/18-add-reset');
+    expect(mockConsoleLog).toHaveBeenCalledWith(
+      prefixed(`  Local worktrees to remove: ${localWorktree}`)
+    );
+    expect(mockConsoleLog).toHaveBeenCalledWith(
+      prefixed('  Local branches to delete: shipper/18-add-reset')
+    );
   });
 
   it('leaves local cleanup inactive when no local artifacts exist', async () => {
@@ -1218,7 +1241,7 @@ describe('resetCommand', () => {
       'process.exit'
     );
     expect(mockConsoleError).toHaveBeenCalledWith(
-      'Error: Issue #18 is already at shipper:groomed. Reset only works backward.'
+      prefixed('Error: Issue #18 is already at shipper:groomed. Reset only works backward.')
     );
   });
 
@@ -1231,7 +1254,9 @@ describe('resetCommand', () => {
       'process.exit'
     );
     expect(mockConsoleError).toHaveBeenCalledWith(
-      'Error: shipper:designed is ahead of the current stage shipper:groomed. Reset only works backward.'
+      prefixed(
+        'Error: shipper:designed is ahead of the current stage shipper:groomed. Reset only works backward.'
+      )
     );
   });
 
@@ -1244,7 +1269,9 @@ describe('resetCommand', () => {
       'process.exit'
     );
     expect(mockConsoleError).toHaveBeenCalledWith(
-      'Error: blocked is not a valid workflow stage. Valid stages: new, groomed, designed, planned, implemented.'
+      prefixed(
+        'Error: blocked is not a valid workflow stage. Valid stages: new, groomed, designed, planned, implemented.'
+      )
     );
   });
 
@@ -1257,7 +1284,9 @@ describe('resetCommand', () => {
       'process.exit'
     );
     expect(mockConsoleError).toHaveBeenCalledWith(
-      'Error: shipper:blocked is not a valid workflow stage. Valid stages: new, groomed, designed, planned, implemented.'
+      prefixed(
+        'Error: shipper:blocked is not a valid workflow stage. Valid stages: new, groomed, designed, planned, implemented.'
+      )
     );
   });
 
@@ -1268,7 +1297,9 @@ describe('resetCommand', () => {
 
     await expect(resetCommand('18', { force: true, to: 'banana' })).rejects.toThrow('process.exit');
     expect(mockConsoleError).toHaveBeenCalledWith(
-      'Error: banana is not a valid stage name. Valid stages: new, groomed, designed, planned, implemented.'
+      prefixed(
+        'Error: banana is not a valid stage name. Valid stages: new, groomed, designed, planned, implemented.'
+      )
     );
   });
 
@@ -1433,12 +1464,12 @@ describe('resetCommand', () => {
       await resetCommand('18', { force: false, to: 'implemented' });
       await resetCommand('18', { force: true, to: 'implemented' });
 
-      expect(mockConsoleLog).toHaveBeenCalledWith('\nReset summary for issue #18:');
+      expect(mockConsoleLog).toHaveBeenCalledWith(prefixed('\nReset summary for issue #18:'));
       expect(mockConsoleLog).not.toHaveBeenCalledWith(
-        '  Remote branches to delete: shipper/18-add-reset'
+        prefixed('  Remote branches to delete: shipper/18-add-reset')
       );
       expect(mockConsoleLog).not.toHaveBeenCalledWith(
-        '  Local branches to delete: shipper/18-add-reset'
+        prefixed('  Local branches to delete: shipper/18-add-reset')
       );
       expect(mockExecFileSync).not.toHaveBeenCalledWith(
         'git',
@@ -1600,11 +1631,11 @@ describe('resetCommand', () => {
 
       await resetCommand('18', { force: true });
 
-      expect(mockConsoleLog).toHaveBeenCalledWith('  1) new');
-      expect(mockConsoleLog).toHaveBeenCalledWith('  2) groomed');
-      expect(mockConsoleLog).toHaveBeenCalledWith('  3) designed');
-      expect(mockConsoleLog).toHaveBeenCalledWith('  4) planned');
-      expect(mockConsoleLog).toHaveBeenCalledWith('  5) implemented');
+      expect(mockConsoleLog).toHaveBeenCalledWith(prefixed('  1) new'));
+      expect(mockConsoleLog).toHaveBeenCalledWith(prefixed('  2) groomed'));
+      expect(mockConsoleLog).toHaveBeenCalledWith(prefixed('  3) designed'));
+      expect(mockConsoleLog).toHaveBeenCalledWith(prefixed('  4) planned'));
+      expect(mockConsoleLog).toHaveBeenCalledWith(prefixed('  5) implemented'));
       expect(mockPromptChoice).toHaveBeenCalledWith('Select [1-5]: ', ['1', '2', '3', '4', '5']);
     });
 
@@ -1634,7 +1665,9 @@ describe('resetCommand', () => {
       );
 
       expect(mockConsoleError).toHaveBeenCalledWith(
-        'Error: shipper:implemented is ahead of the current stage shipper:planned. Reset only works backward.'
+        prefixed(
+          'Error: shipper:implemented is ahead of the current stage shipper:planned. Reset only works backward.'
+        )
       );
     });
   });

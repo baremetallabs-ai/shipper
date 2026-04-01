@@ -69,6 +69,17 @@ const FAIL_CHECKS = [{ name: 'build', state: 'COMPLETED', bucket: 'fail' }];
 type WriteContextFileCall = [string, string, string];
 
 vi.mock('@dnsquared/shipper-core', () => ({
+  logger: {
+    log: (message: string) => {
+      console.log(`[shipper] ${message}`);
+    },
+    warn: (message: string) => {
+      console.warn(`[shipper] ${message}`);
+    },
+    error: (message: string) => {
+      console.error(`[shipper] ${message}`);
+    },
+  },
   resolveRef: resolveRefMock,
   autoSelectPrForStage: autoSelectPrForStageMock,
   formatConflictContext: formatConflictContextMock,
@@ -582,7 +593,7 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
     await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
 
     expect(logSpy).toHaveBeenCalledWith(
-      'Check polling stopped: persistent fetch failures. Proceeding.'
+      '[shipper] Check polling stopped: persistent fetch failures. Proceeding.'
     );
     expect(sleepMsMock).toHaveBeenCalledTimes(2);
     expect(sleepMsMock).toHaveBeenNthCalledWith(1, 20_000);
@@ -614,7 +625,7 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
     await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
 
     expect(logSpy).toHaveBeenCalledWith(
-      'Check polling stopped: persistent fetch failures. Proceeding.'
+      '[shipper] Check polling stopped: persistent fetch failures. Proceeding.'
     );
     expect(sleepMsMock).toHaveBeenCalledTimes(5);
     expect(sleepMsMock).toHaveBeenNthCalledWith(1, 20_000);
@@ -667,7 +678,7 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
     await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
 
     expect(logSpy).toHaveBeenCalledWith(
-      'Wait complete. Waiting 5 more minute(s) for minimum review window (prReviewWait.minDurationMinutes: 15)...'
+      '[shipper] Wait complete. Waiting 5 more minute(s) for minimum review window (prReviewWait.minDurationMinutes: 15)...'
     );
     expect(sleepMsMock).toHaveBeenCalledWith(300_000);
 
@@ -1035,7 +1046,7 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
     await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
 
     expect(errorSpy).toHaveBeenCalledWith(
-      'Pass 1/5: Failed to fetch CI checks after waiting. Continuing to next pass.'
+      '[shipper] Pass 1/5: Failed to fetch CI checks after waiting. Continuing to next pass.'
     );
     expect(syncWorktreeMock).toHaveBeenCalledTimes(2);
     expect(pushWithRetryMock).toHaveBeenCalledTimes(2);
@@ -1170,7 +1181,7 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
 
     await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
 
-    expect(errorSpy).toHaveBeenCalledWith('failed to post remediation result');
+    expect(errorSpy).toHaveBeenCalledWith('[shipper] failed to post remediation result');
     expect(handleAgentCrashMock).toHaveBeenCalledWith(
       'owner/repo',
       '10',
@@ -1218,7 +1229,9 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
     expect(pushWithRetryMock).toHaveBeenCalledTimes(5);
     expect(postCommentMock).toHaveBeenCalledTimes(5);
     expect(executeTransitionMock).not.toHaveBeenCalled();
-    expect(errorSpy).toHaveBeenCalledWith('Remediation exhausted 5 passes without green CI.');
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[shipper] Remediation exhausted 5 passes without green CI.'
+    );
 
     errorSpy.mockRestore();
   });
@@ -1305,7 +1318,7 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
     await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
 
     expect(warnSpy).toHaveBeenCalledWith(
-      'Failed to refresh pr_remediate result after push retry; using previously validated output: Missing result.json at /tmp/fake-wt/.shipper/output/result.json'
+      '[shipper] Failed to refresh pr_remediate result after push retry; using previously validated output: Missing result.json at /tmp/fake-wt/.shipper/output/result.json'
     );
     expect(postRepliesMock).toHaveBeenCalledWith(
       'owner/repo',
@@ -1333,7 +1346,9 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
 
     await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
 
-    expect(errorSpy).toHaveBeenCalledWith('pr_remediate accept requires a pr_spec in result.json');
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[shipper] pr_remediate accept requires a pr_spec in result.json'
+    );
     expect(handleAgentCrashMock).toHaveBeenCalledWith(
       'owner/repo',
       '10',
@@ -1418,10 +1433,10 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
     expect(postRepliesMock).toHaveBeenCalledTimes(1);
     expect(postCommentMock).toHaveBeenCalledTimes(1);
     expect(warnSpy).toHaveBeenCalledWith(
-      'Failed to post replies during push failure handling: reply post failed'
+      '[shipper] Failed to post replies during push failure handling: reply post failed'
     );
     expect(warnSpy).toHaveBeenCalledWith(
-      'Failed to post comment during push failure handling: comment post failed'
+      '[shipper] Failed to post comment during push failure handling: comment post failed'
     );
     expect(handleAgentCrashMock).toHaveBeenCalledWith(
       'owner/repo',

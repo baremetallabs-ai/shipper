@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import { confirm, promptChoice } from '../lib/confirm.js';
 import {
+  logger,
   BLOCKED_LABEL,
   FAILED_LABEL,
   IMPLEMENTED_LABEL,
@@ -104,30 +105,30 @@ function getWorktreeRepoName(repoRoot: string): string {
 }
 
 function printDryRun(issueNum: number, scan: Awaited<ReturnType<typeof scanArtifacts>>): void {
-  console.log(`\nReset summary for issue #${issueNum}:`);
-  console.log(`  Target: ${scan.targetLabel}`);
+  logger.log(`\nReset summary for issue #${issueNum}:`);
+  logger.log(`  Target: ${scan.targetLabel}`);
   if (scan.labelsToRemove.length > 0) {
-    console.log(`  Labels to remove: ${scan.labelsToRemove.join(', ')}`);
+    logger.log(`  Labels to remove: ${scan.labelsToRemove.join(', ')}`);
   }
   if (scan.addTarget) {
-    console.log(`  Labels to add: ${scan.targetLabel}`);
+    logger.log(`  Labels to add: ${scan.targetLabel}`);
   }
   if (scan.commentIds.length > 0) {
-    console.log(`  Comments to delete: ${scan.commentIds.length}`);
+    logger.log(`  Comments to delete: ${scan.commentIds.length}`);
   }
   if (scan.prs.length > 0) {
-    console.log(`  PRs to close: ${scan.prs.map((pr) => `#${pr.number}`).join(', ')}`);
+    logger.log(`  PRs to close: ${scan.prs.map((pr) => `#${pr.number}`).join(', ')}`);
   }
   if (scan.branchesToDelete.length > 0) {
-    console.log(`  Remote branches to delete: ${scan.branchesToDelete.join(', ')}`);
+    logger.log(`  Remote branches to delete: ${scan.branchesToDelete.join(', ')}`);
   }
   if (scan.localWorktrees.length > 0) {
-    console.log(`  Local worktrees to remove: ${scan.localWorktrees.join(', ')}`);
+    logger.log(`  Local worktrees to remove: ${scan.localWorktrees.join(', ')}`);
   }
   if (scan.localBranches.length > 0) {
-    console.log(`  Local branches to delete: ${scan.localBranches.join(', ')}`);
+    logger.log(`  Local branches to delete: ${scan.localBranches.join(', ')}`);
   }
-  console.log('');
+  logger.log('');
 }
 
 export async function resetCommand(
@@ -136,8 +137,8 @@ export async function resetCommand(
 ): Promise<void> {
   const cleaned = issue.replace(/^#/, '');
   if (!/^\d+$/.test(cleaned)) {
-    console.error('Error: Please provide a valid issue number.');
-    console.error('Usage: shipper reset <issue> [--to <stage>]');
+    logger.error('Error: Please provide a valid issue number.');
+    logger.error('Usage: shipper reset <issue> [--to <stage>]');
     process.exit(1);
   }
   const issueNum = Number(cleaned);
@@ -160,14 +161,14 @@ export async function resetCommand(
     issueJson = result.stdout;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error(`Error: Failed to fetch issue #${issueNum}: ${message}`);
+    logger.error(`Error: Failed to fetch issue #${issueNum}: ${message}`);
     process.exit(1);
   }
 
   const issueData = parseIssueViewData(issueJson);
 
   if (issueData.state !== 'OPEN') {
-    console.error(`Issue #${issueNum} is closed. Reset only works on open issues.`);
+    logger.error(`Issue #${issueNum} is closed. Reset only works on open issues.`);
     process.exit(1);
   }
 
@@ -175,7 +176,7 @@ export async function resetCommand(
 
   if (!opts.force && labels.includes(LOCKED_LABEL)) {
     if (!(await isLockStale(nwo, String(issueNum)))) {
-      console.error(
+      logger.error(
         `Issue #${issueNum} is locked by another shipper instance. Use --force to override.`
       );
       process.exit(1);
@@ -191,7 +192,7 @@ export async function resetCommand(
   if (opts.to) {
     const parsedStage = parseStage(opts.to);
     if (!parsedStage) {
-      console.error(getInvalidStageError(opts.to));
+      logger.error(getInvalidStageError(opts.to));
       process.exit(1);
     }
 
@@ -199,13 +200,13 @@ export async function resetCommand(
       const targetIndex = getStageIndex(parsedStage);
       const sameImplementedStage = currentStage.hasPrLabels && parsedStage === 'implemented';
       if (targetIndex === currentIndex && !sameImplementedStage) {
-        console.error(
+        logger.error(
           `Error: Issue #${issueNum} is already at ${getStageLabel(parsedStage)}. Reset only works backward.`
         );
         process.exit(1);
       }
       if (targetIndex > currentIndex) {
-        console.error(
+        logger.error(
           `Error: ${getStageLabel(parsedStage)} is ahead of the current stage ${getStageLabel(currentStage.stage)}. Reset only works backward.`
         );
         process.exit(1);
@@ -218,22 +219,22 @@ export async function resetCommand(
       ? ([...RESETTABLE_STAGE_NAMES] as WorkflowStage[])
       : getValidTargets(currentStage);
     if (validTargets.length === 0) {
-      console.error(
+      logger.error(
         `Error: Issue #${issueNum} is already at ${getStageLabel(currentStage.stage)}. Reset only works backward.`
       );
       process.exit(1);
     }
 
-    console.log('\nReset targets:');
+    logger.log('\nReset targets:');
     for (const [index, stage] of validTargets.entries()) {
-      console.log(`  ${index + 1}) ${stage}`);
+      logger.log(`  ${index + 1}) ${stage}`);
     }
 
     const choiceNumbers = validTargets.map((_, index) => String(index + 1));
     const selection = await promptChoice(`Select [1-${validTargets.length}]: `, choiceNumbers);
     const selectedStage = validTargets[Number(selection) - 1];
     if (!selectedStage) {
-      console.error('Error: Invalid reset target selected.');
+      logger.error('Error: Invalid reset target selected.');
       process.exit(1);
     }
     targetStage = selectedStage;
@@ -245,7 +246,7 @@ export async function resetCommand(
   });
 
   if (isClean(scan)) {
-    console.log(
+    logger.log(
       `Issue #${issueNum} is already clean for target ${scan.targetLabel}. Nothing to reset.`
     );
     return;
@@ -256,7 +257,7 @@ export async function resetCommand(
   if (!opts.force) {
     const proceed = await confirm('Proceed? (y/N): ');
     if (!proceed) {
-      console.log('Reset cancelled.');
+      logger.log('Reset cancelled.');
       return;
     }
   }

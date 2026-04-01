@@ -27,6 +27,17 @@ const classifyChecksMock = vi.fn<
 const sleepMsMock = vi.fn<(ms: number) => Promise<void>>(() => Promise.resolve());
 
 vi.mock('@dnsquared/shipper-core', () => ({
+  logger: {
+    log: (message: string) => {
+      console.log(`[shipper] ${message}`);
+    },
+    warn: (message: string) => {
+      console.warn(`[shipper] ${message}`);
+    },
+    error: (message: string) => {
+      console.error(`[shipper] ${message}`);
+    },
+  },
   getSettings: () => getSettingsMock(),
   gh: (args: string[]) => ghMock(args),
   tryResolvePrForIssue: (repo: string, issueNumber: number) =>
@@ -162,7 +173,7 @@ describe('postMerge', () => {
 
     expect(ghMock).not.toHaveBeenCalled();
     expect(logMock).toHaveBeenCalledWith(
-      '  [dry-run] Would remove shipper:ready and close issue #25'
+      '[shipper]   [dry-run] Would remove shipper:ready and close issue #25'
     );
   });
 });
@@ -226,7 +237,9 @@ describe('lookupPR', () => {
     });
 
     await expect(lookupPR('42', 'owner/repo')).rejects.toThrow('exit:1');
-    expect(errorMock).toHaveBeenCalledWith('Error: PR #42 does not have the shipper:ready label.');
+    expect(errorMock).toHaveBeenCalledWith(
+      '[shipper] Error: PR #42 does not have the shipper:ready label.'
+    );
   });
 
   it('exits with error when PR is closed', async () => {
@@ -243,7 +256,7 @@ describe('lookupPR', () => {
     });
 
     await expect(lookupPR('42', 'owner/repo')).rejects.toThrow('exit:1');
-    expect(errorMock).toHaveBeenCalledWith('Error: PR #42 is not open (state: CLOSED).');
+    expect(errorMock).toHaveBeenCalledWith('[shipper] Error: PR #42 is not open (state: CLOSED).');
   });
 
   it('resolves issue to linked PR when ref is not a PR', async () => {
@@ -269,7 +282,9 @@ describe('lookupPR', () => {
     tryResolvePrForIssueMock.mockResolvedValue(undefined);
 
     await expect(lookupPR('99', 'owner/repo')).rejects.toThrow('exit:1');
-    expect(errorMock).toHaveBeenCalledWith('Error: #99 is not a PR and no linked PR was found.');
+    expect(errorMock).toHaveBeenCalledWith(
+      '[shipper] Error: #99 is not a PR and no linked PR was found.'
+    );
   });
 });
 
@@ -483,7 +498,7 @@ describe('requirePassingChecks', () => {
     expect(findCalls('pr', 'edit')).toHaveLength(0);
     expect(findCalls('pr', 'comment')).toHaveLength(0);
     expect(logMock).toHaveBeenCalledWith(
-      '  PR #42 merge succeeded despite reported error. Proceeding with post-merge cleanup.'
+      '[shipper]   PR #42 merge succeeded despite reported error. Proceeding with post-merge cleanup.'
     );
     expect(exitSpy).not.toHaveBeenCalled();
   });
@@ -506,7 +521,7 @@ describe('requirePassingChecks', () => {
     expect(findCalls('pr', 'comment')).toHaveLength(1);
     expect(findCalls('issue', 'edit')).toHaveLength(0);
     expect(findCalls('issue', 'close')).toHaveLength(0);
-    expect(logMock).toHaveBeenCalledWith('  PR #42 failed: Merge failed: merge failed');
+    expect(logMock).toHaveBeenCalledWith('[shipper]   PR #42 failed: Merge failed: merge failed');
   });
 
   it('remediates when merge verification fails after a reported merge error', async () => {
@@ -527,7 +542,7 @@ describe('requirePassingChecks', () => {
     expect(findCalls('pr', 'comment')).toHaveLength(1);
     expect(findCalls('issue', 'edit')).toHaveLength(0);
     expect(findCalls('issue', 'close')).toHaveLength(0);
-    expect(logMock).toHaveBeenCalledWith('  PR #42 failed: Merge failed: merge failed');
+    expect(logMock).toHaveBeenCalledWith('[shipper]   PR #42 failed: Merge failed: merge failed');
   });
 });
 
