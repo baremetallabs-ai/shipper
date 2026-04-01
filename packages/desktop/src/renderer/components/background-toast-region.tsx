@@ -66,6 +66,8 @@ function ToastItem({
     try {
       await onRetry?.(toast.id);
     } catch {
+      // Error presentation is handled by the parent fetchError banner.
+    } finally {
       setIsRetrying(false);
     }
   }
