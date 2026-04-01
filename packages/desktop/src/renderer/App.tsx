@@ -2279,6 +2279,7 @@ export default function App(): JSX.Element {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setFetchError(`Failed to retry background command: ${message}`);
+      throw error;
     }
   }
 
@@ -2431,13 +2432,7 @@ export default function App(): JSX.Element {
 
   return (
     <div className="flex h-screen flex-col bg-transparent">
-      <BackgroundToastRegion
-        toasts={toasts}
-        onDismiss={dismissToast}
-        onRetry={(toastId) => {
-          void handleRetryToast(toastId);
-        }}
-      />
+      <BackgroundToastRegion toasts={toasts} onDismiss={dismissToast} onRetry={handleRetryToast} />
       <BackgroundLogViewer
         open={logViewer.open}
         title={logViewer.title}

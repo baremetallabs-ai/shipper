@@ -1,6 +1,6 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import type { JSX } from 'react';
-import { CircleCheckBig, CircleX, Info } from 'lucide-react';
+import { CircleCheckBig, CircleX, Info, LoaderCircle } from 'lucide-react';
 
 import { Alert, AlertDescription, AlertTitle } from './ui/alert.js';
 import { Button } from './ui/button.js';
@@ -21,7 +21,7 @@ export interface BackgroundToast {
 interface BackgroundToastRegionProps {
   toasts: BackgroundToast[];
   onDismiss: (toastId: string) => void;
-  onRetry?: (toastId: string) => void;
+  onRetry?: (toastId: string) => Promise<void>;
 }
 
 function ToastIcon({ variant }: { variant: BackgroundToastVariant }): JSX.Element {
@@ -42,8 +42,10 @@ function ToastItem({
 }: {
   toast: BackgroundToast;
   onDismiss: (toastId: string) => void;
-  onRetry?: (toastId: string) => void;
+  onRetry?: (toastId: string) => Promise<void>;
 }): JSX.Element {
+  const [isRetrying, setIsRetrying] = useState(false);
+
   useEffect(() => {
     if (toast.variant !== 'success') {
       return;
@@ -57,6 +59,16 @@ function ToastItem({
       window.clearTimeout(timeoutId);
     };
   }, [onDismiss, toast.id, toast.variant]);
+
+  async function handleRetryClick(): Promise<void> {
+    setIsRetrying(true);
+
+    try {
+      await onRetry?.(toast.id);
+    } catch {
+      setIsRetrying(false);
+    }
+  }
 
   return (
     <Alert
@@ -88,17 +100,26 @@ function ToastItem({
               type="button"
               size="sm"
               variant="outline"
+              disabled={isRetrying}
               onClick={() => {
-                onRetry(toast.id);
+                void handleRetryClick();
               }}
             >
-              Retry
+              {isRetrying ? (
+                <>
+                  <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />
+                  Retrying…
+                </>
+              ) : (
+                'Retry'
+              )}
             </Button>
           ) : null}
           <Button
             type="button"
             size="sm"
             variant="ghost"
+            disabled={isRetrying}
             onClick={() => {
               onDismiss(toast.id);
             }}
