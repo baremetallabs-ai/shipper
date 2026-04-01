@@ -814,6 +814,17 @@ export default function App(): JSX.Element {
   const canFetch = prerequisites !== null && prerequisiteMessage === null;
   const hasActiveRepo = activeRepo.length > 0 && isValidRepo(activeRepo);
   const hasSession = sessions.length > 0;
+  const hasRunningShipCommand = useMemo(
+    () =>
+      backgroundCommands.some(
+        (command) =>
+          command.command === 'ship' &&
+          command.repo === activeRepo &&
+          command.status === 'running' &&
+          !command.cancelled
+      ),
+    [activeRepo, backgroundCommands]
+  );
   const viewedBackgroundCommand =
     logViewer.sessionId === null
       ? null
@@ -1579,14 +1590,6 @@ export default function App(): JSX.Element {
     if (!canFetch || !hasActiveRepo) {
       return;
     }
-
-    const hasRunningShipCommand = backgroundCommands.some(
-      (command) =>
-        command.command === 'ship' &&
-        command.repo === activeRepo &&
-        command.status === 'running' &&
-        !command.cancelled
-    );
     if (!hasRunningShipCommand) {
       return;
     }
@@ -1598,7 +1601,7 @@ export default function App(): JSX.Element {
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [activeRepo, backgroundCommands, canFetch, hasActiveRepo]);
+  }, [activeRepo, canFetch, hasActiveRepo, hasRunningShipCommand]);
 
   useEffect(() => {
     const drawerPanel = drawerPanelRef.current;
@@ -2521,7 +2524,9 @@ export default function App(): JSX.Element {
           onToggle={handleToggleActionQueue}
           commands={backgroundCommands.map((command) => {
             const issue =
-              command.command === 'ship' && command.issueNumber !== undefined
+              command.command === 'ship' &&
+              command.repo === activeRepo &&
+              command.issueNumber !== undefined
                 ? issues.find((candidate) => candidate.number === command.issueNumber)
                 : undefined;
 

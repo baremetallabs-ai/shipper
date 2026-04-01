@@ -186,7 +186,7 @@ export function ActionQueueDrawer({
                         {getStatusLabel(item.status, item.cancelled)}
                       </Badge>
                       {item.workflowStage ? (
-                        <Badge variant="secondary" className="text-[10px]">
+                        <Badge variant="default" className="text-[10px]">
                           {item.workflowStage}
                         </Badge>
                       ) : null}
