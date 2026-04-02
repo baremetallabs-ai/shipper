@@ -158,6 +158,23 @@ describe('designCommand', () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it('reports protocol crashes during result processing and exits with code 1', async () => {
+    processResultMock.mockRejectedValueOnce(new Error('Missing result.json'));
+    const { designCommand } = await import('../../src/commands/design.js');
+
+    await expect(designCommand('owner/repo', '123')).resolves.toBeUndefined();
+
+    expect(retryOnInvalidOutputMock).toHaveBeenCalledTimes(1);
+    expect(handleAgentCrashMock).toHaveBeenCalledWith(
+      'owner/repo',
+      '123',
+      'design',
+      'Missing result.json'
+    );
+    expect(consoleErrorSpy).toHaveBeenCalledWith('[shipper] Missing result.json');
+    expect(process.exitCode).toBe(1);
+  });
+
   it('fails hard when worktree creation fails', async () => {
     withWorktreeMock.mockRejectedValueOnce(new Error('worktree add failed'));
     const { designCommand } = await import('../../src/commands/design.js');
