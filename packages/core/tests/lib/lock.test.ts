@@ -1,10 +1,8 @@
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { toError } from '../../src/lib/errors.js';
 
 const execFileMock = vi.fn();
-function normalizeError(error: unknown): Error {
-  return error instanceof Error ? error : new Error(String(error));
-}
 
 const execFile = Object.assign(
   (...args: unknown[]) => {
@@ -17,7 +15,7 @@ const execFile = Object.assign(
           ...args,
           (err: unknown, stdout: string | Buffer = '', stderr: string | Buffer = '') => {
             if (err) {
-              reject(normalizeError(err));
+              reject(toError(err));
               return;
             }
             resolve({ stdout: String(stdout), stderr: String(stderr) });

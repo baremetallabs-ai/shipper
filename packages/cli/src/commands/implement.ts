@@ -5,6 +5,7 @@ import { formatConflictContext } from '@dnsquared/shipper-core';
 import { getSettings, resolveBaseBranch } from '@dnsquared/shipper-core';
 import { handleAgentCrash, processResult, scrubOutputDir } from '@dnsquared/shipper-core';
 import { retryOnInvalidOutput } from '@dnsquared/shipper-core';
+import { toErrorMessage } from '@dnsquared/shipper-core';
 import { truncateLargeInput } from '@dnsquared/shipper-core';
 import { withStageHooks } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
@@ -114,7 +115,7 @@ export async function implementCommand(
               result,
             });
           } catch (error) {
-            const detail = error instanceof Error ? error.message : String(error);
+            const detail = toErrorMessage(error);
             logger.error(detail);
             await handleAgentCrash(repo, issue, 'implement', detail);
             process.exitCode = 1;

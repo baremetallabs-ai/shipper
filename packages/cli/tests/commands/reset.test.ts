@@ -33,7 +33,10 @@ vi.mock('../../src/lib/confirm.js', () => ({
   promptChoice: mockPromptChoice,
 }));
 
-vi.mock('@dnsquared/shipper-core', () => {
+vi.mock('@dnsquared/shipper-core', async () => {
+  const { toErrorMessage } = await vi.importActual<
+    typeof import('../../../core/src/lib/errors.js')
+  >('../../../core/src/lib/errors.js');
   const logger = {
     log: (message: string) => {
       console.log(`[shipper] ${message}`);
@@ -267,8 +270,9 @@ vi.mock('@dnsquared/shipper-core', () => {
         .map((entry) => `${mockHomedir()}/.shipper/worktrees/${entry.name}`);
     } catch (error) {
       if ((error as ErrnoError).code !== 'ENOENT') {
-        const message = error instanceof Error ? error.message : String(error);
-        console.warn(`Warning: Could not scan local worktrees for issue #${issueNum}: ${message}`);
+        console.warn(
+          `Warning: Could not scan local worktrees for issue #${issueNum}: ${toErrorMessage(error)}`
+        );
       }
     }
 
@@ -291,8 +295,9 @@ vi.mock('@dnsquared/shipper-core', () => {
           )
           .filter(Boolean);
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.warn(`Warning: Could not scan local branches for issue #${issueNum}: ${message}`);
+        console.warn(
+          `Warning: Could not scan local branches for issue #${issueNum}: ${toErrorMessage(error)}`
+        );
       }
 
       if (localBranches.length > 0) {
@@ -305,9 +310,8 @@ vi.mock('@dnsquared/shipper-core', () => {
             localBranches = localBranches.filter((branchName) => branchName !== currentBranch);
           }
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
           console.warn(
-            `Warning: Could not determine the current branch for issue #${issueNum}: ${message}`
+            `Warning: Could not determine the current branch for issue #${issueNum}: ${toErrorMessage(error)}`
           );
           console.warn(
             'Warning: Skipping local branch deletion because the checked-out branch is unknown.'
@@ -352,8 +356,9 @@ vi.mock('@dnsquared/shipper-core', () => {
 
         removedWorktrees.push(worktreePath);
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.warn(`  Warning: Failed to remove local worktree ${worktreePath}: ${message}`);
+        console.warn(
+          `  Warning: Failed to remove local worktree ${worktreePath}: ${toErrorMessage(error)}`
+        );
       }
     }
     if (removedWorktrees.length > 0) {
@@ -367,8 +372,9 @@ vi.mock('@dnsquared/shipper-core', () => {
           mockExecFileSync('git', ['branch', '-D', branch]);
           deletedLocalBranches.push(branch);
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          console.warn(`  Warning: Failed to delete local branch ${branch}: ${message}`);
+          console.warn(
+            `  Warning: Failed to delete local branch ${branch}: ${toErrorMessage(error)}`
+          );
         }
       }
     }
@@ -382,8 +388,7 @@ vi.mock('@dnsquared/shipper-core', () => {
         await mockGh(['pr', 'close', String(pr.number), '-R', nwo]);
         closedPrBranches.add(pr.headRefName);
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.warn(`  Warning: Failed to close PR #${pr.number}: ${message}`);
+        console.warn(`  Warning: Failed to close PR #${pr.number}: ${toErrorMessage(error)}`);
       }
     }
     if (scan.prs.length > 0) {
@@ -397,8 +402,7 @@ vi.mock('@dnsquared/shipper-core', () => {
       try {
         await mockGh(['api', '-X', 'DELETE', `repos/${nwo}/git/refs/heads/${branch}`]);
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.warn(`  Warning: Failed to delete branch ${branch}: ${message}`);
+        console.warn(`  Warning: Failed to delete branch ${branch}: ${toErrorMessage(error)}`);
       }
     }
     if (deletableBranches.length > 0) {
@@ -409,8 +413,7 @@ vi.mock('@dnsquared/shipper-core', () => {
       try {
         await mockGh(['api', '-X', 'DELETE', `repos/${nwo}/issues/comments/${commentId}`]);
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.warn(`  Warning: Failed to delete comment ${commentId}: ${message}`);
+        console.warn(`  Warning: Failed to delete comment ${commentId}: ${toErrorMessage(error)}`);
       }
     }
     if (scan.commentIds.length > 0) {
@@ -471,12 +474,17 @@ vi.mock('@dnsquared/shipper-core', () => {
     scanArtifacts,
     isClean,
     executeReset,
+    toErrorMessage,
   };
 });
 
-vi.mock('node:child_process', () => ({
-  execFileSync: (command: string, args: string[]) => mockExecFileSync(command, args),
-}));
+vi.mock('node:child_process', async () => {
+  const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+  return {
+    ...actual,
+    execFileSync: (command: string, args: string[]) => mockExecFileSync(command, args),
+  };
+});
 
 vi.mock('node:fs', () => ({
   readdirSync: (path: string) => mockReaddirSync(path),

@@ -2,6 +2,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { toError, toErrorMessage } from '../../core/src/lib/errors.js';
 
 type IpcHandler = (event: unknown, payload: unknown) => unknown;
 let mockUserDataPath = '';
@@ -110,6 +111,8 @@ vi.mock('@dnsquared/shipper-core', () => {
     releaseIssueLock: state.releaseIssueLockMock,
     renewIssueLock: state.renewIssueLockMock,
     scanArtifacts: state.scanArtifactsMock,
+    toError,
+    toErrorMessage,
   };
 });
 

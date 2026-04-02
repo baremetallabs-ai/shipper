@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { toError, toErrorMessage } from '../../../core/src/lib/errors.js';
 
 const tryResolvePrForIssueMock =
   vi.fn<(repo: string, issueNumber: number) => Promise<string | undefined>>();
@@ -38,6 +39,8 @@ vi.mock('@dnsquared/shipper-core', () => ({
       console.error(`[shipper] ${message}`);
     },
   },
+  toError,
+  toErrorMessage,
   getSettings: () => getSettingsMock(),
   gh: (args: string[]) => ghMock(args),
   tryResolvePrForIssue: (repo: string, issueNumber: number) =>

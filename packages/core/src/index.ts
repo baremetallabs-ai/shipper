@@ -1,6 +1,7 @@
 // Core intentionally uses a single barrel export for its public API.
 export * from './lib/branch.js';
 export * from './lib/checks.js';
+export * from './lib/errors.js';
 export * from './lib/frontmatter.js';
 export * from './lib/gh.js';
 export * from './lib/github.js';

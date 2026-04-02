@@ -5,6 +5,7 @@ import type {
   PRChecksLine,
   ResultJson,
 } from '@dnsquared/shipper-core';
+import { toError, toErrorMessage } from '../../../core/src/lib/errors.js';
 
 type MockPrReviewWait =
   | { mode: 'timer'; durationMinutes: number }
@@ -80,6 +81,8 @@ vi.mock('@dnsquared/shipper-core', () => ({
       console.error(`[shipper] ${message}`);
     },
   },
+  toError,
+  toErrorMessage,
   resolveRef: resolveRefMock,
   autoSelectPrForStage: autoSelectPrForStageMock,
   formatConflictContext: formatConflictContextMock,

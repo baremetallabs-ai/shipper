@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { toError, toErrorMessage } from '../../../core/src/lib/errors.js';
 
 const { mockGh, mockExecFileAsync, mockRunPrereqChecks } = vi.hoisted(() => ({
   mockGh: vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>(),
@@ -108,6 +109,8 @@ vi.mock('@dnsquared/shipper-core', () => ({
       console.error(`[shipper] ${message}`);
     },
   },
+  toError,
+  toErrorMessage,
   gh: (args: string[]) => mockGh(args),
   scripts: {},
   LABELS: canonicalLabels,

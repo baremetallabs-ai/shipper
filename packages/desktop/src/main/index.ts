@@ -27,6 +27,7 @@ import {
   releaseIssueLock,
   renewIssueLock,
   scanArtifacts,
+  toErrorMessage,
   type ListIssueItem,
   type WorkflowStage,
 } from '@dnsquared/shipper-core';
@@ -354,7 +355,7 @@ function parseIssueListJson(repo: string, json: string): RawListIssueData[] {
   try {
     return JSON.parse(json) as RawListIssueData[];
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = toErrorMessage(error);
     const preview = json.length > 200 ? `${json.slice(0, 200)}…` : json;
     throw new Error(`Failed to list adoptable issues for ${repo}: ${message}. Output: ${preview}`);
   }
@@ -441,7 +442,7 @@ function parseCreatedIssueList(repo: string, json: string): RawCreatedIssueData[
       };
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = toErrorMessage(error);
     throw new Error(`Failed to parse created issue metadata for ${repo}: ${message}`);
   }
 }
@@ -506,7 +507,7 @@ function parseResetIssueJson(repo: string, issueNumber: number, json: string): R
       }),
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = toErrorMessage(error);
     throw new Error(`Failed to fetch reset data for issue #${issueNumber} in ${repo}: ${message}`);
   }
 }
@@ -771,7 +772,7 @@ function registerIpcHandlers(): void {
       }
       return { initialized: result.ok };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = toErrorMessage(error);
       return { initialized: false, error: message };
     }
   });
@@ -792,7 +793,7 @@ function registerIpcHandlers(): void {
       const response: ListIssuesSuccess = { ok: true, issues };
       return response;
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = toErrorMessage(error);
       const response: ListIssuesFailure = { ok: false, error: message };
       return response;
     }
@@ -836,7 +837,7 @@ function registerIpcHandlers(): void {
       const response: ListIssuesSuccess = { ok: true, issues };
       return response;
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = toErrorMessage(error);
       const response: ListIssuesFailure = { ok: false, error: message };
       return response;
     }
@@ -883,7 +884,7 @@ function registerIpcHandlers(): void {
         scan: toArtifactScanSummary(scan),
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = toErrorMessage(error);
       return { ok: false, error: message };
     }
   });
@@ -934,7 +935,7 @@ function registerIpcHandlers(): void {
         await releaseIssueLock(parsedPayload.repo, issueNumber);
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = toErrorMessage(error);
       return { ok: false, error: message };
     }
   });
@@ -976,7 +977,7 @@ function registerIpcHandlers(): void {
 
       return { ok: true };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = toErrorMessage(error);
       return { ok: false, error: message };
     }
   });
@@ -1033,7 +1034,7 @@ function registerIpcHandlers(): void {
 
       return { ok: true };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = toErrorMessage(error);
       return { ok: false, error: message };
     }
   });
@@ -1066,7 +1067,7 @@ function registerIpcHandlers(): void {
       await gh(args);
       return { ok: true };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = toErrorMessage(error);
       return { ok: false, error: message };
     }
   });
@@ -1277,7 +1278,7 @@ function registerIpcHandlers(): void {
       ]);
       return { ok: true };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = toErrorMessage(error);
       return { ok: false, error: message };
     }
   });

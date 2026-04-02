@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import { toError } from './errors.js';
 import { logger } from './logger.js';
 import type { TokenUsage } from './usage.js';
 const UNLINKED_REPO = '_unlinked';
@@ -149,7 +150,7 @@ function getRemoteUrl(cwd?: string): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile('git', ['remote', 'get-url', 'origin'], { cwd }, (error, stdout) => {
       if (error) {
-        reject(error instanceof Error ? error : new Error(toErrorMessage(error)));
+        reject(toError(error));
         return;
       }
       resolve(stdout);
@@ -202,20 +203,6 @@ function parseUsage(value: unknown): TokenUsage | undefined {
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
-}
-
-function toErrorMessage(error: unknown): string {
-  if (typeof error === 'string') return error;
-  if (typeof error === 'number' || typeof error === 'boolean') return String(error);
-  if (
-    (typeof error === 'object' || typeof error === 'function') &&
-    error !== null &&
-    'message' in error &&
-    typeof error.message === 'string'
-  ) {
-    return error.message;
-  }
-  return 'Failed to resolve git remote URL';
 }
 
 function hasErrorCode(error: unknown, code: string): boolean {

@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import { formatValidRanges, includesLine, type DiffFileHunks } from './diff-parse.js';
 import { PROTOCOL_OUTPUT_DIR, resolveOutputPath } from './protocol-io.js';
+import { toErrorMessage } from '../errors.js';
 import { readResultFile, ResultValidationError, type ResultJson } from '../result-schema.js';
 import type { StageName } from '../stage-transitions.js';
 
@@ -152,14 +153,14 @@ async function readJsonFile(filePath: string, label: string): Promise<unknown> {
   try {
     raw = await readFile(filePath, 'utf-8');
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = toErrorMessage(error);
     throw new Error(`Failed to read ${label} at ${filePath}: ${message}`);
   }
 
   try {
     return JSON.parse(raw) as unknown;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = toErrorMessage(error);
     throw new Error(`Failed to parse ${label} at ${filePath}: ${message}`);
   }
 }
@@ -196,7 +197,7 @@ export async function readPrSpec(
       ) {
         errors.push(`PR body path does not exist: ${bodyPath ?? bodyFile}`);
       } else {
-        errors.push(error instanceof Error ? error.message : String(error));
+        errors.push(toErrorMessage(error));
       }
     }
   }
@@ -393,7 +394,7 @@ export async function retryOnInvalidOutput(opts: {
     const errors =
       error instanceof ResultValidationError
         ? error.errors
-        : [error instanceof Error ? error.message : String(error)];
+        : [toErrorMessage(error)];
     await opts.retry(formatCorrectionMessage(errors));
     return await validateStageOutput(opts.cwd, opts.stage, opts.prFiles, opts.diffHunks);
   }

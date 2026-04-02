@@ -21,6 +21,7 @@ import {
   isLockStale,
   parseStage,
   scanArtifacts,
+  toErrorMessage,
   type WorkflowStage,
 } from '@dnsquared/shipper-core';
 
@@ -160,8 +161,7 @@ export async function resetCommand(
     ]);
     issueJson = result.stdout;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    logger.error(`Error: Failed to fetch issue #${issueNum}: ${message}`);
+    logger.error(`Error: Failed to fetch issue #${issueNum}: ${toErrorMessage(error)}`);
     process.exit(1);
   }
 

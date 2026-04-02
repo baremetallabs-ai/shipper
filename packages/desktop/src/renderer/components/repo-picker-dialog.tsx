@@ -2,6 +2,7 @@ import { LoaderCircle, PlusCircle } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { JSX } from 'react';
 
+import { toErrorMessage } from '../../../../core/src/lib/errors.js';
 import { Alert, AlertDescription, AlertTitle } from './ui/alert.js';
 import {
   Command,
@@ -71,8 +72,7 @@ export function RepoPickerDialog({
       })
       .catch((error: unknown) => {
         if (!cancelled) {
-          const message = error instanceof Error ? error.message : String(error);
-          setFetchError(message);
+          setFetchError(toErrorMessage(error));
         }
       })
       .finally(() => {

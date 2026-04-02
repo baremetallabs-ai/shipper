@@ -4,6 +4,7 @@ import { rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 
+import { toErrorMessage } from './errors.js';
 import {
   FAILED_LABEL,
   IMPLEMENTED_LABEL,
@@ -224,8 +225,9 @@ export async function scanArtifacts(
         .filter((line) => line !== '')
         .map(Number);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      logger.warn(`Warning: Could not fetch comments for issue #${issueNum}: ${message}`);
+      logger.warn(
+        `Warning: Could not fetch comments for issue #${issueNum}: ${toErrorMessage(error)}`
+      );
     }
   } else {
     const stageTimestamp = await getStageTimestamp(issueNum, nwo, targetStage);
@@ -256,8 +258,9 @@ export async function scanArtifacts(
             }
           }
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          logger.warn(`Warning: Could not fetch comments for issue #${issueNum}: ${message}`);
+          logger.warn(
+            `Warning: Could not fetch comments for issue #${issueNum}: ${toErrorMessage(error)}`
+          );
         }
       }
     } else {
@@ -290,8 +293,7 @@ export async function scanArtifacts(
         pr.headRefName.startsWith(`${issueNum}-`)
     );
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    logger.warn(`Warning: Could not fetch PRs for issue #${issueNum}: ${message}`);
+    logger.warn(`Warning: Could not fetch PRs for issue #${issueNum}: ${toErrorMessage(error)}`);
   }
 
   let remoteBranches: string[] = [];
@@ -303,8 +305,9 @@ export async function scanArtifacts(
           stdio: ['ignore', 'ignore', 'ignore'],
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        logger.warn(`Warning: Could not fetch remote branches for issue #${issueNum}: ${message}`);
+        logger.warn(
+          `Warning: Could not fetch remote branches for issue #${issueNum}: ${toErrorMessage(error)}`
+        );
       }
 
       try {
@@ -322,8 +325,9 @@ export async function scanArtifacts(
           .filter((branchName) => branchName !== '')
           .map((branchName) => branchName.replace(/^origin\//, ''));
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        logger.warn(`Warning: Could not scan remote branches for issue #${issueNum}: ${message}`);
+        logger.warn(
+          `Warning: Could not scan remote branches for issue #${issueNum}: ${toErrorMessage(error)}`
+        );
       }
     } else {
       try {
@@ -338,8 +342,9 @@ export async function scanArtifacts(
               branchName === `shipper/${issueNum}` || branchName.startsWith(`shipper/${issueNum}-`)
           );
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        logger.warn(`Warning: Could not scan remote branches for issue #${issueNum}: ${message}`);
+        logger.warn(
+          `Warning: Could not scan remote branches for issue #${issueNum}: ${toErrorMessage(error)}`
+        );
       }
     }
   }
@@ -369,8 +374,9 @@ export async function scanArtifacts(
   } catch (error) {
     const errnoError = error as ErrnoError;
     if (errnoError.code !== 'ENOENT') {
-      const message = error instanceof Error ? error.message : String(error);
-      logger.warn(`Warning: Could not scan local worktrees for issue #${issueNum}: ${message}`);
+      logger.warn(
+        `Warning: Could not scan local worktrees for issue #${issueNum}: ${toErrorMessage(error)}`
+      );
     }
   }
 
@@ -395,8 +401,9 @@ export async function scanArtifacts(
         )
         .filter((branchName) => branchName !== '');
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      logger.warn(`Warning: Could not scan local branches for issue #${issueNum}: ${message}`);
+      logger.warn(
+        `Warning: Could not scan local branches for issue #${issueNum}: ${toErrorMessage(error)}`
+      );
     }
 
     if (localBranches.length > 0) {
@@ -413,9 +420,8 @@ export async function scanArtifacts(
           localBranches = localBranches.filter((branchName) => branchName !== currentBranch);
         }
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
         logger.warn(
-          `Warning: Could not determine the current branch for issue #${issueNum}: ${message}`
+          `Warning: Could not determine the current branch for issue #${issueNum}: ${toErrorMessage(error)}`
         );
         logger.warn(
           'Warning: Skipping local branch deletion because the checked-out branch is unknown.'
@@ -474,8 +480,9 @@ export async function executeReset(
 
       removedWorktrees.push(worktreePath);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      logger.warn(`  Warning: Failed to remove local worktree ${worktreePath}: ${message}`);
+      logger.warn(
+        `  Warning: Failed to remove local worktree ${worktreePath}: ${toErrorMessage(error)}`
+      );
     }
   }
   if (removedWorktrees.length > 0) {
@@ -492,8 +499,7 @@ export async function executeReset(
         });
         deletedLocalBranches.push(branch);
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        logger.warn(`  Warning: Failed to delete local branch ${branch}: ${message}`);
+        logger.warn(`  Warning: Failed to delete local branch ${branch}: ${toErrorMessage(error)}`);
       }
     }
   }
@@ -507,8 +513,7 @@ export async function executeReset(
       await gh(['pr', 'close', String(pr.number), '-R', nwo]);
       closedPrBranches.add(pr.headRefName);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      logger.warn(`  Warning: Failed to close PR #${pr.number}: ${message}`);
+      logger.warn(`  Warning: Failed to close PR #${pr.number}: ${toErrorMessage(error)}`);
     }
   }
   if (scan.prs.length > 0) {
@@ -552,16 +557,16 @@ export async function executeReset(
           .join(', ')}`
       );
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      logger.warn(`  Warning: Could not verify open PR state for branch ${branchName}: ${message}`);
+      logger.warn(
+        `  Warning: Could not verify open PR state for branch ${branchName}: ${toErrorMessage(error)}`
+      );
     }
   }
   for (const branch of deletableBranches) {
     try {
       await gh(['api', '-X', 'DELETE', `repos/${nwo}/git/refs/heads/${branch}`]);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      logger.warn(`  Warning: Failed to delete branch ${branch}: ${message}`);
+      logger.warn(`  Warning: Failed to delete branch ${branch}: ${toErrorMessage(error)}`);
     }
   }
   if (deletableBranches.length > 0) {
@@ -572,8 +577,7 @@ export async function executeReset(
     try {
       await gh(['api', '-X', 'DELETE', `repos/${nwo}/issues/comments/${commentId}`]);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      logger.warn(`  Warning: Failed to delete comment ${commentId}: ${message}`);
+      logger.warn(`  Warning: Failed to delete comment ${commentId}: ${toErrorMessage(error)}`);
     }
   }
   if (scan.commentIds.length > 0) {
@@ -592,8 +596,7 @@ export async function executeReset(
     try {
       await gh(args);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      logger.warn(`  Warning: Failed to update labels: ${message}`);
+      logger.warn(`  Warning: Failed to update labels: ${toErrorMessage(error)}`);
     }
   }
   if (scan.labelsToRemove.length > 0) {
@@ -616,8 +619,7 @@ export async function executeReset(
     await gh(['issue', 'comment', String(issueNum), '-R', nwo, '--body', resetBody]);
     actions.push('Posted reset notice comment');
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    logger.warn(`  Warning: Failed to post reset comment: ${message}`);
+    logger.warn(`  Warning: Failed to post reset comment: ${toErrorMessage(error)}`);
   }
 
   logger.log(`\nReset complete for issue #${issueNum}:`);

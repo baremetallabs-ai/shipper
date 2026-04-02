@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { toErrorMessage } from './errors.js';
 import { gh } from './gh.js';
 import { getPriorityTier } from './labels.js';
 import { isLockStale, releaseIssueLock } from './lock.js';
@@ -225,8 +226,7 @@ export async function resolveBaseBranch(repo: string, configured?: string): Prom
       });
       result = output.stdout;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      throw new Error(`Failed to check remote branch '${configured}': ${msg}`);
+      throw new Error(`Failed to check remote branch '${configured}': ${toErrorMessage(err)}`);
     }
     // ls-remote uses pattern matching, so verify the exact ref is present
     const exactRef = `refs/heads/${configured}`;
@@ -252,8 +252,7 @@ export async function resolveBaseBranch(repo: string, configured?: string): Prom
     ]);
     output = result.stdout;
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`Failed to auto-detect default base branch: ${msg}`);
+    throw new Error(`Failed to auto-detect default base branch: ${toErrorMessage(err)}`);
   }
   const branch = output.trim();
   if (!branch) {
@@ -276,8 +275,7 @@ export async function fetchIssue(repo: string, ref: string): Promise<string> {
     ]);
     json = result.stdout;
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`Failed to fetch issue ${ref}: ${msg}`);
+    throw new Error(`Failed to fetch issue ${ref}: ${toErrorMessage(err)}`);
   }
 
   const data = parseIssueData(json);
@@ -298,8 +296,7 @@ export async function fetchPR(repo: string, ref: string): Promise<string> {
     ]);
     json = result.stdout;
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`Failed to fetch PR ${ref}: ${msg}`);
+    throw new Error(`Failed to fetch PR ${ref}: ${toErrorMessage(err)}`);
   }
 
   const data = parsePRData(json);
@@ -340,17 +337,17 @@ export async function listIssues(
     const result = await gh(args);
     json = result.stdout;
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`Failed to list issues for ${repo}: ${msg}`);
+    throw new Error(`Failed to list issues for ${repo}: ${toErrorMessage(err)}`);
   }
 
   let raw: RawListIssueData[];
   try {
     raw = JSON.parse(json) as RawListIssueData[];
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
     const preview = json.length > 200 ? `${json.slice(0, 200)}…` : json;
-    throw new Error(`Failed to list issues for ${repo}: ${msg}. Output: ${preview}`);
+    throw new Error(
+      `Failed to list issues for ${repo}: ${toErrorMessage(err)}. Output: ${preview}`
+    );
   }
 
   const mapped = raw.map((issue) => ({

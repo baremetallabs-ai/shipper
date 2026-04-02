@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { toErrorMessage } from './errors.js';
 import { logger } from './logger.js';
 
 export type AgentName = 'claude' | 'codex' | 'copilot';
@@ -301,7 +302,6 @@ async function readSettingsFile(filepath: string): Promise<Partial<Settings>> {
 
     return parsed as Partial<Settings>;
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    throw new Error(`Malformed JSON in ${filepath}: ${message}`);
+    throw new Error(`Malformed JSON in ${filepath}: ${toErrorMessage(err)}`);
   }
 }

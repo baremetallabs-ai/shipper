@@ -1,3 +1,4 @@
+import { toErrorMessage } from './errors.js';
 import { gh } from './gh.js';
 import { logger } from './logger.js';
 
@@ -95,8 +96,7 @@ export async function enrichFailedChecks(
       const logDumpName = createLogDumpName(check.name, job.databaseId, logDumps);
       logDumps.set(logDumpName, logOutput);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      logger.warn(`Warning: Failed to enrich CI check "${check.name}": ${message}`);
+      logger.warn(`Warning: Failed to enrich CI check "${check.name}": ${toErrorMessage(error)}`);
     }
   }
 
@@ -121,8 +121,7 @@ export async function rerunFailedChecks(repo: string, failedChecks: PRChecksLine
     try {
       await gh(['run', 'rerun', runId, '--failed', '-R', repo]);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      logger.warn(`Warning: Failed to re-run workflow ${runId}: ${message}`);
+      logger.warn(`Warning: Failed to re-run workflow ${runId}: ${toErrorMessage(error)}`);
     }
   }
 }

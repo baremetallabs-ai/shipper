@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { JSX } from 'react';
 
 import type { WorkflowStage } from '@dnsquared/shipper-core';
+import { toErrorMessage } from '../../../../core/src/lib/errors.js';
 
 import { Alert, AlertDescription, AlertTitle } from './ui/alert.js';
 import { Button } from './ui/button.js';
@@ -113,8 +114,7 @@ export function ResetConfirmDialog({
           return;
         }
 
-        const message = error instanceof Error ? error.message : String(error);
-        setScanError(message);
+        setScanError(toErrorMessage(error));
       })
       .finally(() => {
         if (!cancelled && activeRequestIdRef.current === requestId) {
@@ -147,8 +147,7 @@ export function ResetConfirmDialog({
       onOpenChange(false);
       onResetSuccess(issueNumber);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setResetError(message);
+      setResetError(toErrorMessage(error));
       onResetFailure(issueNumber);
     } finally {
       setIsResetting(false);

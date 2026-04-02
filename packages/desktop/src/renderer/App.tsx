@@ -17,6 +17,7 @@ import {
   NEW_LABEL,
   READY_LABEL,
 } from '../../../core/src/lib/labels.js';
+import { toErrorMessage } from '../../../core/src/lib/errors.js';
 import type { ListIssueItem, WorkflowStage } from '@dnsquared/shipper-core';
 
 import { AdoptDialog } from './components/adopt-dialog.js';
@@ -665,7 +666,7 @@ export default function App(): JSX.Element {
       await persistConfig({ repos, activeRepo, autoMergeRepos: [...nextAutoMergeRepos] });
       setAutoMergeRepos(nextAutoMergeRepos);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = toErrorMessage(error);
       setFetchError(`Failed to save auto-merge preference: ${message}`);
     } finally {
       autoMergeSaveInFlightRef.current = false;
@@ -698,7 +699,7 @@ export default function App(): JSX.Element {
         return null;
       }
 
-      const message = error instanceof Error ? error.message : String(error);
+      const message = toErrorMessage(error);
       setFetchError(message);
       return null;
     } finally {
@@ -1275,7 +1276,7 @@ export default function App(): JSX.Element {
         }
       } catch (error) {
         if (!cancelled) {
-          const message = error instanceof Error ? error.message : String(error);
+          const message = toErrorMessage(error);
           setFetchError(`Failed to initialize desktop app: ${message}`);
         }
       }
@@ -1447,7 +1448,7 @@ export default function App(): JSX.Element {
         await loadIssues(nextRepo);
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = toErrorMessage(error);
       setFetchError(`Failed to save repositories: ${message}`);
     }
   }
@@ -1467,7 +1468,7 @@ export default function App(): JSX.Element {
         await loadIssues(repo);
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = toErrorMessage(error);
       setFetchError(`Failed to save repositories: ${message}`);
     }
   }
@@ -1505,7 +1506,7 @@ export default function App(): JSX.Element {
       await persistConfig({ repos: nextRepos, activeRepo, autoMergeRepos: [...autoMergeRepos] });
       setRepos(nextRepos);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = toErrorMessage(error);
       setFetchError(`Failed to save repositories: ${message}`);
     }
   }
@@ -1592,7 +1593,7 @@ export default function App(): JSX.Element {
         );
       } catch (error) {
         if (!cancelled) {
-          const message = error instanceof Error ? error.message : String(error);
+          const message = toErrorMessage(error);
           setFetchError(`Failed to load background logs: ${message}`);
         }
       }
@@ -1680,7 +1681,7 @@ export default function App(): JSX.Element {
     try {
       await window.shipperAPI.spawnBackgroundNew(request, repo);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = toErrorMessage(error);
       setFetchError(`Failed to launch shipper new: ${message}`);
     }
   }
@@ -1705,7 +1706,7 @@ export default function App(): JSX.Element {
         issueNumber,
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = toErrorMessage(error);
       setFetchError(`Failed to launch shipper groom: ${message}`);
     }
   }
@@ -1714,7 +1715,7 @@ export default function App(): JSX.Element {
     try {
       await window.shipperAPI.spawnBackgroundShip(issueNumber, repo, autoMergeRepos.has(repo));
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = toErrorMessage(error);
       setFetchError(`Failed to launch shipper ship: ${message}`);
     }
   }
@@ -1723,7 +1724,7 @@ export default function App(): JSX.Element {
     try {
       await window.shipperAPI.spawnBackgroundInit(repo);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = toErrorMessage(error);
       setFetchError(`Failed to launch shipper init: ${message}`);
     }
   }
@@ -1866,7 +1867,7 @@ export default function App(): JSX.Element {
       });
       await refreshIssuesForActiveRepo(repo);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = toErrorMessage(error);
       pushToast({
         id: `unlock-issue-error-${issue.number}`,
         sessionId: '',
@@ -1913,7 +1914,7 @@ export default function App(): JSX.Element {
       });
       await refreshIssuesForActiveRepo(repo);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = toErrorMessage(error);
       pushToast({
         id: `set-priority-error-${issue.number}`,
         sessionId: '',
@@ -1945,7 +1946,7 @@ export default function App(): JSX.Element {
 
       setUnlockConfirmIssue(issue);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = toErrorMessage(error);
       pushToast({
         id: `unlock-issue-check-error-${issue.number}`,
         sessionId: '',
@@ -1978,7 +1979,7 @@ export default function App(): JSX.Element {
     try {
       await window.shipperAPI.spawnBackgroundUnblock(issue.number, activeRepo);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = toErrorMessage(error);
       pushToast({
         id: `unblock-spawn-error-${issue.number}`,
         sessionId: '',
@@ -2016,7 +2017,7 @@ export default function App(): JSX.Element {
     try {
       await window.shipperAPI.killBackground(sessionId);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = toErrorMessage(error);
       setFetchError(`Failed to cancel background command: ${message}`);
     }
   }
@@ -2042,7 +2043,7 @@ export default function App(): JSX.Element {
           : currentViewer
       );
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = toErrorMessage(error);
       setFetchError(`Failed to open background logs: ${message}`);
     }
   }
@@ -2060,7 +2061,7 @@ export default function App(): JSX.Element {
         currentCommands.filter((command) => command.id !== toast.sessionId)
       );
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = toErrorMessage(error);
       setFetchError(`Failed to retry background command: ${message}`);
       throw error;
     }
@@ -2172,7 +2173,7 @@ export default function App(): JSX.Element {
       setPendingCloseSessionId(null);
       removeSession(session.id);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = toErrorMessage(error);
       setFetchError(`Failed to close terminal session: ${message}`);
     }
   }
@@ -2208,7 +2209,7 @@ export default function App(): JSX.Element {
         }
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = toErrorMessage(error);
       setFetchError(`Failed to save repositories: ${message}`);
     }
   }

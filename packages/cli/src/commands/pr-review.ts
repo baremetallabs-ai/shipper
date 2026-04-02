@@ -13,6 +13,7 @@ import {
   processResult,
   retryOnInvalidOutput,
   scrubOutputDir,
+  toErrorMessage,
   writeContextFile,
 } from '@dnsquared/shipper-core';
 import { withStageHooks } from '@dnsquared/shipper-core';
@@ -132,7 +133,7 @@ export async function prReviewCommand(
               prNumber: pr,
             });
           } catch (error) {
-            const detail = error instanceof Error ? error.message : String(error);
+            const detail = toErrorMessage(error);
             logger.error(detail);
             await handleAgentCrash(repo, issueNumber, 'pr_review', detail);
             process.exitCode = 1;
