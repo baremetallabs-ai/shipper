@@ -32,7 +32,7 @@ const {
   truncateLargeInput,
   validateStageOutput,
   writeContextFile,
-} = await import('../../src/lib/output-protocol.js');
+} = await import('../../src/lib/output-protocol/index.js');
 
 describe('output protocol helpers', () => {
   let tempDir: string;
