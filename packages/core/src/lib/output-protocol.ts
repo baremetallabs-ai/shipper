@@ -7,13 +7,13 @@ import { resolveTransition, type LabelTransition, type StageName } from './stage
 
 export const PROTOCOL_INPUT_DIR = path.join('.shipper', 'input');
 export const PROTOCOL_OUTPUT_DIR = path.join('.shipper', 'output');
-const TRUNCATION_THRESHOLD_BYTES = 50_000;
+export const TRUNCATION_THRESHOLD_BYTES = 50_000;
 const TRUNCATION_HEAD_LINES = 50;
 const TRUNCATION_TAIL_LINES = 50;
 const TRUNCATION_HEAD_BYTES = 25_000;
 const TRUNCATION_TAIL_BYTES = 25_000;
 const REVIEW_VALID_FILES_DISPLAY_LIMIT = 50;
-const PROTOCOL_INPUT_DISPLAY_DIR = path.posix.join('.shipper', 'input');
+export const PROTOCOL_INPUT_DISPLAY_DIR = path.posix.join('.shipper', 'input');
 
 type ReviewEvent = 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT';
 type ReviewCommentSide = 'LEFT' | 'RIGHT';
