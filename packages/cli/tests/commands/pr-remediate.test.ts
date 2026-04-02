@@ -1194,23 +1194,31 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
     errorSpy.mockRestore();
   });
 
-  it('continues the pass when the initial prompt exits non-zero but retry validation succeeds', async () => {
+  it('bails early when the initial prompt exits non-zero', async () => {
     fetchChecksMock.mockResolvedValue(PASS_CHECKS);
     runPromptMock.mockResolvedValueOnce(17);
-    validateStageOutputMock.mockResolvedValue({
-      verdict: 'accept',
-      comment: '.shipper/output/comment-10.md',
-    });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const { prRemediateCommand } = await import('../../src/commands/pr-remediate.js');
 
     await expect(prRemediateCommand(repo, '42')).resolves.toBeUndefined();
 
-    expect(retryOnInvalidOutputMock).toHaveBeenCalledTimes(1);
-    expect(handleAgentCrashMock).not.toHaveBeenCalled();
-    expect(pushWithRetryMock).toHaveBeenCalledTimes(1);
-    expect(postCommentMock).toHaveBeenCalledTimes(1);
-    expect(process.exitCode).toBe(0);
+    expect(errorSpy).toHaveBeenCalledWith('[shipper] Agent exited with code 17');
+    expect(handleAgentCrashMock).toHaveBeenCalledWith(
+      'owner/repo',
+      '10',
+      'pr_remediate',
+      'Agent exited with code 17',
+      'The `pr_remediate` agent run exited with code 17.'
+    );
+    expect(retryOnInvalidOutputMock).not.toHaveBeenCalled();
+    expect(processResultMock).not.toHaveBeenCalled();
+    expect(pushWithRetryMock).not.toHaveBeenCalled();
+    expect(postRepliesMock).not.toHaveBeenCalled();
+    expect(postCommentMock).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+
+    errorSpy.mockRestore();
   });
 
   it('exits after five red-CI passes without changing labels', async () => {

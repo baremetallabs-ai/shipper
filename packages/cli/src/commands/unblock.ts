@@ -116,7 +116,20 @@ export async function unblockCommand(
     const cwd = process.cwd();
     await scrubOutputDir(cwd);
     await prepareUnblockContext(repo, issue, cwd);
-    await runPrompt('unblock', { repo, issueRef: issue, cwd, mode, agent, model });
+    const exitCode = await runPrompt('unblock', { repo, issueRef: issue, cwd, mode, agent, model });
+    if (exitCode !== 0) {
+      const detail = `Agent exited with code ${exitCode}`;
+      logger.error(detail);
+      await handleAgentCrash(
+        repo,
+        issue,
+        'unblock',
+        detail,
+        `The \`unblock\` agent run exited with code ${exitCode}.`
+      );
+      process.exitCode = 1;
+      return;
+    }
     try {
       const result = await retryOnInvalidOutput({
         cwd,

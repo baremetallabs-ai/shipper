@@ -83,7 +83,7 @@ export async function prReviewCommand(
           ]);
           await writeContextFile(wtPath, 'pr-metadata.json', prMetadata);
 
-          await runPrompt('pr_review', {
+          const exitCode = await runPrompt('pr_review', {
             repo,
             issueRef: issueNumber,
             prRef: pr,
@@ -92,6 +92,19 @@ export async function prReviewCommand(
             agent,
             model,
           });
+          if (exitCode !== 0) {
+            const detail = `Agent exited with code ${exitCode}`;
+            logger.error(detail);
+            await handleAgentCrash(
+              repo,
+              issueNumber,
+              'pr_review',
+              detail,
+              `The \`pr_review\` agent run exited with code ${exitCode}.`
+            );
+            process.exitCode = 1;
+            return;
+          }
           try {
             const result = await retryOnInvalidOutput({
               cwd: wtPath,
@@ -123,6 +136,7 @@ export async function prReviewCommand(
             logger.error(detail);
             await handleAgentCrash(repo, issueNumber, 'pr_review', detail);
             process.exitCode = 1;
+            return;
           }
         }
       );

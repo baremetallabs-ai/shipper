@@ -43,7 +43,27 @@ export async function designCommand(
         },
         async (wtPath) => {
           await scrubOutputDir(wtPath);
-          await runPrompt('design', { repo, issueRef: issue, cwd: wtPath, mode, agent, model });
+          const exitCode = await runPrompt('design', {
+            repo,
+            issueRef: issue,
+            cwd: wtPath,
+            mode,
+            agent,
+            model,
+          });
+          if (exitCode !== 0) {
+            const detail = `Agent exited with code ${exitCode}`;
+            logger.error(detail);
+            await handleAgentCrash(
+              repo,
+              issue,
+              'design',
+              detail,
+              `The \`design\` agent run exited with code ${exitCode}.`
+            );
+            process.exitCode = 1;
+            return;
+          }
           try {
             const result = await retryOnInvalidOutput({
               cwd: wtPath,

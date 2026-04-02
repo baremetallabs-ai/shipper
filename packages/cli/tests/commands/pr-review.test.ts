@@ -221,19 +221,23 @@ describe('prReviewCommand', () => {
     });
   });
 
-  it('reports protocol crashes and exits with code 1', async () => {
-    processResultMock.mockRejectedValueOnce(new Error('Missing result.json'));
+  it('reports non-zero prompt exits and skips output validation', async () => {
+    runPromptMock.mockResolvedValueOnce(23);
     const { prReviewCommand } = await import('../../src/commands/pr-review.js');
 
     await expect(prReviewCommand(repo, '42')).resolves.toBeUndefined();
 
+    expect(writeContextFileMock).toHaveBeenCalledTimes(3);
+    expect(retryOnInvalidOutputMock).not.toHaveBeenCalled();
+    expect(processResultMock).not.toHaveBeenCalled();
     expect(handleAgentCrashMock).toHaveBeenCalledWith(
       repo,
       '10',
       'pr_review',
-      'Missing result.json'
+      'Agent exited with code 23',
+      'The `pr_review` agent run exited with code 23.'
     );
-    expect(consoleErrorSpy).toHaveBeenCalledWith('[shipper] Missing result.json');
+    expect(consoleErrorSpy).toHaveBeenCalledWith('[shipper] Agent exited with code 23');
     expect(process.exitCode).toBe(1);
   });
 

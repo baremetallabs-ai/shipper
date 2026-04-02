@@ -18,7 +18,7 @@ const retryOnInvalidOutputMock = vi.fn<
   }) => Promise<typeof validatedResult>
 >(() => Promise.resolve(validatedResult));
 const resolveBaseBranchMock = vi.fn(() => Promise.resolve('main'));
-const runPromptMock = vi.fn(() => Promise.resolve(9));
+const runPromptMock = vi.fn(() => Promise.resolve(0));
 const scrubOutputDirMock = vi.fn(() => Promise.resolve());
 const loggerMock = {
   log: (message: string) => {
@@ -126,6 +126,7 @@ describe('planCommand', () => {
     expect(process.exitCode).toBeUndefined();
     expect(exitSpy).not.toHaveBeenCalled();
 
+    runPromptMock.mockResolvedValueOnce(9);
     await expect(retryCall?.retry('Fix result')).resolves.toBe(9);
     expect(runPromptMock).toHaveBeenLastCalledWith('plan', {
       repo: 'owner/repo',
@@ -138,19 +139,22 @@ describe('planCommand', () => {
     });
   });
 
-  it('reports protocol crashes and exits with code 1', async () => {
-    processResultMock.mockRejectedValueOnce(new Error('Invalid result.json'));
+  it('reports non-zero prompt exits and skips output validation', async () => {
+    runPromptMock.mockResolvedValueOnce(9);
     const { planCommand } = await import('../../src/commands/plan.js');
 
     await expect(planCommand('owner/repo', '123')).resolves.toBeUndefined();
 
+    expect(retryOnInvalidOutputMock).not.toHaveBeenCalled();
+    expect(processResultMock).not.toHaveBeenCalled();
     expect(handleAgentCrashMock).toHaveBeenCalledWith(
       'owner/repo',
       '123',
       'plan',
-      'Invalid result.json'
+      'Agent exited with code 9',
+      'The `plan` agent run exited with code 9.'
     );
-    expect(consoleErrorSpy).toHaveBeenCalledWith('[shipper] Invalid result.json');
+    expect(consoleErrorSpy).toHaveBeenCalledWith('[shipper] Agent exited with code 9');
     expect(process.exitCode).toBe(1);
   });
 
