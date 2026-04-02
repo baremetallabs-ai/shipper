@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { promisify } from 'node:util';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -186,7 +187,7 @@ describe('checkShipperDir', () => {
       ok: true,
       message: '.shipper directory exists',
     });
-    expect(mockAccess.mock.calls[0]?.[0]?.endsWith('/.shipper')).toBe(true);
+    expect(mockAccess).toHaveBeenCalledWith(path.resolve('.shipper'));
   });
 
   it('fails with guidance when the .shipper directory is missing', async () => {
@@ -372,8 +373,9 @@ describe('runPreflight', () => {
     });
 
     await expect(runPreflight()).resolves.toBeUndefined();
-    expect(mockMkdir.mock.calls[0]?.[0]?.endsWith('/.shipper/tmp')).toBe(true);
-    expect(mockMkdir.mock.calls[0]?.[1]).toEqual({ recursive: true });
+    expect(mockMkdir).toHaveBeenCalledWith(path.resolve('.shipper', 'tmp'), {
+      recursive: true,
+    });
   });
 
   it('throws with the failing prerequisite when a single check fails', async () => {

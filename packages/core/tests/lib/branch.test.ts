@@ -310,6 +310,6 @@ describe('getBranchForPR', () => {
       cb(null, '', '');
     });
 
-    await expect(getBranchForPR(repo, '123')).rejects.toThrow();
+    await expect(getBranchForPR(repo, '123')).rejects.toThrow(SyntaxError);
   });
 });

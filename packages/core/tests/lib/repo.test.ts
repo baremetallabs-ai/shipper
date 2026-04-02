@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { mockGh } = vi.hoisted(() => ({
-  mockGh: vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>(),
+  mockGh:
+    vi.fn<
+      (args: string[], opts?: { cwd?: string }) => Promise<{ stdout: string; stderr: string }>
+    >(),
 }));
 
 vi.mock('../../src/lib/gh.js', () => ({
-  gh: (...args: unknown[]) => mockGh(...(args as [string[]])),
+  gh: (...args: unknown[]) => mockGh(...(args as Parameters<typeof mockGh>)),
 }));
 
 const { getRepoNwo } = await import('../../src/lib/repo.js');
