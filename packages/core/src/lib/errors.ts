@@ -3,7 +3,7 @@ export function toError(error: unknown): Error {
     return error;
   }
 
-  return new Error(String(error));
+  return new Error(toErrorMessage(error));
 }
 
 export function toErrorMessage(error: unknown): string {
@@ -11,5 +11,9 @@ export function toErrorMessage(error: unknown): string {
     return error.message;
   }
 
-  return String(error);
+  try {
+    return String(error);
+  } catch {
+    return 'Unknown error';
+  }
 }

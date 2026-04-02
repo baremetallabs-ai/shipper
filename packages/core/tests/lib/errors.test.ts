@@ -22,6 +22,19 @@ describe('toError', () => {
     expect(error).toBeInstanceOf(Error);
     expect(error.message).toBe(expectedMessage);
   });
+
+  it('falls back when string coercion throws', () => {
+    const input = {
+      [Symbol.toPrimitive]() {
+        throw new Error('nope');
+      },
+    };
+
+    const error = toError(input);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toBe('Unknown error');
+  });
 });
 
 describe('toErrorMessage', () => {
@@ -38,5 +51,11 @@ describe('toErrorMessage', () => {
     ['boolean', false, 'false'],
   ])('stringifies %s inputs', (_label, input, expectedMessage) => {
     expect(toErrorMessage(input)).toBe(expectedMessage);
+  });
+
+  it('falls back when string coercion throws', () => {
+    const input = Object.create(null) as Record<string, never>;
+
+    expect(toErrorMessage(input)).toBe('Unknown error');
   });
 });
