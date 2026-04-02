@@ -158,6 +158,23 @@ describe('planCommand', () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it('reports protocol crashes during result processing and exits with code 1', async () => {
+    processResultMock.mockRejectedValueOnce(new Error('Missing result.json'));
+    const { planCommand } = await import('../../src/commands/plan.js');
+
+    await expect(planCommand('owner/repo', '123')).resolves.toBeUndefined();
+
+    expect(retryOnInvalidOutputMock).toHaveBeenCalledTimes(1);
+    expect(handleAgentCrashMock).toHaveBeenCalledWith(
+      'owner/repo',
+      '123',
+      'plan',
+      'Missing result.json'
+    );
+    expect(consoleErrorSpy).toHaveBeenCalledWith('[shipper] Missing result.json');
+    expect(process.exitCode).toBe(1);
+  });
+
   it('fails hard when worktree creation fails', async () => {
     withWorktreeMock.mockRejectedValueOnce(new Error('worktree add failed'));
     const { planCommand } = await import('../../src/commands/plan.js');

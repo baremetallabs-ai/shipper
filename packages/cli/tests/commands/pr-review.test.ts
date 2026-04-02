@@ -241,6 +241,23 @@ describe('prReviewCommand', () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it('reports protocol crashes during result processing and exits with code 1', async () => {
+    processResultMock.mockRejectedValueOnce(new Error('Missing result.json'));
+    const { prReviewCommand } = await import('../../src/commands/pr-review.js');
+
+    await expect(prReviewCommand(repo, '42')).resolves.toBeUndefined();
+
+    expect(retryOnInvalidOutputMock).toHaveBeenCalledTimes(1);
+    expect(handleAgentCrashMock).toHaveBeenCalledWith(
+      repo,
+      '10',
+      'pr_review',
+      'Missing result.json'
+    );
+    expect(consoleErrorSpy).toHaveBeenCalledWith('[shipper] Missing result.json');
+    expect(process.exitCode).toBe(1);
+  });
+
   it('fails hard when worktree creation fails', async () => {
     withWorktreeMock.mockRejectedValueOnce(new Error('worktree add failed'));
     const { prReviewCommand } = await import('../../src/commands/pr-review.js');

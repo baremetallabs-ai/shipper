@@ -312,4 +312,22 @@ describe('unblockCommand', () => {
     expect(consoleErrorSpy).toHaveBeenCalledWith('[shipper] Agent exited with code 13');
     expect(process.exitCode).toBe(1);
   });
+
+  it('reports protocol crashes during result processing and exits with code 1', async () => {
+    const unblockModule = await import('../../src/commands/unblock.js');
+    fetchIssueMock.mockResolvedValue('<issue number="250"><comments></comments></issue>');
+    processResultMock.mockRejectedValueOnce(new Error('Missing result.json'));
+
+    await expect(unblockModule.unblockCommand('owner/repo', '250')).resolves.toBeUndefined();
+
+    expect(retryOnInvalidOutputMock).toHaveBeenCalledTimes(1);
+    expect(handleAgentCrashMock).toHaveBeenCalledWith(
+      'owner/repo',
+      '250',
+      'unblock',
+      'Missing result.json'
+    );
+    expect(consoleErrorSpy).toHaveBeenCalledWith('[shipper] Missing result.json');
+    expect(process.exitCode).toBe(1);
+  });
 });
