@@ -57,8 +57,26 @@ export interface ExecuteResetOptions {
   repoRoot?: string;
 }
 
+export type ResetOpStatus = 'succeeded' | 'failed' | 'skipped';
+
+export interface ResetOpResult {
+  description: string;
+  status: ResetOpStatus;
+  reason?: string;
+}
+
+export interface ResetResult {
+  operations: ResetOpResult[];
+  hasFailures: boolean;
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function hasMessageMatch(error: unknown, patterns: string[]): boolean {
+  const message = toErrorMessage(error).toLowerCase();
+  return patterns.some((pattern) => message.includes(pattern.toLowerCase()));
 }
 
 function parsePrEntries(json: string): PREntry[] {
@@ -461,149 +479,179 @@ export async function executeReset(
   scan: ArtifactScan,
   nwo: string,
   options: ExecuteResetOptions = {}
-): Promise<void> {
-  const actions: string[] = [];
+): Promise<ResetResult> {
+  const operations: ResetOpResult[] = [];
+  const recordOperation = (description: string, status: ResetOpStatus, reason?: string): void => {
+    operations.push(reason ? { description, status, reason } : { description, status });
+  };
 
-  const removedWorktrees: string[] = [];
   for (const worktreePath of scan.localWorktrees) {
+    const description = `Remove local worktree ${worktreePath}`;
+
+    if (!existsSync(worktreePath)) {
+      recordOperation(description, 'skipped', 'already removed');
+      continue;
+    }
+
     try {
       if (options.repoRoot) {
         await removeWorktree(options.repoRoot, worktreePath);
       } else {
         await rm(worktreePath, { recursive: true, force: true });
       }
-
-      if (existsSync(worktreePath)) {
-        logger.warn(`  Warning: Failed to remove local worktree ${worktreePath}.`);
-        continue;
-      }
-
-      removedWorktrees.push(worktreePath);
     } catch (error) {
-      logger.warn(
-        `  Warning: Failed to remove local worktree ${worktreePath}: ${toErrorMessage(error)}`
-      );
+      recordOperation(description, 'failed', toErrorMessage(error));
+      continue;
     }
-  }
-  if (removedWorktrees.length > 0) {
-    actions.push(`Removed local worktrees: ${removedWorktrees.join(', ')}`);
+
+    if (existsSync(worktreePath)) {
+      recordOperation(description, 'failed', 'worktree still exists after removal');
+      continue;
+    }
+
+    recordOperation(description, 'succeeded');
   }
 
-  const deletedLocalBranches: string[] = [];
   if (options.repoRoot) {
     for (const branch of scan.localBranches) {
+      const description = `Delete local branch ${branch}`;
+
       try {
         execFileSync('git', ['branch', '-D', branch], {
           cwd: options.repoRoot,
           stdio: ['ignore', 'ignore', 'ignore'],
         });
-        deletedLocalBranches.push(branch);
+        recordOperation(description, 'succeeded');
       } catch (error) {
-        logger.warn(`  Warning: Failed to delete local branch ${branch}: ${toErrorMessage(error)}`);
+        if (hasMessageMatch(error, ['not found'])) {
+          recordOperation(description, 'skipped', 'already deleted');
+          continue;
+        }
+
+        recordOperation(description, 'failed', toErrorMessage(error));
       }
     }
-  }
-  if (deletedLocalBranches.length > 0) {
-    actions.push(`Deleted local branches: ${deletedLocalBranches.join(', ')}`);
   }
 
   const closedPrBranches = new Set<string>();
+  const prNumbersByBranch = new Map(scan.prs.map((pr) => [pr.headRefName, pr.number]));
   for (const pr of scan.prs) {
+    const description = `Close PR #${pr.number}`;
+
     try {
       await gh(['pr', 'close', String(pr.number), '-R', nwo]);
       closedPrBranches.add(pr.headRefName);
+      recordOperation(description, 'succeeded');
     } catch (error) {
-      logger.warn(`  Warning: Failed to close PR #${pr.number}: ${toErrorMessage(error)}`);
-    }
-  }
-  if (scan.prs.length > 0) {
-    actions.push(`Closed PRs: ${scan.prs.map((pr) => `#${pr.number}`).join(', ')}`);
-  }
-
-  const prBranches = new Set(scan.prs.map((pr) => pr.headRefName));
-  const deletableBranches: string[] = [];
-  for (const branchName of scan.branchesToDelete) {
-    if (closedPrBranches.has(branchName)) {
-      deletableBranches.push(branchName);
-      continue;
-    }
-
-    if (prBranches.has(branchName)) {
-      continue;
-    }
-
-    try {
-      const { stdout: prJson } = await gh([
-        'pr',
-        'list',
-        '-R',
-        nwo,
-        '--head',
-        branchName,
-        '--state',
-        'open',
-        '--json',
-        'number,headRefName',
-      ]);
-      const branchPrs = parsePrEntries(prJson).filter((pr) => pr.headRefName === branchName);
-      if (branchPrs.length === 0) {
-        deletableBranches.push(branchName);
+      if (hasMessageMatch(error, ['already closed'])) {
+        closedPrBranches.add(pr.headRefName);
+        recordOperation(description, 'skipped', 'already closed');
         continue;
       }
 
-      logger.warn(
-        `  Warning: Skipping branch ${branchName} because it still has an open PR: ${branchPrs
-          .map((pr) => `#${pr.number}`)
-          .join(', ')}`
-      );
-    } catch (error) {
-      logger.warn(
-        `  Warning: Could not verify open PR state for branch ${branchName}: ${toErrorMessage(error)}`
-      );
+      recordOperation(description, 'failed', toErrorMessage(error));
     }
   }
-  for (const branch of deletableBranches) {
+
+  const prBranches = new Set(scan.prs.map((pr) => pr.headRefName));
+  for (const branchName of scan.branchesToDelete) {
+    const description = `Delete remote branch ${branchName}`;
+
+    if (closedPrBranches.has(branchName)) {
+      // Safe to delete because the matching PR was closed in this run or was already closed.
+    } else if (prBranches.has(branchName)) {
+      const prNumber = prNumbersByBranch.get(branchName);
+      const reason = prNumber
+        ? `blocked because PR #${prNumber} could not be closed`
+        : 'blocked because the associated PR could not be closed';
+      recordOperation(description, 'failed', reason);
+      continue;
+    } else {
+      try {
+        const { stdout: prJson } = await gh([
+          'pr',
+          'list',
+          '-R',
+          nwo,
+          '--head',
+          branchName,
+          '--state',
+          'open',
+          '--json',
+          'number,headRefName',
+        ]);
+        const branchPrs = parsePrEntries(prJson).filter((pr) => pr.headRefName === branchName);
+        if (branchPrs.length > 0) {
+          recordOperation(
+            description,
+            'failed',
+            `still has an open PR: ${branchPrs.map((pr) => `#${pr.number}`).join(', ')}`
+          );
+          continue;
+        }
+      } catch (error) {
+        recordOperation(
+          description,
+          'failed',
+          `could not verify open PR state: ${toErrorMessage(error)}`
+        );
+        continue;
+      }
+    }
+
     try {
-      await gh(['api', '-X', 'DELETE', `repos/${nwo}/git/refs/heads/${branch}`]);
+      await gh(['api', '-X', 'DELETE', `repos/${nwo}/git/refs/heads/${branchName}`]);
+      recordOperation(description, 'succeeded');
     } catch (error) {
-      logger.warn(`  Warning: Failed to delete branch ${branch}: ${toErrorMessage(error)}`);
+      if (hasMessageMatch(error, ['not found', 'reference does not exist'])) {
+        recordOperation(description, 'skipped', 'already deleted');
+        continue;
+      }
+
+      recordOperation(description, 'failed', toErrorMessage(error));
     }
-  }
-  if (deletableBranches.length > 0) {
-    actions.push(`Deleted remote branches: ${deletableBranches.join(', ')}`);
   }
 
   for (const commentId of scan.commentIds) {
+    const description = `Delete comment ${commentId}`;
+
     try {
       await gh(['api', '-X', 'DELETE', `repos/${nwo}/issues/comments/${commentId}`]);
+      recordOperation(description, 'succeeded');
     } catch (error) {
-      logger.warn(`  Warning: Failed to delete comment ${commentId}: ${toErrorMessage(error)}`);
+      if (hasMessageMatch(error, ['not found', '404'])) {
+        recordOperation(description, 'skipped', 'already deleted');
+        continue;
+      }
+
+      recordOperation(description, 'failed', toErrorMessage(error));
     }
-  }
-  if (scan.commentIds.length > 0) {
-    actions.push(`Deleted ${scan.commentIds.length} comment(s)`);
   }
 
   if (scan.labelsToRemove.length > 0 || scan.addTarget) {
     const args = ['issue', 'edit', String(issueNum), '-R', nwo];
+    const descriptions: string[] = [];
+
     if (scan.labelsToRemove.length > 0) {
       args.push('--remove-label', scan.labelsToRemove.join(','));
+      descriptions.push(`Remove labels: ${scan.labelsToRemove.join(', ')}`);
     }
     if (scan.addTarget) {
       args.push('--add-label', scan.targetLabel);
+      descriptions.push(`Add label: ${scan.targetLabel}`);
     }
 
     try {
       await gh(args);
+      for (const description of descriptions) {
+        recordOperation(description, 'succeeded');
+      }
     } catch (error) {
-      logger.warn(`  Warning: Failed to update labels: ${toErrorMessage(error)}`);
+      const reason = toErrorMessage(error);
+      for (const description of descriptions) {
+        recordOperation(description, 'failed', reason);
+      }
     }
-  }
-  if (scan.labelsToRemove.length > 0) {
-    actions.push(`Removed labels: ${scan.labelsToRemove.join(', ')}`);
-  }
-  if (scan.addTarget) {
-    actions.push(`Added label: ${scan.targetLabel}`);
   }
 
   let resetBody =
@@ -617,13 +665,13 @@ export async function executeReset(
 
   try {
     await gh(['issue', 'comment', String(issueNum), '-R', nwo, '--body', resetBody]);
-    actions.push('Posted reset notice comment');
+    recordOperation('Post reset notice comment', 'succeeded');
   } catch (error) {
-    logger.warn(`  Warning: Failed to post reset comment: ${toErrorMessage(error)}`);
+    recordOperation('Post reset notice comment', 'failed', toErrorMessage(error));
   }
 
-  logger.log(`\nReset complete for issue #${issueNum}:`);
-  for (const action of actions) {
-    logger.log(`  ✓ ${action}`);
-  }
+  return {
+    operations,
+    hasFailures: operations.some((operation) => operation.status === 'failed'),
+  };
 }
