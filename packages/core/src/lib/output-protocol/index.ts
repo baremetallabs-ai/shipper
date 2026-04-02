@@ -1,0 +1,27 @@
+export type { DiffFileHunks } from './diff-parse.js';
+export { parseDiffHunks } from './diff-parse.js';
+
+export {
+  PROTOCOL_INPUT_DIR,
+  PROTOCOL_OUTPUT_DIR,
+  scrubOutputDir,
+  setupProtocolDirs,
+  truncateLargeInput,
+  writeContextFile,
+} from './protocol-io.js';
+
+export {
+  formatCorrectionMessage,
+  retryOnInvalidOutput,
+  validateStageOutput,
+} from './protocol-validation.js';
+
+export {
+  createPrFromSpec,
+  executeTransition,
+  handleAgentCrash,
+  postComment,
+  postReplies,
+  processResult,
+  submitReviewPayload,
+} from './protocol-actions.js';
