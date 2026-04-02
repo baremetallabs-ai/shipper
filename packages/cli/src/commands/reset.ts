@@ -17,6 +17,7 @@ import {
   getStageLabel,
   getValidTargets,
   gh,
+  isPlainObject,
   isClean,
   isLockStale,
   parseStage,
@@ -42,10 +43,6 @@ interface IssueViewData {
   number: number;
   state: string;
   labels: { name: string }[];
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function parseIssueViewData(json: string): IssueViewData {

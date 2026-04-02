@@ -12,6 +12,7 @@ import { autoSelectPrForStage, resolveRef } from '@dnsquared/shipper-core';
 import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
 import { formatConflictContext } from '@dnsquared/shipper-core';
 import { gh } from '@dnsquared/shipper-core';
+import { isPlainObject } from '@dnsquared/shipper-core';
 import { toErrorMessage } from '@dnsquared/shipper-core';
 import { withStageHooks } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
@@ -50,10 +51,6 @@ class PollingInterruptedError extends Error {
   constructor() {
     super('Check polling interrupted.');
   }
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function parseCreatedAt(json: string): string {

@@ -3,12 +3,9 @@ import { promisify } from 'node:util';
 
 import { gh } from './gh.js';
 import { logger } from './logger.js';
+import { isPlainObject } from './type-guards.js';
 
 const execFileAsync = promisify(execFile);
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 function parseHeadRefName(json: string): string {
   const parsed: unknown = JSON.parse(json);

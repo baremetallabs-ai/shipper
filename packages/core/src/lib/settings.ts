@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import { toErrorMessage } from './errors.js';
 import { logger } from './logger.js';
+import { isPlainObject } from './type-guards.js';
 
 export type AgentName = 'claude' | 'codex' | 'copilot';
 export type CommandMode = 'headless' | 'interactive' | 'default';
@@ -195,10 +196,6 @@ export function resolveModel(step: string, override?: string): string | undefine
 
   const s = getSettings();
   return validateModel(s.commands[step]?.model ?? s.commands.default.model, step);
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function isSafeCommandKey(key: string): boolean {

@@ -13,6 +13,7 @@ import {
 } from './labels.js';
 import { gh } from './gh.js';
 import { logger } from './logger.js';
+import { isPlainObject } from './type-guards.js';
 import { removeWorktree } from './worktree.js';
 
 const IMPLEMENTED_STAGE_INDEX = STAGE_LABEL_NAMES.indexOf(IMPLEMENTED_LABEL);
@@ -70,15 +71,10 @@ export interface ResetResult {
   hasFailures: boolean;
 }
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 function hasMessageMatch(error: unknown, patterns: string[]): boolean {
   const message = toErrorMessage(error).toLowerCase();
   return patterns.some((pattern) => message.includes(pattern.toLowerCase()));
 }
-
 function parsePrEntries(json: string): PREntry[] {
   const parsed: unknown = JSON.parse(json);
   if (!Array.isArray(parsed)) {

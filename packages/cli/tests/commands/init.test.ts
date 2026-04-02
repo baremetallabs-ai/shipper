@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { toError, toErrorMessage } from '../../../core/src/lib/errors.js';
+import { isPlainObject } from '../../../core/src/lib/type-guards.js';
 
 const { mockGh, mockExecFileAsync, mockRunPrereqChecks } = vi.hoisted(() => ({
   mockGh: vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>(),
@@ -111,6 +112,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   },
   toError,
   toErrorMessage,
+  isPlainObject,
   gh: (args: string[]) => mockGh(args),
   scripts: {},
   LABELS: canonicalLabels,
@@ -150,10 +152,6 @@ const expectedLabels = canonicalLabels;
 
 type JsonObject = Record<string, unknown>;
 type WriteFileCall = [target: string | number, data: string | Buffer];
-
-function isPlainObject(value: unknown): value is JsonObject {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 function findWriteCall(targetPath: string): WriteFileCall | undefined {
   return writeFileSyncMock.mock.calls.find(([target]) => target === targetPath);
