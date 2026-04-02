@@ -18,6 +18,7 @@ import {
   getStageLabel,
   getValidTargets,
   gh,
+  isPlainObject,
   isLockStale,
   listIssues,
   LOCKED_LABEL,
@@ -359,10 +360,6 @@ function parseIssueListJson(repo: string, json: string): RawListIssueData[] {
     const preview = json.length > 200 ? `${json.slice(0, 200)}…` : json;
     throw new Error(`Failed to list adoptable issues for ${repo}: ${message}. Output: ${preview}`);
   }
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function readConfiguredAgentFromSettings(

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { toError, toErrorMessage } from '../../core/src/lib/errors.js';
+import { isPlainObject } from '../../core/src/lib/type-guards.js';
 
 type IpcHandler = (event: unknown, payload: unknown) => unknown;
 let mockUserDataPath = '';
@@ -102,6 +103,7 @@ vi.mock('@dnsquared/shipper-core', () => {
     getStageLabel,
     getValidTargets,
     gh: state.ghMock,
+    isPlainObject,
     isLockStale: state.isLockStaleMock,
     listIssues: state.listIssuesMock,
     LOCKED_LABEL: 'shipper:locked',

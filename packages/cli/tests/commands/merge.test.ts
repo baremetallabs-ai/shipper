@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { toError, toErrorMessage } from '../../../core/src/lib/errors.js';
+import { isPlainObject } from '../../../core/src/lib/type-guards.js';
 
 const tryResolvePrForIssueMock =
   vi.fn<(repo: string, issueNumber: number) => Promise<string | undefined>>();
@@ -41,6 +42,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   },
   toError,
   toErrorMessage,
+  isPlainObject,
   getSettings: () => getSettingsMock(),
   gh: (args: string[]) => ghMock(args),
   tryResolvePrForIssue: (repo: string, issueNumber: number) =>

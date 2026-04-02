@@ -6,6 +6,7 @@ import type {
   ResultJson,
 } from '@dnsquared/shipper-core';
 import { toError, toErrorMessage } from '../../../core/src/lib/errors.js';
+import { isPlainObject } from '../../../core/src/lib/type-guards.js';
 
 type MockPrReviewWait =
   | { mode: 'timer'; durationMinutes: number }
@@ -83,6 +84,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   },
   toError,
   toErrorMessage,
+  isPlainObject,
   resolveRef: resolveRefMock,
   autoSelectPrForStage: autoSelectPrForStageMock,
   formatConflictContext: formatConflictContextMock,

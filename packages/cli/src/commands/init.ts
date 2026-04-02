@@ -12,6 +12,7 @@ import {
   CLI_VERSION,
   readmeTemplate,
   LABELS,
+  isPlainObject,
   runPrereqChecks,
   checkGitRepo,
   checkGhInstalled,
@@ -33,10 +34,6 @@ function getErrorStderr(err: unknown): string {
 
 const VALID_AGENTS = ['claude', 'codex', 'copilot'] as const;
 const UNSAFE_COMMAND_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 function getNestedValue(source: Record<string, unknown>, dottedKey: string): unknown {
   let current: unknown = source;

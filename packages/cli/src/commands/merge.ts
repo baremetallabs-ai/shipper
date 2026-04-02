@@ -1,7 +1,7 @@
 import { openSync, closeSync, readFileSync, writeFileSync, unlinkSync, constants } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { logger, fetchChecks, classifyChecks } from '@dnsquared/shipper-core';
+import { logger, fetchChecks, classifyChecks, isPlainObject } from '@dnsquared/shipper-core';
 import { gh } from '@dnsquared/shipper-core';
 import { getSettings } from '@dnsquared/shipper-core';
 import { tryResolvePrForIssue } from '@dnsquared/shipper-core';
@@ -61,10 +61,6 @@ interface PRStateViewData {
 
 const MERGE_POLL_MAX_ATTEMPTS = 5;
 const MERGE_POLL_BASE_DELAY_MS = 1_000;
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 export function parseGraphQLResponse(json: string): GraphQLResponse {
   const parsed: unknown = JSON.parse(json);
