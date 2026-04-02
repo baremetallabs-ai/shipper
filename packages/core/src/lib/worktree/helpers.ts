@@ -57,7 +57,11 @@ export function toError(error: unknown): Error {
     return new Error('Unknown child process error');
   }
 
-  return new Error(JSON.stringify(error));
+  try {
+    return new Error(JSON.stringify(error));
+  } catch {
+    return new Error(Object.prototype.toString.call(error));
+  }
 }
 
 export function spawnAsync(command: string, args: string[], opts: CommandOpts = {}): Promise<void> {

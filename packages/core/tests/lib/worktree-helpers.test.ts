@@ -19,6 +19,7 @@ vi.mock('node:child_process', async () => {
 });
 
 const { getCommitsAheadCount } = await import('../../src/lib/worktree.js');
+const { toError } = await import('../../src/lib/worktree/helpers.js');
 
 function queueExecResult(opts: { code?: number; stdout?: string; stderr?: string } = {}): void {
   const { code = 0, stdout = '', stderr = '' } = opts;
@@ -90,5 +91,15 @@ describe('getCommitsAheadCount', () => {
       'git rev-list --count origin/main..HEAD returned a non-numeric commit count'
     );
     expect(gitArgsFromExecCalls()).toEqual([['rev-list', '--count', 'origin/main..HEAD']]);
+  });
+});
+
+describe('toError', () => {
+  it('does not throw for circular objects', () => {
+    const input: { self?: unknown } = {};
+    input.self = input;
+
+    expect(() => toError(input)).not.toThrow();
+    expect(toError(input).message).toBe('[object Object]');
   });
 });
