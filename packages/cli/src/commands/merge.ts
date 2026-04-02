@@ -187,6 +187,7 @@ export async function isPrMerged(prNumber: number, nwo: string): Promise<boolean
     const { state } = parsePRStateViewData(stdout);
     return state === 'MERGED';
   } catch {
+    logger.warn(`Failed to check merge status for PR #${prNumber}`);
     return null;
   }
 }
@@ -436,6 +437,7 @@ export async function getLinkedIssueNumber(prNumber: number, nwo: string): Promi
     const match = /(?:^|\s)(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/im.exec(body);
     return match?.[1] ? Number(match[1]) : null;
   } catch {
+    logger.warn(`Failed to fetch linked issue for PR #${prNumber}`);
     return null;
   }
 }
