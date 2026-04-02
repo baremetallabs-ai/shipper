@@ -11,19 +11,11 @@ import {
 
 import {
   BLOCKED_LABEL,
-  DESIGNED_LABEL,
   DISPLAY_NAME_MAP,
-  FAILED_LABEL,
-  GROOMED_LABEL,
   getPriorityTier,
-  IMPLEMENTED_LABEL,
   LOCKED_LABEL,
   NEW_LABEL,
-  PLANNED_LABEL,
-  PR_OPEN_LABEL,
-  PR_REVIEWED_LABEL,
   READY_LABEL,
-  STAGE_LABEL_NAMES,
 } from '../../../core/src/lib/labels.js';
 import type { ListIssueItem, WorkflowStage } from '@dnsquared/shipper-core';
 
@@ -37,7 +29,6 @@ import { ResetConfirmDialog } from './components/reset-confirm-dialog.js';
 import { RepoPickerDialog } from './components/repo-picker-dialog.js';
 import { RepoTabBar } from './components/repo-tab-bar.js';
 import { UnlockConfirmDialog } from './components/unlock-confirm-dialog.js';
-import type { TerminalSessionTab } from './components/session-tab-bar.js';
 import { TerminalPanel } from './components/terminal-panel.js';
 import { Alert, AlertDescription, AlertTitle } from './components/ui/alert.js';
 import { Badge } from './components/ui/badge.js';
@@ -60,145 +51,43 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from './components/ui/dropdown-menu.js';
+import {
+  getActiveShipIssueNumbers,
+  getBackgroundDetail,
+  getBackgroundRetryPayload,
+  getBackgroundTitle,
+  getNextAutoShipFailureState,
+  getWorkflowStageDisplayName,
+  selectNextAutoShipIssue,
+  selectNextAutoUnblockIssue,
+} from './lib/app-utils.js';
+import {
+  COLUMN_RESET_STAGE,
+  dateFormatter,
+  MAX_AUTO_SHIP_CONSECUTIVE_FAILURES,
+  PIPELINE_COLUMNS,
+  POST_IMPLEMENTATION_LABELS,
+  repoPattern,
+  RESET_STAGE_LABELS,
+  RESET_STAGE_ORDER,
+} from './lib/constants.js';
 import { cn } from './lib/utils.js';
-
-interface CheckResult {
-  ok: boolean;
-  message: string;
-}
-
-interface Prerequisites {
-  ghInstalled: CheckResult;
-  ghAuth: CheckResult;
-}
-
-interface AppConfig {
-  repos: string[];
-  activeRepo: string;
-  autoMergeRepos: string[];
-}
-
-type TerminalSession = TerminalSessionTab;
-type ResetSelection = {
-  issue: ListIssueItem;
-  targetStage: WorkflowStage;
-};
-type BackgroundCommandKind = 'new' | 'ship' | 'init' | 'unblock';
-type BackgroundCommandStatus = 'queued' | 'running' | 'complete' | 'failed';
-type BackgroundRetryPayload =
-  | { command: 'new'; repo: string; request: string }
-  | { command: 'ship'; repo: string; issueNumber: number; merge: boolean }
-  | { command: 'init'; repo: string }
-  | { command: 'unblock'; repo: string; issueNumber: number };
-
-interface BackgroundStatusMeta {
-  issueNumber?: number;
-  merge?: boolean;
-  issueUrl?: string;
-  logFile?: string;
-  request?: string;
-  cancelled?: boolean;
-}
-
-interface BackgroundStatusPayload {
-  sessionId: string;
-  command: BackgroundCommandKind;
-  repo: string;
-  status: BackgroundCommandStatus;
-  exitCode?: number | null;
-  meta?: BackgroundStatusMeta;
-}
-
-interface BackgroundOutputPayload {
-  sessionId: string;
-  data: string;
-}
-
-interface BackgroundCommandState {
-  id: string;
-  command: BackgroundCommandKind;
-  repo: string;
-  status: BackgroundCommandStatus;
-  title: string;
-  detail: string;
-  output: string;
-  request?: string;
-  issueNumber?: number;
-  merge?: boolean;
-  issueUrl?: string;
-  logFile?: string;
-  exitCode?: number | null;
-  cancelled: boolean;
-}
-
-type ActiveShippingCommand = BackgroundCommandState & {
-  command: 'ship';
-  status: 'queued' | 'running';
-  issueNumber: number;
-};
-
-interface BackgroundToastItem {
-  id: string;
-  sessionId: string;
-  variant: 'success' | 'error' | 'cancelled';
-  title: string;
-  description: string;
-  issueUrl?: string;
-  issueLabel?: string;
-  retryable?: boolean;
-  retryPayload?: BackgroundRetryPayload;
-}
-
-interface BackgroundLogViewerState {
-  open: boolean;
-  sessionId: string | null;
-  title: string;
-  content: string;
-}
-
-const repoPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
-const dateFormatter = new Intl.DateTimeFormat(undefined, {
-  dateStyle: 'medium',
-  timeStyle: 'short',
-});
-const PIPELINE_COLUMNS = [
-  GROOMED_LABEL,
-  DESIGNED_LABEL,
-  PLANNED_LABEL,
-  IMPLEMENTED_LABEL,
-  PR_OPEN_LABEL,
-  PR_REVIEWED_LABEL,
-  READY_LABEL,
-] as const;
-const RESET_STAGE_ORDER: ReadonlyArray<{ stage: WorkflowStage; label: string }> = [
-  { stage: 'new', label: NEW_LABEL },
-  { stage: 'groomed', label: GROOMED_LABEL },
-  { stage: 'designed', label: DESIGNED_LABEL },
-  { stage: 'planned', label: PLANNED_LABEL },
-  { stage: 'implemented', label: IMPLEMENTED_LABEL },
-];
-const RESET_STAGE_LABELS: Record<WorkflowStage, string> = Object.fromEntries(
-  RESET_STAGE_ORDER.map(({ stage, label }) => [stage, label])
-) as Record<WorkflowStage, string>;
-const POST_IMPLEMENTATION_LABELS = [PR_OPEN_LABEL, PR_REVIEWED_LABEL, READY_LABEL] as const;
-const MAX_AUTO_SHIP_CONSECUTIVE_FAILURES = 3;
-export const AUTO_SHIP_PRIORITY_LABELS = [
-  PR_REVIEWED_LABEL,
-  PR_OPEN_LABEL,
-  IMPLEMENTED_LABEL,
-  PLANNED_LABEL,
-  DESIGNED_LABEL,
-  GROOMED_LABEL,
-] as const;
-
-type PipelineColumnLabel = (typeof PIPELINE_COLUMNS)[number];
-
-const COLUMN_RESET_STAGE: Partial<Record<PipelineColumnLabel, WorkflowStage>> = {
-  [GROOMED_LABEL]: 'groomed',
-  [DESIGNED_LABEL]: 'designed',
-  [PLANNED_LABEL]: 'planned',
-  [IMPLEMENTED_LABEL]: 'implemented',
-};
+import type {
+  ActiveShippingCommand,
+  AppConfig,
+  BackgroundCommandKind,
+  BackgroundCommandStatus,
+  BackgroundCommandState,
+  BackgroundLogViewerState,
+  BackgroundOutputPayload,
+  BackgroundRetryPayload,
+  BackgroundStatusPayload,
+  BackgroundToastItem,
+  PipelineColumnLabel,
+  Prerequisites,
+  ResetSelection,
+  TerminalSession,
+} from './types.js';
 
 function isValidRepo(repo: string): boolean {
   return repoPattern.test(repo);
@@ -214,100 +103,6 @@ function getLatestOutputLine(output: string): string | null {
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
   return lines.at(-1) ?? null;
-}
-
-export function getBackgroundTitle(
-  command: BackgroundCommandKind,
-  repo: string,
-  issueNumber?: number,
-  merge?: boolean
-): string {
-  switch (command) {
-    case 'new':
-      return 'New issue';
-    case 'ship':
-      return issueNumber ? `Ship #${issueNumber}${merge ? ' · merge' : ''}` : 'Ship';
-    case 'init':
-      return `Init ${repo}`;
-    case 'unblock':
-      return issueNumber ? `Unblock #${issueNumber}` : 'Unblock';
-  }
-}
-
-export function getBackgroundDetail({
-  command,
-  status,
-  repo,
-  issueNumber,
-  merge,
-  latestOutput,
-  cancelled,
-}: {
-  command: BackgroundCommandKind;
-  status: BackgroundCommandStatus;
-  repo: string;
-  issueNumber?: number;
-  merge?: boolean;
-  latestOutput?: string | null;
-  cancelled?: boolean;
-}): string {
-  if (cancelled) {
-    return 'Cancelled';
-  }
-
-  if (status === 'queued' && command === 'ship' && issueNumber) {
-    return `Ship #${issueNumber} queued`;
-  }
-
-  if (status === 'failed') {
-    return latestOutput ?? 'Command failed';
-  }
-
-  if (status === 'complete') {
-    switch (command) {
-      case 'new':
-        return 'Issue created';
-      case 'ship':
-        return merge ? 'Ship completed · merged' : 'Ship completed';
-      case 'init':
-        return 'Initialization complete';
-      case 'unblock':
-        return 'Unblock completed';
-    }
-  }
-
-  if (command === 'new') {
-    return 'Creating issue...';
-  }
-
-  if (command === 'ship') {
-    return latestOutput ?? (issueNumber ? `Shipping #${issueNumber}...` : 'Shipping...');
-  }
-
-  if (command === 'unblock') {
-    return latestOutput ?? (issueNumber ? `Unblocking #${issueNumber}...` : 'Unblocking...');
-  }
-
-  return latestOutput ?? `Initializing ${repo}...`;
-}
-
-export function getBackgroundRetryPayload(
-  command: BackgroundCommandKind,
-  repo: string,
-  request?: string,
-  issueNumber?: number,
-  merge?: boolean
-): BackgroundRetryPayload | undefined {
-  switch (command) {
-    case 'new':
-      return request ? { command, repo, request } : undefined;
-    case 'ship':
-      return issueNumber ? { command, repo, issueNumber, merge: merge ?? false } : undefined;
-    case 'init':
-      return { command, repo };
-    case 'unblock':
-      return issueNumber ? { command, repo, issueNumber } : undefined;
-  }
 }
 
 function isActiveShippingCommand(
@@ -416,156 +211,6 @@ function findActiveIssueSession(
     (session) =>
       session.repo === repo && session.issueNumber === issueNumber && session.status !== 'exited'
   );
-}
-
-export function getActiveShipIssueNumbers(
-  commands: BackgroundCommandState[],
-  repo: string
-): Set<number> {
-  const activeIssueNumbers = new Set<number>();
-
-  for (const command of commands) {
-    if (
-      command.command === 'ship' &&
-      command.repo === repo &&
-      command.issueNumber !== undefined &&
-      (command.status === 'queued' || command.status === 'running') &&
-      !command.cancelled
-    ) {
-      activeIssueNumbers.add(command.issueNumber);
-    }
-  }
-
-  return activeIssueNumbers;
-}
-
-export function getWorkflowStageDisplayName(labels: string[]): string | undefined {
-  for (let index = STAGE_LABEL_NAMES.length - 1; index >= 0; index -= 1) {
-    const label = STAGE_LABEL_NAMES[index];
-    if (label && labels.includes(label)) {
-      return DISPLAY_NAME_MAP[label];
-    }
-  }
-
-  return undefined;
-}
-
-export function selectNextAutoShipIssue(
-  issues: ListIssueItem[],
-  activeIssueNumbers: Set<number>,
-  skippedIssueNumbers: Set<number>
-): ListIssueItem | null {
-  const candidates: Array<{
-    issue: ListIssueItem;
-    priorityTier: 0 | 1 | 2;
-    stageIndex: number;
-    issueIndex: number;
-  }> = [];
-
-  issues.forEach((issue, issueIndex) => {
-    if (
-      activeIssueNumbers.has(issue.number) ||
-      skippedIssueNumbers.has(issue.number) ||
-      issue.labels.includes(BLOCKED_LABEL) ||
-      issue.labels.includes(FAILED_LABEL) ||
-      issue.labels.includes(LOCKED_LABEL)
-    ) {
-      return;
-    }
-
-    const stageIndex = AUTO_SHIP_PRIORITY_LABELS.findIndex((label) => issue.labels.includes(label));
-    if (stageIndex < 0) {
-      return;
-    }
-
-    candidates.push({
-      issue,
-      priorityTier: getPriorityTier(issue.labels),
-      stageIndex,
-      issueIndex,
-    });
-  });
-
-  if (candidates.length === 0) {
-    return null;
-  }
-
-  candidates.sort((left, right) => {
-    if (left.priorityTier !== right.priorityTier) {
-      return left.priorityTier - right.priorityTier;
-    }
-
-    if (left.stageIndex !== right.stageIndex) {
-      return left.stageIndex - right.stageIndex;
-    }
-
-    return left.issueIndex - right.issueIndex;
-  });
-
-  return candidates[0]?.issue ?? null;
-}
-
-export function selectNextAutoUnblockIssue(
-  issues: ListIssueItem[],
-  queuedIssueNumbers: number[]
-): {
-  issue: ListIssueItem | null;
-  remainingIssueNumbers: number[];
-} {
-  const remainingIssueNumbers = [...queuedIssueNumbers];
-
-  while (remainingIssueNumbers.length > 0) {
-    const nextIssueNumber = remainingIssueNumbers.shift();
-    if (nextIssueNumber === undefined) {
-      continue;
-    }
-
-    const issue = issues.find((currentIssue) => currentIssue.number === nextIssueNumber);
-    if (!issue || !issue.labels.includes(BLOCKED_LABEL) || issue.labels.includes(LOCKED_LABEL)) {
-      continue;
-    }
-
-    return {
-      issue,
-      remainingIssueNumbers,
-    };
-  }
-
-  return {
-    issue: null,
-    remainingIssueNumbers: [],
-  };
-}
-
-export function getNextAutoShipFailureState(
-  status: 'complete' | 'failed',
-  issueNumber: number | undefined,
-  currentFailures: number,
-  currentSkipped: Set<number>
-): {
-  consecutiveFailures: number;
-  skippedIssueNumbers: Set<number>;
-  pauseAutoShip: boolean;
-} {
-  if (status === 'complete') {
-    return {
-      consecutiveFailures: 0,
-      skippedIssueNumbers: new Set(currentSkipped),
-      pauseAutoShip: false,
-    };
-  }
-
-  const skippedIssueNumbers = new Set(currentSkipped);
-  if (issueNumber !== undefined) {
-    skippedIssueNumbers.add(issueNumber);
-  }
-
-  const consecutiveFailures = currentFailures + 1;
-  return {
-    consecutiveFailures,
-    skippedIssueNumbers,
-    pauseAutoShip: consecutiveFailures >= MAX_AUTO_SHIP_CONSECUTIVE_FAILURES,
-  };
 }
 
 interface IssueCardProps {
