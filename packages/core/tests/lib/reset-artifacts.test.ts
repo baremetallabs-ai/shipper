@@ -731,6 +731,10 @@ describe('executeReset', () => {
       status: 'skipped',
       reason: 'already deleted',
     });
+    expect(mockExecFileSync).toHaveBeenCalledWith('git', ['branch', '-D', 'shipper/18-add-reset'], {
+      cwd: '/repo',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     expect(result.hasFailures).toBe(false);
   });
 

@@ -141,12 +141,14 @@ function printResetResult(issueNum: number, result: ResetResult): void {
       continue;
     }
 
+    const reason = operation.reason ?? 'unknown reason';
+
     if (operation.status === 'failed') {
-      logger.log(`  ✗ ${operation.description}: ${operation.reason}`);
+      logger.log(`  ✗ ${operation.description}: ${reason}`);
       continue;
     }
 
-    logger.log(`  — ${operation.description} (${operation.reason})`);
+    logger.log(`  — ${operation.description} (${reason})`);
   }
 }
 
