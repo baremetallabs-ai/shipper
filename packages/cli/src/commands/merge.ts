@@ -65,7 +65,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function parseGraphQLResponse(json: string): GraphQLResponse {
+export function parseGraphQLResponse(json: string): GraphQLResponse {
   const parsed: unknown = JSON.parse(json);
   if (!isPlainObject(parsed)) {
     throw new Error('GitHub GraphQL response was not an object.');
@@ -136,7 +136,7 @@ function parseGraphQLResponse(json: string): GraphQLResponse {
   };
 }
 
-function parsePRViewData(json: string): PRViewData {
+export function parsePRViewData(json: string): PRViewData {
   const parsed: unknown = JSON.parse(json);
   if (!isPlainObject(parsed) || typeof parsed.mergeStateStatus !== 'string') {
     throw new Error('GitHub CLI returned an invalid pull request view payload.');
@@ -145,7 +145,7 @@ function parsePRViewData(json: string): PRViewData {
   return { mergeStateStatus: parsed.mergeStateStatus };
 }
 
-function parsePRStateViewData(json: string): PRStateViewData {
+export function parsePRStateViewData(json: string): PRStateViewData {
   const parsed: unknown = JSON.parse(json);
   if (!isPlainObject(parsed) || typeof parsed.state !== 'string') {
     throw new Error('GitHub CLI returned an invalid pull request state payload.');
