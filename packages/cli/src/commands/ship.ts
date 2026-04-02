@@ -274,6 +274,7 @@ async function getCurrentLabel(repo: string, issueStr: string): Promise<string |
     ]);
     output = result.stdout.trim();
   } catch {
+    logger.warn(`Failed to fetch labels for issue #${issueStr}`);
     return undefined;
   }
 
@@ -1150,6 +1151,7 @@ export async function selectBlockedIssues(
     ]);
     output = result.stdout.trim();
   } catch {
+    logger.warn('Failed to fetch blocked issues');
     return [];
   }
 
@@ -1159,6 +1161,7 @@ export async function selectBlockedIssues(
   try {
     issues = JSON.parse(output) as { number: number; title: string; labels: { name: string }[] }[];
   } catch {
+    logger.warn('Failed to parse blocked issues response');
     return [];
   }
 
@@ -1741,6 +1744,7 @@ async function resolveIssueTotalTokens(
     const usage = await aggregateSessionUsage(repo, issue, since);
     return usage ? getTotalTokens(usage) : undefined;
   } catch {
+    logger.warn(`Failed to resolve total tokens for issue #${issue}`);
     return undefined;
   }
 }

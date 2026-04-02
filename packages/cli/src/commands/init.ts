@@ -359,6 +359,7 @@ export async function initCommand(options: {
     try {
       await execFileAsync('git', ['diff', '--cached', '--quiet', '--', '.shipper/']);
     } catch {
+      // Non-zero exit means there are staged changes.
       hasChanges = true;
     }
 
@@ -468,6 +469,7 @@ function readGitignore(filepath: string): string {
   try {
     return readFileSync(filepath, 'utf-8');
   } catch {
+    // File doesn't exist — start with empty content.
     return '';
   }
 }

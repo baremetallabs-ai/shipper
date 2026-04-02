@@ -72,6 +72,7 @@ beforeEach(() => {
 
 const {
   getLinkedIssueNumber,
+  isPrMerged,
   parseGraphQLResponse,
   parsePRViewData,
   parsePRStateViewData,
@@ -80,6 +81,15 @@ const {
   mergeCommand,
   pollPrMerged,
 } = await import('../../src/commands/merge.js');
+
+describe('isPrMerged', () => {
+  it('returns null and warns when gh pr view throws', async () => {
+    ghMock.mockRejectedValue(new Error('gh failed'));
+
+    await expect(isPrMerged(42, 'owner/repo')).resolves.toBeNull();
+    expect(warnMock).toHaveBeenCalledWith('[shipper] Failed to check merge status for PR #42');
+  });
+});
 
 interface MockPRLookupOptions {
   linkedIssueBody?: string;
@@ -457,6 +467,7 @@ describe('getLinkedIssueNumber', () => {
   it('returns null when gh pr view throws', async () => {
     ghMock.mockRejectedValue(new Error('gh failed'));
     await expect(getLinkedIssueNumber(42, 'owner/repo')).resolves.toBeNull();
+    expect(warnMock).toHaveBeenCalledWith('[shipper] Failed to fetch linked issue for PR #42');
   });
 });
 

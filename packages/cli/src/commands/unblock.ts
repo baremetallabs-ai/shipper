@@ -74,6 +74,7 @@ async function fetchDependencyStates(repo: string, refs: string[]): Promise<stri
           `- **State**: ${state}`,
         ].join('\n');
       } catch {
+        // Not a PR — render as issue instead.
         return [
           `## #${ref}`,
           '- **Type**: Issue',
