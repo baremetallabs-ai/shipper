@@ -13,78 +13,17 @@ import {
   PRIORITY_LOW_LABEL,
 } from '../../core/src/lib/labels.js';
 import type { ListIssueItem } from '../../core/src/lib/github.js';
-import * as autoShipModule from '../src/renderer/App.js';
-
-type BackgroundCommandLike = {
-  command: 'new' | 'ship' | 'init' | 'unblock';
-  repo: string;
-  status: 'queued' | 'running' | 'complete' | 'failed';
-  issueNumber?: number;
-  cancelled: boolean;
-};
-
-const {
+import {
   getActiveShipIssueNumbers,
   getBackgroundDetail,
   getBackgroundRetryPayload,
   getBackgroundTitle,
   getNextAutoShipFailureState,
-  selectNextAutoUnblockIssue,
   getWorkflowStageDisplayName,
   selectNextAutoShipIssue,
-} = autoShipModule as {
-  getActiveShipIssueNumbers: (commands: BackgroundCommandLike[], repo: string) => Set<number>;
-  getBackgroundDetail: (input: {
-    command: 'new' | 'ship' | 'init' | 'unblock';
-    status: 'queued' | 'running' | 'complete' | 'failed';
-    repo: string;
-    issueNumber?: number;
-    merge?: boolean;
-    latestOutput?: string | null;
-    cancelled?: boolean;
-  }) => string;
-  getBackgroundRetryPayload: (
-    command: 'new' | 'ship' | 'init' | 'unblock',
-    repo: string,
-    request?: string,
-    issueNumber?: number,
-    merge?: boolean
-  ) =>
-    | { command: 'new'; repo: string; request: string }
-    | { command: 'ship'; repo: string; issueNumber: number; merge: boolean }
-    | { command: 'init'; repo: string }
-    | { command: 'unblock'; repo: string; issueNumber: number }
-    | undefined;
-  getBackgroundTitle: (
-    command: 'new' | 'ship' | 'init' | 'unblock',
-    repo: string,
-    issueNumber?: number,
-    merge?: boolean
-  ) => string;
-  getNextAutoShipFailureState: (
-    status: 'complete' | 'failed',
-    issueNumber: number | undefined,
-    currentFailures: number,
-    currentSkipped: Set<number>
-  ) => {
-    consecutiveFailures: number;
-    skippedIssueNumbers: Set<number>;
-    pauseAutoShip: boolean;
-  };
-  getWorkflowStageDisplayName: (labels: string[]) => string | undefined;
-  selectNextAutoShipIssue: (
-    issues: ListIssueItem[],
-    activeIssueNumbers: Set<number>,
-    skippedIssueNumbers: Set<number>
-  ) => ListIssueItem | null;
-  selectNextAutoUnblockIssue: (
-    issues: ListIssueItem[],
-    queuedIssueNumbers: number[]
-  ) => {
-    issue: ListIssueItem | null;
-    remainingIssueNumbers: number[];
-  };
-};
+  selectNextAutoUnblockIssue,
+} from '../src/renderer/lib/app-utils.js';
+import type { BackgroundCommandState } from '../src/renderer/types.js';
 
 function createIssue(number: number, labels: string[]): ListIssueItem {
   return {
@@ -148,7 +87,7 @@ describe('selectNextAutoShipIssue', () => {
 
 describe('getActiveShipIssueNumbers', () => {
   it('returns queued and running ship issue numbers for the matching repo only', () => {
-    const commands = [
+    const commands: BackgroundCommandState[] = [
       {
         id: 'ship-queued',
         command: 'ship',
@@ -243,6 +182,11 @@ describe('getActiveShipIssueNumbers', () => {
 });
 
 describe('merge-aware background helpers', () => {
+  it('renders new and init titles', () => {
+    expect(getBackgroundTitle('new', 'owner/repo')).toBe('New issue');
+    expect(getBackgroundTitle('init', 'owner/repo')).toBe('Init owner/repo');
+  });
+
   it('renders unblock titles and detail copy', () => {
     expect(getBackgroundTitle('unblock', 'owner/repo', 70)).toBe('Unblock #70');
     expect(
@@ -261,6 +205,38 @@ describe('merge-aware background helpers', () => {
         issueNumber: 70,
       })
     ).toBe('Unblock completed');
+  });
+
+  it('returns cancelled detail before any other status-specific copy', () => {
+    expect(
+      getBackgroundDetail({
+        command: 'ship',
+        status: 'failed',
+        repo: 'owner/repo',
+        issueNumber: 70,
+        latestOutput: 'fatal: merge conflict',
+        cancelled: true,
+      })
+    ).toBe('Cancelled');
+  });
+
+  it('uses failure output when present and a default failure message otherwise', () => {
+    expect(
+      getBackgroundDetail({
+        command: 'ship',
+        status: 'failed',
+        repo: 'owner/repo',
+        issueNumber: 70,
+        latestOutput: 'fatal: merge conflict',
+      })
+    ).toBe('fatal: merge conflict');
+    expect(
+      getBackgroundDetail({
+        command: 'new',
+        status: 'failed',
+        repo: 'owner/repo',
+      })
+    ).toBe('Command failed');
   });
 
   it('adds the merge suffix to ship titles only when merge is enabled', () => {
@@ -289,6 +265,43 @@ describe('merge-aware background helpers', () => {
     ).toBe('Ship completed');
   });
 
+  it('uses the existing non-merge default detail copy for new, ship, and init commands', () => {
+    expect(
+      getBackgroundDetail({
+        command: 'new',
+        status: 'running',
+        repo: 'owner/repo',
+      })
+    ).toBe('Creating issue...');
+    expect(
+      getBackgroundDetail({
+        command: 'ship',
+        status: 'running',
+        repo: 'owner/repo',
+        issueNumber: 72,
+      })
+    ).toBe('Shipping #72...');
+    expect(
+      getBackgroundDetail({
+        command: 'init',
+        status: 'running',
+        repo: 'owner/repo',
+      })
+    ).toBe('Initializing owner/repo...');
+  });
+
+  it('builds new and init retry payloads', () => {
+    expect(getBackgroundRetryPayload('new', 'owner/repo', 'Investigate flaky tests')).toEqual({
+      command: 'new',
+      repo: 'owner/repo',
+      request: 'Investigate flaky tests',
+    });
+    expect(getBackgroundRetryPayload('init', 'owner/repo')).toEqual({
+      command: 'init',
+      repo: 'owner/repo',
+    });
+  });
+
   it('preserves merge mode in ship retry payloads', () => {
     expect(getBackgroundRetryPayload('ship', 'owner/repo', undefined, 73, true)).toEqual({
       command: 'ship',
@@ -310,6 +323,12 @@ describe('merge-aware background helpers', () => {
       repo: 'owner/repo',
       issueNumber: 75,
     });
+  });
+
+  it('returns undefined retry payloads when required command inputs are missing', () => {
+    expect(getBackgroundRetryPayload('new', 'owner/repo')).toBeUndefined();
+    expect(getBackgroundRetryPayload('ship', 'owner/repo')).toBeUndefined();
+    expect(getBackgroundRetryPayload('unblock', 'owner/repo')).toBeUndefined();
   });
 });
 
@@ -336,6 +355,14 @@ describe('getNextAutoShipFailureState', () => {
     expect(result.consecutiveFailures).toBe(3);
     expect(result.skippedIssueNumbers).toEqual(new Set([61, 62, 63]));
     expect(result.pauseAutoShip).toBe(true);
+  });
+
+  it('increments failures without adding a skipped issue when the failed command has no issue number', () => {
+    const result = getNextAutoShipFailureState('failed', undefined, 1, new Set([61]));
+
+    expect(result.consecutiveFailures).toBe(2);
+    expect(result.skippedIssueNumbers).toEqual(new Set([61]));
+    expect(result.pauseAutoShip).toBe(false);
   });
 });
 
