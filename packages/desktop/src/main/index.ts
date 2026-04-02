@@ -388,6 +388,7 @@ function readConfiguredAgentFromSettings(
       ? configuredAgent
       : undefined;
   } catch {
+    // Missing or malformed settings file — fall through to default.
     return undefined;
   }
 }
@@ -476,6 +477,7 @@ async function resolveCreatedIssueMeta(
 
     return match ? { issueNumber: match.number, issueUrl: match.url } : {};
   } catch {
+    console.warn(`[shipper] Failed to find matching created issue for ${repo}`);
     return {};
   }
 }
@@ -947,6 +949,7 @@ function registerIpcHandlers(): void {
       const stale = await isLockStale(parsedPayload.repo, String(parsedPayload.issueNumber));
       return { stale };
     } catch {
+      console.warn('[shipper] Failed to check lock staleness');
       return { stale: false };
     }
   });

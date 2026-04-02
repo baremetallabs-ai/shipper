@@ -245,6 +245,26 @@ describe('BackgroundManager', () => {
     expect(manager.getOutput('new-1')).toBe('{"type":"log","message":"hello"}\n');
   });
 
+  it('warns and returns an empty string when the new-session log file cannot be read', () => {
+    const manager = createManager();
+    const logFile = join(tempDir, 'sessions', 'missing-desktop-run.jsonl');
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    manager.spawn({
+      sessionId: 'new-1',
+      command: 'new',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['new', 'idea', '--mode', 'headless', '--log-file', logFile],
+      cwd: '/tmp/repo',
+      logFile,
+      meta: { request: 'idea', logFile },
+    });
+
+    expect(manager.getOutput('new-1')).toBe('');
+    expect(warnSpy).toHaveBeenCalledWith(`[shipper] Failed to read session log file ${logFile}`);
+  });
+
   it('kills a running child with SIGTERM and escalates to SIGKILL after the grace period', () => {
     vi.useFakeTimers();
     const manager = createManager();

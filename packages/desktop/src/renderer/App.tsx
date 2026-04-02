@@ -993,6 +993,9 @@ export default function App(): JSX.Element {
               event.repo
             );
           } catch {
+            console.warn(
+              `[shipper] Failed to spawn background unblock for #${nextQueuedIssue.issue.number}`
+            );
             clearUnblockIssue(nextQueuedIssue.issue.number);
             clearAutoUnblockIssue(event.repo, nextQueuedIssue.issue.number);
             autoUnblockQueueRef.current.delete(event.repo);
@@ -1008,6 +1011,7 @@ export default function App(): JSX.Element {
             description: nextQueuedIssue.issue.title,
           });
         } catch {
+          console.warn(`[shipper] Failed to confirm unblock result for #${issueNumber}`);
           if (!isAutoUnblock || !autoShipRepos.has(event.repo)) {
             pushToast({
               id: event.sessionId,
@@ -1129,6 +1133,9 @@ export default function App(): JSX.Element {
           try {
             await window.shipperAPI.spawnBackgroundUnblock(firstBlocked.number, event.repo);
           } catch {
+            console.warn(
+              `[shipper] Failed to spawn background unblock for #${firstBlocked.number}`
+            );
             clearUnblockIssue(firstBlocked.number);
             clearAutoUnblockIssue(event.repo, firstBlocked.number);
             autoUnblockQueueRef.current.delete(event.repo);
@@ -1216,6 +1223,9 @@ export default function App(): JSX.Element {
       try {
         await window.shipperAPI.spawnBackgroundUnblock(nextQueuedIssue.issue.number, event.repo);
       } catch {
+        console.warn(
+          `[shipper] Failed to spawn background unblock for #${nextQueuedIssue.issue.number}`
+        );
         clearUnblockIssue(nextQueuedIssue.issue.number);
         clearAutoUnblockIssue(event.repo, nextQueuedIssue.issue.number);
         autoUnblockQueueRef.current.delete(event.repo);
@@ -1231,6 +1241,7 @@ export default function App(): JSX.Element {
         description: nextQueuedIssue.issue.title,
       });
     } catch {
+      console.warn(`[shipper] Failed to process auto-unblock retry for ${event.repo}`);
       autoUnblockQueueRef.current.delete(event.repo);
     }
   });

@@ -140,6 +140,7 @@ export class BackgroundManager {
       try {
         return readFileSync(session.meta.logFile, 'utf8');
       } catch {
+        console.warn(`[shipper] Failed to read session log file ${session.meta.logFile}`);
         return '';
       }
     }
