@@ -580,6 +580,13 @@ describe('resetCommand', () => {
     );
   });
 
+  it('rejects partial numeric input like 18foo', async () => {
+    await expect(resetCommand('18foo', { force: true })).rejects.toThrow('process.exit');
+    expect(mockConsoleError).toHaveBeenCalledWith(
+      prefixed('Error: Please provide a valid issue number.')
+    );
+  });
+
   it('exits with error for closed issues', async () => {
     setupExecMock({ issueJson: mockIssueView('CLOSED', ['shipper:groomed']) });
 
@@ -617,6 +624,30 @@ describe('resetCommand', () => {
     await expect(resetCommand('18', { force: false, to: 'new' })).rejects.toThrow('process.exit');
     expect(mockConsoleError).toHaveBeenCalledWith(
       prefixed('Issue #18 is locked by another shipper instance. Use --force to override.')
+    );
+  });
+
+  it('allows reset with --force when shipper:locked is present', async () => {
+    setupExecMock({
+      issueJson: mockIssueView('OPEN', ['shipper:groomed', 'shipper:locked']),
+    });
+
+    await resetCommand('18', { force: true, to: 'new' });
+
+    expect(mockIsLockStale).not.toHaveBeenCalled();
+  });
+
+  it('allows reset when lock is stale', async () => {
+    setupExecMock({
+      issueJson: mockIssueView('OPEN', ['shipper:groomed', 'shipper:locked']),
+    });
+    mockIsLockStale.mockReturnValue(true);
+
+    await resetCommand('18', { force: false, to: 'new' });
+
+    expect(mockIsLockStale).toHaveBeenCalledWith('owner/repo', '18');
+    expect(mockConsoleError).not.toHaveBeenCalledWith(
+      expect.stringContaining('locked by another shipper instance')
     );
   });
 
@@ -682,6 +713,19 @@ describe('resetCommand', () => {
     expect(mockConsoleLog).toHaveBeenCalledWith(prefixed('  4) planned'));
     expect(mockConsoleLog).toHaveBeenCalledWith(prefixed('  5) implemented'));
     expect(getExecuteResetScan().targetLabel).toBe('shipper:implemented');
+  });
+
+  it('skips both prompts when --to and --force are provided together', async () => {
+    setupExecMock({
+      issueJson: mockIssueView('OPEN', ['shipper:planned']),
+      timelineByStage: { groomed: '2024-01-15T12:00:00Z\n' },
+      commentsWithDates: '',
+    });
+
+    await resetCommand('18', { force: true, to: 'groomed' });
+
+    expect(mockPromptChoice).not.toHaveBeenCalled();
+    expect(mockConfirm).not.toHaveBeenCalled();
   });
 
   it('prompts for confirmation without --force and cancels cleanly', async () => {
@@ -859,5 +903,125 @@ describe('resetCommand', () => {
       prefixed('Some operations failed. Re-run the command to retry failed operations.')
     );
     expect(_mockExit).not.toHaveBeenCalled();
+  });
+
+  it('rejects resetting to the current stage', async () => {
+    setupExecMock({
+      issueJson: mockIssueView('OPEN', ['shipper:groomed']),
+    });
+
+    await expect(resetCommand('18', { force: true, to: 'groomed' })).rejects.toThrow(
+      'process.exit'
+    );
+    expect(mockConsoleError).toHaveBeenCalledWith(
+      prefixed('Error: Issue #18 is already at shipper:groomed. Reset only works backward.')
+    );
+  });
+
+  it('rejects resetting to a later stage', async () => {
+    setupExecMock({
+      issueJson: mockIssueView('OPEN', ['shipper:groomed']),
+    });
+
+    await expect(resetCommand('18', { force: true, to: 'designed' })).rejects.toThrow(
+      'process.exit'
+    );
+    expect(mockConsoleError).toHaveBeenCalledWith(
+      prefixed(
+        'Error: shipper:designed is ahead of the current stage shipper:groomed. Reset only works backward.'
+      )
+    );
+  });
+
+  it('rejects non-workflow stage names', async () => {
+    setupExecMock({
+      issueJson: mockIssueView('OPEN', ['shipper:planned']),
+    });
+
+    await expect(resetCommand('18', { force: true, to: 'blocked' })).rejects.toThrow(
+      'process.exit'
+    );
+    expect(mockConsoleError).toHaveBeenCalledWith(
+      prefixed(
+        'Error: blocked is not a valid workflow stage. Valid stages: new, groomed, designed, planned, implemented.'
+      )
+    );
+  });
+
+  it('rejects non-workflow shipper labels', async () => {
+    setupExecMock({
+      issueJson: mockIssueView('OPEN', ['shipper:planned']),
+    });
+
+    await expect(resetCommand('18', { force: true, to: 'shipper:blocked' })).rejects.toThrow(
+      'process.exit'
+    );
+    expect(mockConsoleError).toHaveBeenCalledWith(
+      prefixed(
+        'Error: shipper:blocked is not a valid workflow stage. Valid stages: new, groomed, designed, planned, implemented.'
+      )
+    );
+  });
+
+  it('rejects invalid stage names', async () => {
+    setupExecMock({
+      issueJson: mockIssueView('OPEN', ['shipper:planned']),
+    });
+
+    await expect(resetCommand('18', { force: true, to: 'banana' })).rejects.toThrow('process.exit');
+    expect(mockConsoleError).toHaveBeenCalledWith(
+      prefixed(
+        'Error: banana is not a valid stage name. Valid stages: new, groomed, designed, planned, implemented.'
+      )
+    );
+  });
+
+  describe('shipper:failed-only issues', () => {
+    it('allows resetting a failed-only issue to a requested stage', async () => {
+      setupExecMock({
+        issueJson: mockIssueView('OPEN', ['shipper:failed']),
+        timelineByStage: { planned: '2024-01-15T12:00:00Z\n' },
+      });
+
+      await resetCommand('18', { force: true, to: 'planned' });
+
+      expect(getExecuteResetScan()).toMatchObject({
+        labelsToRemove: ['shipper:failed'],
+        addTarget: true,
+        targetStage: 'planned',
+        targetLabel: 'shipper:planned',
+      });
+    });
+
+    it('lists all workflow stages in interactive mode for a failed-only issue', async () => {
+      setupExecMock({
+        issueJson: mockIssueView('OPEN', ['shipper:failed']),
+        timelineByStage: { new: '' },
+      });
+
+      await resetCommand('18', { force: true });
+
+      expect(mockConsoleLog).toHaveBeenCalledWith(prefixed('  1) new'));
+      expect(mockConsoleLog).toHaveBeenCalledWith(prefixed('  2) groomed'));
+      expect(mockConsoleLog).toHaveBeenCalledWith(prefixed('  3) designed'));
+      expect(mockConsoleLog).toHaveBeenCalledWith(prefixed('  4) planned'));
+      expect(mockConsoleLog).toHaveBeenCalledWith(prefixed('  5) implemented'));
+      expect(mockPromptChoice).toHaveBeenCalledWith('Select [1-5]: ', ['1', '2', '3', '4', '5']);
+    });
+
+    it('still rejects forward resets when shipper:failed is paired with a workflow stage', async () => {
+      setupExecMock({
+        issueJson: mockIssueView('OPEN', ['shipper:planned', 'shipper:failed']),
+      });
+
+      await expect(resetCommand('18', { force: true, to: 'implemented' })).rejects.toThrow(
+        'process.exit'
+      );
+      expect(mockConsoleError).toHaveBeenCalledWith(
+        prefixed(
+          'Error: shipper:implemented is ahead of the current stage shipper:planned. Reset only works backward.'
+        )
+      );
+    });
   });
 });

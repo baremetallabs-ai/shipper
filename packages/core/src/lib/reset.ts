@@ -519,7 +519,7 @@ export async function executeReset(
       try {
         execFileSync('git', ['branch', '-D', branch], {
           cwd: options.repoRoot,
-          stdio: ['ignore', 'ignore', 'ignore'],
+          stdio: ['ignore', 'pipe', 'pipe'],
         });
         recordOperation(description, 'succeeded');
       } catch (error) {
