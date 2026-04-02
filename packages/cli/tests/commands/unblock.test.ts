@@ -292,20 +292,24 @@ describe('unblockCommand', () => {
     });
   });
 
-  it('reports protocol crashes and exits with code 1', async () => {
+  it('reports non-zero prompt exits and skips output validation', async () => {
     const unblockModule = await import('../../src/commands/unblock.js');
     fetchIssueMock.mockResolvedValue('<issue number="250"><comments></comments></issue>');
-    processResultMock.mockRejectedValueOnce(new Error('Invalid result.json'));
+    runPromptMock.mockResolvedValueOnce(13);
 
     await expect(unblockModule.unblockCommand('owner/repo', '250')).resolves.toBeUndefined();
 
+    expect(setupProtocolDirsMock).toHaveBeenCalled();
+    expect(retryOnInvalidOutputMock).not.toHaveBeenCalled();
+    expect(processResultMock).not.toHaveBeenCalled();
     expect(handleAgentCrashMock).toHaveBeenCalledWith(
       'owner/repo',
       '250',
       'unblock',
-      'Invalid result.json'
+      'Agent exited with code 13',
+      'The `unblock` agent run exited with code 13.'
     );
-    expect(consoleErrorSpy).toHaveBeenCalledWith('[shipper] Invalid result.json');
+    expect(consoleErrorSpy).toHaveBeenCalledWith('[shipper] Agent exited with code 13');
     expect(process.exitCode).toBe(1);
   });
 });

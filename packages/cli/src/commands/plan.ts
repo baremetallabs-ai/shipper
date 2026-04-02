@@ -36,7 +36,27 @@ export async function planCommand(
         { repoRoot, branch, createBranch: true, baseBranch, issueNumber: issue, stage: 'plan' },
         async (wtPath) => {
           await scrubOutputDir(wtPath);
-          await runPrompt('plan', { repo, issueRef: issue, cwd: wtPath, mode, agent, model });
+          const exitCode = await runPrompt('plan', {
+            repo,
+            issueRef: issue,
+            cwd: wtPath,
+            mode,
+            agent,
+            model,
+          });
+          if (exitCode !== 0) {
+            const detail = `Agent exited with code ${exitCode}`;
+            logger.error(detail);
+            await handleAgentCrash(
+              repo,
+              issue,
+              'plan',
+              detail,
+              `The \`plan\` agent run exited with code ${exitCode}.`
+            );
+            process.exitCode = 1;
+            return;
+          }
           try {
             const result = await retryOnInvalidOutput({
               cwd: wtPath,

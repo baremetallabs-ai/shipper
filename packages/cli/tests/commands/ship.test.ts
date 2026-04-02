@@ -38,9 +38,9 @@ type MockCandidate = { number: number; title: string; priority: 0 | 1 | 2 };
 type ReadyCheck = () => Promise<boolean>;
 
 const handleAgentCrashMock = vi.hoisted(() =>
-  vi.fn<(repo: string, issue: string, stage: string, detail: string) => Promise<void>>(() =>
-    Promise.resolve()
-  )
+  vi.fn<
+    (repo: string, issue: string, stage: string, detail: string, summary?: string) => Promise<void>
+  >(() => Promise.resolve())
 );
 const buildReadyCheckMock = vi.hoisted(() =>
   vi.fn<(repo: string, pr: string) => Promise<ReadyCheck>>()
@@ -185,8 +185,13 @@ vi.mock('@dnsquared/shipper-core', () => ({
   fetchChecks: vi.fn<(repo: string, pr: string) => Promise<MockCheck[]>>(() => Promise.resolve([])),
   classifyChecks: vi.fn(() => ({ pending: [], failed: [], passed: [], total: 0 })),
   sleepMs: (ms: number) => sleepMsMock(ms),
-  handleAgentCrash: (repo: string, issue: string, stage: string, detail: string) =>
-    handleAgentCrashMock(repo, issue, stage, detail),
+  handleAgentCrash: (
+    repo: string,
+    issue: string,
+    stage: string,
+    detail: string,
+    summary?: string
+  ) => handleAgentCrashMock(repo, issue, stage, detail, summary),
   STAGE_NAME_MAP: labelFixtures.stageNameMap,
   STAGE_LABEL_NAMES: labelFixtures.stageLabelNames,
   NEW_LABEL: 'shipper:new',
@@ -2766,6 +2771,11 @@ describe('shipCommand parallel auto runner', () => {
     mockClearStaleLockIfNeeded.mockReset();
     mockGh.mockReset();
     mockGh.mockResolvedValue({ stdout: '[]', stderr: '' });
+    mockRetryOnInvalidOutput.mockReset();
+    mockRetryOnInvalidOutput.mockResolvedValue({
+      verdict: 'accept',
+      comment: '.shipper/output/comment-7.md',
+    });
     mockRunPrompt.mockReset();
     mockRunPrompt.mockResolvedValue(0);
     mockHandleAgentCrash.mockReset();
@@ -3220,7 +3230,61 @@ describe('shipCommand parallel auto runner', () => {
     const output = getConsoleOutput(logSpy);
     expect(output).toContain('still blocked');
     expect(errorSpy).toHaveBeenCalledWith(prefixed('Missing result.json'));
-    expect(mockHandleAgentCrash).toHaveBeenCalledWith(repo, '7', 'unblock', 'Missing result.json');
+    expect(mockHandleAgentCrash).toHaveBeenCalledWith(
+      repo,
+      '7',
+      'unblock',
+      'Missing result.json',
+      undefined
+    );
+
+    errorSpy.mockRestore();
+    logSpy.mockRestore();
+  });
+
+  it('treats initial non-zero unblock exits as still blocked in auto mode', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    let blockedReturned = false;
+    mockSelectIssuesForStage.mockImplementation(() => []);
+    mockGh.mockImplementation((args: string[]) => {
+      if (args[0] === 'issue' && args[1] === 'list' && !blockedReturned) {
+        blockedReturned = true;
+        return {
+          stdout: JSON.stringify([
+            {
+              number: 7,
+              title: 'Blocked issue',
+              labels: [{ name: 'shipper:planned' }, { name: 'shipper:blocked' }],
+            },
+          ]),
+          stderr: '',
+        };
+      }
+
+      if (args[0] === 'issue' && args[1] === 'list') {
+        return { stdout: '[]', stderr: '' };
+      }
+
+      return { stdout: '[]', stderr: '' };
+    });
+    mockRunPrompt.mockResolvedValueOnce(17);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await shipCommand(repo, undefined, { auto: true, merge: false, parallel: 1 });
+
+    expect(mockRetryOnInvalidOutput).not.toHaveBeenCalled();
+    expect(mockProcessResult).not.toHaveBeenCalled();
+    const output = getConsoleOutput(logSpy);
+    expect(output).toContain('still blocked');
+    expect(errorSpy).toHaveBeenCalledWith(prefixed('Agent exited with code 17'));
+    expect(mockHandleAgentCrash).toHaveBeenCalledWith(
+      repo,
+      '7',
+      'unblock',
+      'Agent exited with code 17',
+      'The `unblock` agent run exited with code 17.'
+    );
 
     errorSpy.mockRestore();
     logSpy.mockRestore();

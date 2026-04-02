@@ -476,7 +476,7 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
 
             await scrubOutputDir(wtPath);
 
-            await runPrompt('pr_remediate', {
+            const exitCode = await runPrompt('pr_remediate', {
               repo,
               issueRef: issueNumber,
               prRef,
@@ -485,6 +485,18 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
               agent,
               model,
             });
+            if (exitCode !== 0) {
+              const detail = `Agent exited with code ${exitCode}`;
+              logger.error(detail);
+              await handleAgentCrash(
+                repo,
+                issueNumber,
+                'pr_remediate',
+                detail,
+                `The \`pr_remediate\` agent run exited with code ${exitCode}.`
+              );
+              return 1;
+            }
 
             let result: Awaited<ReturnType<typeof retryOnInvalidOutput>>;
             try {
