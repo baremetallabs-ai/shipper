@@ -117,9 +117,7 @@ export function ActionQueueDrawer({
   const activeCount = commands.filter(
     (command) => command.status === 'queued' || command.status === 'running'
   ).length;
-  const hasClearable = commands.some(
-    (command) => command.status === 'complete' || command.status === 'failed'
-  );
+  const hasClearable = commands.length > activeCount;
   const commandIndexById = useMemo(
     () => new Map(commands.map((command, index) => [command.id, index])),
     [commands]
