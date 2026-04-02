@@ -121,7 +121,8 @@ function mockPRLookup(mergeStateStatus: string, options?: MockPRLookupOptions) {
 
   ghMock.mockImplementation((args: string[]) => {
     if (args[0] === 'pr' && args[1] === 'view') {
-      const jsonFields = args[args.indexOf('--json') + 1] ?? '';
+      const jsonIndex = args.indexOf('--json');
+      const jsonFields = jsonIndex >= 0 ? (args[jsonIndex + 1] ?? '') : '';
       if (jsonFields === 'mergeStateStatus') {
         if (mergeStateError) {
           return Promise.reject(mergeStateError);
