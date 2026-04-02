@@ -391,10 +391,7 @@ export async function retryOnInvalidOutput(opts: {
   try {
     return await validateStageOutput(opts.cwd, opts.stage, opts.prFiles, opts.diffHunks);
   } catch (error) {
-    const errors =
-      error instanceof ResultValidationError
-        ? error.errors
-        : [toErrorMessage(error)];
+    const errors = error instanceof ResultValidationError ? error.errors : [toErrorMessage(error)];
     await opts.retry(formatCorrectionMessage(errors));
     return await validateStageOutput(opts.cwd, opts.stage, opts.prFiles, opts.diffHunks);
   }
