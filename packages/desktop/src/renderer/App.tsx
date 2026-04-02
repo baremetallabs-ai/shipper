@@ -1993,6 +1993,14 @@ export default function App(): JSX.Element {
     );
   }
 
+  function handleClearFinishedBackground(): void {
+    commitBackgroundCommands((currentCommands) =>
+      currentCommands.filter(
+        (command) => command.status === 'queued' || command.status === 'running'
+      )
+    );
+  }
+
   async function handleCancelBackground(sessionId: string): Promise<void> {
     try {
       await window.shipperAPI.killBackground(sessionId);
@@ -2349,6 +2357,7 @@ export default function App(): JSX.Element {
           onShowLogs={(sessionId) => {
             void handleShowBackgroundLogs(sessionId);
           }}
+          onClearFinished={handleClearFinishedBackground}
           onDismiss={handleDismissBackground}
         />
         <div ref={contentPaneRef} tabIndex={-1} className="min-w-0 flex-1 overflow-y-auto">
