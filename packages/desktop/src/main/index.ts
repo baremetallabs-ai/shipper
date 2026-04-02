@@ -1118,6 +1118,7 @@ function registerIpcHandlers(): void {
       const cmd = await buildPromptCommand('groom', {
         issueRef: issueNumber,
         repo: parsedPayload.repo,
+        cwd: repoPath,
         mode: 'interactive',
       });
 

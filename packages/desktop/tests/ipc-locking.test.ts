@@ -594,6 +594,28 @@ describe('desktop IPC locking', () => {
     state.exitCallbacks.get(sessionId)?.();
   });
 
+  it('builds the groom prompt with the cloned repo path as cwd', async () => {
+    await loadHandlers();
+    const handler = getHandler('pty-spawn-shipper-groom');
+
+    await handler(
+      {},
+      {
+        repo: 'owner/repo',
+        issueNumber: 42,
+        cols: 120,
+        rows: 40,
+      }
+    );
+
+    expect(state.buildPromptCommandMock).toHaveBeenCalledWith('groom', {
+      issueRef: '42',
+      repo: 'owner/repo',
+      cwd: '/tmp/repo',
+      mode: 'interactive',
+    });
+  });
+
   it('releases the groom lock when the PTY session exits', async () => {
     await loadHandlers();
     const handler = getHandler('pty-spawn-shipper-groom');

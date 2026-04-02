@@ -224,8 +224,8 @@ function mockSpawnResult(
   });
 }
 
+const { TRUNCATION_THRESHOLD_BYTES } = await import('../../src/lib/output-protocol.js');
 const { buildPromptCommand, runPrompt } = await import('../../src/lib/prompt-runner.js');
-const OFFLOAD_THRESHOLD_BYTES = 50_000;
 
 function makePrompt(
   cmd: 'claude' | 'codex' | 'copilot',
@@ -260,7 +260,7 @@ function spawnedChild(): PromptChild {
 }
 
 function oversizedContent(char: string): string {
-  return char.repeat(OFFLOAD_THRESHOLD_BYTES + 1);
+  return char.repeat(TRUNCATION_THRESHOLD_BYTES + 1);
 }
 
 function makeTimeoutChild(): PromptChild & {
