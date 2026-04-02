@@ -3,12 +3,12 @@ import path from 'node:path';
 
 export const PROTOCOL_INPUT_DIR = path.join('.shipper', 'input');
 export const PROTOCOL_OUTPUT_DIR = path.join('.shipper', 'output');
-const TRUNCATION_THRESHOLD_BYTES = 50_000;
+export const TRUNCATION_THRESHOLD_BYTES = 50_000;
 const TRUNCATION_HEAD_LINES = 50;
 const TRUNCATION_TAIL_LINES = 50;
 const TRUNCATION_HEAD_BYTES = 25_000;
 const TRUNCATION_TAIL_BYTES = 25_000;
-const PROTOCOL_INPUT_DISPLAY_DIR = path.posix.join('.shipper', 'input');
+export const PROTOCOL_INPUT_DISPLAY_DIR = path.posix.join('.shipper', 'input');
 
 function resolveContainedPath(rootDir: string, relativePath: string, label: string): string {
   if (path.isAbsolute(relativePath)) {

@@ -126,10 +126,10 @@ vi.mock('../../src/lib/github.js', () => ({
   fetchPR: (...args: unknown[]) => fetchPRMock(...args),
 }));
 
-vi.mock('../../src/lib/output-protocol.js', async () => {
-  const actual = await vi.importActual<typeof import('../../src/lib/output-protocol.js')>(
-    '../../src/lib/output-protocol.js'
-  );
+vi.mock('../../src/lib/output-protocol/protocol-io.js', async () => {
+  const actual = await vi.importActual<
+    typeof import('../../src/lib/output-protocol/protocol-io.js')
+  >('../../src/lib/output-protocol/protocol-io.js');
   return {
     ...actual,
     writeContextFile: (...args: unknown[]) => writeContextFileMock(...args),
@@ -224,7 +224,7 @@ function mockSpawnResult(
   });
 }
 
-const { TRUNCATION_THRESHOLD_BYTES } = await import('../../src/lib/output-protocol.js');
+const { TRUNCATION_THRESHOLD_BYTES } = await import('../../src/lib/output-protocol/protocol-io.js');
 const { buildPromptCommand, runPrompt } = await import('../../src/lib/prompt-runner.js');
 
 function makePrompt(

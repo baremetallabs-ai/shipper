@@ -9,7 +9,7 @@ import {
   PROTOCOL_INPUT_DISPLAY_DIR,
   TRUNCATION_THRESHOLD_BYTES,
   writeContextFile,
-} from './output-protocol.js';
+} from './output-protocol/protocol-io.js';
 import { getSessionPaths, resolveSessionRepo, writeSessionMeta } from './session.js';
 import {
   getSettings,
