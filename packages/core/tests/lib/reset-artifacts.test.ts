@@ -162,6 +162,15 @@ function ghCalls(): string[][] {
   return mockGh.mock.calls.map(([args]) => args);
 }
 
+function getOperation(
+  result: Awaited<ReturnType<typeof executeReset>>,
+  description: string
+): { description: string; status: string; reason?: string } {
+  const operation = result.operations.find((entry) => entry.description === description);
+  expect(operation).toBeDefined();
+  return operation as { description: string; status: string; reason?: string };
+}
+
 beforeEach(() => {
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -306,6 +315,64 @@ describe('scanArtifacts', () => {
 });
 
 describe('executeReset', () => {
+  it('returns succeeded results for a fully successful reset', async () => {
+    const worktreePath = '/home/test/.shipper/worktrees/repo--wt--shipper-18';
+    const existingPaths = new Set([worktreePath]);
+
+    mockExistsSync.mockImplementation((candidate: string) => existingPaths.has(candidate));
+    mockRemoveWorktree.mockImplementation((_repoRoot: string, candidate: string) => {
+      existingPaths.delete(candidate);
+      return Promise.resolve();
+    });
+    mockExecFileSync.mockReturnValue('');
+    mockGh.mockImplementation((args: string[]) => {
+      if (args[0] === 'pr' && args[1] === 'close') {
+        return Promise.resolve(ok());
+      }
+
+      if (args[0] === 'api' && args[1] === '-X' && args[2] === 'DELETE') {
+        return Promise.resolve(ok());
+      }
+
+      if (args[0] === 'issue' && (args[1] === 'edit' || args[1] === 'comment')) {
+        return Promise.resolve(ok());
+      }
+
+      return Promise.reject(new Error(`Unexpected gh call: ${args.join(' ')}`));
+    });
+
+    const result = await executeReset(
+      18,
+      makeScan({
+        localWorktrees: [worktreePath],
+        localBranches: ['shipper/18-add-reset'],
+        prs: [{ number: 101, headRefName: 'shipper/18-add-reset' }],
+        branchesToDelete: ['shipper/18-add-reset'],
+        commentIds: [3001],
+        labelsToRemove: ['shipper:planned'],
+        addTarget: true,
+        targetStage: 'groomed',
+        targetLabel: 'shipper:groomed',
+      }),
+      'owner/repo',
+      { repoRoot: '/repo' }
+    );
+
+    expect(result).toEqual({
+      operations: [
+        { description: `Remove local worktree ${worktreePath}`, status: 'succeeded' },
+        { description: 'Delete local branch shipper/18-add-reset', status: 'succeeded' },
+        { description: 'Close PR #101', status: 'succeeded' },
+        { description: 'Delete remote branch shipper/18-add-reset', status: 'succeeded' },
+        { description: 'Delete comment 3001', status: 'succeeded' },
+        { description: 'Remove labels: shipper:planned', status: 'succeeded' },
+        { description: 'Add label: shipper:groomed', status: 'succeeded' },
+        { description: 'Post reset notice comment', status: 'succeeded' },
+      ],
+      hasFailures: false,
+    });
+  });
+
   it('deletes an orphaned remote branch directly through the ref delete API', async () => {
     mockGh.mockImplementation((args: string[]) => {
       if (
@@ -335,7 +402,7 @@ describe('executeReset', () => {
       return Promise.reject(new Error(`Unexpected gh call: ${args.join(' ')}`));
     });
 
-    await executeReset(
+    const result = await executeReset(
       18,
       makeScan({
         branchesToDelete: ['shipper/18-add-reset'],
@@ -343,6 +410,11 @@ describe('executeReset', () => {
       'owner/repo'
     );
 
+    expect(getOperation(result, 'Delete remote branch shipper/18-add-reset')).toEqual({
+      description: 'Delete remote branch shipper/18-add-reset',
+      status: 'succeeded',
+    });
+    expect(result.hasFailures).toBe(false);
     expect(ghCalls()).toContainEqual([
       'pr',
       'list',
@@ -385,7 +457,7 @@ describe('executeReset', () => {
       return Promise.reject(new Error(`Unexpected gh call: ${args.join(' ')}`));
     });
 
-    await executeReset(
+    const result = await executeReset(
       18,
       makeScan({
         prs: [{ number: 101, headRefName: 'shipper/18-open-pr' }],
@@ -405,14 +477,31 @@ describe('executeReset', () => {
         args[3] === 'repos/owner/repo/git/refs/heads/shipper/18-open-pr'
     );
 
+    expect(getOperation(result, 'Close PR #101')).toEqual({
+      description: 'Close PR #101',
+      status: 'succeeded',
+    });
+    expect(getOperation(result, 'Delete remote branch shipper/18-open-pr')).toEqual({
+      description: 'Delete remote branch shipper/18-open-pr',
+      status: 'succeeded',
+    });
     expect(closeIndex).toBeGreaterThanOrEqual(0);
     expect(deleteIndex).toBeGreaterThan(closeIndex);
   });
 
-  it('does not delete a PR branch when closing the PR fails', async () => {
+  it('reports an already closed PR as skipped and still deletes its branch', async () => {
     mockGh.mockImplementation((args: string[]) => {
       if (args[0] === 'pr' && args[1] === 'close') {
-        return Promise.reject(new Error('close failed'));
+        return Promise.reject(new Error('PR is already closed'));
+      }
+
+      if (
+        args[0] === 'api' &&
+        args[1] === '-X' &&
+        args[2] === 'DELETE' &&
+        args[3] === 'repos/owner/repo/git/refs/heads/shipper/18-open-pr'
+      ) {
+        return Promise.resolve(ok());
       }
 
       if (args[0] === 'issue' && args[1] === 'comment') {
@@ -422,7 +511,7 @@ describe('executeReset', () => {
       return Promise.reject(new Error(`Unexpected gh call: ${args.join(' ')}`));
     });
 
-    await executeReset(
+    const result = await executeReset(
       18,
       makeScan({
         prs: [{ number: 101, headRefName: 'shipper/18-open-pr' }],
@@ -431,15 +520,19 @@ describe('executeReset', () => {
       'owner/repo'
     );
 
-    expect(ghCalls()).not.toContainEqual([
-      'api',
-      '-X',
-      'DELETE',
-      'repos/owner/repo/git/refs/heads/shipper/18-open-pr',
-    ]);
+    expect(getOperation(result, 'Close PR #101')).toEqual({
+      description: 'Close PR #101',
+      status: 'skipped',
+      reason: 'already closed',
+    });
+    expect(getOperation(result, 'Delete remote branch shipper/18-open-pr')).toEqual({
+      description: 'Delete remote branch shipper/18-open-pr',
+      status: 'succeeded',
+    });
+    expect(result.hasFailures).toBe(false);
   });
 
-  it('still deletes orphaned branches when an open PR branch remains blocked', async () => {
+  it('marks a failed PR close as a failure and still deletes orphaned branches', async () => {
     mockGh.mockImplementation((args: string[]) => {
       if (args[0] === 'pr' && args[1] === 'close') {
         return Promise.reject(new Error('close failed'));
@@ -472,7 +565,7 @@ describe('executeReset', () => {
       return Promise.reject(new Error(`Unexpected gh call: ${args.join(' ')}`));
     });
 
-    await executeReset(
+    const result = await executeReset(
       18,
       makeScan({
         prs: [{ number: 101, headRefName: 'shipper/18-open-pr' }],
@@ -481,6 +574,21 @@ describe('executeReset', () => {
       'owner/repo'
     );
 
+    expect(getOperation(result, 'Close PR #101')).toEqual({
+      description: 'Close PR #101',
+      status: 'failed',
+      reason: 'close failed',
+    });
+    expect(getOperation(result, 'Delete remote branch shipper/18-open-pr')).toEqual({
+      description: 'Delete remote branch shipper/18-open-pr',
+      status: 'failed',
+      reason: 'blocked because PR #101 could not be closed',
+    });
+    expect(getOperation(result, 'Delete remote branch shipper/18-orphan')).toEqual({
+      description: 'Delete remote branch shipper/18-orphan',
+      status: 'succeeded',
+    });
+    expect(result.hasFailures).toBe(true);
     expect(ghCalls()).toContainEqual([
       'api',
       '-X',
@@ -495,7 +603,7 @@ describe('executeReset', () => {
     ]);
   });
 
-  it('does not delete a branch when branch-level PR verification finds an open PR', async () => {
+  it('records a failure when branch-level PR verification finds an open PR', async () => {
     mockGh.mockImplementation((args: string[]) => {
       if (
         args[0] === 'pr' &&
@@ -517,7 +625,7 @@ describe('executeReset', () => {
       return Promise.reject(new Error(`Unexpected gh call: ${args.join(' ')}`));
     });
 
-    await executeReset(
+    const result = await executeReset(
       18,
       makeScan({
         branchesToDelete: ['shipper/18-open-pr'],
@@ -525,6 +633,12 @@ describe('executeReset', () => {
       'owner/repo'
     );
 
+    expect(getOperation(result, 'Delete remote branch shipper/18-open-pr')).toEqual({
+      description: 'Delete remote branch shipper/18-open-pr',
+      status: 'failed',
+      reason: 'still has an open PR: #101',
+    });
+    expect(result.hasFailures).toBe(true);
     expect(ghCalls()).not.toContainEqual([
       'api',
       '-X',
@@ -533,7 +647,7 @@ describe('executeReset', () => {
     ]);
   });
 
-  it('does not delete a branch when branch-level PR verification fails', async () => {
+  it('records a failure when branch-level PR verification fails', async () => {
     mockGh.mockImplementation((args: string[]) => {
       if (
         args[0] === 'pr' &&
@@ -553,7 +667,7 @@ describe('executeReset', () => {
       return Promise.reject(new Error(`Unexpected gh call: ${args.join(' ')}`));
     });
 
-    await executeReset(
+    const result = await executeReset(
       18,
       makeScan({
         branchesToDelete: ['shipper/18-open-pr'],
@@ -561,12 +675,216 @@ describe('executeReset', () => {
       'owner/repo'
     );
 
-    expect(ghCalls()).not.toContainEqual([
-      'api',
-      '-X',
-      'DELETE',
-      'repos/owner/repo/git/refs/heads/shipper/18-open-pr',
-    ]);
+    expect(getOperation(result, 'Delete remote branch shipper/18-open-pr')).toEqual({
+      description: 'Delete remote branch shipper/18-open-pr',
+      status: 'failed',
+      reason: 'could not verify open PR state: lookup failed',
+    });
+    expect(result.hasFailures).toBe(true);
+  });
+
+  it('reports an already removed worktree as skipped', async () => {
+    const result = await executeReset(
+      18,
+      makeScan({
+        localWorktrees: ['/home/test/.shipper/worktrees/repo--wt--shipper-18'],
+      }),
+      'owner/repo'
+    );
+
+    expect(
+      getOperation(
+        result,
+        'Remove local worktree /home/test/.shipper/worktrees/repo--wt--shipper-18'
+      )
+    ).toEqual({
+      description: 'Remove local worktree /home/test/.shipper/worktrees/repo--wt--shipper-18',
+      status: 'skipped',
+      reason: 'already removed',
+    });
+    expect(result.hasFailures).toBe(false);
+  });
+
+  it('reports an already deleted local branch as skipped', async () => {
+    mockExecFileSync.mockImplementation(() => {
+      throw new Error("error: branch 'shipper/18-add-reset' not found.");
+    });
+    mockGh.mockImplementation((args: string[]) => {
+      if (args[0] === 'issue' && args[1] === 'comment') {
+        return Promise.resolve(ok());
+      }
+
+      return Promise.reject(new Error(`Unexpected gh call: ${args.join(' ')}`));
+    });
+
+    const result = await executeReset(
+      18,
+      makeScan({
+        localBranches: ['shipper/18-add-reset'],
+      }),
+      'owner/repo',
+      { repoRoot: '/repo' }
+    );
+
+    expect(getOperation(result, 'Delete local branch shipper/18-add-reset')).toEqual({
+      description: 'Delete local branch shipper/18-add-reset',
+      status: 'skipped',
+      reason: 'already deleted',
+    });
+    expect(result.hasFailures).toBe(false);
+  });
+
+  it('reports an already deleted remote branch as skipped', async () => {
+    mockGh.mockImplementation((args: string[]) => {
+      if (
+        args[0] === 'pr' &&
+        args[1] === 'list' &&
+        args[2] === '-R' &&
+        args[3] === 'owner/repo' &&
+        args[4] === '--head' &&
+        args[5] === 'shipper/18-add-reset'
+      ) {
+        return Promise.resolve(ok('[]'));
+      }
+
+      if (
+        args[0] === 'api' &&
+        args[1] === '-X' &&
+        args[2] === 'DELETE' &&
+        args[3] === 'repos/owner/repo/git/refs/heads/shipper/18-add-reset'
+      ) {
+        return Promise.reject(new Error('Reference does not exist'));
+      }
+
+      if (args[0] === 'issue' && args[1] === 'comment') {
+        return Promise.resolve(ok());
+      }
+
+      return Promise.reject(new Error(`Unexpected gh call: ${args.join(' ')}`));
+    });
+
+    const result = await executeReset(
+      18,
+      makeScan({
+        branchesToDelete: ['shipper/18-add-reset'],
+      }),
+      'owner/repo'
+    );
+
+    expect(getOperation(result, 'Delete remote branch shipper/18-add-reset')).toEqual({
+      description: 'Delete remote branch shipper/18-add-reset',
+      status: 'skipped',
+      reason: 'already deleted',
+    });
+    expect(result.hasFailures).toBe(false);
+  });
+
+  it('reports an already deleted comment as skipped', async () => {
+    mockGh.mockImplementation((args: string[]) => {
+      if (
+        args[0] === 'api' &&
+        args[1] === '-X' &&
+        args[2] === 'DELETE' &&
+        args[3] === 'repos/owner/repo/issues/comments/101'
+      ) {
+        return Promise.reject(new Error('HTTP 404'));
+      }
+
+      if (args[0] === 'issue' && args[1] === 'comment') {
+        return Promise.resolve(ok());
+      }
+
+      return Promise.reject(new Error(`Unexpected gh call: ${args.join(' ')}`));
+    });
+
+    const result = await executeReset(
+      18,
+      makeScan({
+        commentIds: [101],
+      }),
+      'owner/repo'
+    );
+
+    expect(getOperation(result, 'Delete comment 101')).toEqual({
+      description: 'Delete comment 101',
+      status: 'skipped',
+      reason: 'already deleted',
+    });
+    expect(result.hasFailures).toBe(false);
+  });
+
+  it('records failures without stopping later operations', async () => {
+    mockGh.mockImplementation((args: string[]) => {
+      if (
+        args[0] === 'pr' &&
+        args[1] === 'list' &&
+        args[2] === '-R' &&
+        args[3] === 'owner/repo' &&
+        args[4] === '--head' &&
+        args[5] === 'shipper/18-add-reset'
+      ) {
+        return Promise.resolve(ok('[]'));
+      }
+
+      if (
+        args[0] === 'api' &&
+        args[1] === '-X' &&
+        args[2] === 'DELETE' &&
+        args[3] === 'repos/owner/repo/git/refs/heads/shipper/18-add-reset'
+      ) {
+        return Promise.reject(new Error('network error'));
+      }
+
+      if (
+        args[0] === 'api' &&
+        args[1] === '-X' &&
+        args[2] === 'DELETE' &&
+        args[3] === 'repos/owner/repo/issues/comments/101'
+      ) {
+        return Promise.resolve(ok());
+      }
+
+      if (args[0] === 'issue' && (args[1] === 'edit' || args[1] === 'comment')) {
+        return Promise.resolve(ok());
+      }
+
+      return Promise.reject(new Error(`Unexpected gh call: ${args.join(' ')}`));
+    });
+
+    const result = await executeReset(
+      18,
+      makeScan({
+        branchesToDelete: ['shipper/18-add-reset'],
+        commentIds: [101],
+        labelsToRemove: ['shipper:planned'],
+        addTarget: true,
+        targetLabel: 'shipper:groomed',
+      }),
+      'owner/repo'
+    );
+
+    expect(getOperation(result, 'Delete remote branch shipper/18-add-reset')).toEqual({
+      description: 'Delete remote branch shipper/18-add-reset',
+      status: 'failed',
+      reason: 'network error',
+    });
+    expect(getOperation(result, 'Delete comment 101')).toEqual({
+      description: 'Delete comment 101',
+      status: 'succeeded',
+    });
+    expect(getOperation(result, 'Remove labels: shipper:planned')).toEqual({
+      description: 'Remove labels: shipper:planned',
+      status: 'succeeded',
+    });
+    expect(getOperation(result, 'Add label: shipper:groomed')).toEqual({
+      description: 'Add label: shipper:groomed',
+      status: 'succeeded',
+    });
+    expect(getOperation(result, 'Post reset notice comment')).toEqual({
+      description: 'Post reset notice comment',
+      status: 'succeeded',
+    });
+    expect(result.hasFailures).toBe(true);
   });
 
   it('does not call the branch delete API when implemented resets preserve branches', async () => {
@@ -578,7 +896,7 @@ describe('executeReset', () => {
       return Promise.reject(new Error(`Unexpected gh call: ${args.join(' ')}`));
     });
 
-    await executeReset(
+    const result = await executeReset(
       18,
       makeScan({
         targetStage: 'implemented',
@@ -587,66 +905,9 @@ describe('executeReset', () => {
       'owner/repo'
     );
 
-    expect(ghCalls().some((args) => args[0] === 'api' && args[2] === 'DELETE')).toBe(false);
-  });
-
-  it('logs the reset summary with the shipper prefix', async () => {
-    mockGh.mockImplementation((args: string[]) => {
-      if (args[0] === 'issue' && args[1] === 'comment') {
-        return Promise.resolve(ok());
-      }
-
-      return Promise.reject(new Error(`Unexpected gh call: ${args.join(' ')}`));
-    });
-
-    await executeReset(
-      18,
-      makeScan({
-        labelsToRemove: ['shipper:planned'],
-        addTarget: true,
-        targetLabel: 'shipper:groomed',
-      }),
-      'owner/repo'
-    );
-
-    expect(vi.mocked(console.log).mock.calls).toEqual([
-      ['\n[shipper] Reset complete for issue #18:'],
-      ['[shipper]   ✓ Removed labels: shipper:planned'],
-      ['[shipper]   ✓ Added label: shipper:groomed'],
-      ['[shipper]   ✓ Posted reset notice comment'],
+    expect(result.operations).toEqual([
+      { description: 'Post reset notice comment', status: 'succeeded' },
     ]);
-  });
-
-  it('warns with the shipper prefix when branch verification fails during reset', async () => {
-    mockGh.mockImplementation((args: string[]) => {
-      if (
-        args[0] === 'pr' &&
-        args[1] === 'list' &&
-        args[2] === '-R' &&
-        args[3] === 'owner/repo' &&
-        args[4] === '--head' &&
-        args[5] === 'shipper/18-open-pr'
-      ) {
-        return Promise.reject(new Error('lookup failed'));
-      }
-
-      if (args[0] === 'issue' && args[1] === 'comment') {
-        return Promise.resolve(ok());
-      }
-
-      return Promise.reject(new Error(`Unexpected gh call: ${args.join(' ')}`));
-    });
-
-    await executeReset(
-      18,
-      makeScan({
-        branchesToDelete: ['shipper/18-open-pr'],
-      }),
-      'owner/repo'
-    );
-
-    expect(vi.mocked(console.warn)).toHaveBeenCalledWith(
-      '[shipper]   Warning: Could not verify open PR state for branch shipper/18-open-pr: lookup failed'
-    );
+    expect(ghCalls().some((args) => args[0] === 'api' && args[2] === 'DELETE')).toBe(false);
   });
 });

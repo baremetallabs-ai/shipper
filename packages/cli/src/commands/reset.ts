@@ -22,6 +22,7 @@ import {
   parseStage,
   scanArtifacts,
   toErrorMessage,
+  type ResetResult,
   type WorkflowStage,
 } from '@dnsquared/shipper-core';
 
@@ -130,6 +131,23 @@ function printDryRun(issueNum: number, scan: Awaited<ReturnType<typeof scanArtif
     logger.log(`  Local branches to delete: ${scan.localBranches.join(', ')}`);
   }
   logger.log('');
+}
+
+function printResetResult(issueNum: number, result: ResetResult): void {
+  logger.log(`\nReset complete for issue #${issueNum}:`);
+  for (const operation of result.operations) {
+    if (operation.status === 'succeeded') {
+      logger.log(`  ✓ ${operation.description}`);
+      continue;
+    }
+
+    if (operation.status === 'failed') {
+      logger.log(`  ✗ ${operation.description}: ${operation.reason}`);
+      continue;
+    }
+
+    logger.log(`  — ${operation.description} (${operation.reason})`);
+  }
 }
 
 export async function resetCommand(
@@ -262,5 +280,11 @@ export async function resetCommand(
     }
   }
 
-  await executeReset(issueNum, scan, nwo, { repoRoot });
+  const result = await executeReset(issueNum, scan, nwo, { repoRoot });
+  printResetResult(issueNum, result);
+
+  if (result.hasFailures) {
+    logger.log('\nSome operations failed. Re-run the command to retry failed operations.');
+    process.exit(1);
+  }
 }
