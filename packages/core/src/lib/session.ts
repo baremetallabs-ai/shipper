@@ -87,8 +87,10 @@ export async function aggregateSessionUsage(
   let entries: string[];
   try {
     entries = await readdir(sessionDir);
-  } catch {
-    logger.warn(`Failed to read session directory for ${repo}/${issue}`);
+  } catch (error) {
+    if (!hasErrorCode(error, 'ENOENT')) {
+      logger.warn(`Failed to read session directory for ${repo}/${issue}`);
+    }
     return undefined;
   }
 
@@ -214,4 +216,8 @@ function toErrorMessage(error: unknown): string {
     return error.message;
   }
   return 'Failed to resolve git remote URL';
+}
+
+function hasErrorCode(error: unknown, code: string): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === code;
 }

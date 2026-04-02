@@ -194,7 +194,7 @@ describe('writeSessionMeta', () => {
 });
 
 describe('aggregateSessionUsage', () => {
-  it('returns undefined when the session directory does not exist', async () => {
+  it('returns undefined without warning when the session directory does not exist', async () => {
     mockHomeDir.value = mkdtempSync(path.join(tmpdir(), 'session-home-'));
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
@@ -202,11 +202,32 @@ describe('aggregateSessionUsage', () => {
       await expect(
         aggregateSessionUsage('owner/repo', '308', new Date('2026-03-15T00:00:00.000Z'))
       ).resolves.toBeUndefined();
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+      rmSync(mockHomeDir.value, { recursive: true, force: true });
+    }
+  });
+
+  it('warns when reading the session directory fails for a non-ENOENT reason', async () => {
+    const tempHome = mkdtempSync(path.join(tmpdir(), 'session-home-'));
+    mockHomeDir.value = tempHome;
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      const sessionDir = getSessionDir('owner-repo');
+      mkdirSync(path.dirname(sessionDir), { recursive: true });
+      writeFileSync(sessionDir, 'not a directory', 'utf-8');
+
+      await expect(
+        aggregateSessionUsage('owner/repo', '308', new Date('2026-03-15T00:00:00.000Z'))
+      ).resolves.toBeUndefined();
       expect(warnSpy).toHaveBeenCalledWith(
         '[shipper] Failed to read session directory for owner/repo/308'
       );
     } finally {
-      rmSync(mockHomeDir.value, { recursive: true, force: true });
+      warnSpy.mockRestore();
+      rmSync(tempHome, { recursive: true, force: true });
     }
   });
 

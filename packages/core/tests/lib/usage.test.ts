@@ -137,8 +137,12 @@ describe('parseAgentUsage', () => {
     const file = path.join(dir, 'missing.jsonl');
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    await expect(parseAgentUsage('claude', file)).resolves.toBeUndefined();
-    expect(warnSpy).toHaveBeenCalledWith(`[shipper] Failed to parse usage from ${file}`);
+    try {
+      await expect(parseAgentUsage('claude', file)).resolves.toBeUndefined();
+      expect(warnSpy).toHaveBeenCalledWith(`[shipper] Failed to parse usage from ${file}`);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it('parses the final Codex turn.completed usage payload', async () => {

@@ -139,8 +139,10 @@ export class BackgroundManager {
     if (session.command === 'new' && session.meta.logFile) {
       try {
         return readFileSync(session.meta.logFile, 'utf8');
-      } catch {
-        console.warn(`[shipper] Failed to read session log file ${session.meta.logFile}`);
+      } catch (error) {
+        if (!hasErrorCode(error, 'ENOENT')) {
+          console.warn(`[shipper] Failed to read session log file ${session.meta.logFile}`);
+        }
         return '';
       }
     }
@@ -352,4 +354,8 @@ export class BackgroundManager {
 
     this.shipQueue.set(session.repo, nextQueue);
   }
+}
+
+function hasErrorCode(error: unknown, code: string): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === code;
 }

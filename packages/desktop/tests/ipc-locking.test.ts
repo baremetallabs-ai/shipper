@@ -819,13 +819,17 @@ describe('desktop IPC locking', () => {
     await loadHandlers();
     state.isLockStaleMock.mockRejectedValueOnce(new Error('lock lookup failed'));
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const handler = getHandler('check-lock-stale');
+    try {
+      const handler = getHandler('check-lock-stale');
 
-    await expect(handler({}, { repo: 'owner/repo', issueNumber: 42 })).resolves.toEqual({
-      stale: false,
-    });
-    expect(state.isLockStaleMock).toHaveBeenCalledWith('owner/repo', '42');
-    expect(warnSpy).toHaveBeenCalledWith('[shipper] Failed to check lock staleness');
+      await expect(handler({}, { repo: 'owner/repo', issueNumber: 42 })).resolves.toEqual({
+        stale: false,
+      });
+      expect(state.isLockStaleMock).toHaveBeenCalledWith('owner/repo', '42');
+      expect(warnSpy).toHaveBeenCalledWith('[shipper] Failed to check lock staleness');
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it('removes only the locked label when unlocking an issue', async () => {
