@@ -7,6 +7,7 @@ import { getSettings } from '@dnsquared/shipper-core';
 import { tryResolvePrForIssue } from '@dnsquared/shipper-core';
 import { getRepoNwo } from '@dnsquared/shipper-core';
 import { sleepMs } from '@dnsquared/shipper-core';
+import { toErrorMessage } from '@dnsquared/shipper-core';
 import { withStageHooks } from '@dnsquared/shipper-core';
 
 interface MergeOptions {
@@ -354,8 +355,7 @@ async function getQueue(nwo: string): Promise<QueuedPR[]> {
       const result = await gh(args);
       output = result.stdout;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.error(`Error: Failed to query merge queue: ${msg}`);
+      logger.error(`Error: Failed to query merge queue: ${toErrorMessage(err)}`);
       return [];
     }
 
@@ -465,9 +465,8 @@ export async function postMerge(
       'shipper:ready',
     ]);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
     logger.warn(
-      `  Warning: Failed to remove shipper:ready label from issue #${issueNumber}: ${msg}`
+      `  Warning: Failed to remove shipper:ready label from issue #${issueNumber}: ${toErrorMessage(err)}`
     );
   }
 
@@ -475,8 +474,7 @@ export async function postMerge(
     await gh(['issue', 'close', String(issueNumber), ...repoArgs]);
     logger.log(`  Issue #${issueNumber} closed.`);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    logger.warn(`  Warning: Failed to close issue #${issueNumber}: ${msg}`);
+    logger.warn(`  Warning: Failed to close issue #${issueNumber}: ${toErrorMessage(err)}`);
   }
 }
 
@@ -515,8 +513,7 @@ async function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): Promise<bo
     const data = parsePRViewData(json);
     mergeState = data.mergeStateStatus;
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    await failPR(pr, `Could not determine merge state: ${msg}`, nwo, dryRun);
+    await failPR(pr, `Could not determine merge state: ${toErrorMessage(err)}`, nwo, dryRun);
     return false;
   }
 
@@ -542,8 +539,7 @@ async function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): Promise<bo
       }
       logger.log(`  Branch updated. Will check again next cycle.`);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      await failPR(pr, `Failed to update branch: ${msg}`, nwo, dryRun);
+      await failPR(pr, `Failed to update branch: ${toErrorMessage(err)}`, nwo, dryRun);
     }
     return false;
   }
@@ -559,8 +555,7 @@ async function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): Promise<bo
     try {
       checks = await fetchChecks(nwo, String(pr.number));
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      await failPR(pr, `Could not fetch CI checks: ${msg}`, nwo, dryRun);
+      await failPR(pr, `Could not fetch CI checks: ${toErrorMessage(err)}`, nwo, dryRun);
       return false;
     }
 
@@ -599,8 +594,7 @@ async function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): Promise<bo
     try {
       checks = await fetchChecks(nwo, String(pr.number));
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      await failPR(pr, `Could not fetch CI checks: ${msg}`, nwo, dryRun);
+      await failPR(pr, `Could not fetch CI checks: ${toErrorMessage(err)}`, nwo, dryRun);
       return false;
     }
 
@@ -649,8 +643,7 @@ async function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): Promise<bo
         `  PR #${pr.number} merge succeeded despite reported error. Proceeding with post-merge cleanup.`
       );
     }
-    const msg = err instanceof Error ? err.message : String(err);
-    await failPR(pr, `Merge failed: ${msg}`, nwo, dryRun);
+    await failPR(pr, `Merge failed: ${toErrorMessage(err)}`, nwo, dryRun);
     return false;
   }
 }

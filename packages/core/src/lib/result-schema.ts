@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 
+import { toErrorMessage } from './errors.js';
 import type { Verdict } from './stage-transitions.js';
 
 export interface ResultJson {
@@ -121,16 +122,14 @@ export async function readResultFile(outputDir: string): Promise<ResultJson> {
       throw new Error(`Missing result.json at ${resultPath}`);
     }
 
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Failed to read result.json at ${resultPath}: ${message}`);
+    throw new Error(`Failed to read result.json at ${resultPath}: ${toErrorMessage(error)}`);
   }
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw) as unknown;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Failed to parse ${resultPath}: ${message}`);
+    throw new Error(`Failed to parse ${resultPath}: ${toErrorMessage(error)}`);
   }
 
   try {

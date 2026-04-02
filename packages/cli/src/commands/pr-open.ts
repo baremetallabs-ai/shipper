@@ -4,6 +4,7 @@ import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
 import { formatConflictContext } from '@dnsquared/shipper-core';
 import { handleAgentCrash, processResult, scrubOutputDir } from '@dnsquared/shipper-core';
 import { retryOnInvalidOutput } from '@dnsquared/shipper-core';
+import { toErrorMessage } from '@dnsquared/shipper-core';
 import { truncateLargeInput } from '@dnsquared/shipper-core';
 import { withStageHooks } from '@dnsquared/shipper-core';
 import { getSettings } from '@dnsquared/shipper-core';
@@ -113,7 +114,7 @@ export async function prOpenCommand(
               result,
             });
           } catch (error) {
-            const detail = error instanceof Error ? error.message : String(error);
+            const detail = toErrorMessage(error);
             logger.error(detail);
             await handleAgentCrash(repo, issue, 'pr_open', detail);
             process.exitCode = 1;

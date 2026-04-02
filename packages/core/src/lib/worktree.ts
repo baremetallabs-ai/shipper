@@ -3,6 +3,7 @@ import { access, mkdir, readFile, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { toError, toErrorMessage } from './errors.js';
 import { runAdvisoryHook, runWorktreeHook } from './hooks.js';
 import { createLogger, logger } from './logger.js';
 import { getSettings } from './settings.js';
@@ -38,22 +39,6 @@ interface ExecFileError extends Error {
 
 interface ErrnoError extends Error {
   code?: string;
-}
-
-function toError(error: unknown): Error {
-  if (error instanceof Error) {
-    return error;
-  }
-
-  if (typeof error === 'string') {
-    return new Error(error);
-  }
-
-  if (typeof error === 'undefined') {
-    return new Error('Unknown child process error');
-  }
-
-  return new Error(JSON.stringify(error));
 }
 
 export interface WorktreeGitOpts {
@@ -335,10 +320,7 @@ async function fetchOriginOrThrow(opts: WorktreeGitOpts): Promise<void> {
   try {
     await spawnAsync('git', ['fetch', 'origin'], { cwd: opts.wtPath });
   } catch (error) {
-    throw formatTransportError(
-      opts,
-      `git fetch origin failed: ${error instanceof Error ? error.message : String(error)}`
-    );
+    throw formatTransportError(opts, `git fetch origin failed: ${toErrorMessage(error)}`);
   }
 }
 
@@ -474,9 +456,8 @@ async function pushWorktreeBranch(
     try {
       commitsAhead = await getCommitsAheadCount(opts.wtPath, opts.baseBranch);
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
       logger.error(
-        `Commit-count safety check failed before force-push; proceeding with push.\n${errorMessage}`
+        `Commit-count safety check failed before force-push; proceeding with push.\n${toErrorMessage(error)}`
       );
     }
 

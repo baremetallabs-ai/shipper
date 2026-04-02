@@ -17,6 +17,7 @@ import {
   checkGhInstalled,
   checkGhAuth,
   checkGitHubRemote,
+  toErrorMessage,
 } from '@dnsquared/shipper-core';
 
 const execFileAsync = promisify(execFile);
@@ -277,8 +278,7 @@ export async function initCommand(options: {
         commands: migratedCommands,
       };
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      logger.error(`Error: Malformed JSON in ${settingsPath}: ${message}`);
+      logger.error(`Error: Malformed JSON in ${settingsPath}: ${toErrorMessage(err)}`);
       process.exit(1);
       return;
     }

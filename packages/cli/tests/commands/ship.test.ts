@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { afterAll, describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { toError, toErrorMessage } from '../../../core/src/lib/errors.js';
 
 const fsMockState = vi.hoisted(() => ({
   capturedLogs: new Map<string, string>(),
@@ -166,6 +167,8 @@ vi.mock('@dnsquared/shipper-core', () => ({
         createMockLogger(stream),
     };
   })(),
+  toError,
+  toErrorMessage,
   selectIssuesForStage: vi.fn<
     (
       _repo: string,

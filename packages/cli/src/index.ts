@@ -4,6 +4,7 @@ import { runPreflight } from '@dnsquared/shipper-core';
 import { getRepoNwo } from '@dnsquared/shipper-core';
 import { loadSettings, logger, type AgentName, type CommandMode } from '@dnsquared/shipper-core';
 import { CLI_VERSION, checkVersionFreshness } from '@dnsquared/shipper-core';
+import { toErrorMessage } from '@dnsquared/shipper-core';
 import { warnTrackedOutputFiles } from '@dnsquared/shipper-core';
 import { initCommand } from './commands/init.js';
 import { newCommand } from './commands/new.js';
@@ -73,7 +74,7 @@ program.configureOutput({
 });
 
 function exitWithError(err: unknown): never {
-  logger.error(err instanceof Error ? err.message : String(err));
+  logger.error(toErrorMessage(err));
   process.exit(1);
 }
 

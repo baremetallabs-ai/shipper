@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { toError, toErrorMessage } from '../../core/src/lib/errors.js';
 
 const { mockLoggerError, mockLoggerLog, mockLoggerWarn } = vi.hoisted(() => ({
   mockLoggerError: vi.fn((message: string) => {
@@ -16,6 +17,8 @@ vi.mock('@dnsquared/shipper-core', () => ({
   runPreflight: vi.fn(),
   warnTrackedOutputFiles: vi.fn(),
   loadSettings: vi.fn(),
+  toError,
+  toErrorMessage,
   logger: {
     error: (message: string) => {
       mockLoggerError(message);

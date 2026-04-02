@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { toError, toErrorMessage } from '../../../core/src/lib/errors.js';
 
 const autoSelectIssueMock = vi.fn();
 const formatConflictContextMock = vi.fn(() => 'formatted conflict context');
@@ -62,6 +63,8 @@ const withWorktreeMock = vi.fn((_opts: unknown, fn: (wtPath: string) => Promise<
 
 vi.mock('@dnsquared/shipper-core', () => ({
   logger: loggerMock,
+  toError,
+  toErrorMessage,
   autoSelectIssue: autoSelectIssueMock,
   formatConflictContext: formatConflictContextMock,
   generateBranchName: generateBranchNameMock,

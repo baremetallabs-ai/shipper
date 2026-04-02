@@ -22,6 +22,8 @@ import {
   resolveMode,
   retryOnInvalidOutput,
   scrubOutputDir,
+  toError,
+  toErrorMessage,
   totalTokens as getTotalTokens,
   withStageHooks,
   releaseIssueLock,
@@ -218,7 +220,7 @@ function closeLogStream(logStream: WriteStream | undefined): Promise<void> {
     const rejectClose = (err: unknown): void => {
       if (settled) return;
       settled = true;
-      reject(err instanceof Error ? err : new Error(String(err)));
+      reject(toError(err));
     };
 
     logStream.on('finish', resolveClose);
@@ -392,10 +394,6 @@ async function resolvePrForIssue(issueNumber: number, nwo: string): Promise<Queu
   return { ...pr, labeledAt: '' };
 }
 
-function normalizeError(err: unknown): Error {
-  return err instanceof Error ? err : new Error(String(err));
-}
-
 const UNKNOWN_STATE_POLL_MAX = 5;
 const UNKNOWN_STATE_POLL_DELAY_MS = 3_000;
 
@@ -426,9 +424,7 @@ async function getMergeStateStatus(prNumber: number, nwo: string): Promise<strin
     ]);
     output = result.stdout;
   } catch (err) {
-    throw new Error(
-      `Could not determine merge state for PR #${prNumber}: ${normalizeError(err).message}`
-    );
+    throw new Error(`Could not determine merge state for PR #${prNumber}: ${toErrorMessage(err)}`);
   }
 
   try {
@@ -443,9 +439,7 @@ async function getMergeStateStatus(prNumber: number, nwo: string): Promise<strin
 
     return data.mergeStateStatus;
   } catch (err) {
-    throw new Error(
-      `Could not determine merge state for PR #${prNumber}: ${normalizeError(err).message}`
-    );
+    throw new Error(`Could not determine merge state for PR #${prNumber}: ${toErrorMessage(err)}`);
   }
 }
 
@@ -454,9 +448,7 @@ async function getBlockedMergeStateReason(pr: QueuedPR, nwo: string): Promise<st
   try {
     checks = await fetchChecks(nwo, String(pr.number));
   } catch (err) {
-    throw new Error(
-      `Could not fetch CI checks for PR #${pr.number}: ${normalizeError(err).message}`
-    );
+    throw new Error(`Could not fetch CI checks for PR #${pr.number}: ${toErrorMessage(err)}`);
   }
 
   const { pending, failed } = classifyChecks(checks);
@@ -590,7 +582,7 @@ async function mergePr(
         }
       } catch (err) {
         throw new Error(
-          `Failed to rebase PR #${pr.number} onto its base branch: ${normalizeError(err).message}`
+          `Failed to rebase PR #${pr.number} onto its base branch: ${toErrorMessage(err)}`
         );
       }
 
@@ -636,7 +628,7 @@ async function mergePr(
       throw err;
     }
   } catch (err) {
-    const reason = normalizeError(err).message;
+    const reason = toErrorMessage(err);
     await remediateMergeFailure(pr, issueNumber, nwo, reason, issueLogger);
     throw new Error(formatMergeFailureMessage(pr.number, reason));
   }
@@ -730,7 +722,7 @@ async function shipOneIssue(
             try {
               pr = await resolvePrForIssue(Number(issueStr), repo);
             } catch (err) {
-              return failCurrentStage(stageName, err instanceof Error ? err.message : String(err));
+              return failCurrentStage(stageName, toErrorMessage(err));
             }
 
             let readyCheck: ReadyCheck;
@@ -741,7 +733,7 @@ async function shipOneIssue(
                 getSettings().prReviewWait
               );
             } catch (err) {
-              return failCurrentStage(stageName, err instanceof Error ? err.message : String(err));
+              return failCurrentStage(stageName, toErrorMessage(err));
             }
 
             const readyNow = await readyCheck();
@@ -851,9 +843,8 @@ async function shipOneIssue(
                 label,
               ]);
             } catch (err) {
-              const relabelError = err instanceof Error ? err.message : String(err);
               issueLogger.error(
-                `Warning: Failed to update labels on issue #${issueStr}: ${relabelError}`
+                `Warning: Failed to update labels on issue #${issueStr}: ${toErrorMessage(err)}`
               );
             }
 
@@ -877,7 +868,7 @@ async function shipOneIssue(
         try {
           pr = await resolvePrForIssue(issueNumber, nwo);
         } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
+          const msg = toErrorMessage(err);
           issueLogger.error(msg);
           results.push({ stage: 'merge', status: 'fail' });
           printSummary(results, issueLogger);
@@ -894,7 +885,7 @@ async function shipOneIssue(
           );
           results.push({ stage: 'merge', status: 'pass' });
         } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
+          const msg = toErrorMessage(err);
           results.push({ stage: 'merge', status: 'fail' });
           printSummary(results, issueLogger);
           return { success: false, error: msg, retriable: isRetriableMergeFailure(msg) };
@@ -1230,7 +1221,7 @@ async function attemptUnblock(
       });
       return result.verdict === 'accept';
     } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
+      const detail = toErrorMessage(error);
       logger.error(detail);
       await handleAgentCrash(repo, issueStr, 'unblock', detail);
       return false;

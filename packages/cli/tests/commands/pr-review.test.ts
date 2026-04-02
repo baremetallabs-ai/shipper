@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { toError, toErrorMessage } from '../../../core/src/lib/errors.js';
 
 const autoSelectPrForStageMock = vi.fn();
 const getBranchForPRMock = vi.fn(() => Promise.resolve('shipper/10-feature'));
@@ -67,6 +68,8 @@ const parseDiffHunksMock = vi.fn(() => parsedDiffHunks);
 
 vi.mock('@dnsquared/shipper-core', () => ({
   logger: loggerMock,
+  toError,
+  toErrorMessage,
   autoSelectPrForStage: autoSelectPrForStageMock,
   getBranchForPR: getBranchForPRMock,
   getRepoRoot: getRepoRootMock,

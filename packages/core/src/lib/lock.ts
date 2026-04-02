@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { toErrorMessage } from './errors.js';
 import { gh } from './gh.js';
 import { logger } from './logger.js';
 import { getSettings } from './settings.js';
@@ -57,8 +58,7 @@ export async function acquireIssueLock(repo: string, issueNumber: string): Promi
     ]);
     output = result.stdout.trim();
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`Failed to fetch issue #${issueNumber}: ${msg}`);
+    throw new Error(`Failed to fetch issue #${issueNumber}: ${toErrorMessage(err)}`);
   }
 
   const labels = output ? output.split(/\r?\n/) : [];
@@ -77,8 +77,7 @@ export async function acquireIssueLock(repo: string, issueNumber: string): Promi
   try {
     await gh(['issue', 'edit', issueNumber, '-R', repo, '--add-label', 'shipper:locked']);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`Failed to acquire lock on issue #${issueNumber}: ${msg}`);
+    throw new Error(`Failed to acquire lock on issue #${issueNumber}: ${toErrorMessage(err)}`);
   }
 }
 
@@ -114,8 +113,7 @@ export async function renewIssueLock(
   try {
     await gh(['issue', 'edit', issueNumber, '-R', repo, '--remove-label', 'shipper:locked']);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    logger.error(`Warning: lock renewal failed for issue #${issueNumber}: ${msg}`);
+    logger.error(`Warning: lock renewal failed for issue #${issueNumber}: ${toErrorMessage(err)}`);
     return;
   }
 
@@ -128,9 +126,8 @@ export async function renewIssueLock(
     await gh(['issue', 'edit', issueNumber, '-R', repo, '--add-label', 'shipper:locked']);
     logger.error(`Lock renewed for issue #${issueNumber}`);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
     logger.error(
-      `Warning: lock re-add failed for issue #${issueNumber} — lock is absent until next heartbeat: ${msg}`
+      `Warning: lock re-add failed for issue #${issueNumber} — lock is absent until next heartbeat: ${toErrorMessage(err)}`
     );
   }
 }

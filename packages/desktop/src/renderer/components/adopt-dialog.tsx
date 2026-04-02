@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { JSX } from 'react';
 
 import type { ListIssueItem } from '@dnsquared/shipper-core';
+import { toErrorMessage } from '../../../../core/src/lib/errors.js';
 
 import { Alert, AlertDescription, AlertTitle } from './ui/alert.js';
 import { Button } from './ui/button.js';
@@ -92,8 +93,7 @@ export function AdoptDialog({
       })
       .catch((fetchError: unknown) => {
         if (!cancelled && isRunActive(runId)) {
-          const message = fetchError instanceof Error ? fetchError.message : String(fetchError);
-          setError(message);
+          setError(toErrorMessage(fetchError));
         }
       })
       .finally(() => {
@@ -132,8 +132,7 @@ export function AdoptDialog({
         return false;
       }
 
-      const message = adoptError instanceof Error ? adoptError.message : String(adoptError);
-      setError(message);
+      setError(toErrorMessage(adoptError));
       return false;
     } finally {
       if (isRunActive(runId)) {
@@ -185,8 +184,7 @@ export function AdoptDialog({
             break;
           }
 
-          const message = adoptError instanceof Error ? adoptError.message : String(adoptError);
-          failures.push(`#${issueNumber}: ${message}`);
+          failures.push(`#${issueNumber}: ${toErrorMessage(adoptError)}`);
         } finally {
           if (isRunActive(runId)) {
             setBulkAdoptProgress((prev) =>

@@ -12,6 +12,7 @@ import { autoSelectPrForStage, resolveRef } from '@dnsquared/shipper-core';
 import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
 import { formatConflictContext } from '@dnsquared/shipper-core';
 import { gh } from '@dnsquared/shipper-core';
+import { toErrorMessage } from '@dnsquared/shipper-core';
 import { withStageHooks } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
 import { withWorktree } from '@dnsquared/shipper-core';
@@ -143,8 +144,7 @@ async function fetchChecksGraceful(
   try {
     return await fetchChecks(repo, pr);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    logger.warn(`Warning: Failed to fetch CI checks: ${msg}`);
+    logger.warn(`Warning: Failed to fetch CI checks: ${toErrorMessage(err)}`);
     return null;
   }
 }
@@ -153,8 +153,7 @@ async function getGitRevParseGraceful(cwd: string, ref: string): Promise<string 
   try {
     return await getGitRevParse(cwd, ref);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    logger.warn(`Warning: Failed to resolve git ref ${ref}: ${msg}`);
+    logger.warn(`Warning: Failed to resolve git ref ${ref}: ${toErrorMessage(err)}`);
     return null;
   }
 }
@@ -449,7 +448,7 @@ export async function prRemediateCommand(
                 }
               );
             } catch (error) {
-              const detail = error instanceof Error ? error.message : String(error);
+              const detail = toErrorMessage(error);
               await handleAgentCrash(repo, issueNumber, 'pr_remediate', detail);
               return 1;
             }
@@ -458,7 +457,7 @@ export async function prRemediateCommand(
             try {
               commitsAhead = await getCommitsAheadCount(wtPath, baseBranch);
             } catch (error) {
-              const detail = error instanceof Error ? error.message : String(error);
+              const detail = toErrorMessage(error);
               await handleAgentCrash(repo, issueNumber, 'pr_remediate', detail);
               return 1;
             }
@@ -516,7 +515,7 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
                   }),
               });
             } catch (error) {
-              const detail = error instanceof Error ? error.message : String(error);
+              const detail = toErrorMessage(error);
               logger.error(detail);
               await handleAgentCrash(repo, issueNumber, 'pr_remediate', detail);
               return 1;
@@ -533,7 +532,7 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
                 });
                 return 0;
               } catch (error) {
-                const detail = error instanceof Error ? error.message : String(error);
+                const detail = toErrorMessage(error);
                 logger.error(detail);
                 await handleAgentCrash(repo, issueNumber, 'pr_remediate', detail);
                 return 1;
@@ -544,9 +543,8 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
               try {
                 return await validateStageOutput(wtPath, 'pr_remediate');
               } catch (error) {
-                const detail = error instanceof Error ? error.message : String(error);
                 logger.warn(
-                  `Failed to refresh pr_remediate result after push retry; using previously validated output: ${detail}`
+                  `Failed to refresh pr_remediate result after push retry; using previously validated output: ${toErrorMessage(error)}`
                 );
                 return result;
               }
@@ -577,17 +575,13 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
                 throw new Error(`Push retry agent exited with code ${pushCode}`);
               }
             } catch (error) {
-              const detail = error instanceof Error ? error.message : String(error);
+              const detail = toErrorMessage(error);
               const postingResult = await readLatestPostingResult();
               try {
                 await postReplies(repo, prRef, wtPath, postingResult.replies);
               } catch (postRepliesError) {
                 logger.warn(
-                  `Failed to post replies during push failure handling: ${
-                    postRepliesError instanceof Error
-                      ? postRepliesError.message
-                      : String(postRepliesError)
-                  }`
+                  `Failed to post replies during push failure handling: ${toErrorMessage(postRepliesError)}`
                 );
                 // Best-effort: still attempt the main comment and crash report.
               }
@@ -595,11 +589,7 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
                 await postComment(repo, issueNumber, path.resolve(wtPath, postingResult.comment));
               } catch (postCommentError) {
                 logger.warn(
-                  `Failed to post comment during push failure handling: ${
-                    postCommentError instanceof Error
-                      ? postCommentError.message
-                      : String(postCommentError)
-                  }`
+                  `Failed to post comment during push failure handling: ${toErrorMessage(postCommentError)}`
                 );
                 // Best-effort: the crash report is the required audit trail.
               }

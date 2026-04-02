@@ -2,6 +2,7 @@ import { LoaderCircle } from 'lucide-react';
 import { useState } from 'react';
 import type { JSX } from 'react';
 
+import { toErrorMessage } from '../../../../core/src/lib/errors.js';
 import { Button } from './ui/button.js';
 import {
   Dialog,
@@ -48,8 +49,7 @@ export function CloseNotPlannedDialog({
       onOpenChange(false);
       onSuccess(issue.number);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      onError(issue.number, message);
+      onError(issue.number, toErrorMessage(error));
     } finally {
       setIsClosing(false);
     }

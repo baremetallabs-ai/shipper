@@ -2,6 +2,7 @@ import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { createWriteStream, readFileSync, statSync } from 'node:fs';
 import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { toError, toErrorMessage } from './errors.js';
 import { parseFrontmatter } from './frontmatter.js';
 import { fetchIssue, fetchPR } from './github.js';
 import { agentPrompts } from './prompts.js';
@@ -183,7 +184,7 @@ function spawnAsync(
             settled = true;
             stdout.unpipe(logStream);
             stdout.resume();
-            logReject(asError(err));
+            logReject(toError(err));
           };
 
           logStream.on('finish', resolveLog);
@@ -193,7 +194,7 @@ function spawnAsync(
         stdout.pipe(logStream);
       } catch (err) {
         stdout.resume();
-        logger.warn(`Warning: Session log capture failed: ${asError(err).message}`);
+        logger.warn(`Warning: Session log capture failed: ${toErrorMessage(err)}`);
       }
     }
 
@@ -218,7 +219,7 @@ function spawnAsync(
       clearTimeout(killTimer);
       clearTimeout(graceTimer);
       stdinCleanup?.();
-      reject(asError(err));
+      reject(toError(err));
     });
 
     const handleClose = async (code: number | null): Promise<void> => {
@@ -229,7 +230,7 @@ function spawnAsync(
         try {
           await logCompletion;
         } catch (err) {
-          logger.warn(`Warning: Session log capture failed: ${asError(err).message}`);
+          logger.warn(`Warning: Session log capture failed: ${toErrorMessage(err)}`);
         }
       }
       resolve(timedOut ? code || 1 : (code ?? 1));
@@ -239,10 +240,6 @@ function spawnAsync(
       void handleClose(code);
     });
   });
-}
-
-function asError(err: unknown): Error {
-  return err instanceof Error ? err : new Error(String(err));
 }
 
 async function resolvePromptCommand(
@@ -255,7 +252,7 @@ async function resolvePromptCommand(
     try {
       execFileSync('copilot', ['--version'], { stdio: 'ignore' });
     } catch (err) {
-      const error = asError(err) as Error & { code?: string | number };
+      const error = toError(err) as Error & { code?: string | number };
       if (error.code === 'ENOENT') {
         throw new Error(
           'copilot binary not found on PATH.\n' +
@@ -469,7 +466,7 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
   try {
     resolved = await resolvePromptCommand(name, opts, effectiveMode);
   } catch (err) {
-    logger.error(`Error: ${asError(err).message}`);
+    logger.error(`Error: ${toErrorMessage(err)}`);
     return 1;
   }
 
@@ -497,7 +494,7 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
   } catch (err) {
     sessionRepo = undefined;
     sessionTimestamp = undefined;
-    logger.warn(`Warning: Failed to initialize session logging: ${asError(err).message}`);
+    logger.warn(`Warning: Failed to initialize session logging: ${toErrorMessage(err)}`);
   }
 
   const effectiveModel = getEffectiveModel(agent, args);
@@ -547,15 +544,13 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
           usage,
         });
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        logger.warn(`Warning: Failed to write session metadata: ${message}`);
+        logger.warn(`Warning: Failed to write session metadata: ${toErrorMessage(err)}`);
       }
     }
 
     return exitCode;
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    logger.error(`Error: Failed to spawn ${agent}: ${message}`);
+    logger.error(`Error: Failed to spawn ${agent}: ${toErrorMessage(err)}`);
     return 1;
   }
 }

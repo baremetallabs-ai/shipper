@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { toError, toErrorMessage } from '../../../core/src/lib/errors.js';
 
 const fetchIssueMock = vi.fn();
 const ghMock = vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>();
@@ -36,6 +37,8 @@ const writeContextFileMock = vi.fn(() => Promise.resolve());
 
 vi.mock('@dnsquared/shipper-core', () => ({
   logger: loggerMock,
+  toError,
+  toErrorMessage,
   fetchIssue: fetchIssueMock,
   gh: ghMock,
   handleAgentCrash: handleAgentCrashMock,

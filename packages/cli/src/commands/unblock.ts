@@ -9,6 +9,7 @@ import {
   runPrompt,
   scrubOutputDir,
   setupProtocolDirs,
+  toErrorMessage,
   withIssueLock,
   writeContextFile,
 } from '@dnsquared/shipper-core';
@@ -45,12 +46,11 @@ async function fetchDependencyStates(repo: string, refs: string[]): Promise<stri
         const issueResult = await gh(['issue', 'view', ref, '-R', repo, '--json', 'state,title']);
         issue = JSON.parse(issueResult.stdout) as DependencyIssueData;
       } catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
         return [
           `## #${ref}`,
           '- **Type**: Unknown',
           '- **Title**: Unable to fetch dependency',
-          `- **Detail**: ${detail}`,
+          `- **Detail**: ${toErrorMessage(error)}`,
         ].join('\n');
       }
 
@@ -140,7 +140,7 @@ export async function unblockCommand(
       });
       await processResult({ repo, issueNumber: issue, stage: 'unblock', cwd, result });
     } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
+      const detail = toErrorMessage(error);
       logger.error(detail);
       await handleAgentCrash(repo, issue, 'unblock', detail);
       process.exitCode = 1;
