@@ -40,6 +40,7 @@ async function exists(dir: string): Promise<boolean> {
     await access(dir);
     return true;
   } catch {
+    // Directory doesn't exist — not cloned yet.
     return false;
   }
 }

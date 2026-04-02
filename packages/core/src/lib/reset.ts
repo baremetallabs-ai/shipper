@@ -120,6 +120,7 @@ async function getStageTimestamp(
 
     return timestamps[timestamps.length - 1] ?? null;
   } catch {
+    logger.warn(`Failed to fetch stage timestamp for issue #${issueNum}`);
     return null;
   }
 }

@@ -446,8 +446,13 @@ describe('tryResolvePrForIssue', () => {
   });
 
   it('returns undefined when gh command fails', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     queueExecFileError('gh failed');
+    queueExecFileError('gh failed');
+    queueExecFileError('gh failed');
+
     expect(await tryResolvePrForIssue(repo, 12)).toBeUndefined();
+    expect(warnSpy).toHaveBeenCalledWith('[shipper] Failed to resolve PR for issue #12');
   });
 });
 
@@ -547,11 +552,15 @@ describe('fetchIssueTimelines', () => {
   });
 
   it('falls back to an empty event list when a timeline fetch fails', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    queueExecFileError('gh failed');
+    queueExecFileError('gh failed');
     queueExecFileError('gh failed');
 
     const result = await fetchIssueTimelines(repo, [33]);
 
     expect(result).toEqual(new Map([[33, []]]));
+    expect(warnSpy).toHaveBeenCalledWith('[shipper] Failed to fetch timeline for issue #33');
   });
 });
 
@@ -783,6 +792,18 @@ describe('selectIssuesForStage', () => {
       '[shipper] Warning: Could not check for stale-locked issues. Proceeding without them.'
     );
     stderrSpy.mockRestore();
+  });
+
+  it('returns an empty list when the initial issue query fails', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    queueExecFileError('gh failed');
+    queueExecFileError('gh failed');
+    queueExecFileError('gh failed');
+
+    const result = await selectIssuesForStage(repo, 'shipper:new');
+
+    expect(result).toEqual([]);
+    expect(warnSpy).toHaveBeenCalledWith('[shipper] Failed to fetch issues for stage shipper:new');
   });
 
   it('sorts issues by priority tier before FIFO within the same stage', async () => {

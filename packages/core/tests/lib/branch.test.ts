@@ -3,6 +3,7 @@ import { beforeEach, describe, it, expect, vi } from 'vitest';
 
 const execFileMock = vi.fn();
 const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 function normalizeError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
@@ -38,6 +39,7 @@ const repo = 'owner/repo';
 beforeEach(() => {
   execFileMock.mockReset();
   errorSpy.mockClear();
+  warnSpy.mockClear();
   execFileMock.mockImplementation((_cmd: string, args: string[], ...rest: unknown[]) => {
     const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
     if (args.includes('--jq')) {
@@ -93,6 +95,7 @@ describe('generateBranchName', () => {
 
     const result = await generateBranchName(repo, '99');
     expect(result).toBe('shipper/99-implement');
+    expect(warnSpy).toHaveBeenCalledWith('[shipper] Failed to fetch issue title for #99');
   });
 });
 
