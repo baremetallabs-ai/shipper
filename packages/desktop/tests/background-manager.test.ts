@@ -245,24 +245,53 @@ describe('BackgroundManager', () => {
     expect(manager.getOutput('new-1')).toBe('{"type":"log","message":"hello"}\n');
   });
 
-  it('warns and returns an empty string when the new-session log file cannot be read', () => {
+  it('returns an empty string without warning when the new-session log file is not created yet', () => {
     const manager = createManager();
     const logFile = join(tempDir, 'sessions', 'missing-desktop-run.jsonl');
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    manager.spawn({
-      sessionId: 'new-1',
-      command: 'new',
-      repo: 'owner/repo',
-      commandName: 'shipper',
-      args: ['new', 'idea', '--mode', 'headless', '--log-file', logFile],
-      cwd: '/tmp/repo',
-      logFile,
-      meta: { request: 'idea', logFile },
-    });
+    try {
+      manager.spawn({
+        sessionId: 'new-1',
+        command: 'new',
+        repo: 'owner/repo',
+        commandName: 'shipper',
+        args: ['new', 'idea', '--mode', 'headless', '--log-file', logFile],
+        cwd: '/tmp/repo',
+        logFile,
+        meta: { request: 'idea', logFile },
+      });
 
-    expect(manager.getOutput('new-1')).toBe('');
-    expect(warnSpy).toHaveBeenCalledWith(`[shipper] Failed to read session log file ${logFile}`);
+      expect(manager.getOutput('new-1')).toBe('');
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('warns and returns an empty string when the new-session log file read fails for another reason', () => {
+    const manager = createManager();
+    const logFile = join(tempDir, 'sessions', 'not-a-file');
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mkdirSync(logFile, { recursive: true });
+
+    try {
+      manager.spawn({
+        sessionId: 'new-1',
+        command: 'new',
+        repo: 'owner/repo',
+        commandName: 'shipper',
+        args: ['new', 'idea', '--mode', 'headless', '--log-file', logFile],
+        cwd: '/tmp/repo',
+        logFile,
+        meta: { request: 'idea', logFile },
+      });
+
+      expect(manager.getOutput('new-1')).toBe('');
+      expect(warnSpy).toHaveBeenCalledWith(`[shipper] Failed to read session log file ${logFile}`);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it('kills a running child with SIGTERM and escalates to SIGKILL after the grace period', () => {

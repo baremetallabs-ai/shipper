@@ -359,7 +359,7 @@ export async function initCommand(options: {
     try {
       await execFileAsync('git', ['diff', '--cached', '--quiet', '--', '.shipper/']);
     } catch {
-      // Non-zero exit means there are staged changes.
+      // Treat any diff check failure as "changes present" so autocommit keeps the staged files.
       hasChanges = true;
     }
 

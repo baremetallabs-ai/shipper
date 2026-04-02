@@ -986,20 +986,28 @@ describe('selectBlockedIssues', () => {
 
   it('returns empty array when gh throws', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    mockGh.mockRejectedValue(new Error('gh CLI error'));
-    const result = await selectBlockedIssues(repo);
-    expect(result).toEqual([]);
-    expect(warnSpy).toHaveBeenCalledWith(prefixed('Failed to fetch blocked issues'));
+    try {
+      mockGh.mockRejectedValue(new Error('gh CLI error'));
+      const result = await selectBlockedIssues(repo);
+      expect(result).toEqual([]);
+      expect(warnSpy).toHaveBeenCalledWith(prefixed('Failed to fetch blocked issues'));
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it('returns empty array and warns when the blocked issues response is invalid JSON', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    mockGh.mockResolvedValue({ stdout: '{not json', stderr: '' });
+    try {
+      mockGh.mockResolvedValue({ stdout: '{not json', stderr: '' });
 
-    const result = await selectBlockedIssues(repo);
+      const result = await selectBlockedIssues(repo);
 
-    expect(result).toEqual([]);
-    expect(warnSpy).toHaveBeenCalledWith(prefixed('Failed to parse blocked issues response'));
+      expect(result).toEqual([]);
+      expect(warnSpy).toHaveBeenCalledWith(prefixed('Failed to parse blocked issues response'));
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it('passes --search flag to exclude shipper:locked issues', async () => {
@@ -1353,20 +1361,25 @@ describe('shipCommand single-issue path', () => {
   it('warns when the issue label fetch fails before reporting the missing-label error', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    mockGh.mockImplementation((args: string[]) => {
-      if (args[0] === 'issue' && args[1] === 'view') {
-        throw new Error('gh view failed');
-      }
+    try {
+      mockGh.mockImplementation((args: string[]) => {
+        if (args[0] === 'issue' && args[1] === 'view') {
+          throw new Error('gh view failed');
+        }
 
-      return { stdout: '', stderr: '' };
-    });
+        return { stdout: '', stderr: '' };
+      });
 
-    await shipCommand(repo, '42', { auto: false, merge: false });
+      await shipCommand(repo, '42', { auto: false, merge: false });
 
-    expect(warnSpy).toHaveBeenCalledWith(prefixed('Failed to fetch labels for issue #42'));
-    expect(errorSpy).toHaveBeenCalledWith(
-      prefixed('Issue #42 has no shipper label. Run `shipper next` or add a label first.')
-    );
+      expect(warnSpy).toHaveBeenCalledWith(prefixed('Failed to fetch labels for issue #42'));
+      expect(errorSpy).toHaveBeenCalledWith(
+        prefixed('Issue #42 has no shipper label. Run `shipper next` or add a label first.')
+      );
+    } finally {
+      warnSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
   });
 
   it('does not force interactive grooming when resolveMode returns default', async () => {
@@ -2593,11 +2606,16 @@ describe('shipCommand sequential auto runner parking', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
-    await shipCommand(repo, undefined, { auto: true, merge: false, parallel: 1 });
+    try {
+      await shipCommand(repo, undefined, { auto: true, merge: false, parallel: 1 });
 
-    expect(warnSpy).toHaveBeenCalledWith(prefixed('Failed to resolve total tokens for issue #1'));
-    expect(mockTotalTokens).not.toHaveBeenCalled();
-    expect(getConsoleOutput(logSpy)).toMatch(/Usage failure.*—\s+✓ pass/s);
+      expect(warnSpy).toHaveBeenCalledWith(prefixed('Failed to resolve total tokens for issue #1'));
+      expect(mockTotalTokens).not.toHaveBeenCalled();
+      expect(getConsoleOutput(logSpy)).toMatch(/Usage failure.*—\s+✓ pass/s);
+    } finally {
+      warnSpy.mockRestore();
+      logSpy.mockRestore();
+    }
   });
 
   it('does not enable parking for non-auto ship runs', async () => {
