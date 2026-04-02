@@ -33,7 +33,8 @@ vi.mock('node:child_process', () => ({
   execFile,
 }));
 
-const { generateBranchName, findBranchForIssue } = await import('../../src/lib/branch.js');
+const { findBranchForIssue, generateBranchName, getBranchForPR, getRepoRoot } =
+  await import('../../src/lib/branch.js');
 const repo = 'owner/repo';
 
 beforeEach(() => {
@@ -96,6 +97,39 @@ describe('generateBranchName', () => {
     const result = await generateBranchName(repo, '99');
     expect(result).toBe('shipper/99-implement');
     expect(warnSpy).toHaveBeenCalledWith('[shipper] Failed to fetch issue title for #99');
+  });
+});
+
+describe('getRepoRoot', () => {
+  it('returns the trimmed git toplevel path', async () => {
+    execFileMock.mockReset();
+    execFileMock.mockImplementation((_cmd: string, args: string[], ...rest: unknown[]) => {
+      const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
+      if (args.includes('--show-toplevel')) {
+        cb(null, '/home/user/project\n', '');
+        return;
+      }
+      cb(null, '', '');
+    });
+
+    await expect(getRepoRoot()).resolves.toBe('/home/user/project');
+    expect(execFileMock).toHaveBeenCalledWith(
+      'git',
+      ['rev-parse', '--show-toplevel'],
+      expect.objectContaining({ encoding: 'utf-8' }),
+      expect.any(Function)
+    );
+  });
+
+  it('propagates git rev-parse failures', async () => {
+    const error = new Error('git failed');
+    execFileMock.mockReset();
+    execFileMock.mockImplementation((_cmd: string, _args: string[], ...rest: unknown[]) => {
+      const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
+      cb(error);
+    });
+
+    await expect(getRepoRoot()).rejects.toThrow('git failed');
   });
 });
 
@@ -225,5 +259,57 @@ describe('findBranchForIssue', () => {
         '  shipper/84-only-require-reason\n' +
         'Using most recent: shipper/84-fix-make-late-filing'
     );
+  });
+});
+
+describe('getBranchForPR', () => {
+  it('returns the PR head ref name from gh pr view', async () => {
+    execFileMock.mockReset();
+    execFileMock.mockImplementation((_cmd: string, args: string[], ...rest: unknown[]) => {
+      const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
+      if (args[0] === 'pr' && args[1] === 'view') {
+        cb(null, '{"headRefName":"shipper/42-add-login"}', '');
+        return;
+      }
+      cb(null, '', '');
+    });
+
+    await expect(getBranchForPR(repo, '123')).resolves.toBe('shipper/42-add-login');
+    expect(execFileMock).toHaveBeenCalledWith(
+      'gh',
+      ['pr', 'view', '123', '-R', repo, '--json', 'headRefName'],
+      expect.objectContaining({ encoding: 'utf-8' }),
+      expect.any(Function)
+    );
+  });
+
+  it('rejects when gh returns a payload without headRefName', async () => {
+    execFileMock.mockReset();
+    execFileMock.mockImplementation((_cmd: string, args: string[], ...rest: unknown[]) => {
+      const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
+      if (args[0] === 'pr' && args[1] === 'view') {
+        cb(null, '{}', '');
+        return;
+      }
+      cb(null, '', '');
+    });
+
+    await expect(getBranchForPR(repo, '123')).rejects.toThrow(
+      'GitHub CLI returned an invalid headRefName payload.'
+    );
+  });
+
+  it('rejects when gh returns invalid JSON', async () => {
+    execFileMock.mockReset();
+    execFileMock.mockImplementation((_cmd: string, args: string[], ...rest: unknown[]) => {
+      const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
+      if (args[0] === 'pr' && args[1] === 'view') {
+        cb(null, 'not json', '');
+        return;
+      }
+      cb(null, '', '');
+    });
+
+    await expect(getBranchForPR(repo, '123')).rejects.toThrow();
   });
 });
