@@ -89,6 +89,7 @@ async function hookExists(hookPath: string): Promise<boolean> {
     await stat(hookPath);
     return true;
   } catch {
+    // File doesn't exist — no hook to run.
     return false;
   }
 }
@@ -98,6 +99,7 @@ async function hookIsExecutable(hookPath: string): Promise<boolean> {
     await access(hookPath, constants.X_OK);
     return true;
   } catch {
+    // Not executable — caller handles the warning.
     return false;
   }
 }

@@ -71,6 +71,7 @@ function resolveWorktreeGitDir(cwd: string): WorktreeDirs | undefined {
   try {
     if (!statSync(dotGit).isFile()) return undefined;
   } catch {
+    // .git doesn't exist or isn't a file — not a worktree.
     return undefined;
   }
   try {
@@ -498,6 +499,7 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
       try {
         usage = await parseAgentUsage(agent, spawnLogFile);
       } catch {
+        logger.warn(`Failed to parse agent usage from ${spawnLogFile}`);
         usage = undefined;
       }
 

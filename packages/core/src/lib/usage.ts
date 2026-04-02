@@ -1,5 +1,6 @@
 import { createReadStream } from 'node:fs';
 import { createInterface } from 'node:readline';
+import { logger } from './logger.js';
 import type { AgentName } from './settings.js';
 
 export interface TokenUsage {
@@ -33,6 +34,7 @@ export async function parseAgentUsage(
       }
     }
   } catch {
+    logger.warn(`Failed to parse usage from ${logFile}`);
     return undefined;
   } finally {
     lines.close();
@@ -96,6 +98,7 @@ function parseJsonLine(line: string): Record<string, unknown> | undefined {
     const parsed: unknown = JSON.parse(trimmed);
     return isRecord(parsed) ? parsed : undefined;
   } catch {
+    // Malformed JSON line — expected for truncated writes; skip.
     return undefined;
   }
 }

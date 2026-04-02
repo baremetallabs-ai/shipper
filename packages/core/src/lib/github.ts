@@ -417,6 +417,7 @@ export async function tryResolvePrForIssue(
     );
     return match ? String(match.number) : undefined;
   } catch {
+    logger.warn(`Failed to resolve PR for issue #${issueNumber}`);
     return undefined;
   }
 }
@@ -507,6 +508,7 @@ export async function fetchIssueTimelines(
         : [];
       timelinesByIssue.set(issueNumber, events);
     } catch {
+      logger.warn(`Failed to fetch timeline for issue #${issueNumber}`);
       timelinesByIssue.set(issueNumber, []);
     }
   }
@@ -549,6 +551,7 @@ export async function selectIssuesForStage(
     const output = result.stdout.trim();
     issues = JSON.parse(output) as StageIssueListItem[];
   } catch {
+    logger.warn(`Failed to fetch issues for stage ${label}`);
     return [];
   }
 

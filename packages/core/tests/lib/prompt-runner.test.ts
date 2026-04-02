@@ -1290,12 +1290,16 @@ describe('runPrompt', () => {
     readFileMock.mockResolvedValueOnce(makePrompt('claude'));
     parseAgentUsageMock.mockRejectedValueOnce(new Error('parse failed'));
     const logMock = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const warnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
     mockSpawnResult({ code: 23 });
 
     await expect(runPrompt('test', { mode: 'headless', repo: 'owner/repo' })).resolves.toBe(23);
 
     expect(formatUsageLineMock).not.toHaveBeenCalled();
     expect(logMock).not.toHaveBeenCalled();
+    expect(warnMock).toHaveBeenCalledWith(
+      expect.stringContaining('[shipper] Failed to parse agent usage from ')
+    );
     const failedMeta = writeSessionMetaMock.mock.calls[0]?.[1];
     expect(failedMeta).toBeDefined();
     expect(failedMeta).toMatchObject({ usage: undefined });

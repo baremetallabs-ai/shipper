@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   formatUsageLine,
   parseAgentUsage,
@@ -129,6 +129,16 @@ describe('parseAgentUsage', () => {
     tempDirs.push(dir);
 
     await expect(parseAgentUsage('claude', file)).resolves.toBeUndefined();
+  });
+
+  it('warns and returns undefined when the usage log cannot be read', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'usage-log-'));
+    tempDirs.push(dir);
+    const file = path.join(dir, 'missing.jsonl');
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await expect(parseAgentUsage('claude', file)).resolves.toBeUndefined();
+    expect(warnSpy).toHaveBeenCalledWith(`[shipper] Failed to parse usage from ${file}`);
   });
 
   it('parses the final Codex turn.completed usage payload', async () => {

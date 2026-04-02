@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import { logger } from './logger.js';
 import type { TokenUsage } from './usage.js';
 const UNLINKED_REPO = '_unlinked';
 
@@ -87,6 +88,7 @@ export async function aggregateSessionUsage(
   try {
     entries = await readdir(sessionDir);
   } catch {
+    logger.warn(`Failed to read session directory for ${repo}/${issue}`);
     return undefined;
   }
 
@@ -101,6 +103,7 @@ export async function aggregateSessionUsage(
     try {
       parsed = JSON.parse(await readFile(path.join(sessionDir, entry), 'utf-8'));
     } catch {
+      // Malformed session meta file — skip to next.
       continue;
     }
 

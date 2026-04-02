@@ -44,6 +44,7 @@ export async function generateBranchName(repo: string, issueRef: string): Promis
     ]);
     title = stdout.trim();
   } catch {
+    logger.warn(`Failed to fetch issue title for #${num}`);
     title = '';
   }
 
