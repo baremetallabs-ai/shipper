@@ -36,6 +36,8 @@ const createWriteStreamMock = vi.fn<(path: string) => MockLogStream>();
 const readFileSyncMock = vi.fn<(path: string, encoding: string) => string>();
 const fetchIssueMock = vi.fn<(repo: string, issueRef: string) => Promise<string>>();
 const fetchPRMock = vi.fn<(repo: string, prRef: string) => Promise<string>>();
+const writeContextFileMock =
+  vi.fn<(cwd: string, filename: string, content: string) => Promise<void>>();
 const resolveSessionRepoMock = vi
   .fn<(opts: { repo?: string; cwd?: string }) => Promise<{ repo: string; repoSlug: string }>>()
   .mockResolvedValue({ repo: 'owner/repo', repoSlug: 'owner-repo' });
@@ -123,6 +125,16 @@ vi.mock('../../src/lib/github.js', () => ({
   fetchIssue: (...args: unknown[]) => fetchIssueMock(...args),
   fetchPR: (...args: unknown[]) => fetchPRMock(...args),
 }));
+
+vi.mock('../../src/lib/output-protocol.js', async () => {
+  const actual = await vi.importActual<typeof import('../../src/lib/output-protocol.js')>(
+    '../../src/lib/output-protocol.js'
+  );
+  return {
+    ...actual,
+    writeContextFile: (...args: unknown[]) => writeContextFileMock(...args),
+  };
+});
 
 vi.mock('../../src/lib/settings.js', () => ({
   resolveAgent: (...args: unknown[]) => resolveAgentMock(...args),
@@ -213,6 +225,7 @@ function mockSpawnResult(
 }
 
 const { buildPromptCommand, runPrompt } = await import('../../src/lib/prompt-runner.js');
+const OFFLOAD_THRESHOLD_BYTES = 50_000;
 
 function makePrompt(
   cmd: 'claude' | 'codex' | 'copilot',
@@ -244,6 +257,10 @@ function spawnedChild(): PromptChild {
     throw new Error('Expected spawn to return a child process.');
   }
   return child as PromptChild;
+}
+
+function oversizedContent(char: string): string {
+  return char.repeat(OFFLOAD_THRESHOLD_BYTES + 1);
 }
 
 function makeTimeoutChild(): PromptChild & {
@@ -309,6 +326,8 @@ afterEach(() => {
   getSettingsMock.mockReturnValue({ agentTimeoutMinutes: 60 });
   fetchIssueMock.mockResolvedValue('issue body');
   fetchPRMock.mockResolvedValue('pr body');
+  writeContextFileMock.mockReset();
+  writeContextFileMock.mockResolvedValue(undefined);
   resolveSessionRepoMock.mockResolvedValue({ repo: 'owner/repo', repoSlug: 'owner-repo' });
   writeSessionMetaMock.mockResolvedValue(undefined);
   parseAgentUsageMock.mockReset();
@@ -396,7 +415,41 @@ describe('runPrompt', () => {
     expect(args).toContain('git rebase origin/develop');
   });
 
-  it('appends fetched issue and PR text when requested by frontmatter', async () => {
+  it('offloads fetched issue text to a context file when it exceeds the threshold', async () => {
+    readFileMock.mockResolvedValueOnce(
+      ['---', 'cmd: claude', 'append-issue: true', '---', '', 'prompt body'].join('\n')
+    );
+    const issueContent = oversizedContent('i');
+    fetchIssueMock.mockResolvedValueOnce(issueContent);
+
+    const command = await buildPromptCommand('test', { repo: 'owner/repo', issueRef: '42' });
+
+    expect(writeContextFileMock).toHaveBeenCalledWith(process.cwd(), 'issue-42.md', issueContent);
+    expect(command.args.at(-1)).toContain('.shipper/input/issue-42.md');
+    expect(command.args.at(-1)).toContain('Read this file to access the complete issue');
+    expect(command.args.at(-1)).not.toContain(issueContent);
+    expect(fetchIssueMock).toHaveBeenCalledWith('owner/repo', '42');
+    expect(fetchPRMock).not.toHaveBeenCalled();
+  });
+
+  it('offloads fetched PR text to a context file when it exceeds the threshold', async () => {
+    readFileMock.mockResolvedValueOnce(
+      ['---', 'cmd: claude', 'append-pr: true', '---', '', 'prompt body'].join('\n')
+    );
+    const prContent = oversizedContent('r');
+    fetchPRMock.mockResolvedValueOnce(prContent);
+
+    const command = await buildPromptCommand('test', { repo: 'owner/repo', prRef: '5' });
+
+    expect(writeContextFileMock).toHaveBeenCalledWith(process.cwd(), 'pr-5.md', prContent);
+    expect(command.args.at(-1)).toContain('.shipper/input/pr-5.md');
+    expect(command.args.at(-1)).toContain('Read this file to access the complete PR');
+    expect(command.args.at(-1)).not.toContain(prContent);
+    expect(fetchIssueMock).not.toHaveBeenCalled();
+    expect(fetchPRMock).toHaveBeenCalledWith('owner/repo', '5');
+  });
+
+  it('keeps fetched issue and PR text inline when both stay under the threshold', async () => {
     readFileMock.mockResolvedValueOnce(
       [
         '---',
@@ -410,12 +463,15 @@ describe('runPrompt', () => {
     );
     fetchIssueMock.mockResolvedValueOnce('issue details');
     fetchPRMock.mockResolvedValueOnce('pr details');
-    mockSpawnResult();
 
-    await runPrompt('test', { repo: 'owner/repo', issueRef: '42', prRef: '5' });
+    const command = await buildPromptCommand('test', {
+      repo: 'owner/repo',
+      issueRef: '42',
+      prRef: '5',
+    });
 
-    const args = spawnMock.mock.calls[0][1] as string[];
-    expect(args).toContain('issue details\n\n---\n\npr details');
+    expect(command.args.at(-1)).toBe('issue details\n\n---\n\npr details');
+    expect(writeContextFileMock).not.toHaveBeenCalled();
     expect(fetchIssueMock).toHaveBeenCalledWith('owner/repo', '42');
     expect(fetchPRMock).toHaveBeenCalledWith('owner/repo', '5');
   });
@@ -460,8 +516,8 @@ describe('runPrompt', () => {
     );
   });
 
-  it('throws from buildPromptCommand when combined prompt inputs exceed the budget', async () => {
-    const promptBody = 'p'.repeat(60_000);
+  it('keeps oversized issue and PR payloads under the budget by offloading them', async () => {
+    const promptBody = 'p'.repeat(40_000);
     readFileMock.mockResolvedValueOnce(
       [
         '---',
@@ -474,43 +530,54 @@ describe('runPrompt', () => {
         promptBody,
       ].join('\n')
     );
-    fetchIssueMock.mockResolvedValueOnce('i'.repeat(60_000));
-    fetchPRMock.mockResolvedValueOnce('r'.repeat(60_000));
+    const issueContent = oversizedContent('i');
+    const prContent = oversizedContent('r');
+    fetchIssueMock.mockResolvedValueOnce(issueContent);
+    fetchPRMock.mockResolvedValueOnce(prContent);
 
     await expect(
       buildPromptCommand('test', {
         repo: 'owner/repo',
         issueRef: '42',
         prRef: '5',
-        userInput: 'u'.repeat(60_000),
+        userInput: 'keep user input inline',
+      })
+    ).resolves.toMatchObject({
+      command: 'claude',
+    });
+
+    expect(writeContextFileMock).toHaveBeenNthCalledWith(
+      1,
+      process.cwd(),
+      'issue-42.md',
+      issueContent
+    );
+    expect(writeContextFileMock).toHaveBeenNthCalledWith(2, process.cwd(), 'pr-5.md', prContent);
+  });
+
+  it('throws from buildPromptCommand when non-offloaded prompt inputs exceed the budget', async () => {
+    const promptBody = 'p'.repeat(120_000);
+    readFileMock.mockResolvedValueOnce(
+      ['---', 'cmd: claude', 'append-user-input: true', '---', '', promptBody].join('\n')
+    );
+
+    await expect(
+      buildPromptCommand('test', {
+        userInput: 'u'.repeat(90_000),
       })
     ).rejects.toThrow(/Total prompt input size \(\d+ bytes\) exceeds the 200000-byte budget/);
   });
 
-  it('returns 1 and does not spawn when the combined prompt inputs exceed the budget', async () => {
-    const promptBody = 'p'.repeat(60_000);
+  it('returns 1 and does not spawn when non-offloaded prompt inputs exceed the budget', async () => {
+    const promptBody = 'p'.repeat(120_000);
     readFileMock.mockResolvedValueOnce(
-      [
-        '---',
-        'cmd: claude',
-        'append-issue: true',
-        'append-pr: true',
-        'append-user-input: true',
-        '---',
-        '',
-        promptBody,
-      ].join('\n')
+      ['---', 'cmd: claude', 'append-user-input: true', '---', '', promptBody].join('\n')
     );
-    fetchIssueMock.mockResolvedValueOnce('i'.repeat(60_000));
-    fetchPRMock.mockResolvedValueOnce('r'.repeat(60_000));
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     await expect(
       runPrompt('test', {
-        repo: 'owner/repo',
-        issueRef: '42',
-        prRef: '5',
-        userInput: 'u'.repeat(60_000),
+        userInput: 'u'.repeat(90_000),
       })
     ).resolves.toBe(1);
 
@@ -555,6 +622,39 @@ describe('runPrompt', () => {
     expect(spawnedArgs()).toContain(
       `${'i'.repeat(20_000)}\n\n---\n\n${'r'.repeat(20_000)}\n\n---\n\n${'u'.repeat(20_000)}`
     );
+  });
+
+  it('uses the worktree cwd for offloaded context files and agent spawn', async () => {
+    readFileMock.mockResolvedValueOnce(
+      [
+        '---',
+        'cmd: claude',
+        'append-issue: true',
+        'append-user-input: true',
+        '---',
+        '',
+        'prompt body',
+      ].join('\n')
+    );
+    const issueContent = oversizedContent('i');
+    fetchIssueMock.mockResolvedValueOnce(issueContent);
+    mockSpawnResult();
+
+    await expect(
+      runPrompt('test', {
+        repo: 'owner/repo',
+        issueRef: '42',
+        cwd: '/tmp/wt',
+        userInput: 'keep this inline',
+      })
+    ).resolves.toBe(0);
+
+    expect(writeContextFileMock).toHaveBeenCalledWith('/tmp/wt', 'issue-42.md', issueContent);
+    expect(spawnedOptions()).toMatchObject({ cwd: '/tmp/wt' });
+    expect(spawnedArgs().at(-1)).toContain('.shipper/input/issue-42.md');
+    expect(spawnedArgs().at(-1)).toContain('keep this inline');
+    expect(spawnedArgs().at(-1)).not.toContain(issueContent);
+    expect(writeContextFileMock).toHaveBeenCalledTimes(1);
   });
 
   it('returns 1 when appended issue or PR context is requested without a repo', async () => {
