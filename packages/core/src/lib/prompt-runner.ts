@@ -5,6 +5,7 @@ import path from 'node:path';
 import { parseFrontmatter } from './frontmatter.js';
 import { fetchIssue, fetchPR } from './github.js';
 import { agentPrompts } from './prompts.js';
+import { writeContextFile } from './output-protocol.js';
 import { getSessionPaths, resolveSessionRepo, writeSessionMeta } from './session.js';
 import {
   getSettings,
@@ -58,6 +59,7 @@ const GH_MUTATION_PATTERNS = [
   /gh\s+pr\s+create\b/,
   /gh\s+pr\s+review\b/,
 ] as const;
+const CONTENT_OFFLOAD_THRESHOLD_BYTES = 50_000;
 const MAX_INPUT_BYTES = 200_000;
 const warnedPromptPaths = new Set<string>();
 
@@ -383,7 +385,17 @@ async function resolvePromptCommand(
       throw new Error(`Prompt "${name}" requires opts.repo when append-issue is enabled.`);
     }
     if (opts.issueRef) {
-      messageParts.push(await fetchIssue(opts.repo, opts.issueRef));
+      const content = await fetchIssue(opts.repo, opts.issueRef);
+      if (Buffer.byteLength(content, 'utf-8') > CONTENT_OFFLOAD_THRESHOLD_BYTES) {
+        const cwd = opts.cwd ?? process.cwd();
+        const filename = `issue-${opts.issueRef}.md`;
+        await writeContextFile(cwd, filename, content);
+        messageParts.push(
+          `The full issue content has been written to .shipper/input/${filename} because it exceeds the inline size limit. Read this file to access the complete issue with all comments.`
+        );
+      } else {
+        messageParts.push(content);
+      }
     }
   }
 
@@ -392,7 +404,17 @@ async function resolvePromptCommand(
       throw new Error(`Prompt "${name}" requires opts.repo when append-pr is enabled.`);
     }
     if (opts.prRef) {
-      messageParts.push(await fetchPR(opts.repo, opts.prRef));
+      const content = await fetchPR(opts.repo, opts.prRef);
+      if (Buffer.byteLength(content, 'utf-8') > CONTENT_OFFLOAD_THRESHOLD_BYTES) {
+        const cwd = opts.cwd ?? process.cwd();
+        const filename = `pr-${opts.prRef}.md`;
+        await writeContextFile(cwd, filename, content);
+        messageParts.push(
+          `The full PR content has been written to .shipper/input/${filename} because it exceeds the inline size limit. Read this file to access the complete PR with all reviews and comments.`
+        );
+      } else {
+        messageParts.push(content);
+      }
     }
   }
 
