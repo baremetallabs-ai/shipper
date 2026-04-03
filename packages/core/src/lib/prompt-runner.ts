@@ -620,7 +620,7 @@ function canTrackUsage(agent: AgentName, args: string[]): boolean {
     case 'codex':
       return args.includes('exec');
     case 'copilot':
-      return false;
+      return args.includes('--autopilot');
     default: {
       const exhaustiveCheck: never = agent;
       throw new Error(`Unsupported agent: ${String(exhaustiveCheck)}`);
@@ -654,8 +654,14 @@ function ensureJsonOutputFormat(agent: AgentName, args: string[]): void {
       args.splice(insertIdx, 0, CODEX_HEADLESS_JSON_ARG);
       return;
     }
-    case 'copilot':
+    case 'copilot': {
+      if (!args.includes('--output-format')) {
+        const promptFlagIdx = args.indexOf('-p');
+        const insertIdx = promptFlagIdx === -1 ? args.length : promptFlagIdx;
+        args.splice(insertIdx, 0, '--output-format', 'json');
+      }
       return;
+    }
     default: {
       const exhaustiveCheck: never = agent;
       throw new Error(`Unsupported agent: ${String(exhaustiveCheck)}`);

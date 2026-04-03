@@ -16,7 +16,7 @@ export async function parseAgentUsage(
   agent: AgentName,
   logFile: string
 ): Promise<TokenUsage | undefined> {
-  const parseUsageRecord = agent === 'claude' ? getClaudeUsageRecord : getCodexUsageRecord;
+  const parseUsageRecord = selectUsageParser(agent);
   let lastUsage: TokenUsage | undefined;
 
   const logStream = createReadStream(logFile, { encoding: 'utf-8' });
@@ -86,6 +86,57 @@ function getCodexUsageRecord(record: Record<string, unknown>): TokenUsage | unde
     cacheReadTokens: getNumericField(usage.cached_input_tokens),
     cacheWriteTokens: 0,
   };
+}
+
+function getCopilotUsageRecord(record: Record<string, unknown>): TokenUsage | undefined {
+  if (record.type !== 'session.shutdown') {
+    return undefined;
+  }
+
+  const data = getUsageRecord(record.data);
+  const modelMetrics = getUsageRecord(data?.modelMetrics);
+  if (!modelMetrics) {
+    return undefined;
+  }
+
+  let totalUsage: TokenUsage | undefined;
+
+  for (const modelMetric of Object.values(modelMetrics)) {
+    const usage = getUsageRecord(getUsageRecord(modelMetric)?.usage);
+    if (!usage) {
+      continue;
+    }
+
+    totalUsage ??= {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    };
+    totalUsage.inputTokens += getNumericField(usage.inputTokens);
+    totalUsage.outputTokens += getNumericField(usage.outputTokens);
+    totalUsage.cacheReadTokens += getNumericField(usage.cacheReadTokens);
+    totalUsage.cacheWriteTokens += getNumericField(usage.cacheWriteTokens);
+  }
+
+  return totalUsage;
+}
+
+function selectUsageParser(
+  agent: AgentName
+): (record: Record<string, unknown>) => TokenUsage | undefined {
+  switch (agent) {
+    case 'claude':
+      return getClaudeUsageRecord;
+    case 'codex':
+      return getCodexUsageRecord;
+    case 'copilot':
+      return getCopilotUsageRecord;
+    default: {
+      const exhaustiveCheck: never = agent;
+      throw new Error(`Unsupported agent: ${String(exhaustiveCheck)}`);
+    }
+  }
 }
 
 function parseJsonLine(line: string): Record<string, unknown> | undefined {
