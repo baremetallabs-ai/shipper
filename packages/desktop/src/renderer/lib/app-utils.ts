@@ -137,6 +137,36 @@ export function getWorkflowStageDisplayName(labels: string[]): string | undefine
   return undefined;
 }
 
+export function getWorkflowStageCacheKey(repo: string, issueNumber: number): string {
+  return `${repo}:${issueNumber}`;
+}
+
+export function syncWorkflowStageCacheForRepo(
+  current: ReadonlyMap<string, string>,
+  repo: string,
+  issues: ListIssueItem[]
+): Map<string, string> {
+  const next = new Map(current);
+  const repoPrefix = `${repo}:`;
+
+  for (const key of next.keys()) {
+    if (key.startsWith(repoPrefix)) {
+      next.delete(key);
+    }
+  }
+
+  for (const issue of issues) {
+    const stage = getWorkflowStageDisplayName(issue.labels);
+    if (!stage) {
+      continue;
+    }
+
+    next.set(getWorkflowStageCacheKey(repo, issue.number), stage);
+  }
+
+  return next;
+}
+
 export function selectNextAutoShipIssue(
   issues: ListIssueItem[],
   activeIssueNumbers: Set<number>,

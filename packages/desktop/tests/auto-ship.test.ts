@@ -19,9 +19,11 @@ import {
   getBackgroundRetryPayload,
   getBackgroundTitle,
   getNextAutoShipFailureState,
+  getWorkflowStageCacheKey,
   getWorkflowStageDisplayName,
   selectNextAutoShipIssue,
   selectNextAutoUnblockIssue,
+  syncWorkflowStageCacheForRepo,
 } from '../src/renderer/lib/app-utils.js';
 import type { BackgroundCommandState } from '../src/renderer/types.js';
 
@@ -398,5 +400,52 @@ describe('getWorkflowStageDisplayName', () => {
 
   it('returns undefined when labels contain no workflow stage', () => {
     expect(getWorkflowStageDisplayName([FAILED_LABEL, LOCKED_LABEL])).toBeUndefined();
+  });
+});
+
+describe('workflow stage cache helpers', () => {
+  it('uses the same repo and issue number key format for cache reads and writes', () => {
+    expect(getWorkflowStageCacheKey('owner/repo', 42)).toBe('owner/repo:42');
+  });
+
+  it('refreshes one repo cache without disturbing another repo', () => {
+    const current = new Map<string, string>([
+      [getWorkflowStageCacheKey('owner/repo-a', 11), 'Groomed'],
+      [getWorkflowStageCacheKey('owner/repo-a', 12), 'Planned'],
+      [getWorkflowStageCacheKey('owner/repo-b', 21), 'Designed'],
+    ]);
+
+    const next = syncWorkflowStageCacheForRepo(current, 'owner/repo-a', [
+      createIssue(12, [DESIGNED_LABEL]),
+      createIssue(13, [PLANNED_LABEL]),
+    ]);
+
+    expect(next).toEqual(
+      new Map<string, string>([
+        [getWorkflowStageCacheKey('owner/repo-a', 12), 'Designed'],
+        [getWorkflowStageCacheKey('owner/repo-a', 13), 'Planned'],
+        [getWorkflowStageCacheKey('owner/repo-b', 21), 'Designed'],
+      ])
+    );
+  });
+
+  it('removes stale repo entries when refreshed issues disappear or no longer have a workflow stage', () => {
+    const current = new Map<string, string>([
+      [getWorkflowStageCacheKey('owner/repo-a', 11), 'Groomed'],
+      [getWorkflowStageCacheKey('owner/repo-a', 12), 'Planned'],
+      [getWorkflowStageCacheKey('owner/repo-b', 21), 'Designed'],
+    ]);
+
+    const next = syncWorkflowStageCacheForRepo(current, 'owner/repo-a', [
+      createIssue(12, [FAILED_LABEL]),
+      createIssue(14, [GROOMED_LABEL]),
+    ]);
+
+    expect(next).toEqual(
+      new Map<string, string>([
+        [getWorkflowStageCacheKey('owner/repo-a', 14), 'Groomed'],
+        [getWorkflowStageCacheKey('owner/repo-b', 21), 'Designed'],
+      ])
+    );
   });
 });
