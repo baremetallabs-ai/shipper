@@ -386,6 +386,7 @@ describe('runPrompt', () => {
     expect(stdinPipeMock).toHaveBeenCalledWith(spawnedChild().stdin);
     expect(stdinUnpipeMock).toHaveBeenCalledWith(spawnedChild().stdin);
     expect(stdinPauseMock).toHaveBeenCalled();
+    expect(parseAgentUsageMock).not.toHaveBeenCalled();
   });
 
   it('reads the prompt from the resolved agent subdirectory', async () => {
@@ -877,6 +878,8 @@ describe('runPrompt', () => {
       '--allow-all-tools',
       '--allow-all-urls',
       '--no-ask-user',
+      '--output-format',
+      'json',
       '-p',
       'prompt body',
     ]);
@@ -1343,6 +1346,58 @@ describe('runPrompt', () => {
     logMock.mockRestore();
   });
 
+  it('captures and persists usage metadata for headless Copilot runs', async () => {
+    resolveAgentMock.mockReturnValue('copilot');
+    resolveModeMock.mockReturnValue('headless');
+    readFileMock.mockResolvedValueOnce(makePrompt('copilot'));
+    parseAgentUsageMock.mockResolvedValueOnce({
+      inputTokens: 31,
+      outputTokens: 14,
+      cacheReadTokens: 6,
+      cacheWriteTokens: 3,
+    });
+    mockSpawnResult();
+
+    await expect(
+      runPrompt('implement', { mode: 'headless', repo: 'owner/repo', issueRef: '540' })
+    ).resolves.toBe(0);
+
+    expect(spawnedArgs()).toEqual([
+      '--autopilot',
+      '--allow-all-tools',
+      '--allow-all-urls',
+      '--no-ask-user',
+      '--output-format',
+      'json',
+      '-p',
+      'prompt body',
+    ]);
+    expect(createWriteStreamMock).toHaveBeenCalledWith(
+      expect.stringContaining('/home/user/.shipper/sessions/owner-repo/540-implement-')
+    );
+    expect(spawnedOptions()).toMatchObject({
+      stdio: ['inherit', 'pipe', 'inherit'],
+    });
+    expect(parseAgentUsageMock).toHaveBeenCalledWith(
+      'copilot',
+      expect.stringContaining('/home/user/.shipper/sessions/owner-repo/540-implement-')
+    );
+    expect(writeSessionMetaMock).toHaveBeenCalledWith(
+      expect.stringContaining('/home/user/.shipper/sessions/owner-repo/540-implement-'),
+      expect.objectContaining({
+        issue: '540',
+        stage: 'implement',
+        agent: 'copilot',
+        usage: {
+          inputTokens: 31,
+          outputTokens: 14,
+          cacheReadTokens: 6,
+          cacheWriteTokens: 3,
+        },
+      })
+    );
+  });
+
   it('does not parse or persist usage for interactive runs without a log file', async () => {
     resolveModeMock.mockReturnValue('interactive');
     readFileMock.mockResolvedValueOnce(makePrompt('claude'));
@@ -1612,6 +1667,8 @@ describe('worktree --add-dir', () => {
       '--allow-all-tools',
       '--allow-all-urls',
       '--no-ask-user',
+      '--output-format',
+      'json',
       '-p',
       'prompt body',
     ]);

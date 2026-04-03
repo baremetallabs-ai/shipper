@@ -170,6 +170,135 @@ describe('parseAgentUsage', () => {
       })
     );
   });
+
+  it('aggregates Copilot shutdown usage across all modelMetrics entries', async () => {
+    const { dir, file } = writeTempLog(
+      [
+        JSON.stringify({
+          type: 'session.mcp_server_status_changed',
+          data: { status: 'connected' },
+        }),
+        JSON.stringify({
+          type: 'session.shutdown',
+          data: {
+            modelMetrics: {
+              'gpt-4.1': {
+                usage: {
+                  inputTokens: 120,
+                  outputTokens: 30,
+                  cacheReadTokens: 14,
+                  cacheWriteTokens: 6,
+                },
+              },
+              'gpt-4.1-mini': {
+                usage: {
+                  inputTokens: 80,
+                  outputTokens: 12,
+                  cacheReadTokens: 4,
+                },
+              },
+            },
+          },
+        }),
+      ].join('\n')
+    );
+    tempDirs.push(dir);
+
+    await expect(parseAgentUsage('copilot', file)).resolves.toEqual(
+      makeUsage({
+        inputTokens: 200,
+        outputTokens: 42,
+        cacheReadTokens: 18,
+        cacheWriteTokens: 6,
+      })
+    );
+  });
+
+  it('returns undefined when Copilot logs contain no shutdown usage totals', async () => {
+    const { dir, file } = writeTempLog(
+      [
+        JSON.stringify({
+          type: 'session.mcp_server_status_changed',
+          data: { status: 'connected' },
+        }),
+        JSON.stringify({
+          type: 'session.usage_info',
+          data: {
+            inputTokens: 50,
+            outputTokens: 7,
+          },
+        }),
+      ].join('\n')
+    );
+    tempDirs.push(dir);
+
+    await expect(parseAgentUsage('copilot', file)).resolves.toBeUndefined();
+  });
+
+  it('ignores malformed Copilot records and keeps the last valid shutdown aggregate', async () => {
+    const { dir, file } = writeTempLog(
+      [
+        'not json',
+        JSON.stringify({ type: 'session.usage_info', data: { inputTokens: 25 } }),
+        JSON.stringify({
+          type: 'session.shutdown',
+          data: {
+            modelMetrics: {
+              'gpt-4.1': {
+                usage: {
+                  inputTokens: 10,
+                  outputTokens: 3,
+                  cacheReadTokens: 2,
+                  cacheWriteTokens: 1,
+                },
+              },
+            },
+          },
+        }),
+        JSON.stringify({
+          type: 'session.shutdown',
+          data: {
+            modelMetrics: 'invalid',
+          },
+        }),
+        '{"type":"session.shutdown","data":',
+        JSON.stringify({
+          type: 'session.shutdown',
+          data: {
+            modelMetrics: {
+              'gpt-4.1': {
+                usage: {
+                  inputTokens: 40,
+                  outputTokens: 8,
+                },
+              },
+              'gpt-4.1-mini': {
+                usage: {
+                  inputTokens: 20,
+                  outputTokens: 4,
+                  cacheReadTokens: 5,
+                  cacheWriteTokens: 2,
+                },
+              },
+              'gpt-4o': {
+                usage: 'invalid',
+              },
+            },
+          },
+        }),
+      ].join('\n')
+    );
+    tempDirs.push(dir);
+
+    await expect(parseAgentUsage('copilot', file)).resolves.toEqual(
+      makeUsage({
+        inputTokens: 60,
+        outputTokens: 12,
+        cacheReadTokens: 5,
+        cacheWriteTokens: 2,
+      })
+    );
+  });
 });
 
 describe('formatUsageLine', () => {
