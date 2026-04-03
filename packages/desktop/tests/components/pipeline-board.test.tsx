@@ -80,7 +80,6 @@ function renderBoard({
     issues,
     columnMap,
     attentionIssues,
-    stageCache: new Map<string, string>(),
     resettingIssues: new Set<number>(),
     unlockingIssues: new Set<number>(),
     unblockingIssues: new Set<number>(),

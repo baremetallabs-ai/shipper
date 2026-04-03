@@ -16,7 +16,6 @@ export interface PipelineBoardProps {
   issues: ListIssueItem[];
   columnMap: Map<string, ListIssueItem[]>;
   attentionIssues: ListIssueItem[];
-  stageCache: ReadonlyMap<string, string>;
   resettingIssues: ReadonlySet<number>;
   unlockingIssues: ReadonlySet<number>;
   unblockingIssues: ReadonlySet<number>;
@@ -45,7 +44,6 @@ export function PipelineBoard({
   issues,
   columnMap,
   attentionIssues,
-  stageCache: _stageCache,
   resettingIssues,
   unlockingIssues,
   unblockingIssues,
@@ -207,7 +205,11 @@ export function PipelineBoard({
                       setDragOverColumn(columnIndex);
                     }}
                     onDragLeave={(event) => {
-                      if (!event.currentTarget.contains(event.relatedTarget as Node)) {
+                      const { relatedTarget } = event;
+                      if (
+                        !(relatedTarget instanceof Node) ||
+                        !event.currentTarget.contains(relatedTarget)
+                      ) {
                         setDragOverColumn(null);
                       }
                     }}

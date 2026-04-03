@@ -49,7 +49,7 @@ describe('TerminalDrawer', () => {
     const onCloseSession = vi.fn();
     const onSessionInput = vi.fn();
 
-    render(
+    const { container } = render(
       <TerminalDrawer
         sessions={sessions}
         activeSessionId="pty-1"
@@ -63,7 +63,12 @@ describe('TerminalDrawer', () => {
       />
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Close terminal drawer' }));
+    const toggleButton = screen.getByRole('button', { name: 'Close terminal drawer' });
+
+    expect(String(container.innerHTML)).toContain('aria-expanded="true"');
+    expect(String(container.innerHTML)).toContain('aria-controls="terminal-drawer-panel"');
+
+    fireEvent.click(toggleButton);
     fireEvent.click(screen.getByRole('button', { name: 'groom - #12' }));
 
     expect(onToggle).toHaveBeenCalledTimes(1);
@@ -87,7 +92,11 @@ describe('TerminalDrawer', () => {
       />
     );
 
-    expect(screen.getByRole('button', { name: 'Open terminal drawer' })).toBeTruthy();
+    const toggleButton = screen.getByRole('button', { name: 'Open terminal drawer' });
+
+    expect(toggleButton).toBeTruthy();
+    expect(String(container.innerHTML)).toContain('aria-expanded="false"');
     expect(String(container.innerHTML)).toContain('aria-hidden="true"');
+    expect(String(container.innerHTML)).toContain('inert=""');
   });
 });
