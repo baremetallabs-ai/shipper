@@ -80,7 +80,7 @@ function exitWithError(err: unknown): never {
 }
 
 function wrapAction<T extends unknown[]>(
-  fn: (...args: T) => Promise<void>
+  fn: (...args: T) => void | Promise<void>
 ): (...args: T) => Promise<void> {
   return async (...args: T) => {
     try {
@@ -421,7 +421,6 @@ program
   .action(
     wrapAction((name?: string) => {
       ejectCommand(name);
-      return Promise.resolve();
     })
   );
 

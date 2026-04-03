@@ -1541,6 +1541,9 @@ async function shipAutoSequential(repo: string, agent?: AgentName, model?: strin
       logger.log(`  #${result.issue}   ${formatLogDisplayPath(logFile, homeDir)}`);
     }
   }
+  if (results.some((result) => result.outcome === 'fail')) {
+    process.exitCode = 1;
+  }
   return;
 }
 
@@ -1714,6 +1717,9 @@ async function shipAutoParallel(
       if (!logFile) continue;
       logger.log(`  #${result.issue}   ${formatLogDisplayPath(logFile, homeDir)}`);
     }
+  }
+  if (results.some((result) => result.outcome === 'fail')) {
+    process.exitCode = 1;
   }
   return;
 }
