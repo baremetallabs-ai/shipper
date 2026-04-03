@@ -85,23 +85,6 @@ export function useTerminalSessions({
       : (sessions.find((session) => session.id === pendingCloseSessionId) ?? null);
 
   useEffect(() => {
-    const drawerPanel = drawerPanelRef.current as {
-      removeAttribute: (qualifiedName: string) => void;
-      setAttribute: (qualifiedName: string, value: string) => void;
-    } | null;
-    if (!drawerPanel) {
-      return;
-    }
-
-    if (drawerOpen) {
-      drawerPanel.removeAttribute('inert');
-      return;
-    }
-
-    drawerPanel.setAttribute('inert', '');
-  }, [drawerOpen]);
-
-  useEffect(() => {
     sessionsRef.current = sessions;
   }, [sessions]);
 

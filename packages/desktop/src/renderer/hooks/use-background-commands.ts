@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import type { RefObject, SetStateAction } from 'react';
 
 import { BLOCKED_LABEL, LOCKED_LABEL } from '../../../../core/src/lib/labels.js';
@@ -159,28 +159,32 @@ export function useBackgroundCommands({
     return repos;
   }, [backgroundCommands]);
 
-  const commitBackgroundCommands = useEffectEvent(
+  useEffect(() => {
+    backgroundCommandsRef.current = backgroundCommands;
+  }, [backgroundCommands]);
+
+  const commitBackgroundCommands = useCallback(
     (updater: SetStateAction<BackgroundCommandState[]>) => {
-      setBackgroundCommands((currentCommands) => {
-        const nextCommands = typeof updater === 'function' ? updater(currentCommands) : updater;
-        backgroundCommandsRef.current = nextCommands;
-        return nextCommands;
-      });
-    }
+      const nextCommands =
+        typeof updater === 'function' ? updater(backgroundCommandsRef.current) : updater;
+      backgroundCommandsRef.current = nextCommands;
+      setBackgroundCommands(nextCommands);
+    },
+    []
   );
 
-  const dismissToast = useEffectEvent((toastId: string) => {
+  const dismissToast = useCallback((toastId: string) => {
     setToasts((currentToasts) => currentToasts.filter((toast) => toast.id !== toastId));
-  });
+  }, []);
 
-  const pushToast = useEffectEvent((toast: BackgroundToastItem) => {
+  const pushToast = useCallback((toast: BackgroundToastItem) => {
     setToasts((currentToasts) => {
       const nextToasts = currentToasts.filter((item) => item.id !== toast.id);
       return [...nextToasts, toast];
     });
-  });
+  }, []);
 
-  const clearAutoShipStateForRepo = useEffectEvent((repo: string) => {
+  const clearAutoShipStateForRepo = useCallback((repo: string) => {
     setAutoShipRepos((currentRepos) => {
       if (!currentRepos.has(repo)) {
         return currentRepos;
@@ -194,9 +198,9 @@ export function useBackgroundCommands({
     autoShipSkippedRef.current.delete(repo);
     autoUnblockQueueRef.current.delete(repo);
     autoUnblockIssuesRef.current.delete(repo);
-  });
+  }, []);
 
-  const enableAutoShipForRepo = useEffectEvent((repo: string) => {
+  const enableAutoShipForRepo = useCallback((repo: string) => {
     setAutoShipRepos((currentRepos) => {
       if (currentRepos.has(repo)) {
         return currentRepos;
@@ -206,9 +210,9 @@ export function useBackgroundCommands({
     });
     autoShipFailuresRef.current.set(repo, 0);
     autoShipSkippedRef.current.set(repo, new Set());
-  });
+  }, []);
 
-  const refreshRepoAfterBackground = useEffectEvent(
+  const refreshRepoAfterBackground = useCallback(
     async (
       repo: string,
       command: BackgroundCommandKind,
@@ -236,31 +240,39 @@ export function useBackgroundCommands({
       }
 
       return null;
-    }
+    },
+    [activeRepo, checkInitState, pipelineBridgeRef]
   );
 
-  const handleRetryBackgroundCommand = useEffectEvent(async (payload: BackgroundRetryPayload) => {
-    switch (payload.command) {
-      case 'new':
-        await getShipperApi().spawnBackgroundNew(payload.request, payload.repo);
-        return;
-      case 'ship':
-        await getShipperApi().spawnBackgroundShip(payload.issueNumber, payload.repo, payload.merge);
-        return;
-      case 'init':
-        await getShipperApi().spawnBackgroundInit(payload.repo);
-        return;
-      case 'unblock':
-        pipelineBridgeRef.current?.trackUnblockIssue(payload.issueNumber);
-        try {
-          await getShipperApi().spawnBackgroundUnblock(payload.issueNumber, payload.repo);
-        } catch (error) {
-          pipelineBridgeRef.current?.clearUnblockIssue(payload.issueNumber);
-          throw error;
-        }
-        return;
-    }
-  });
+  const handleRetryBackgroundCommand = useCallback(
+    async (payload: BackgroundRetryPayload) => {
+      switch (payload.command) {
+        case 'new':
+          await getShipperApi().spawnBackgroundNew(payload.request, payload.repo);
+          return;
+        case 'ship':
+          await getShipperApi().spawnBackgroundShip(
+            payload.issueNumber,
+            payload.repo,
+            payload.merge
+          );
+          return;
+        case 'init':
+          await getShipperApi().spawnBackgroundInit(payload.repo);
+          return;
+        case 'unblock':
+          pipelineBridgeRef.current?.trackUnblockIssue(payload.issueNumber);
+          try {
+            await getShipperApi().spawnBackgroundUnblock(payload.issueNumber, payload.repo);
+          } catch (error) {
+            pipelineBridgeRef.current?.clearUnblockIssue(payload.issueNumber);
+            throw error;
+          }
+          return;
+      }
+    },
+    [pipelineBridgeRef]
+  );
 
   function isAutoUnblockIssue(repo: string, issueNumber: number): boolean {
     return autoUnblockIssuesRef.current.get(repo)?.has(issueNumber) ?? false;
@@ -732,7 +744,7 @@ export function useBackgroundCommands({
     });
 
     return unsubscribe;
-  }, [handleBackgroundStatus]);
+  }, []);
 
   useEffect(() => {
     const unsubscribe = getShipperApi().onBackgroundOutput((event) => {
@@ -833,86 +845,104 @@ export function useBackgroundCommands({
     viewedBackgroundCommandType,
   ]);
 
-  const handleDismissBackground = useEffectEvent((sessionId: string) => {
-    commitBackgroundCommands((currentCommands) =>
-      currentCommands.filter((command) => command.id !== sessionId)
-    );
-  });
+  const handleDismissBackground = useCallback(
+    (sessionId: string) => {
+      commitBackgroundCommands((currentCommands) =>
+        currentCommands.filter((command) => command.id !== sessionId)
+      );
+    },
+    [commitBackgroundCommands]
+  );
 
-  const handleClearFinishedBackground = useEffectEvent(() => {
+  const handleClearFinishedBackground = useCallback(() => {
     commitBackgroundCommands((currentCommands) =>
       currentCommands.filter(
         (command) => command.status === 'queued' || command.status === 'running'
       )
     );
-  });
+  }, [commitBackgroundCommands]);
 
-  const handleCancelBackground = useEffectEvent(async (sessionId: string) => {
-    try {
-      await getShipperApi().killBackground(sessionId);
-    } catch (error) {
-      const message = toErrorMessage(error);
-      pipelineBridgeRef.current?.setFetchError(`Failed to cancel background command: ${message}`);
-    }
-  });
+  const handleCancelBackground = useCallback(
+    async (sessionId: string) => {
+      try {
+        await getShipperApi().killBackground(sessionId);
+      } catch (error) {
+        const message = toErrorMessage(error);
+        pipelineBridgeRef.current?.setFetchError(`Failed to cancel background command: ${message}`);
+      }
+    },
+    [pipelineBridgeRef]
+  );
 
-  const handleShowBackgroundLogs = useEffectEvent(async (sessionId: string) => {
-    const command = backgroundCommandsRef.current.find((item) => item.id === sessionId);
-    if (!command) {
-      return;
-    }
+  const handleShowBackgroundLogs = useCallback(
+    async (sessionId: string) => {
+      const command = backgroundCommandsRef.current.find((item) => item.id === sessionId);
+      if (!command) {
+        return;
+      }
 
-    setLogViewer({
-      open: true,
-      sessionId,
-      title: getBackgroundLogTitle(command.command, command.repo, command.issueNumber),
-      content: command.command === 'new' ? '' : command.output,
-    });
+      setLogViewer({
+        open: true,
+        sessionId,
+        title: getBackgroundLogTitle(command.command, command.repo, command.issueNumber),
+        content: command.command === 'new' ? '' : command.output,
+      });
 
-    try {
-      const output = await getShipperApi().getBackgroundOutput(sessionId);
-      setLogViewer((currentViewer) =>
-        currentViewer.sessionId === sessionId
-          ? { ...currentViewer, content: output }
-          : currentViewer
-      );
-    } catch (error) {
-      const message = toErrorMessage(error);
-      pipelineBridgeRef.current?.setFetchError(`Failed to open background logs: ${message}`);
-    }
-  });
+      try {
+        const output = await getShipperApi().getBackgroundOutput(sessionId);
+        setLogViewer((currentViewer) =>
+          currentViewer.sessionId === sessionId
+            ? { ...currentViewer, content: output }
+            : currentViewer
+        );
+      } catch (error) {
+        const message = toErrorMessage(error);
+        pipelineBridgeRef.current?.setFetchError(`Failed to open background logs: ${message}`);
+      }
+    },
+    [pipelineBridgeRef]
+  );
 
-  const handleRetryToast = useEffectEvent(async (toastId: string) => {
-    const toast = toasts.find((item) => item.id === toastId);
-    if (!toast?.retryPayload) {
-      return;
-    }
+  const handleRetryToast = useCallback(
+    async (toastId: string) => {
+      const toast = toasts.find((item) => item.id === toastId);
+      if (!toast?.retryPayload) {
+        return;
+      }
 
-    try {
-      await handleRetryBackgroundCommand(toast.retryPayload);
-      dismissToast(toastId);
-      commitBackgroundCommands((currentCommands) =>
-        currentCommands.filter((command) => command.id !== toast.sessionId)
-      );
-    } catch (error) {
-      const message = toErrorMessage(error);
-      pipelineBridgeRef.current?.setFetchError(`Failed to retry background command: ${message}`);
-      throw error;
-    }
-  });
+      try {
+        await handleRetryBackgroundCommand(toast.retryPayload);
+        dismissToast(toastId);
+        commitBackgroundCommands((currentCommands) =>
+          currentCommands.filter((command) => command.id !== toast.sessionId)
+        );
+      } catch (error) {
+        const message = toErrorMessage(error);
+        pipelineBridgeRef.current?.setFetchError(`Failed to retry background command: ${message}`);
+        throw error;
+      }
+    },
+    [
+      commitBackgroundCommands,
+      dismissToast,
+      handleRetryBackgroundCommand,
+      pipelineBridgeRef,
+      toasts,
+    ]
+  );
 
-  const handleLogViewerOpenChange = useEffectEvent((open: boolean) => {
+  const handleLogViewerOpenChange = useCallback((open: boolean) => {
     setLogViewer((currentViewer) => ({
       ...currentViewer,
       open,
       content: open ? currentViewer.content : '',
       sessionId: open ? currentViewer.sessionId : null,
     }));
-  });
+  }, []);
 
-  const handleToggleActionQueue = useEffectEvent(() => {
+  const handleToggleActionQueue = useCallback(() => {
     setActionQueueOpen((current) => !current);
-  });
+  }, []);
 
   return {
     backgroundCommands,

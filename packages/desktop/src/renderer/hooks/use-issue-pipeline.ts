@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 
 import { NEW_LABEL } from '../../../../core/src/lib/labels.js';
@@ -132,7 +132,7 @@ export function useIssuePipeline({
     };
   }, [issues]);
 
-  const clearIssueState = useEffectEvent(() => {
+  const clearIssueState = useCallback(() => {
     requestVersionRef.current += 1;
     setIssues([]);
     setLastUpdated(null);
@@ -145,13 +145,13 @@ export function useIssuePipeline({
     setUnlockingIssues(new Set());
     setUnblockingIssues(new Set());
     setSettingPriorityIssues(new Set());
-  });
+  }, []);
 
-  const clearStageCacheForRepo = useEffectEvent((repo: string) => {
+  const clearStageCacheForRepo = useCallback((repo: string) => {
     setStageCache((current) => syncWorkflowStageCacheForRepo(current, repo, []));
-  });
+  }, []);
 
-  const loadIssues = useEffectEvent(async (repo: string) => {
+  const loadIssues = useCallback(async (repo: string) => {
     const requestVersion = requestVersionRef.current + 1;
     requestVersionRef.current = requestVersion;
     setIsLoading(true);
@@ -184,15 +184,18 @@ export function useIssuePipeline({
         setIsLoading(false);
       }
     }
-  });
+  }, []);
 
-  const refreshIssuesForActiveRepo = useEffectEvent(async (repo: string) => {
-    if (repo !== activeRepo) {
-      return;
-    }
+  const refreshIssuesForActiveRepo = useCallback(
+    async (repo: string) => {
+      if (repo !== activeRepo) {
+        return;
+      }
 
-    await loadIssues(repo);
-  });
+      await loadIssues(repo);
+    },
+    [activeRepo, loadIssues]
+  );
 
   useEffect(() => {
     return () => {
@@ -205,163 +208,162 @@ export function useIssuePipeline({
       return;
     }
 
+    const intervalMs = hasRunningShipCommand ? 10_000 : 60_000;
     const intervalId = globalThis.setInterval(() => {
       void loadIssues(activeRepo);
-    }, 60_000);
-
-    return () => {
-      globalThis.clearInterval(intervalId);
-    };
-  }, [activeRepo, canFetch, hasActiveRepo, loadIssues]);
-
-  useEffect(() => {
-    if (!canFetch || !hasActiveRepo || !hasRunningShipCommand) {
-      return;
-    }
-
-    const intervalId = globalThis.setInterval(() => {
-      void loadIssues(activeRepo);
-    }, 10_000);
+    }, intervalMs);
 
     return () => {
       globalThis.clearInterval(intervalId);
     };
   }, [activeRepo, canFetch, hasActiveRepo, hasRunningShipCommand, loadIssues]);
 
-  const handleRefresh = useEffectEvent(async () => {
+  const handleRefresh = useCallback(async () => {
     if (!canFetch || !hasActiveRepo || isLoading) {
       return;
     }
 
     await loadIssues(activeRepo);
-  });
+  }, [activeRepo, canFetch, hasActiveRepo, isLoading, loadIssues]);
 
-  const trackResetIssue = useEffectEvent((issueNumber: number) => {
+  const trackResetIssue = useCallback((issueNumber: number) => {
     setResettingIssues((current) => new Set(current).add(issueNumber));
-  });
+  }, []);
 
-  const clearResetIssue = useEffectEvent((issueNumber: number) => {
+  const clearResetIssue = useCallback((issueNumber: number) => {
     setResettingIssues((current) => {
       const next = new Set(current);
       next.delete(issueNumber);
       return next;
     });
-  });
+  }, []);
 
-  const trackUnlockIssue = useEffectEvent((issueNumber: number) => {
+  const trackUnlockIssue = useCallback((issueNumber: number) => {
     setUnlockingIssues((current) => new Set(current).add(issueNumber));
-  });
+  }, []);
 
-  const clearUnlockIssue = useEffectEvent((issueNumber: number) => {
+  const clearUnlockIssue = useCallback((issueNumber: number) => {
     setUnlockingIssues((current) => {
       const next = new Set(current);
       next.delete(issueNumber);
       return next;
     });
-  });
+  }, []);
 
-  const trackUnblockIssue = useEffectEvent((issueNumber: number) => {
+  const trackUnblockIssue = useCallback((issueNumber: number) => {
     setUnblockingIssues((current) => new Set(current).add(issueNumber));
-  });
+  }, []);
 
-  const clearUnblockIssue = useEffectEvent((issueNumber: number) => {
+  const clearUnblockIssue = useCallback((issueNumber: number) => {
     setUnblockingIssues((current) => {
       const next = new Set(current);
       next.delete(issueNumber);
       return next;
     });
-  });
+  }, []);
 
-  const trackSettingPriorityIssue = useEffectEvent((issueNumber: number) => {
+  const trackSettingPriorityIssue = useCallback((issueNumber: number) => {
     setSettingPriorityIssues((current) => new Set(current).add(issueNumber));
-  });
+  }, []);
 
-  const clearSettingPriorityIssue = useEffectEvent((issueNumber: number) => {
+  const clearSettingPriorityIssue = useCallback((issueNumber: number) => {
     setSettingPriorityIssues((current) => {
       const next = new Set(current);
       next.delete(issueNumber);
       return next;
     });
-  });
+  }, []);
 
-  const handleResetSuccess = useEffectEvent((issueNumber: number) => {
-    clearResetIssue(issueNumber);
-    if (activeRepo) {
-      void loadIssues(activeRepo);
-    }
-  });
+  const handleResetSuccess = useCallback(
+    (issueNumber: number) => {
+      clearResetIssue(issueNumber);
+      if (activeRepo) {
+        void loadIssues(activeRepo);
+      }
+    },
+    [activeRepo, clearResetIssue, loadIssues]
+  );
 
-  const handleCloseNotPlannedSuccess = useEffectEvent((issueNumber: number) => {
-    setCloseNotPlannedIssue(null);
-    pushToast({
-      id: `close-not-planned-${issueNumber}`,
-      sessionId: '',
-      variant: 'success',
-      title: 'Issue closed',
-      description: `#${issueNumber} closed as not planned.`,
-    });
-    if (activeRepo) {
-      void loadIssues(activeRepo);
-    }
-  });
+  const handleCloseNotPlannedSuccess = useCallback(
+    (issueNumber: number) => {
+      setCloseNotPlannedIssue(null);
+      pushToast({
+        id: `close-not-planned-${issueNumber}`,
+        sessionId: '',
+        variant: 'success',
+        title: 'Issue closed',
+        description: `#${issueNumber} closed as not planned.`,
+      });
+      if (activeRepo) {
+        void loadIssues(activeRepo);
+      }
+    },
+    [activeRepo, loadIssues, pushToast]
+  );
 
-  const handleCloseNotPlannedError = useEffectEvent((issueNumber: number, error: string) => {
-    setCloseNotPlannedIssue(null);
-    pushToast({
-      id: `close-not-planned-error-${issueNumber}`,
-      sessionId: '',
-      variant: 'error',
-      title: 'Failed to close issue',
-      description: error,
-    });
-    if (activeRepo) {
-      void loadIssues(activeRepo);
-    }
-  });
+  const handleCloseNotPlannedError = useCallback(
+    (issueNumber: number, error: string) => {
+      setCloseNotPlannedIssue(null);
+      pushToast({
+        id: `close-not-planned-error-${issueNumber}`,
+        sessionId: '',
+        variant: 'error',
+        title: 'Failed to close issue',
+        description: error,
+      });
+      if (activeRepo) {
+        void loadIssues(activeRepo);
+      }
+    },
+    [activeRepo, loadIssues, pushToast]
+  );
 
-  const handleUnlockExecute = useEffectEvent(async (issue: ListIssueItem, repo = activeRepo) => {
-    if (!repo) {
-      return;
-    }
+  const handleUnlockExecute = useCallback(
+    async (issue: ListIssueItem, repo = activeRepo) => {
+      if (!repo) {
+        return;
+      }
 
-    trackUnlockIssue(issue.number);
+      trackUnlockIssue(issue.number);
 
-    try {
-      const result = await getShipperApi().unlockIssue(repo, issue.number);
-      if (!result.ok) {
+      try {
+        const result = await getShipperApi().unlockIssue(repo, issue.number);
+        if (!result.ok) {
+          pushToast({
+            id: `unlock-issue-error-${issue.number}`,
+            sessionId: '',
+            variant: 'error',
+            title: 'Failed to unlock issue',
+            description: result.error,
+          });
+          return;
+        }
+
+        pushToast({
+          id: `unlock-issue-${issue.number}`,
+          sessionId: '',
+          variant: 'success',
+          title: 'Issue unlocked',
+          description: `#${issue.number} lock removed.`,
+        });
+        await refreshIssuesForActiveRepo(repo);
+      } catch (error) {
         pushToast({
           id: `unlock-issue-error-${issue.number}`,
           sessionId: '',
           variant: 'error',
           title: 'Failed to unlock issue',
-          description: result.error,
+          description: toErrorMessage(error),
         });
-        return;
+      } finally {
+        setUnlockConfirmIssue(null);
+        clearUnlockIssue(issue.number);
       }
+    },
+    [activeRepo, clearUnlockIssue, pushToast, refreshIssuesForActiveRepo, trackUnlockIssue]
+  );
 
-      pushToast({
-        id: `unlock-issue-${issue.number}`,
-        sessionId: '',
-        variant: 'success',
-        title: 'Issue unlocked',
-        description: `#${issue.number} lock removed.`,
-      });
-      await refreshIssuesForActiveRepo(repo);
-    } catch (error) {
-      pushToast({
-        id: `unlock-issue-error-${issue.number}`,
-        sessionId: '',
-        variant: 'error',
-        title: 'Failed to unlock issue',
-        description: toErrorMessage(error),
-      });
-    } finally {
-      setUnlockConfirmIssue(null);
-      clearUnlockIssue(issue.number);
-    }
-  });
-
-  const handleSetPriority = useEffectEvent(
+  const handleSetPriority = useCallback(
     async (issue: ListIssueItem, level: 'high' | 'normal' | 'low') => {
       if (!activeRepo || settingPriorityIssues.has(issue.number)) {
         return;
@@ -402,78 +404,92 @@ export function useIssuePipeline({
       } finally {
         clearSettingPriorityIssue(issue.number);
       }
-    }
+    },
+    [
+      activeRepo,
+      clearSettingPriorityIssue,
+      pushToast,
+      refreshIssuesForActiveRepo,
+      settingPriorityIssues,
+      trackSettingPriorityIssue,
+    ]
   );
 
-  const handleUnlockClick = useEffectEvent(async (issue: ListIssueItem) => {
-    if (!activeRepo) {
-      return;
-    }
-
-    const repo = activeRepo;
-    let clearPendingState = true;
-    trackUnlockIssue(issue.number);
-
-    try {
-      const result = await getShipperApi().checkLockStale(repo, issue.number);
-      if (result.stale) {
-        clearPendingState = false;
-        await handleUnlockExecute(issue, repo);
+  const handleUnlockClick = useCallback(
+    async (issue: ListIssueItem) => {
+      if (!activeRepo) {
         return;
       }
 
-      setUnlockConfirmIssue(issue);
-    } catch (error) {
-      pushToast({
-        id: `unlock-issue-check-error-${issue.number}`,
-        sessionId: '',
-        variant: 'error',
-        title: 'Failed to check issue lock',
-        description: toErrorMessage(error),
-      });
-    } finally {
-      if (clearPendingState) {
-        clearUnlockIssue(issue.number);
-      }
-    }
-  });
+      const repo = activeRepo;
+      let clearPendingState = true;
+      trackUnlockIssue(issue.number);
 
-  const handleUnlockDialogConfirm = useEffectEvent(async () => {
+      try {
+        const result = await getShipperApi().checkLockStale(repo, issue.number);
+        if (result.stale) {
+          clearPendingState = false;
+          await handleUnlockExecute(issue, repo);
+          return;
+        }
+
+        setUnlockConfirmIssue(issue);
+      } catch (error) {
+        pushToast({
+          id: `unlock-issue-check-error-${issue.number}`,
+          sessionId: '',
+          variant: 'error',
+          title: 'Failed to check issue lock',
+          description: toErrorMessage(error),
+        });
+      } finally {
+        if (clearPendingState) {
+          clearUnlockIssue(issue.number);
+        }
+      }
+    },
+    [activeRepo, clearUnlockIssue, handleUnlockExecute, pushToast, trackUnlockIssue]
+  );
+
+  const handleUnlockDialogConfirm = useCallback(async () => {
     if (unlockConfirmIssue === null) {
       return;
     }
 
     await handleUnlockExecute(unlockConfirmIssue);
-  });
+  }, [handleUnlockExecute, unlockConfirmIssue]);
 
-  const handleUnblockClick = useEffectEvent(async (issue: ListIssueItem) => {
-    if (!activeRepo) {
-      return;
-    }
+  const handleUnblockClick = useCallback(
+    async (issue: ListIssueItem) => {
+      if (!activeRepo) {
+        return;
+      }
 
-    trackUnblockIssue(issue.number);
+      trackUnblockIssue(issue.number);
 
-    try {
-      await getShipperApi().spawnBackgroundUnblock(issue.number, activeRepo);
-    } catch (error) {
-      pushToast({
-        id: `unblock-spawn-error-${issue.number}`,
-        sessionId: '',
-        variant: 'error',
-        title: 'Failed to start unblock',
-        description: toErrorMessage(error),
-      });
-      clearUnblockIssue(issue.number);
-    }
-  });
+      try {
+        await getShipperApi().spawnBackgroundUnblock(issue.number, activeRepo);
+      } catch (error) {
+        pushToast({
+          id: `unblock-spawn-error-${issue.number}`,
+          sessionId: '',
+          variant: 'error',
+          title: 'Failed to start unblock',
+          description: toErrorMessage(error),
+        });
+        clearUnblockIssue(issue.number);
+      }
+    },
+    [activeRepo, clearUnblockIssue, pushToast, trackUnblockIssue]
+  );
 
-  const handleOpenNewIssue = useEffectEvent(() => {
+  const handleOpenNewIssue = useCallback(() => {
     setIsNewIssueOpen(true);
-  });
+  }, []);
 
-  const handleOpenAdopt = useEffectEvent(() => {
+  const handleOpenAdopt = useCallback(() => {
     setIsAdoptOpen(true);
-  });
+  }, []);
 
   return {
     issues,

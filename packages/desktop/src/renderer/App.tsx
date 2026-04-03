@@ -63,6 +63,7 @@ import {
 import { useBackgroundCommands } from './hooks/use-background-commands.js';
 import { useDragDrop } from './hooks/use-drag-drop.js';
 import { useTerminalSessions } from './hooks/use-terminal-sessions.js';
+import { getShipperApi } from './lib/shipper-api.js';
 import { cn } from './lib/utils.js';
 import { useIssuePipeline } from './hooks/use-issue-pipeline.js';
 import { useRepos } from './hooks/use-repos.js';
@@ -473,7 +474,7 @@ export default function App(): JSX.Element {
 
   async function handleShipperNew(request: string, repo = activeRepo): Promise<void> {
     try {
-      await window.shipperAPI.spawnBackgroundNew(request, repo);
+      await getShipperApi().spawnBackgroundNew(request, repo);
     } catch (error) {
       const message = toErrorMessage(error);
       setFetchError(`Failed to launch shipper new: ${message}`);
@@ -484,7 +485,7 @@ export default function App(): JSX.Element {
     if (focusExistingGroomSession(issueNumber)) return;
 
     try {
-      const result = await window.shipperAPI.spawnShipperGroom(issueNumber, activeRepo, 120, 30);
+      const result = await getShipperApi().spawnShipperGroom(issueNumber, activeRepo, 120, 30);
       openRunningSession(result.sessionId, `groom — #${issueNumber}`, {
         repo: activeRepo,
         issueNumber,
@@ -497,7 +498,7 @@ export default function App(): JSX.Element {
 
   async function handleShipperShip(issueNumber: number, repo = activeRepo): Promise<void> {
     try {
-      await window.shipperAPI.spawnBackgroundShip(issueNumber, repo, autoMergeRepos.has(repo));
+      await getShipperApi().spawnBackgroundShip(issueNumber, repo, autoMergeRepos.has(repo));
     } catch (error) {
       const message = toErrorMessage(error);
       setFetchError(`Failed to launch shipper ship: ${message}`);
@@ -506,7 +507,7 @@ export default function App(): JSX.Element {
 
   async function handleShipperInit(repo = activeRepo): Promise<void> {
     try {
-      await window.shipperAPI.spawnBackgroundInit(repo);
+      await getShipperApi().spawnBackgroundInit(repo);
     } catch (error) {
       const message = toErrorMessage(error);
       setFetchError(`Failed to launch shipper init: ${message}`);
@@ -1079,6 +1080,7 @@ export default function App(): JSX.Element {
             <div
               ref={drawerPanelRef}
               aria-hidden={!drawerOpen}
+              inert={!drawerOpen}
               className={cn(
                 'flex-shrink-0 overflow-hidden transition-[width] duration-200',
                 drawerOpen ? 'w-[40%]' : 'pointer-events-none w-0'
