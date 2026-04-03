@@ -102,7 +102,8 @@ function getCopilotUsageRecord(record: Record<string, unknown>): TokenUsage | un
   let totalUsage: TokenUsage | undefined;
 
   for (const modelMetric of Object.values(modelMetrics)) {
-    const usage = getUsageRecord(getUsageRecord(modelMetric)?.usage);
+    const metricRecord = getUsageRecord(modelMetric);
+    const usage = getUsageRecord(metricRecord?.usage);
     if (!usage) {
       continue;
     }
