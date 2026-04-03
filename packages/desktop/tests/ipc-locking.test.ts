@@ -1014,11 +1014,33 @@ describe('desktop IPC locking', () => {
   it('still registers groom on the PTY path with lock acquisition intact', async () => {
     await loadHandlers();
 
-    expect(state.handlers.has('pty-spawn-shipper-groom')).toBe(true);
-    expect(state.handlers.has('bg-spawn-new')).toBe(true);
-    expect(state.handlers.has('bg-spawn-ship')).toBe(true);
-    expect(state.handlers.has('bg-spawn-init')).toBe(true);
-    expect(state.handlers.has('bg-spawn-unblock')).toBe(true);
-    expect(state.handlers.has('set-priority')).toBe(true);
+    expect([...state.handlers.keys()].sort()).toEqual(
+      [
+        'check-prerequisites',
+        'check-init',
+        'list-issues',
+        'list-adoptable-issues',
+        'adopt-issue',
+        'close-not-planned',
+        'set-priority',
+        'check-lock-stale',
+        'unlock-issue',
+        'scan-reset',
+        'execute-reset',
+        'get-config',
+        'list-repos',
+        'set-config',
+        'pty-spawn-shipper-groom',
+        'pty-write',
+        'pty-resize',
+        'pty-kill',
+        'bg-spawn-new',
+        'bg-spawn-ship',
+        'bg-spawn-init',
+        'bg-spawn-unblock',
+        'bg-kill',
+        'bg-get-output',
+      ].sort()
+    );
   });
 });
