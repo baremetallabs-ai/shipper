@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useMemo, useRef } from 'react';
 import type { JSX } from 'react';
 
 import { toErrorMessage } from '../../../core/src/lib/errors.js';
@@ -61,24 +61,30 @@ export default function App(): JSX.Element {
   const showPipelineBoard = reposState.repos.length > 0 && repoInitialized === true;
   const autoMergeEnabled = activeRepo ? reposState.autoMergeRepos.has(activeRepo) : false;
   const autoShipEnabled = activeRepo ? backgroundState.autoShipRepos.has(activeRepo) : false;
-  const actionQueueCommands = backgroundState.backgroundCommands.map((command) => ({
-    id: command.id,
-    command: command.command,
-    status: command.status,
-    title: command.title,
-    repo: command.repo,
-    detail: command.detail,
-    canCancel: command.status === 'queued' || command.status === 'running',
-    canShowLogs:
-      command.command === 'new'
-        ? Boolean(command.logFile)
-        : command.output.length > 0 || command.status !== 'queued',
-    cancelled: command.cancelled,
-    workflowStage:
-      command.command === 'ship' && command.issueNumber !== undefined
-        ? pipelineState.stageCache.get(getWorkflowStageCacheKey(command.repo, command.issueNumber))
-        : undefined,
-  }));
+  const actionQueueCommands = useMemo(
+    () =>
+      backgroundState.backgroundCommands.map((command) => ({
+        id: command.id,
+        command: command.command,
+        status: command.status,
+        title: command.title,
+        repo: command.repo,
+        detail: command.detail,
+        canCancel: command.status === 'queued' || command.status === 'running',
+        canShowLogs:
+          command.command === 'new'
+            ? Boolean(command.logFile)
+            : command.output.length > 0 || command.status !== 'queued',
+        cancelled: command.cancelled,
+        workflowStage:
+          command.command === 'ship' && command.issueNumber !== undefined
+            ? pipelineState.stageCache.get(
+                getWorkflowStageCacheKey(command.repo, command.issueNumber)
+              )
+            : undefined,
+      })),
+    [backgroundState.backgroundCommands, pipelineState.stageCache]
+  );
 
   async function handleShipperNew(request: string, repo = activeRepo): Promise<void> {
     try {
@@ -320,7 +326,6 @@ export default function App(): JSX.Element {
                 issues={pipelineState.issues}
                 columnMap={pipelineState.columnMap}
                 attentionIssues={pipelineState.attentionIssues}
-                stageCache={pipelineState.stageCache}
                 resettingIssues={pipelineState.resettingIssues}
                 unlockingIssues={pipelineState.unlockingIssues}
                 unblockingIssues={pipelineState.unblockingIssues}
