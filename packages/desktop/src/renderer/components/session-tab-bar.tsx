@@ -2,19 +2,10 @@ import { X } from 'lucide-react';
 import type { JSX } from 'react';
 
 import { cn } from '../lib/utils.js';
-
-export type TerminalSessionStatus = 'running' | 'waiting' | 'exited';
-
-export interface TerminalSessionTab {
-  id: string;
-  label: string;
-  status: TerminalSessionStatus;
-  repo?: string;
-  issueNumber?: number;
-}
+import type { TerminalSession, TerminalSessionStatus } from '../types.js';
 
 interface SessionTabBarProps {
-  sessions: TerminalSessionTab[];
+  sessions: TerminalSession[];
   activeSessionId: string | null;
   onSelectSession: (sessionId: string) => void;
   onCloseSession: (sessionId: string) => void;

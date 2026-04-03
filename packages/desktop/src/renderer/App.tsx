@@ -1,5 +1,5 @@
-import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
-import type { DragEvent, JSX, SetStateAction } from 'react';
+import { useRef } from 'react';
+import type { DragEvent, JSX } from 'react';
 import {
   Check,
   ChevronLeft,
@@ -14,7 +14,6 @@ import {
   DISPLAY_NAME_MAP,
   getPriorityTier,
   LOCKED_LABEL,
-  NEW_LABEL,
   READY_LABEL,
 } from '../../../core/src/lib/labels.js';
 import { toErrorMessage } from '../../../core/src/lib/errors.js';
@@ -52,124 +51,22 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from './components/ui/dropdown-menu.js';
-import {
-  getActiveShipIssueNumbers,
-  getBackgroundDetail,
-  getBackgroundRetryPayload,
-  getBackgroundTitle,
-  getNextAutoShipFailureState,
-  getWorkflowStageCacheKey,
-  selectNextAutoShipIssue,
-  selectNextAutoUnblockIssue,
-  syncWorkflowStageCacheForRepo,
-} from './lib/app-utils.js';
+import { getWorkflowStageCacheKey } from './lib/app-utils.js';
 import {
   COLUMN_RESET_STAGE,
   dateFormatter,
-  MAX_AUTO_SHIP_CONSECUTIVE_FAILURES,
   PIPELINE_COLUMNS,
   POST_IMPLEMENTATION_LABELS,
-  repoPattern,
   RESET_STAGE_LABELS,
   RESET_STAGE_ORDER,
 } from './lib/constants.js';
+import { useBackgroundCommands } from './hooks/use-background-commands.js';
+import { useDragDrop } from './hooks/use-drag-drop.js';
+import { useTerminalSessions } from './hooks/use-terminal-sessions.js';
 import { cn } from './lib/utils.js';
-import type {
-  ActiveShippingCommand,
-  AppConfig,
-  BackgroundCommandKind,
-  BackgroundCommandStatus,
-  BackgroundCommandState,
-  BackgroundLogViewerState,
-  BackgroundOutputPayload,
-  BackgroundRetryPayload,
-  BackgroundStatusPayload,
-  BackgroundToastItem,
-  PipelineColumnLabel,
-  Prerequisites,
-  ResetSelection,
-  TerminalSession,
-} from './types.js';
-
-function isValidRepo(repo: string): boolean {
-  return repoPattern.test(repo);
-}
-
-function toRepoKey(repo: string): string {
-  return repo.trim().toLowerCase();
-}
-
-function getLatestOutputLine(output: string): string | null {
-  const lines = output
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-  return lines.at(-1) ?? null;
-}
-
-function isActiveShippingCommand(
-  command: BackgroundCommandState,
-  activeRepo: string | null
-): command is ActiveShippingCommand {
-  return (
-    command.command === 'ship' &&
-    command.repo === activeRepo &&
-    command.issueNumber !== undefined &&
-    (command.status === 'queued' || command.status === 'running') &&
-    !command.cancelled
-  );
-}
-
-function getBackgroundLogTitle(
-  command: BackgroundCommandKind,
-  repo: string,
-  issueNumber?: number
-): string {
-  switch (command) {
-    case 'new':
-      return `New issue logs — ${repo}`;
-    case 'ship':
-      return issueNumber ? `Ship #${issueNumber} logs` : `Ship logs — ${repo}`;
-    case 'init':
-      return `Init logs — ${repo}`;
-    case 'unblock':
-      return issueNumber ? `Unblock #${issueNumber} logs` : `Unblock logs — ${repo}`;
-  }
-}
-
-function getNextActiveSessionId(
-  sessions: TerminalSession[],
-  activeSessionId: string | null,
-  removedSessionId: string
-): string | null {
-  if (activeSessionId !== removedSessionId) {
-    return activeSessionId;
-  }
-
-  const removedIndex = sessions.findIndex((session) => session.id === removedSessionId);
-  const remainingSessions = sessions.filter((session) => session.id !== removedSessionId);
-  if (removedIndex < 0) {
-    return remainingSessions[0]?.id ?? null;
-  }
-
-  return remainingSessions[removedIndex - 1]?.id ?? remainingSessions[removedIndex]?.id ?? null;
-}
-
-function getPrerequisiteMessage(prerequisites: Prerequisites | null): string | null {
-  if (!prerequisites) {
-    return null;
-  }
-
-  if (!prerequisites.ghInstalled.ok) {
-    return prerequisites.ghInstalled.message;
-  }
-
-  if (!prerequisites.ghAuth.ok) {
-    return prerequisites.ghAuth.message;
-  }
-
-  return null;
-}
+import { useIssuePipeline } from './hooks/use-issue-pipeline.js';
+import { useRepos } from './hooks/use-repos.js';
+import type { BackgroundCommandsBridge, IssuePipelineBridge } from './types.js';
 
 function getResetTargets(labels: string[]): WorkflowStage[] {
   const hasPrLabels = POST_IMPLEMENTATION_LABELS.some((label) => labels.includes(label));
@@ -202,17 +99,6 @@ function isValidDropTarget(
   if (!targetStage) return false;
   const resetTargets = getResetTargets(source.issue.labels);
   return resetTargets.includes(targetStage);
-}
-
-function findActiveIssueSession(
-  sessions: TerminalSession[],
-  repo: string,
-  issueNumber: number
-): TerminalSession | undefined {
-  return sessions.find(
-    (session) =>
-      session.repo === repo && session.issueNumber === issueNumber && session.status !== 'exited'
-  );
 }
 
 interface IssueCardProps {
@@ -463,1222 +349,127 @@ function IssueCard({
 }
 
 export default function App(): JSX.Element {
-  const [repos, setRepos] = useState<string[]>([]);
-  const [activeRepo, setActiveRepo] = useState('');
-  const [autoMergeRepos, setAutoMergeRepos] = useState<Set<string>>(new Set());
-  const [prerequisites, setPrerequisites] = useState<Prerequisites | null>(null);
-  const [issues, setIssues] = useState<ListIssueItem[]>([]);
-  const [stageCache, setStageCache] = useState<Map<string, string>>(new Map());
-  const [isLoading, setIsLoading] = useState(false);
-  const [fetchError, setFetchError] = useState<string | null>(null);
-  const [resetSelection, setResetSelection] = useState<ResetSelection | null>(null);
-  const [closeNotPlannedIssue, setCloseNotPlannedIssue] = useState<ListIssueItem | null>(null);
-  const [unlockConfirmIssue, setUnlockConfirmIssue] = useState<ListIssueItem | null>(null);
-  const [resettingIssues, setResettingIssues] = useState<Set<number>>(new Set());
-  const [unlockingIssues, setUnlockingIssues] = useState<Set<number>>(new Set());
-  const [unblockingIssues, setUnblockingIssues] = useState<Set<number>>(new Set());
-  const [settingPriorityIssues, setSettingPriorityIssues] = useState<Set<number>>(new Set());
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [isPickerOpen, setIsPickerOpen] = useState(false);
-  const [isNewIssueOpen, setIsNewIssueOpen] = useState(false);
-  const [isAdoptOpen, setIsAdoptOpen] = useState(false);
-  const [repoInitialized, setRepoInitialized] = useState<boolean | null>(null);
-  const [backgroundCommands, setBackgroundCommands] = useState<BackgroundCommandState[]>([]);
-  const [toasts, setToasts] = useState<BackgroundToastItem[]>([]);
-  const [autoShipRepos, setAutoShipRepos] = useState<Set<string>>(new Set());
-  const [isSavingAutoMerge, setIsSavingAutoMerge] = useState(false);
-  const [logViewer, setLogViewer] = useState<BackgroundLogViewerState>({
-    open: false,
-    sessionId: null,
-    title: '',
-    content: '',
-  });
-  const [sessions, setSessions] = useState<TerminalSession[]>([]);
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [pendingCloseSessionId, setPendingCloseSessionId] = useState<string | null>(null);
-  const [actionQueueOpen, setActionQueueOpen] = useState(false);
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [dragSource, setDragSource] = useState<{
-    issue: ListIssueItem;
-    columnIndex: number;
-  } | null>(null);
-  const [dragOverColumn, setDragOverColumn] = useState<number | null>(null);
-  const requestVersionRef = useRef(0);
-  const initVersionRef = useRef(0);
-  const contentPaneRef = useRef<HTMLDivElement | null>(null);
-  const toggleButtonRef = useRef<HTMLButtonElement | null>(null);
-  const drawerPanelRef = useRef<HTMLDivElement | null>(null);
-  const backgroundCommandsRef = useRef<BackgroundCommandState[]>([]);
-  const autoShipFailuresRef = useRef<Map<string, number>>(new Map());
-  const autoShipSkippedRef = useRef<Map<string, Set<number>>>(new Map());
-  const autoUnblockQueueRef = useRef<Map<string, number[]>>(new Map());
-  const autoUnblockIssuesRef = useRef<Map<string, Set<number>>>(new Map());
-  const autoMergeSaveInFlightRef = useRef(false);
-  const sessionsRef = useRef<TerminalSession[]>([]);
-  const activeSessionIdRef = useRef<string | null>(null);
-  const lastOutputAtBySessionRef = useRef<Map<string, number>>(new Map());
+  const pipelineBridgeRef = useRef<IssuePipelineBridge | null>(null);
+  const backgroundBridgeRef = useRef<BackgroundCommandsBridge | null>(null);
 
-  const prerequisiteMessage = getPrerequisiteMessage(prerequisites);
-  const canFetch = prerequisites !== null && prerequisiteMessage === null;
-  const hasActiveRepo = activeRepo.length > 0 && isValidRepo(activeRepo);
-  const hasSession = sessions.length > 0;
-  const hasRunningShipCommand = useMemo(
-    () =>
-      backgroundCommands.some(
-        (command) =>
-          command.command === 'ship' &&
-          command.repo === activeRepo &&
-          command.status === 'running' &&
-          !command.cancelled
-      ),
-    [activeRepo, backgroundCommands]
-  );
-  const viewedBackgroundCommand =
-    logViewer.sessionId === null
-      ? null
-      : (backgroundCommands.find((command) => command.id === logViewer.sessionId) ?? null);
-  const viewedBackgroundCommandType = viewedBackgroundCommand?.command ?? null;
-  const viewedBackgroundCommandStatus = viewedBackgroundCommand?.status ?? null;
-  const pendingCloseSession =
-    pendingCloseSessionId === null
-      ? null
-      : (sessions.find((session) => session.id === pendingCloseSessionId) ?? null);
-  const { attentionIssues, columnMap } = useMemo(() => {
-    const nextColumnMap = new Map<PipelineColumnLabel, ListIssueItem[]>(
-      PIPELINE_COLUMNS.map((label) => [label, []])
-    );
-    const nextAttentionIssues: ListIssueItem[] = [];
-
-    for (const issue of issues) {
-      if (issue.labels.includes(NEW_LABEL)) {
-        nextAttentionIssues.push(issue);
-        continue;
-      }
-
-      let stageLabel: PipelineColumnLabel | null = null;
-      for (let index = PIPELINE_COLUMNS.length - 1; index >= 0; index -= 1) {
-        const label = PIPELINE_COLUMNS[index];
-        if (label && issue.labels.includes(label)) {
-          stageLabel = label;
-          break;
-        }
-      }
-
-      if (!stageLabel) {
-        continue;
-      }
-
-      const columnIssues = nextColumnMap.get(stageLabel);
-      if (!columnIssues) {
-        throw new Error(`Invariant failed: missing issue bucket for ${stageLabel}`);
-      }
-
-      columnIssues.push(issue);
-    }
-
-    return {
-      attentionIssues: nextAttentionIssues,
-      columnMap: nextColumnMap,
-    };
-  }, [issues]);
-  const shippingCommands = new Map<number, ActiveShippingCommand>();
-  const activeCommandRepos = new Set<string>();
-
-  for (const command of backgroundCommands) {
-    if ((command.status === 'queued' || command.status === 'running') && !command.cancelled) {
-      activeCommandRepos.add(command.repo);
-    }
-
-    if (isActiveShippingCommand(command, activeRepo)) {
-      shippingCommands.set(command.issueNumber, command);
-    }
-  }
-
-  const commitBackgroundCommands = useEffectEvent(
-    (updater: SetStateAction<BackgroundCommandState[]>) => {
-      setBackgroundCommands((currentCommands) => {
-        const nextCommands = typeof updater === 'function' ? updater(currentCommands) : updater;
-        backgroundCommandsRef.current = nextCommands;
-        return nextCommands;
-      });
-    }
-  );
-
-  function clearIssueState(): void {
-    requestVersionRef.current += 1;
-    setIssues([]);
-    setLastUpdated(null);
-    setFetchError(null);
-    setIsLoading(false);
-    setResetSelection(null);
-    setCloseNotPlannedIssue(null);
-    setUnlockConfirmIssue(null);
-    setResettingIssues(new Set());
-    setUnlockingIssues(new Set());
-    setUnblockingIssues(new Set());
-    setSettingPriorityIssues(new Set());
-    setRepoInitialized(null);
-    initVersionRef.current = 0;
-  }
-
-  function clearAutoShipStateForRepo(repo: string): void {
-    setAutoShipRepos((currentRepos) => {
-      if (!currentRepos.has(repo)) {
-        return currentRepos;
-      }
-
-      const nextRepos = new Set(currentRepos);
-      nextRepos.delete(repo);
-      return nextRepos;
-    });
-    autoShipFailuresRef.current.delete(repo);
-    autoShipSkippedRef.current.delete(repo);
-    autoUnblockQueueRef.current.delete(repo);
-    autoUnblockIssuesRef.current.delete(repo);
-  }
-
-  function enableAutoShipForRepo(repo: string): void {
-    setAutoShipRepos((currentRepos) => {
-      if (currentRepos.has(repo)) {
-        return currentRepos;
-      }
-
-      return new Set(currentRepos).add(repo);
-    });
-    autoShipFailuresRef.current.set(repo, 0);
-    autoShipSkippedRef.current.set(repo, new Set());
-  }
-
-  async function handleToggleAutoMerge(repo: string): Promise<void> {
-    if (autoMergeSaveInFlightRef.current) {
-      return;
-    }
-
-    autoMergeSaveInFlightRef.current = true;
-    setIsSavingAutoMerge(true);
-
-    const nextAutoMergeRepos = new Set(autoMergeRepos);
-    if (nextAutoMergeRepos.has(repo)) {
-      nextAutoMergeRepos.delete(repo);
-    } else {
-      nextAutoMergeRepos.add(repo);
-    }
-
-    try {
-      await persistConfig({ repos, activeRepo, autoMergeRepos: [...nextAutoMergeRepos] });
-      setAutoMergeRepos(nextAutoMergeRepos);
-    } catch (error) {
-      const message = toErrorMessage(error);
-      setFetchError(`Failed to save auto-merge preference: ${message}`);
-    } finally {
-      autoMergeSaveInFlightRef.current = false;
-      setIsSavingAutoMerge(false);
-    }
-  }
-
-  const loadIssues = useEffectEvent(async (repo: string) => {
-    const requestVersion = requestVersionRef.current + 1;
-    requestVersionRef.current = requestVersion;
-    setIsLoading(true);
-    setFetchError(null);
-
-    try {
-      const result = await window.shipperAPI.listIssues(repo);
-      if (requestVersion !== requestVersionRef.current) {
-        return null;
-      }
-
-      if (!result.ok) {
-        setFetchError(result.error);
-        return result;
-      }
-
-      setIssues(result.issues);
-      setStageCache((current) => syncWorkflowStageCacheForRepo(current, repo, result.issues));
-      setLastUpdated(new Date());
-      return result;
-    } catch (error) {
-      if (requestVersion !== requestVersionRef.current) {
-        return null;
-      }
-
-      const message = toErrorMessage(error);
-      setFetchError(message);
-      return null;
-    } finally {
-      if (requestVersion === requestVersionRef.current) {
-        setIsLoading(false);
-      }
-    }
+  const {
+    repos,
+    activeRepo,
+    autoMergeRepos,
+    repoInitialized,
+    isPickerOpen,
+    isSavingAutoMerge,
+    prerequisiteMessage,
+    canFetch,
+    hasActiveRepo,
+    setIsPickerOpen,
+    checkInitState,
+    handleAddRepo,
+    handleSwitchRepo,
+    handleReorderRepos,
+    handleCloseRepo,
+    handleToggleAutoMerge,
+  } = useRepos({
+    pipelineBridgeRef,
+    backgroundBridgeRef,
   });
 
-  const checkInitState = useEffectEvent(async (repo: string) => {
-    const version = initVersionRef.current + 1;
-    initVersionRef.current = version;
-
-    try {
-      const result = await window.shipperAPI.checkInit(repo);
-      if (version !== initVersionRef.current) return;
-
-      if (result.error) {
-        // Operational failure (e.g. gh CLI error) — keep null to avoid
-        // incorrectly showing the init CTA for an initialized repo.
-        return;
-      }
-      setRepoInitialized(result.initialized);
-    } catch {
-      if (version !== initVersionRef.current) return;
-      // IPC failure — keep null (unknown)
-    }
+  const {
+    backgroundCommands,
+    toasts,
+    logViewer,
+    actionQueueOpen,
+    autoShipRepos,
+    shippingCommands,
+    activeCommandRepos,
+    hasRunningShipCommand,
+    pushToast,
+    dismissToast,
+    handleLogViewerOpenChange,
+    handleToggleActionQueue,
+    handleDismissBackground,
+    handleClearFinishedBackground,
+    handleCancelBackground,
+    handleShowBackgroundLogs,
+    handleRetryToast,
+    enableAutoShipForRepo,
+    clearAutoShipStateForRepo,
+  } = useBackgroundCommands({
+    activeRepo,
+    autoMergeRepos,
+    checkInitState,
+    pipelineBridgeRef,
   });
-
-  const persistConfig = useEffectEvent(async (config: AppConfig) => {
-    await window.shipperAPI.setConfig(config);
+  const {
+    issues,
+    stageCache,
+    isLoading,
+    fetchError,
+    lastUpdated,
+    resettingIssues,
+    unlockingIssues,
+    unblockingIssues,
+    settingPriorityIssues,
+    resetSelection,
+    closeNotPlannedIssue,
+    unlockConfirmIssue,
+    isNewIssueOpen,
+    isAdoptOpen,
+    attentionIssues,
+    columnMap,
+    setFetchError,
+    setResetSelection,
+    setCloseNotPlannedIssue,
+    setUnlockConfirmIssue,
+    setIsNewIssueOpen,
+    setIsAdoptOpen,
+    loadIssues,
+    clearIssueState,
+    clearStageCacheForRepo,
+    handleRefresh,
+    trackResetIssue,
+    clearResetIssue,
+    trackUnblockIssue,
+    clearUnblockIssue,
+    handleResetSuccess,
+    handleCloseNotPlannedSuccess,
+    handleCloseNotPlannedError,
+    handleUnlockClick,
+    handleUnlockDialogConfirm,
+    handleUnblockClick,
+    handleSetPriority,
+    handleOpenNewIssue,
+    handleOpenAdopt,
+  } = useIssuePipeline({
+    activeRepo,
+    canFetch,
+    hasActiveRepo,
+    hasRunningShipCommand,
+    pushToast,
   });
-
-  const refreshIssuesForActiveRepo = useEffectEvent(async (repo: string) => {
-    if (repo !== activeRepo) {
-      return;
-    }
-
-    await loadIssues(repo);
+  const {
+    sessions,
+    activeSessionId,
+    pendingCloseSession,
+    drawerOpen,
+    hasSession,
+    contentPaneRef,
+    toggleButtonRef,
+    drawerPanelRef,
+    openRunningSession,
+    focusExistingGroomSession,
+    handlePendingCloseOpenChange,
+    handleToggleDrawer,
+    handleSelectSession,
+    handleCloseSession,
+    handleSessionInput,
+    handleConfirmCloseSession,
+  } = useTerminalSessions({
+    activeRepo,
+    setFetchError,
   });
-
-  const dismissToast = useEffectEvent((toastId: string) => {
-    setToasts((currentToasts) => currentToasts.filter((toast) => toast.id !== toastId));
-  });
-
-  const refreshRepoAfterBackground = useEffectEvent(
-    async (repo: string, command: BackgroundCommandKind, status: BackgroundCommandStatus) => {
-      if (repo !== activeRepo) {
-        return null;
-      }
-
-      if (command === 'new' && status === 'complete') {
-        return loadIssues(repo);
-      }
-
-      if (command === 'init' && status === 'complete') {
-        void checkInitState(repo);
-        return loadIssues(repo);
-      }
-
-      if (command === 'unblock' && (status === 'complete' || status === 'failed')) {
-        return loadIssues(repo);
-      }
-
-      if (command === 'ship' && (status === 'complete' || status === 'failed')) {
-        return loadIssues(repo);
-      }
-
-      return null;
-    }
-  );
-
-  const handleRetryBackgroundCommand = useEffectEvent(async (payload: BackgroundRetryPayload) => {
-    switch (payload.command) {
-      case 'new':
-        await window.shipperAPI.spawnBackgroundNew(payload.request, payload.repo);
-        return;
-      case 'ship':
-        await window.shipperAPI.spawnBackgroundShip(
-          payload.issueNumber,
-          payload.repo,
-          payload.merge
-        );
-        return;
-      case 'init':
-        await window.shipperAPI.spawnBackgroundInit(payload.repo);
-        return;
-      case 'unblock':
-        trackUnblockIssue(payload.issueNumber);
-        try {
-          await window.shipperAPI.spawnBackgroundUnblock(payload.issueNumber, payload.repo);
-        } catch (error) {
-          clearUnblockIssue(payload.issueNumber);
-          throw error;
-        }
-        return;
-    }
-  });
-
-  const pushToast = useEffectEvent((toast: BackgroundToastItem) => {
-    setToasts((currentToasts) => {
-      const nextToasts = currentToasts.filter((item) => item.id !== toast.id);
-      return [...nextToasts, toast];
-    });
-  });
-
-  const handleBackgroundStatus = useEffectEvent(async (event: BackgroundStatusPayload) => {
-    const previousCommand = backgroundCommandsRef.current.find(
-      (command) => command.id === event.sessionId
-    );
-    const output = previousCommand?.output ?? '';
-    const latestOutput = getLatestOutputLine(output);
-    const request = event.meta?.request ?? previousCommand?.request;
-    const issueNumber = event.meta?.issueNumber ?? previousCommand?.issueNumber;
-    const merge = event.meta?.merge ?? previousCommand?.merge ?? false;
-    const issueUrl = event.meta?.issueUrl ?? previousCommand?.issueUrl;
-    const logFile = event.meta?.logFile ?? previousCommand?.logFile;
-    const cancelled = event.meta?.cancelled ?? previousCommand?.cancelled ?? false;
-    const isAutoUnblock =
-      issueNumber !== undefined && event.command === 'unblock'
-        ? isAutoUnblockIssue(event.repo, issueNumber)
-        : false;
-    const nextCommand: BackgroundCommandState = {
-      id: event.sessionId,
-      command: event.command,
-      repo: event.repo,
-      status: event.status,
-      title: getBackgroundTitle(event.command, event.repo, issueNumber, merge),
-      detail: getBackgroundDetail({
-        command: event.command,
-        status: event.status,
-        repo: event.repo,
-        issueNumber,
-        merge,
-        latestOutput,
-        cancelled,
-      }),
-      output,
-      request,
-      issueNumber,
-      merge,
-      issueUrl,
-      logFile,
-      exitCode: event.exitCode,
-      cancelled,
-    };
-    const currentCommands = backgroundCommandsRef.current;
-    const existingIndex = currentCommands.findIndex((command) => command.id === event.sessionId);
-    const nextCommands =
-      existingIndex >= 0
-        ? currentCommands.map((command, index) => (index === existingIndex ? nextCommand : command))
-        : [...currentCommands, nextCommand];
-
-    if (existingIndex < 0) {
-      setActionQueueOpen(true);
-    }
-
-    const postEventCommands = nextCommands;
-
-    commitBackgroundCommands(postEventCommands);
-
-    if (event.command === 'unblock' && (event.status === 'complete' || event.status === 'failed')) {
-      if (issueNumber !== undefined) {
-        clearUnblockIssue(issueNumber);
-        clearAutoUnblockIssue(event.repo, issueNumber);
-      }
-    }
-
-    if (event.status === 'complete' && event.command !== 'unblock') {
-      const successToast: BackgroundToastItem =
-        event.command === 'new'
-          ? {
-              id: event.sessionId,
-              sessionId: event.sessionId,
-              variant: 'success',
-              title: issueNumber ? `Issue #${issueNumber} created` : 'Issue created',
-              description:
-                issueNumber && issueUrl
-                  ? 'The new issue is ready in GitHub.'
-                  : 'The new issue command completed successfully.',
-              issueUrl,
-              issueLabel: issueNumber ? `Open issue #${issueNumber}` : undefined,
-            }
-          : {
-              id: event.sessionId,
-              sessionId: event.sessionId,
-              variant: 'success',
-              title:
-                event.command === 'init'
-                  ? `Initialized ${event.repo}`
-                  : issueNumber
-                    ? `Ship #${issueNumber} ${merge ? 'merged' : 'finished'}`
-                    : 'Ship finished',
-              description:
-                event.command === 'init'
-                  ? 'Repository labels and settings were updated.'
-                  : merge
-                    ? 'The background ship command completed and merged successfully.'
-                    : 'The background ship command completed successfully.',
-            };
-      pushToast(successToast);
-      await refreshRepoAfterBackground(event.repo, event.command, event.status);
-    }
-
-    if (event.status === 'complete' && event.command === 'unblock') {
-      const refreshedIssues = await refreshRepoAfterBackground(
-        event.repo,
-        event.command,
-        event.status
-      );
-
-      if (issueNumber !== undefined) {
-        try {
-          const issueResult = refreshedIssues ?? (await window.shipperAPI.listIssues(event.repo));
-          if (!issueResult.ok) {
-            throw new Error(issueResult.error);
-          }
-
-          const stillBlocked = issueResult.issues.some(
-            (issue) => issue.number === issueNumber && issue.labels.includes(BLOCKED_LABEL)
-          );
-          const shouldHandleAutoUnblock = isAutoUnblock && autoShipRepos.has(event.repo);
-
-          if (!shouldHandleAutoUnblock) {
-            pushToast({
-              id: event.sessionId,
-              sessionId: event.sessionId,
-              variant: stillBlocked ? 'cancelled' : 'success',
-              title: stillBlocked ? `#${issueNumber} remains blocked` : `Unblocked #${issueNumber}`,
-              description: stillBlocked
-                ? 'The blocking dependencies have not been resolved.'
-                : 'The issue is now eligible for shipping.',
-            });
-            return;
-          }
-
-          if (stillBlocked) {
-            pushToast({
-              id: `auto-unblock-still-blocked-${event.repo}-${issueNumber}-${Date.now()}`,
-              sessionId: event.sessionId,
-              variant: 'cancelled',
-              title: `Auto-ship: #${issueNumber} remains blocked`,
-              description: 'The blocking condition has not been resolved.',
-            });
-          } else {
-            pushToast({
-              id: `auto-unblock-success-${event.repo}-${issueNumber}-${Date.now()}`,
-              sessionId: event.sessionId,
-              variant: 'success',
-              title: `Auto-ship: unblocked #${issueNumber}`,
-              description: 'The issue is now eligible for shipping.',
-            });
-          }
-
-          const skippedIssueNumbers =
-            autoShipSkippedRef.current.get(event.repo) ?? new Set<number>();
-          const activeIssueNumbers = getActiveShipIssueNumbers(postEventCommands, event.repo);
-          const candidate = selectNextAutoShipIssue(
-            issueResult.issues,
-            activeIssueNumbers,
-            skippedIssueNumbers
-          );
-
-          if (candidate) {
-            autoUnblockQueueRef.current.delete(event.repo);
-            await window.shipperAPI.spawnBackgroundShip(
-              candidate.number,
-              event.repo,
-              autoMergeRepos.has(event.repo)
-            );
-            pushToast({
-              id: `auto-ship-${event.repo}-${candidate.number}-${Date.now()}`,
-              sessionId: event.sessionId,
-              variant: 'success',
-              title: `Auto-ship: starting #${candidate.number}`,
-              description: candidate.title,
-            });
-            return;
-          }
-
-          const queue = autoUnblockQueueRef.current.get(event.repo) ?? [];
-          const nextQueuedIssue = selectNextAutoUnblockIssue(issueResult.issues, queue);
-          if (!nextQueuedIssue.issue) {
-            autoUnblockQueueRef.current.delete(event.repo);
-            return;
-          }
-
-          trackAutoUnblockIssue(event.repo, nextQueuedIssue.issue.number);
-          try {
-            await window.shipperAPI.spawnBackgroundUnblock(
-              nextQueuedIssue.issue.number,
-              event.repo
-            );
-          } catch {
-            console.warn(
-              `[shipper] Failed to spawn background unblock for #${nextQueuedIssue.issue.number}`
-            );
-            clearUnblockIssue(nextQueuedIssue.issue.number);
-            clearAutoUnblockIssue(event.repo, nextQueuedIssue.issue.number);
-            autoUnblockQueueRef.current.delete(event.repo);
-            return;
-          }
-
-          autoUnblockQueueRef.current.set(event.repo, nextQueuedIssue.remainingIssueNumbers);
-          pushToast({
-            id: `auto-unblock-${event.repo}-${nextQueuedIssue.issue.number}-${Date.now()}`,
-            sessionId: event.sessionId,
-            variant: 'success',
-            title: `Auto-ship: attempting unblock of #${nextQueuedIssue.issue.number}`,
-            description: nextQueuedIssue.issue.title,
-          });
-        } catch {
-          console.warn(`[shipper] Failed to confirm unblock result for #${issueNumber}`);
-          if (!isAutoUnblock || !autoShipRepos.has(event.repo)) {
-            pushToast({
-              id: event.sessionId,
-              sessionId: event.sessionId,
-              variant: 'cancelled',
-              title: `Unblock #${issueNumber} completed`,
-              description:
-                'The unblock agent finished, but the latest issue state could not be confirmed.',
-            });
-            return;
-          }
-
-          autoUnblockQueueRef.current.delete(event.repo);
-        }
-      }
-    }
-
-    if (event.status === 'failed') {
-      if (cancelled) {
-        pushToast({
-          id: event.sessionId,
-          sessionId: event.sessionId,
-          variant: 'cancelled',
-          title: `${nextCommand.title} cancelled`,
-          description: 'The background command was stopped before it finished.',
-        });
-      } else {
-        const retryPayload = getBackgroundRetryPayload(
-          event.command,
-          event.repo,
-          request,
-          issueNumber,
-          merge
-        );
-
-        pushToast({
-          id: event.sessionId,
-          sessionId: event.sessionId,
-          variant: 'error',
-          title: `${nextCommand.title} failed`,
-          description:
-            latestOutput ??
-            (event.exitCode === null || event.exitCode === undefined
-              ? 'The background command exited unsuccessfully.'
-              : `The command exited with code ${event.exitCode}.`),
-          retryable: retryPayload !== undefined,
-          retryPayload,
-        });
-      }
-
-      await refreshRepoAfterBackground(event.repo, event.command, event.status);
-    }
-
-    if (
-      event.command === 'ship' &&
-      (event.status === 'complete' || event.status === 'failed') &&
-      !cancelled &&
-      autoShipRepos.has(event.repo)
-    ) {
-      const currentFailures = autoShipFailuresRef.current.get(event.repo) ?? 0;
-      const currentSkipped = autoShipSkippedRef.current.get(event.repo) ?? new Set<number>();
-      const nextFailureState = getNextAutoShipFailureState(
-        event.status,
-        issueNumber,
-        currentFailures,
-        currentSkipped
-      );
-      autoShipFailuresRef.current.set(event.repo, nextFailureState.consecutiveFailures);
-      autoShipSkippedRef.current.set(event.repo, nextFailureState.skippedIssueNumbers);
-
-      if (nextFailureState.pauseAutoShip) {
-        clearAutoShipStateForRepo(event.repo);
-        pushToast({
-          id: `auto-ship-paused-${event.repo}-${Date.now()}`,
-          sessionId: event.sessionId,
-          variant: 'error',
-          title: 'Auto-ship paused',
-          description: `${MAX_AUTO_SHIP_CONSECUTIVE_FAILURES} consecutive failures disabled auto-ship for this repository.`,
-        });
-        return;
-      }
-
-      const activeIssueNumbers = getActiveShipIssueNumbers(postEventCommands, event.repo);
-      if (activeIssueNumbers.size > 0) {
-        return;
-      }
-
-      try {
-        const issueResult = await window.shipperAPI.listIssues(event.repo);
-        if (!issueResult.ok || !autoShipRepos.has(event.repo)) {
-          return;
-        }
-
-        const skippedIssueNumbers = autoShipSkippedRef.current.get(event.repo) ?? new Set<number>();
-        const nextIssue = selectNextAutoShipIssue(
-          issueResult.issues,
-          activeIssueNumbers,
-          skippedIssueNumbers
-        );
-
-        if (!nextIssue) {
-          const blockedIssues = issueResult.issues.filter(
-            (issue) => issue.labels.includes(BLOCKED_LABEL) && !issue.labels.includes(LOCKED_LABEL)
-          );
-
-          if (blockedIssues.length === 0) {
-            autoUnblockQueueRef.current.delete(event.repo);
-            return;
-          }
-
-          const firstBlocked = blockedIssues[0];
-          if (!firstBlocked) {
-            autoUnblockQueueRef.current.delete(event.repo);
-            return;
-          }
-
-          const remainingIssueNumbers = blockedIssues.slice(1).map((issue) => issue.number);
-          trackAutoUnblockIssue(event.repo, firstBlocked.number);
-          try {
-            await window.shipperAPI.spawnBackgroundUnblock(firstBlocked.number, event.repo);
-          } catch {
-            console.warn(
-              `[shipper] Failed to spawn background unblock for #${firstBlocked.number}`
-            );
-            clearUnblockIssue(firstBlocked.number);
-            clearAutoUnblockIssue(event.repo, firstBlocked.number);
-            autoUnblockQueueRef.current.delete(event.repo);
-            return;
-          }
-
-          autoUnblockQueueRef.current.set(event.repo, remainingIssueNumbers);
-          pushToast({
-            id: `auto-unblock-${event.repo}-${firstBlocked.number}-${Date.now()}`,
-            sessionId: event.sessionId,
-            variant: 'success',
-            title: `Auto-ship: attempting unblock of #${firstBlocked.number}`,
-            description: firstBlocked.title,
-          });
-          return;
-        }
-
-        autoUnblockQueueRef.current.delete(event.repo);
-        await window.shipperAPI.spawnBackgroundShip(
-          nextIssue.number,
-          event.repo,
-          autoMergeRepos.has(event.repo)
-        );
-        pushToast({
-          id: `auto-ship-${event.repo}-${nextIssue.number}-${Date.now()}`,
-          sessionId: event.sessionId,
-          variant: 'success',
-          title: `Auto-ship: starting #${nextIssue.number}`,
-          description: nextIssue.title,
-        });
-      } catch {
-        // Auto-ship enqueue is best-effort; the user can still ship manually.
-      }
-    }
-
-    if (
-      event.command !== 'unblock' ||
-      event.status !== 'failed' ||
-      cancelled ||
-      !isAutoUnblock ||
-      !autoShipRepos.has(event.repo)
-    ) {
-      return;
-    }
-
-    try {
-      const issueResult = await window.shipperAPI.listIssues(event.repo);
-      if (!issueResult.ok || !autoShipRepos.has(event.repo)) {
-        return;
-      }
-
-      const skippedIssueNumbers = autoShipSkippedRef.current.get(event.repo) ?? new Set<number>();
-      const activeIssueNumbers = getActiveShipIssueNumbers(postEventCommands, event.repo);
-      const candidate = selectNextAutoShipIssue(
-        issueResult.issues,
-        activeIssueNumbers,
-        skippedIssueNumbers
-      );
-
-      if (candidate) {
-        autoUnblockQueueRef.current.delete(event.repo);
-        await window.shipperAPI.spawnBackgroundShip(
-          candidate.number,
-          event.repo,
-          autoMergeRepos.has(event.repo)
-        );
-        pushToast({
-          id: `auto-ship-${event.repo}-${candidate.number}-${Date.now()}`,
-          sessionId: event.sessionId,
-          variant: 'success',
-          title: `Auto-ship: starting #${candidate.number}`,
-          description: candidate.title,
-        });
-        return;
-      }
-
-      const queue = autoUnblockQueueRef.current.get(event.repo) ?? [];
-      const nextQueuedIssue = selectNextAutoUnblockIssue(issueResult.issues, queue);
-      if (!nextQueuedIssue.issue) {
-        autoUnblockQueueRef.current.delete(event.repo);
-        return;
-      }
-
-      trackAutoUnblockIssue(event.repo, nextQueuedIssue.issue.number);
-      try {
-        await window.shipperAPI.spawnBackgroundUnblock(nextQueuedIssue.issue.number, event.repo);
-      } catch {
-        console.warn(
-          `[shipper] Failed to spawn background unblock for #${nextQueuedIssue.issue.number}`
-        );
-        clearUnblockIssue(nextQueuedIssue.issue.number);
-        clearAutoUnblockIssue(event.repo, nextQueuedIssue.issue.number);
-        autoUnblockQueueRef.current.delete(event.repo);
-        return;
-      }
-
-      autoUnblockQueueRef.current.set(event.repo, nextQueuedIssue.remainingIssueNumbers);
-      pushToast({
-        id: `auto-unblock-${event.repo}-${nextQueuedIssue.issue.number}-${Date.now()}`,
-        sessionId: event.sessionId,
-        variant: 'success',
-        title: `Auto-ship: attempting unblock of #${nextQueuedIssue.issue.number}`,
-        description: nextQueuedIssue.issue.title,
-      });
-    } catch {
-      console.warn(`[shipper] Failed to process auto-unblock retry for ${event.repo}`);
-      autoUnblockQueueRef.current.delete(event.repo);
-    }
-  });
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function initialize(): Promise<void> {
-      try {
-        const [prerequisiteResult, config] = await Promise.all([
-          window.shipperAPI.checkPrerequisites(),
-          window.shipperAPI.getConfig(),
-        ]);
-
-        if (cancelled) {
-          return;
-        }
-
-        setPrerequisites(prerequisiteResult);
-        setRepos(config.repos);
-        setActiveRepo(config.activeRepo);
-        setAutoMergeRepos(new Set(config.autoMergeRepos));
-
-        if (
-          prerequisiteResult.ghInstalled.ok &&
-          prerequisiteResult.ghAuth.ok &&
-          config.activeRepo.length > 0
-        ) {
-          void checkInitState(config.activeRepo);
-          await loadIssues(config.activeRepo);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          const message = toErrorMessage(error);
-          setFetchError(`Failed to initialize desktop app: ${message}`);
-        }
-      }
-    }
-
-    void initialize();
-
-    return () => {
-      cancelled = true;
-      requestVersionRef.current += 1;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!canFetch || !hasActiveRepo) {
-      return;
-    }
-
-    const intervalId = window.setInterval(() => {
-      void loadIssues(activeRepo);
-    }, 60_000);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
-  }, [activeRepo, canFetch, hasActiveRepo]);
-
-  useEffect(() => {
-    if (!canFetch || !hasActiveRepo) {
-      return;
-    }
-    if (!hasRunningShipCommand) {
-      return;
-    }
-
-    const intervalId = window.setInterval(() => {
-      void loadIssues(activeRepo);
-    }, 10_000);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
-  }, [activeRepo, canFetch, hasActiveRepo, hasRunningShipCommand]);
-
-  useEffect(() => {
-    const drawerPanel = drawerPanelRef.current;
-    if (!drawerPanel) {
-      return;
-    }
-
-    if (drawerOpen) {
-      drawerPanel.removeAttribute('inert');
-      return;
-    }
-
-    drawerPanel.setAttribute('inert', '');
-  }, [drawerOpen]);
-
-  useEffect(() => {
-    sessionsRef.current = sessions;
-  }, [sessions]);
-
-  useEffect(() => {
-    activeSessionIdRef.current = activeSessionId;
-  }, [activeSessionId]);
-
-  useEffect(() => {
-    const unsubscribe = window.shipperAPI.onBackgroundStatus((event) => {
-      void handleBackgroundStatus(event as BackgroundStatusPayload);
-    });
-
-    return unsubscribe;
-  }, [handleBackgroundStatus]);
-
-  useEffect(() => {
-    const unsubscribe = window.shipperAPI.onBackgroundOutput((event) => {
-      const payload = event as BackgroundOutputPayload;
-
-      commitBackgroundCommands((currentCommands) =>
-        currentCommands.map((command) => {
-          if (command.id !== payload.sessionId) {
-            return command;
-          }
-
-          const output = `${command.output}${payload.data}`;
-          return {
-            ...command,
-            output,
-            detail: getBackgroundDetail({
-              command: command.command,
-              status: command.status,
-              repo: command.repo,
-              issueNumber: command.issueNumber,
-              merge: command.merge,
-              latestOutput: getLatestOutputLine(output),
-              cancelled: command.cancelled,
-            }),
-          };
-        })
-      );
-
-      setLogViewer((currentViewer) => {
-        if (!currentViewer.open || currentViewer.sessionId !== payload.sessionId) {
-          return currentViewer;
-        }
-
-        const activeCommand = backgroundCommandsRef.current.find(
-          (command) => command.id === payload.sessionId
-        );
-        if (activeCommand?.command === 'new') {
-          return currentViewer;
-        }
-
-        return {
-          ...currentViewer,
-          content: `${currentViewer.content}${payload.data}`,
-        };
-      });
-    });
-
-    return unsubscribe;
-  }, []);
-
-  useEffect(() => {
-    if (pendingCloseSessionId !== null && pendingCloseSession === null) {
-      setPendingCloseSessionId(null);
-    }
-  }, [pendingCloseSession, pendingCloseSessionId]);
-
-  async function handleRefresh(): Promise<void> {
-    if (!canFetch || !hasActiveRepo || isLoading) {
-      return;
-    }
-
-    await loadIssues(activeRepo);
-  }
-
-  function handleOpenNewIssue(): void {
-    setIsNewIssueOpen(true);
-  }
-
-  function handleOpenAdopt(): void {
-    setIsAdoptOpen(true);
-  }
-
-  async function handleAddRepo(repo: string): Promise<void> {
-    const nextRepo = repo.trim();
-    if (
-      !isValidRepo(nextRepo) ||
-      repos.some((currentRepo) => toRepoKey(currentRepo) === toRepoKey(nextRepo))
-    ) {
-      return;
-    }
-
-    const nextRepos = [...repos, nextRepo];
-
-    try {
-      await persistConfig({
-        repos: nextRepos,
-        activeRepo: nextRepo,
-        autoMergeRepos: [...autoMergeRepos],
-      });
-      setRepos(nextRepos);
-      setActiveRepo(nextRepo);
-      clearIssueState();
-
-      if (canFetch) {
-        void checkInitState(nextRepo);
-        await loadIssues(nextRepo);
-      }
-    } catch (error) {
-      const message = toErrorMessage(error);
-      setFetchError(`Failed to save repositories: ${message}`);
-    }
-  }
-
-  async function handleSwitchRepo(repo: string): Promise<void> {
-    if (repo === activeRepo) {
-      return;
-    }
-
-    try {
-      await persistConfig({ repos, activeRepo: repo, autoMergeRepos: [...autoMergeRepos] });
-      setActiveRepo(repo);
-      clearIssueState();
-
-      if (canFetch) {
-        void checkInitState(repo);
-        await loadIssues(repo);
-      }
-    } catch (error) {
-      const message = toErrorMessage(error);
-      setFetchError(`Failed to save repositories: ${message}`);
-    }
-  }
-
-  async function handleReorderRepos(nextRepos: string[]): Promise<void> {
-    if (
-      repos.length < 2 ||
-      nextRepos.length !== repos.length ||
-      nextRepos.every((repo, index) => repo === repos[index])
-    ) {
-      return;
-    }
-
-    const currentRepoKeys = new Set(repos.map((repo) => toRepoKey(repo)));
-    const nextRepoKeys = new Set(nextRepos.map((repo) => toRepoKey(repo)));
-    if (
-      currentRepoKeys.size !== repos.length ||
-      nextRepoKeys.size !== nextRepos.length ||
-      currentRepoKeys.size !== nextRepoKeys.size
-    ) {
-      return;
-    }
-
-    for (const repoKey of currentRepoKeys) {
-      if (!nextRepoKeys.has(repoKey)) {
-        return;
-      }
-    }
-
-    if (activeRepo && !nextRepos.some((repo) => toRepoKey(repo) === toRepoKey(activeRepo))) {
-      return;
-    }
-
-    try {
-      await persistConfig({ repos: nextRepos, activeRepo, autoMergeRepos: [...autoMergeRepos] });
-      setRepos(nextRepos);
-    } catch (error) {
-      const message = toErrorMessage(error);
-      setFetchError(`Failed to save repositories: ${message}`);
-    }
-  }
-
-  useEffect(() => {
-    const unsubscribe = window.shipperAPI.onPtyOutput((event) => {
-      const outputAt = Date.now();
-      lastOutputAtBySessionRef.current.set(event.sessionId, outputAt);
-
-      const session = sessionsRef.current.find(
-        (currentSession) =>
-          currentSession.id === event.sessionId && currentSession.status !== 'exited'
-      );
-      if (!session || session.status !== 'waiting') {
-        return;
-      }
-
-      setSessions((currentSessions) => {
-        const sessionIndex = currentSessions.findIndex(
-          (currentSession) =>
-            currentSession.id === event.sessionId && currentSession.status === 'waiting'
-        );
-        if (sessionIndex < 0) {
-          return currentSessions;
-        }
-
-        const currentSession = currentSessions[sessionIndex];
-        if (!currentSession) {
-          return currentSessions;
-        }
-
-        const nextSessions = [...currentSessions];
-        nextSessions[sessionIndex] = { ...currentSession, status: 'running' };
-        return nextSessions;
-      });
-    });
-
-    return unsubscribe;
-  }, []);
-
-  useEffect(() => {
-    const unsubscribe = window.shipperAPI.onPtyExit((event) => {
-      setSessions((currentSessions) => {
-        const sessionIndex = currentSessions.findIndex(
-          (session) => session.id === event.sessionId && session.status !== 'exited'
-        );
-        if (sessionIndex < 0) {
-          return currentSessions;
-        }
-
-        const session = currentSessions[sessionIndex];
-        if (!session) {
-          return currentSessions;
-        }
-
-        const nextSessions = [...currentSessions];
-        nextSessions[sessionIndex] = { ...session, status: 'exited' };
-        return nextSessions;
-      });
-    });
-
-    return unsubscribe;
-  }, []);
-
-  useEffect(() => {
-    if (!logViewer.open || logViewer.sessionId === null || viewedBackgroundCommandType === null) {
-      return;
-    }
-
-    let cancelled = false;
-    const sessionId = logViewer.sessionId;
-
-    const loadOutput = async (): Promise<void> => {
-      try {
-        const output = await window.shipperAPI.getBackgroundOutput(sessionId);
-        if (cancelled) {
-          return;
-        }
-
-        setLogViewer((currentViewer) =>
-          currentViewer.sessionId === sessionId
-            ? { ...currentViewer, content: output }
-            : currentViewer
-        );
-      } catch (error) {
-        if (!cancelled) {
-          const message = toErrorMessage(error);
-          setFetchError(`Failed to load background logs: ${message}`);
-        }
-      }
-    };
-
-    void loadOutput();
-
-    if (viewedBackgroundCommandType !== 'new' || viewedBackgroundCommandStatus !== 'running') {
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    const intervalId = window.setInterval(() => {
-      void loadOutput();
-    }, 1_000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
-    };
-  }, [
-    logViewer.open,
-    logViewer.sessionId,
-    viewedBackgroundCommandStatus,
-    viewedBackgroundCommandType,
-  ]);
-
-  useEffect(() => {
-    if (sessions.length === 0) {
-      return;
-    }
-
-    const intervalId = window.setInterval(() => {
-      const now = Date.now();
-
-      setSessions((currentSessions) => {
-        let nextSessions: TerminalSession[] | null = null;
-
-        for (const [index, session] of currentSessions.entries()) {
-          const lastOutputAt = lastOutputAtBySessionRef.current.get(session.id);
-          if (
-            session.status !== 'running' ||
-            lastOutputAt === undefined ||
-            now - lastOutputAt <= 5_000
-          ) {
-            continue;
-          }
-
-          if (nextSessions === null) {
-            nextSessions = [...currentSessions];
-          }
-
-          nextSessions[index] = { ...session, status: 'waiting' };
-        }
-
-        return nextSessions ?? currentSessions;
-      });
-    }, 1_000);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
-  }, [sessions.length]);
-
-  function openRunningSession(
-    sessionId: string,
-    label: string,
-    metadata?: { repo: string; issueNumber: number }
-  ): void {
-    const session: TerminalSession = {
-      id: sessionId,
-      label,
-      status: 'running',
-      ...metadata,
-    };
-
-    lastOutputAtBySessionRef.current.set(session.id, Date.now());
-    setSessions((currentSessions) => [...currentSessions, session]);
-    setActiveSessionId(session.id);
-    setDrawerOpen(true);
-  }
+  const { dragSource, dragOverColumn, startDrag, endDrag, setDragOverColumn, clearDrag } =
+    useDragDrop();
 
   async function handleShipperNew(request: string, repo = activeRepo): Promise<void> {
     try {
@@ -1687,16 +478,6 @@ export default function App(): JSX.Element {
       const message = toErrorMessage(error);
       setFetchError(`Failed to launch shipper new: ${message}`);
     }
-  }
-
-  function focusExistingGroomSession(issueNumber: number): boolean {
-    const existing = findActiveIssueSession(sessionsRef.current, activeRepo, issueNumber);
-    if (existing) {
-      setActiveSessionId(existing.id);
-      setDrawerOpen(true);
-      return true;
-    }
-    return false;
   }
 
   async function handleShipperGroom(issueNumber: number): Promise<void> {
@@ -1732,491 +513,18 @@ export default function App(): JSX.Element {
     }
   }
 
-  function trackResetIssue(issueNumber: number): void {
-    setResettingIssues((current) => new Set(current).add(issueNumber));
-  }
-
-  function clearResetIssue(issueNumber: number): void {
-    setResettingIssues((current) => {
-      const next = new Set(current);
-      next.delete(issueNumber);
-      return next;
-    });
-  }
-
-  function trackUnlockIssue(issueNumber: number): void {
-    setUnlockingIssues((current) => new Set(current).add(issueNumber));
-  }
-
-  function clearUnlockIssue(issueNumber: number): void {
-    setUnlockingIssues((current) => {
-      const next = new Set(current);
-      next.delete(issueNumber);
-      return next;
-    });
-  }
-
-  function trackUnblockIssue(issueNumber: number): void {
-    setUnblockingIssues((current) => new Set(current).add(issueNumber));
-  }
-
-  function clearUnblockIssue(issueNumber: number): void {
-    setUnblockingIssues((current) => {
-      const next = new Set(current);
-      next.delete(issueNumber);
-      return next;
-    });
-  }
-
-  function trackSettingPriorityIssue(issueNumber: number): void {
-    setSettingPriorityIssues((current) => new Set(current).add(issueNumber));
-  }
-
-  function clearSettingPriorityIssue(issueNumber: number): void {
-    setSettingPriorityIssues((current) => {
-      const next = new Set(current);
-      next.delete(issueNumber);
-      return next;
-    });
-  }
-
-  function isAutoUnblockIssue(repo: string, issueNumber: number): boolean {
-    return autoUnblockIssuesRef.current.get(repo)?.has(issueNumber) ?? false;
-  }
-
-  function trackAutoUnblockIssue(repo: string, issueNumber: number): void {
-    const currentIssues = autoUnblockIssuesRef.current.get(repo) ?? new Set<number>();
-    currentIssues.add(issueNumber);
-    autoUnblockIssuesRef.current.set(repo, currentIssues);
-    trackUnblockIssue(issueNumber);
-  }
-
-  function clearAutoUnblockIssue(repo: string, issueNumber: number): void {
-    const currentIssues = autoUnblockIssuesRef.current.get(repo);
-    if (!currentIssues) {
-      return;
-    }
-
-    currentIssues.delete(issueNumber);
-    if (currentIssues.size === 0) {
-      autoUnblockIssuesRef.current.delete(repo);
-      return;
-    }
-
-    autoUnblockIssuesRef.current.set(repo, currentIssues);
-  }
-
-  function handleResetSuccess(issueNumber: number): void {
-    clearResetIssue(issueNumber);
-    if (activeRepo) {
-      void loadIssues(activeRepo);
-    }
-  }
-
-  function handleCloseNotPlannedSuccess(issueNumber: number): void {
-    setCloseNotPlannedIssue(null);
-    pushToast({
-      id: `close-not-planned-${issueNumber}`,
-      sessionId: '',
-      variant: 'success',
-      title: 'Issue closed',
-      description: `#${issueNumber} closed as not planned.`,
-    });
-    if (activeRepo) {
-      void loadIssues(activeRepo);
-    }
-  }
-
-  function handleCloseNotPlannedError(issueNumber: number, error: string): void {
-    setCloseNotPlannedIssue(null);
-    pushToast({
-      id: `close-not-planned-error-${issueNumber}`,
-      sessionId: '',
-      variant: 'error',
-      title: 'Failed to close issue',
-      description: error,
-    });
-    if (activeRepo) {
-      void loadIssues(activeRepo);
-    }
-  }
-
-  async function handleUnlockExecute(issue: ListIssueItem, repo = activeRepo): Promise<void> {
-    if (!repo) {
-      return;
-    }
-
-    trackUnlockIssue(issue.number);
-
-    try {
-      const result = await window.shipperAPI.unlockIssue(repo, issue.number);
-      if (!result.ok) {
-        pushToast({
-          id: `unlock-issue-error-${issue.number}`,
-          sessionId: '',
-          variant: 'error',
-          title: 'Failed to unlock issue',
-          description: result.error,
-        });
-        return;
-      }
-
-      pushToast({
-        id: `unlock-issue-${issue.number}`,
-        sessionId: '',
-        variant: 'success',
-        title: 'Issue unlocked',
-        description: `#${issue.number} lock removed.`,
-      });
-      await refreshIssuesForActiveRepo(repo);
-    } catch (error) {
-      const message = toErrorMessage(error);
-      pushToast({
-        id: `unlock-issue-error-${issue.number}`,
-        sessionId: '',
-        variant: 'error',
-        title: 'Failed to unlock issue',
-        description: message,
-      });
-    } finally {
-      setUnlockConfirmIssue(null);
-      clearUnlockIssue(issue.number);
-    }
-  }
-
-  async function handleSetPriority(
-    issue: ListIssueItem,
-    level: 'high' | 'normal' | 'low'
-  ): Promise<void> {
-    if (!activeRepo || settingPriorityIssues.has(issue.number)) {
-      return;
-    }
-
-    const repo = activeRepo;
-    trackSettingPriorityIssue(issue.number);
-
-    try {
-      const result = await window.shipperAPI.setPriority(repo, issue.number, level);
-      if (!result.ok) {
-        pushToast({
-          id: `set-priority-error-${issue.number}`,
-          sessionId: '',
-          variant: 'error',
-          title: 'Failed to set priority',
-          description: result.error,
-        });
-        return;
-      }
-
-      pushToast({
-        id: `set-priority-${issue.number}`,
-        sessionId: '',
-        variant: 'success',
-        title: 'Priority updated',
-        description: `#${issue.number} set to ${level}.`,
-      });
-      await refreshIssuesForActiveRepo(repo);
-    } catch (error) {
-      const message = toErrorMessage(error);
-      pushToast({
-        id: `set-priority-error-${issue.number}`,
-        sessionId: '',
-        variant: 'error',
-        title: 'Failed to set priority',
-        description: message,
-      });
-    } finally {
-      clearSettingPriorityIssue(issue.number);
-    }
-  }
-
-  async function handleUnlockClick(issue: ListIssueItem): Promise<void> {
-    if (!activeRepo) {
-      return;
-    }
-
-    const repo = activeRepo;
-    let clearPendingState = true;
-    trackUnlockIssue(issue.number);
-
-    try {
-      const result = await window.shipperAPI.checkLockStale(repo, issue.number);
-      if (result.stale) {
-        clearPendingState = false;
-        await handleUnlockExecute(issue, repo);
-        return;
-      }
-
-      setUnlockConfirmIssue(issue);
-    } catch (error) {
-      const message = toErrorMessage(error);
-      pushToast({
-        id: `unlock-issue-check-error-${issue.number}`,
-        sessionId: '',
-        variant: 'error',
-        title: 'Failed to check issue lock',
-        description: message,
-      });
-    } finally {
-      if (clearPendingState) {
-        clearUnlockIssue(issue.number);
-      }
-    }
-  }
-
-  async function handleUnlockDialogConfirm(): Promise<void> {
-    if (unlockConfirmIssue === null) {
-      return;
-    }
-
-    await handleUnlockExecute(unlockConfirmIssue);
-  }
-
-  async function handleUnblockClick(issue: ListIssueItem): Promise<void> {
-    if (!activeRepo) {
-      return;
-    }
-
-    trackUnblockIssue(issue.number);
-
-    try {
-      await window.shipperAPI.spawnBackgroundUnblock(issue.number, activeRepo);
-    } catch (error) {
-      const message = toErrorMessage(error);
-      pushToast({
-        id: `unblock-spawn-error-${issue.number}`,
-        sessionId: '',
-        variant: 'error',
-        title: 'Failed to start unblock',
-        description: message,
-      });
-      clearUnblockIssue(issue.number);
-    }
-  }
-
-  function handleToggleDrawer(): void {
-    setDrawerOpen((current) => !current);
-  }
-
-  function handleToggleActionQueue(): void {
-    setActionQueueOpen((current) => !current);
-  }
-
-  function handleDismissBackground(sessionId: string): void {
-    commitBackgroundCommands((currentCommands) =>
-      currentCommands.filter((command) => command.id !== sessionId)
-    );
-  }
-
-  function handleClearFinishedBackground(): void {
-    commitBackgroundCommands((currentCommands) =>
-      currentCommands.filter(
-        (command) => command.status === 'queued' || command.status === 'running'
-      )
-    );
-  }
-
-  async function handleCancelBackground(sessionId: string): Promise<void> {
-    try {
-      await window.shipperAPI.killBackground(sessionId);
-    } catch (error) {
-      const message = toErrorMessage(error);
-      setFetchError(`Failed to cancel background command: ${message}`);
-    }
-  }
-
-  async function handleShowBackgroundLogs(sessionId: string): Promise<void> {
-    const command = backgroundCommandsRef.current.find((item) => item.id === sessionId);
-    if (!command) {
-      return;
-    }
-
-    setLogViewer({
-      open: true,
-      sessionId,
-      title: getBackgroundLogTitle(command.command, command.repo, command.issueNumber),
-      content: command.command === 'new' ? '' : command.output,
-    });
-
-    try {
-      const output = await window.shipperAPI.getBackgroundOutput(sessionId);
-      setLogViewer((currentViewer) =>
-        currentViewer.sessionId === sessionId
-          ? { ...currentViewer, content: output }
-          : currentViewer
-      );
-    } catch (error) {
-      const message = toErrorMessage(error);
-      setFetchError(`Failed to open background logs: ${message}`);
-    }
-  }
-
-  async function handleRetryToast(toastId: string): Promise<void> {
-    const toast = toasts.find((item) => item.id === toastId);
-    if (!toast?.retryPayload) {
-      return;
-    }
-
-    try {
-      await handleRetryBackgroundCommand(toast.retryPayload);
-      dismissToast(toastId);
-      commitBackgroundCommands((currentCommands) =>
-        currentCommands.filter((command) => command.id !== toast.sessionId)
-      );
-    } catch (error) {
-      const message = toErrorMessage(error);
-      setFetchError(`Failed to retry background command: ${message}`);
-      throw error;
-    }
-  }
-
-  function focusVisibleShell(preferToggle: boolean): void {
-    window.requestAnimationFrame(() => {
-      if (preferToggle && toggleButtonRef.current) {
-        toggleButtonRef.current.focus();
-        return;
-      }
-
-      contentPaneRef.current?.focus();
-    });
-  }
-
-  function removeSession(sessionId: string): void {
-    const currentSessions = sessionsRef.current;
-    if (!currentSessions.some((session) => session.id === sessionId)) {
-      return;
-    }
-
-    const remainingSessions = currentSessions.filter((session) => session.id !== sessionId);
-    const nextActiveSessionId = getNextActiveSessionId(
-      currentSessions,
-      activeSessionIdRef.current,
-      sessionId
-    );
-
-    sessionsRef.current = remainingSessions;
-    activeSessionIdRef.current = nextActiveSessionId;
-    lastOutputAtBySessionRef.current.delete(sessionId);
-    setSessions(remainingSessions);
-    setActiveSessionId(nextActiveSessionId);
-    setPendingCloseSessionId((current) => (current === sessionId ? null : current));
-
-    if (remainingSessions.length === 0) {
-      setDrawerOpen(false);
-      focusVisibleShell(false);
-    }
-  }
-
-  function handleSelectSession(sessionId: string): void {
-    setActiveSessionId(sessionId);
-  }
-
-  function handleCloseSession(sessionId: string): void {
-    const session = sessionsRef.current.find((currentSession) => currentSession.id === sessionId);
-    if (!session) {
-      return;
-    }
-
-    if (session.status === 'exited') {
-      removeSession(sessionId);
-      return;
-    }
-
-    setPendingCloseSessionId(sessionId);
-  }
-
-  function handleSessionInput(sessionId: string): void {
-    lastOutputAtBySessionRef.current.set(sessionId, Date.now());
-
-    const session = sessionsRef.current.find(
-      (currentSession) => currentSession.id === sessionId && currentSession.status !== 'exited'
-    );
-    if (!session || session.status !== 'waiting') {
-      return;
-    }
-
-    setSessions((currentSessions) => {
-      const sessionIndex = currentSessions.findIndex(
-        (currentSession) => currentSession.id === sessionId && currentSession.status === 'waiting'
-      );
-      if (sessionIndex < 0) {
-        return currentSessions;
-      }
-
-      const currentSession = currentSessions[sessionIndex];
-      if (!currentSession) {
-        return currentSessions;
-      }
-
-      const nextSessions = [...currentSessions];
-      nextSessions[sessionIndex] = { ...currentSession, status: 'running' };
-      return nextSessions;
-    });
-  }
-
-  async function handleConfirmCloseSession(): Promise<void> {
-    const session = pendingCloseSessionId
-      ? (sessionsRef.current.find(
-          (currentSession) => currentSession.id === pendingCloseSessionId
-        ) ?? null)
-      : null;
-    if (!session) {
-      setPendingCloseSessionId(null);
-      return;
-    }
-
-    if (session.status === 'exited') {
-      setPendingCloseSessionId(null);
-      removeSession(session.id);
-      return;
-    }
-
-    try {
-      await window.shipperAPI.ptyKill(session.id);
-      setPendingCloseSessionId(null);
-      removeSession(session.id);
-    } catch (error) {
-      const message = toErrorMessage(error);
-      setFetchError(`Failed to close terminal session: ${message}`);
-    }
-  }
-
-  async function handleCloseRepo(repo: string): Promise<void> {
-    const index = repos.findIndex((currentRepo) => currentRepo === repo);
-    if (index < 0) {
-      return;
-    }
-
-    const nextRepos = repos.filter((currentRepo) => currentRepo !== repo);
-    const nextActiveRepo =
-      repo === activeRepo ? (nextRepos[index] ?? nextRepos.at(-1) ?? '') : activeRepo;
-    const nextAutoMergeRepos = [...autoMergeRepos].filter((currentRepo) => currentRepo !== repo);
-
-    try {
-      await persistConfig({
-        repos: nextRepos,
-        activeRepo: nextActiveRepo,
-        autoMergeRepos: nextAutoMergeRepos,
-      });
-      setRepos(nextRepos);
-      setActiveRepo(nextActiveRepo);
-      setAutoMergeRepos(new Set(nextAutoMergeRepos));
-      clearAutoShipStateForRepo(repo);
-      setStageCache((current) => syncWorkflowStageCacheForRepo(current, repo, []));
-
-      if (repo === activeRepo) {
-        clearIssueState();
-
-        if (canFetch && nextActiveRepo) {
-          void checkInitState(nextActiveRepo);
-          await loadIssues(nextActiveRepo);
-        }
-      }
-    } catch (error) {
-      const message = toErrorMessage(error);
-      setFetchError(`Failed to save repositories: ${message}`);
-    }
-  }
+  pipelineBridgeRef.current = {
+    loadIssues,
+    clearIssueState,
+    clearStageCacheForRepo,
+    setFetchError,
+    trackUnblockIssue,
+    clearUnblockIssue,
+  };
+
+  backgroundBridgeRef.current = {
+    clearAutoShipStateForRepo,
+  };
 
   return (
     <div className="flex h-screen flex-col bg-transparent">
@@ -2225,14 +533,7 @@ export default function App(): JSX.Element {
         open={logViewer.open}
         title={logViewer.title}
         content={logViewer.content}
-        onOpenChange={(open) => {
-          setLogViewer((currentViewer) => ({
-            ...currentViewer,
-            open,
-            content: open ? currentViewer.content : '',
-            sessionId: open ? currentViewer.sessionId : null,
-          }));
-        }}
+        onOpenChange={handleLogViewerOpenChange}
       />
       <RepoPickerDialog
         open={isPickerOpen}
@@ -2293,14 +594,7 @@ export default function App(): JSX.Element {
         issue={unlockConfirmIssue}
         onConfirm={handleUnlockDialogConfirm}
       />
-      <Dialog
-        open={pendingCloseSession !== null}
-        onOpenChange={(open) => {
-          if (!open) {
-            setPendingCloseSessionId(null);
-          }
-        }}
-      >
+      <Dialog open={pendingCloseSession !== null} onOpenChange={handlePendingCloseOpenChange}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
@@ -2321,7 +615,7 @@ export default function App(): JSX.Element {
               type="button"
               variant="outline"
               onClick={() => {
-                setPendingCloseSessionId(null);
+                handlePendingCloseOpenChange(false);
               }}
             >
               Cancel
@@ -2683,8 +977,7 @@ export default function App(): JSX.Element {
                                     targetStage,
                                   });
                                 }
-                                setDragSource(null);
-                                setDragOverColumn(null);
+                                clearDrag();
                               }}
                             >
                               <div>
@@ -2744,12 +1037,9 @@ export default function App(): JSX.Element {
                                         }
                                         onDragStart={(e) => {
                                           e.dataTransfer.effectAllowed = 'move';
-                                          setDragSource({ issue, columnIndex });
+                                          startDrag(issue, columnIndex);
                                         }}
-                                        onDragEnd={() => {
-                                          setDragSource(null);
-                                          setDragOverColumn(null);
-                                        }}
+                                        onDragEnd={endDrag}
                                       />
                                     );
                                   })

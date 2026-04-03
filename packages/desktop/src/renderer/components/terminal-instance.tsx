@@ -2,7 +2,7 @@ import type { JSX } from 'react';
 
 import { useTerminalRuntime } from '../hooks/use-terminal-runtime.js';
 import { cn } from '../lib/utils.js';
-import type { TerminalSessionStatus } from './session-tab-bar.js';
+import type { TerminalSessionStatus } from '../types.js';
 
 interface TerminalInstanceProps {
   sessionId: string;

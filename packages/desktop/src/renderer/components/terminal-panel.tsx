@@ -1,11 +1,11 @@
 import type { JSX } from 'react';
-import type { TerminalSessionTab } from './session-tab-bar.js';
+import type { TerminalSession } from '../types.js';
 
 import { SessionTabBar } from './session-tab-bar.js';
 import { TerminalInstance } from './terminal-instance.js';
 
 interface TerminalPanelProps {
-  sessions: TerminalSessionTab[];
+  sessions: TerminalSession[];
   activeSessionId: string | null;
   onSelectSession: (sessionId: string) => void;
   onCloseSession: (sessionId: string) => void;

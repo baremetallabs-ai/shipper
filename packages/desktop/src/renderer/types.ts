@@ -1,7 +1,5 @@
 import type { ListIssueItem, WorkflowStage } from '@dnsquared/shipper-core';
 
-import type { TerminalSessionTab } from './components/session-tab-bar.js';
-
 export interface CheckResult {
   ok: boolean;
   message: string;
@@ -18,7 +16,127 @@ export interface AppConfig {
   autoMergeRepos: string[];
 }
 
-export type TerminalSession = TerminalSessionTab;
+export interface ListIssuesSuccess {
+  ok: true;
+  issues: ListIssueItem[];
+}
+
+export interface ListIssuesFailure {
+  ok: false;
+  error: string;
+}
+
+export interface ArtifactScanSummary {
+  targetStage: WorkflowStage;
+  targetLabel: string;
+  labelsToRemove: string[];
+  addTarget: boolean;
+  prs: Array<{
+    number: number;
+    headRefName: string;
+  }>;
+  branchesToDelete: string[];
+  localBranches: string[];
+  localWorktrees: string[];
+  commentCount: number;
+}
+
+export interface PtyOutputEvent {
+  sessionId: string;
+  sequence: number;
+  data: string;
+}
+
+export interface PtyExitEvent {
+  sessionId: string;
+  exitCode: number | null;
+}
+
+export interface ShipperApi {
+  checkPrerequisites: () => Promise<Prerequisites>;
+  getConfig: () => Promise<AppConfig>;
+  listRepos: () => Promise<string[]>;
+  listAdoptableIssues: (repo: string) => Promise<ListIssuesSuccess | ListIssuesFailure>;
+  listIssues: (repo: string) => Promise<ListIssuesSuccess | ListIssuesFailure>;
+  setConfig: (config: AppConfig) => Promise<void>;
+  adoptIssue: (
+    repo: string,
+    issueNumber: number
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
+  checkInit: (repo: string) => Promise<{ initialized: boolean; error?: string }>;
+  scanReset: (
+    repo: string,
+    issueNumber: number,
+    targetStage: WorkflowStage
+  ) => Promise<{ ok: true; scan: ArtifactScanSummary } | { ok: false; error: string }>;
+  executeReset: (
+    repo: string,
+    issueNumber: number,
+    targetStage: WorkflowStage
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
+  checkLockStale: (repo: string, issueNumber: number) => Promise<{ stale: boolean }>;
+  unlockIssue: (
+    repo: string,
+    issueNumber: number
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
+  closeNotPlanned: (
+    repo: string,
+    issueNumber: number
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
+  setPriority: (
+    repo: string,
+    issueNumber: number,
+    level: 'high' | 'normal' | 'low'
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
+  spawnShipperGroom: (
+    issueNumber: number,
+    repo: string,
+    cols: number,
+    rows: number
+  ) => Promise<{ sessionId: string }>;
+  spawnBackgroundNew: (request: string, repo: string) => Promise<{ sessionId: string }>;
+  spawnBackgroundShip: (
+    issueNumber: number,
+    repo: string,
+    merge: boolean
+  ) => Promise<{ sessionId: string }>;
+  spawnBackgroundInit: (repo: string) => Promise<{ sessionId: string }>;
+  spawnBackgroundUnblock: (issueNumber: number, repo: string) => Promise<{ sessionId: string }>;
+  killBackground: (sessionId: string) => Promise<void>;
+  getBackgroundOutput: (sessionId: string) => Promise<string>;
+  ptyWrite: (sessionId: string, data: string) => Promise<void>;
+  ptyResize: (sessionId: string, cols: number, rows: number) => Promise<void>;
+  ptyKill: (sessionId: string) => Promise<void>;
+  onPtyOutput: (callback: (data: PtyOutputEvent) => void) => () => void;
+  onPtyExit: (callback: (data: PtyExitEvent) => void) => () => void;
+  onBackgroundStatus: (callback: (data: BackgroundStatusPayload) => void) => () => void;
+  onBackgroundOutput: (callback: (data: BackgroundOutputPayload) => void) => () => void;
+}
+
+export type IssueListResult = Awaited<ReturnType<ShipperApi['listIssues']>>;
+
+export interface IssuePipelineBridge {
+  loadIssues: (repo: string) => Promise<IssueListResult | null>;
+  clearIssueState: () => void;
+  clearStageCacheForRepo: (repo: string) => void;
+  setFetchError: (message: string | null) => void;
+  trackUnblockIssue: (issueNumber: number) => void;
+  clearUnblockIssue: (issueNumber: number) => void;
+}
+
+export interface BackgroundCommandsBridge {
+  clearAutoShipStateForRepo: (repo: string) => void;
+}
+
+export type TerminalSessionStatus = 'running' | 'waiting' | 'exited';
+
+export interface TerminalSession {
+  id: string;
+  label: string;
+  status: TerminalSessionStatus;
+  repo?: string;
+  issueNumber?: number;
+}
 
 export interface ResetSelection {
   issue: ListIssueItem;
