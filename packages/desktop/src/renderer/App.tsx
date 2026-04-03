@@ -2202,6 +2202,7 @@ export default function App(): JSX.Element {
       setActiveRepo(nextActiveRepo);
       setAutoMergeRepos(new Set(nextAutoMergeRepos));
       clearAutoShipStateForRepo(repo);
+      setStageCache((current) => syncWorkflowStageCacheForRepo(current, repo, []));
 
       if (repo === activeRepo) {
         clearIssueState();
