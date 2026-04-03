@@ -448,4 +448,18 @@ describe('workflow stage cache helpers', () => {
       ])
     );
   });
+
+  it('clears all cached workflow stages for a repo when it is removed', () => {
+    const current = new Map<string, string>([
+      [getWorkflowStageCacheKey('owner/repo-a', 11), 'Groomed'],
+      [getWorkflowStageCacheKey('owner/repo-a', 12), 'Planned'],
+      [getWorkflowStageCacheKey('owner/repo-b', 21), 'Designed'],
+    ]);
+
+    const next = syncWorkflowStageCacheForRepo(current, 'owner/repo-a', []);
+
+    expect(next).toEqual(
+      new Map<string, string>([[getWorkflowStageCacheKey('owner/repo-b', 21), 'Designed']])
+    );
+  });
 });
