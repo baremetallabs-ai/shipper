@@ -124,8 +124,8 @@ describe('useIssuePipeline', () => {
     expect(shipper.api.listIssues).toHaveBeenCalledTimes(1);
 
     rerender({ hasRunningShipCommand: true });
-    await advanceHookTimers(10_000);
-    expect(shipper.api.listIssues).toHaveBeenCalledTimes(2);
+    await advanceHookTimers(60_000);
+    expect(shipper.api.listIssues).toHaveBeenCalledTimes(7);
   });
 
   it('handles unlock flows, including stale locks and confirmation-required locks', async () => {
