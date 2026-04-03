@@ -59,11 +59,6 @@ vi.mock('@dnsquared/shipper-core', () => ({
 
 import { issueListCommand } from '../../src/commands/issue-list.js';
 
-// Prevent process.exit from actually exiting
-const _mockExit = vi.spyOn(process, 'exit').mockImplementation((() => {
-  throw new Error('process.exit');
-}) as never);
-
 const mockConsoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
 const mockConsoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
 
@@ -321,11 +316,11 @@ describe('issueListCommand', () => {
     expect(mockConsoleLog).toHaveBeenCalledWith('[shipper] No shipper-managed issues found.');
   });
 
-  it('exits non-zero with error for invalid --status value', async () => {
-    await expect(issueListCommand({ status: 'foo' })).rejects.toThrow('process.exit');
-    expect(mockConsoleError).toHaveBeenCalledWith(
-      "[shipper] Error: Invalid status 'foo'. Valid values: new, groomed, designed, planned, implemented, pr-open, pr-reviewed, ready, blocked, failed"
+  it('throws for invalid --status value', async () => {
+    await expect(issueListCommand({ status: 'foo' })).rejects.toThrow(
+      "Error: Invalid status 'foo'. Valid values: new, groomed, designed, planned, implemented, pr-open, pr-reviewed, ready, blocked, failed"
     );
+    expect(mockConsoleError).not.toHaveBeenCalled();
   });
 
   it('omits empty status groups from output', async () => {
@@ -432,11 +427,11 @@ describe('issueListCommand', () => {
     );
   });
 
-  it('exits non-zero when gh call fails', async () => {
+  it('throws when gh call fails', async () => {
     mockGh.mockRejectedValue(new Error('gh failed'));
 
-    await expect(issueListCommand({})).rejects.toThrow('process.exit');
-    expect(mockConsoleError).toHaveBeenCalledWith('[shipper] Error: Failed to fetch issues.');
+    await expect(issueListCommand({})).rejects.toThrow('Error: Failed to fetch issues.');
+    expect(mockConsoleError).not.toHaveBeenCalled();
   });
 
   it('shows a stageless failed issue in Failed with no stage suffix', async () => {

@@ -83,7 +83,6 @@ const mockPrRemediateCommand = vi.mocked(prRemediateCommand);
 const repo = 'owner/repo';
 
 describe('nextCommand', () => {
-  let exitSpy: ReturnType<typeof vi.spyOn>;
   let errorSpy: ReturnType<typeof vi.spyOn>;
   let logSpy: ReturnType<typeof vi.spyOn>;
 
@@ -95,15 +94,11 @@ describe('nextCommand', () => {
     mockWithIssueLock.mockImplementation((_repo: string, _issue: string, fn: () => Promise<void>) =>
       fn()
     );
-    exitSpy = vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
-      throw new Error(`exit:${code}`);
-    });
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
   });
 
   afterEach(() => {
-    exitSpy.mockRestore();
     errorSpy.mockRestore();
     logSpy.mockRestore();
   });
@@ -127,7 +122,6 @@ describe('nextCommand', () => {
       agent: undefined,
       model: undefined,
     });
-    expect(exitSpy).not.toHaveBeenCalled();
     expect(errorSpy).not.toHaveBeenCalled();
     expect(mockDesignCommand).not.toHaveBeenCalled();
     expect(mockPlanCommand).not.toHaveBeenCalled();
@@ -183,7 +177,6 @@ describe('nextCommand', () => {
 
     expect(mockImplementCommand).toHaveBeenCalledWith(repo, '159', undefined, undefined, undefined);
     expect(errorSpy).not.toHaveBeenCalled();
-    expect(exitSpy).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -218,7 +211,7 @@ describe('nextCommand', () => {
     'shipper:pr-open',
     'shipper:pr-reviewed',
     'shipper:ready',
-  ])('exits for blocked %s issues before dispatch', async (stageLabel) => {
+  ])('throws for blocked %s issues before dispatch', async (stageLabel) => {
     mockGh.mockResolvedValueOnce({
       stdout: JSON.stringify({
         number: 159,
@@ -227,11 +220,10 @@ describe('nextCommand', () => {
       stderr: '',
     });
 
-    await expect(nextCommand(repo, '159')).rejects.toThrow('exit:1');
-
-    expect(errorSpy).toHaveBeenCalledWith(
-      "[shipper] Issue #159 is blocked. Run 'shipper unblock 159' to check if it can proceed."
+    await expect(nextCommand(repo, '159')).rejects.toThrow(
+      "Issue #159 is blocked. Run 'shipper unblock 159' to check if it can proceed."
     );
+    expect(errorSpy).not.toHaveBeenCalled();
     expect(mockWithIssueLock).not.toHaveBeenCalled();
     expect(mockGroomCommand).not.toHaveBeenCalled();
     expect(mockDesignCommand).not.toHaveBeenCalled();
@@ -251,7 +243,7 @@ describe('nextCommand', () => {
     'shipper:pr-open',
     'shipper:pr-reviewed',
     'shipper:ready',
-  ])('exits for failed %s issues before dispatch', async (stageLabel) => {
+  ])('throws for failed %s issues before dispatch', async (stageLabel) => {
     mockGh.mockResolvedValueOnce({
       stdout: JSON.stringify({
         number: 159,
@@ -260,9 +252,10 @@ describe('nextCommand', () => {
       stderr: '',
     });
 
-    await expect(nextCommand(repo, '159')).rejects.toThrow('exit:1');
-
-    expect(errorSpy).toHaveBeenCalledWith('[shipper] Issue #159 has the shipper:failed label.');
+    await expect(nextCommand(repo, '159')).rejects.toThrow(
+      'Issue #159 has the shipper:failed label.'
+    );
+    expect(errorSpy).not.toHaveBeenCalled();
     expect(mockWithIssueLock).not.toHaveBeenCalled();
     expect(mockGroomCommand).not.toHaveBeenCalled();
     expect(mockDesignCommand).not.toHaveBeenCalled();
@@ -273,7 +266,7 @@ describe('nextCommand', () => {
     expect(mockPrRemediateCommand).not.toHaveBeenCalled();
   });
 
-  it('exits with the failed message when shipper:failed is the only shipper label', async () => {
+  it('throws with the failed message when shipper:failed is the only shipper label', async () => {
     mockGh.mockResolvedValueOnce({
       stdout: JSON.stringify({
         number: 159,
@@ -282,9 +275,10 @@ describe('nextCommand', () => {
       stderr: '',
     });
 
-    await expect(nextCommand(repo, '159')).rejects.toThrow('exit:1');
-
-    expect(errorSpy).toHaveBeenCalledWith('[shipper] Issue #159 has the shipper:failed label.');
+    await expect(nextCommand(repo, '159')).rejects.toThrow(
+      'Issue #159 has the shipper:failed label.'
+    );
+    expect(errorSpy).not.toHaveBeenCalled();
     expect(mockWithIssueLock).not.toHaveBeenCalled();
     expect(mockGroomCommand).not.toHaveBeenCalled();
     expect(mockDesignCommand).not.toHaveBeenCalled();
@@ -295,7 +289,7 @@ describe('nextCommand', () => {
     expect(mockPrRemediateCommand).not.toHaveBeenCalled();
   });
 
-  it('exits with the failed message before reporting multiple workflow labels', async () => {
+  it('throws with the failed message before reporting multiple workflow labels', async () => {
     mockGh.mockResolvedValueOnce({
       stdout: JSON.stringify({
         number: 159,
@@ -308,9 +302,10 @@ describe('nextCommand', () => {
       stderr: '',
     });
 
-    await expect(nextCommand(repo, '159')).rejects.toThrow('exit:1');
-
-    expect(errorSpy).toHaveBeenCalledWith('[shipper] Issue #159 has the shipper:failed label.');
+    await expect(nextCommand(repo, '159')).rejects.toThrow(
+      'Issue #159 has the shipper:failed label.'
+    );
+    expect(errorSpy).not.toHaveBeenCalled();
     expect(mockWithIssueLock).not.toHaveBeenCalled();
     expect(mockGroomCommand).not.toHaveBeenCalled();
     expect(mockDesignCommand).not.toHaveBeenCalled();

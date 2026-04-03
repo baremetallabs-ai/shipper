@@ -79,9 +79,6 @@ vi.mock('@dnsquared/shipper-core', () => ({
   },
 }));
 
-const exitMock = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
-  throw new Error(`process.exit:${code ?? 0}`);
-}) as typeof process.exit);
 const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
@@ -165,14 +162,13 @@ describe('ejectCommand', () => {
     expect(logSpy).toHaveBeenCalledWith('[shipper] Summary: wrote 9, skipped 0');
   });
 
-  it('prints a helpful error and exits 1 for invalid prompt names', () => {
+  it('throws a helpful error for invalid prompt names', () => {
     expect(() => {
       ejectCommand('not-a-prompt');
-    }).toThrow('process.exit:1');
-
-    expect(errorSpy).toHaveBeenCalledWith(
-      '[shipper] Error: Invalid prompt name "not-a-prompt". Valid prompt names: new, groom, design, plan, implement, pr-open, pr-review, pr-remediate, unblock'
+    }).toThrow(
+      'Error: Invalid prompt name "not-a-prompt". Valid prompt names: new, groom, design, plan, implement, pr-open, pr-review, pr-remediate, unblock'
     );
+    expect(errorSpy).not.toHaveBeenCalled();
     expect(writeFileSyncMock).not.toHaveBeenCalled();
   });
 
@@ -182,7 +178,6 @@ describe('ejectCommand', () => {
     ejectCommand();
 
     expect(writeFileSyncMock).not.toHaveBeenCalled();
-    expect(exitMock).not.toHaveBeenCalledWith(1);
     expect(logSpy).toHaveBeenCalledWith('[shipper] Summary: wrote 0, skipped 9');
   });
 });

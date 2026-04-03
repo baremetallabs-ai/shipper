@@ -320,6 +320,14 @@ const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((_code?: number) =
 }) as typeof process.exit);
 
 beforeEach(() => {
+  process.exitCode = undefined;
+});
+
+afterEach(() => {
+  process.exitCode = undefined;
+});
+
+beforeEach(() => {
   mockAggregateSessionUsage.mockReset();
   mockAggregateSessionUsage.mockResolvedValue(undefined);
   mockResolveMode.mockReset();
@@ -1234,7 +1242,7 @@ describe('shipCommand single-issue path', () => {
       '--remove-label',
       'shipper:pr-reviewed',
     ]);
-    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(process.exitCode).toBe(1);
 
     const capMessage = getConsoleEntries(errorSpy).find((message) =>
       message.includes('hit transition cap')
@@ -1282,7 +1290,7 @@ describe('shipCommand single-issue path', () => {
 
     await shipCommand(repo, '42', { auto: false, merge: false });
 
-    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(process.exitCode).toBe(1);
     expect(errorSpy).toHaveBeenCalledWith(
       prefixed('Warning: Failed to update labels on issue #42: gh edit failed')
     );
@@ -1319,7 +1327,7 @@ describe('shipCommand single-issue path', () => {
     expect(mockGh).not.toHaveBeenCalledWith(
       expect.arrayContaining(['issue', 'edit', '42', '--add-label', 'shipper:failed'])
     );
-    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(process.exitCode).toBeUndefined();
     expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining('hit transition cap'));
 
     logSpy.mockRestore();
@@ -1354,7 +1362,7 @@ describe('shipCommand single-issue path', () => {
       expect.objectContaining({ stdio: ['inherit', 'pipe', 'pipe'] }),
     ]);
     expect(getCallEnv(firstCall)).toEqual(expect.objectContaining({ SHIPPER_LOCK_HELD: '42' }));
-    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(process.exitCode).toBeUndefined();
     expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining('was reset to shipper:new'));
 
     logSpy.mockRestore();
@@ -1396,7 +1404,7 @@ describe('shipCommand single-issue path', () => {
     expect(mockSpawn.mock.calls[0]?.[1]).toEqual([cliEntrypoint, 'next', '42']);
     expect(mockSpawn.mock.calls[0]?.[2]).toMatchObject({ stdio: ['inherit', 'pipe', 'pipe'] });
     expect(mockSpawn.mock.calls[1]?.[1]).toEqual([cliEntrypoint, 'next', '42']);
-    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(process.exitCode).toBeUndefined();
   });
 
   it('uses resolveMode for non-groom stages and preserves the stage log in interactive mode', async () => {
@@ -1520,7 +1528,7 @@ describe('shipCommand single-issue path', () => {
       'Error: groom does not support headless mode. Grooming requires interactive input.'
     );
     expect(stderrWriteSpy).toHaveBeenCalledWith(expect.any(Buffer));
-    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(process.exitCode).toBe(1);
 
     stderrWriteSpy.mockRestore();
     vi.useRealTimers();
@@ -1558,7 +1566,7 @@ describe('shipCommand single-issue path', () => {
 
     await shipCommand(repo, '42', { auto: false, merge: false });
 
-    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(process.exitCode).toBeUndefined();
     expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining('disk full'));
 
     errorSpy.mockRestore();
@@ -1573,7 +1581,7 @@ describe('shipCommand single-issue path', () => {
     await shipCommand(repo, '42', { auto: false, merge: false });
 
     expect(mockSpawn).toHaveBeenCalledTimes(1);
-    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(process.exitCode).toBeUndefined();
   });
 
   it('keeps the same-label safeguard when grooming stays on shipper:new', async () => {
@@ -1585,7 +1593,7 @@ describe('shipCommand single-issue path', () => {
     await shipCommand(repo, '42', { auto: false, merge: false });
 
     expect(mockSpawn).toHaveBeenCalledTimes(1);
-    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(process.exitCode).toBe(1);
     expect(errorSpy).toHaveBeenCalledWith(
       prefixed(
         'Label did not advance after stage "groom" (still "shipper:new"). Aborting to avoid infinite loop.'
@@ -1628,7 +1636,7 @@ describe('shipCommand single-issue path', () => {
     );
     expect(expectedCall).toBeDefined();
     expect(getCallEnv(expectedCall)).toEqual(expect.objectContaining({ SHIPPER_LOCK_HELD: '42' }));
-    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(process.exitCode).toBeUndefined();
   });
 
   it('does not forward --mode when the explicit mode is default', async () => {
@@ -1643,7 +1651,7 @@ describe('shipCommand single-issue path', () => {
       [cliEntrypoint, 'next', '42'],
       expect.objectContaining({ stdio: ['inherit', 'pipe', 'pipe'] })
     );
-    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(process.exitCode).toBeUndefined();
   });
 
   it('continues into groom when a default-mode run resets an issue to shipper:new', async () => {
@@ -1669,7 +1677,7 @@ describe('shipCommand single-issue path', () => {
     ]);
     expect(mockSpawn.mock.calls[1]?.[2]).toMatchObject({ stdio: 'inherit' });
     expect(mockSpawn.mock.calls[2]?.[1]).toEqual([cliEntrypoint, 'next', '42']);
-    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(process.exitCode).toBeUndefined();
     expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining('was reset to shipper:new'));
 
     errorSpy.mockRestore();
@@ -1686,7 +1694,7 @@ describe('shipCommand single-issue path', () => {
       await shipCommand(repo, '42', { auto: false, merge: false, mode: 'default' });
 
       expect(mockSpawn).toHaveBeenCalledTimes(1);
-      expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(process.exitCode).toBe(1);
       expect(errorSpy).toHaveBeenCalledWith(
         prefixed(
           'Issue #42 was reset to shipper:new by stage "implement" - stopping to avoid interactive groom stage.'
@@ -1713,7 +1721,7 @@ describe('shipCommand single-issue path', () => {
 
       expect(mockAggregateSessionUsage).not.toHaveBeenCalled();
       expect(mockTotalTokens).not.toHaveBeenCalled();
-      expect(exitSpy).toHaveBeenCalledWith(0);
+      expect(process.exitCode).toBeUndefined();
     } finally {
       if (previousAutoChild === undefined) {
         delete process.env.SHIPPER_AUTO_CHILD_RUN;
@@ -1743,7 +1751,7 @@ describe('shipCommand single-issue path', () => {
       expect(output).toContain('Skipping issue #42: stage "groom" requires interactive mode.');
       expect(output).not.toContain('Running stage: groom');
       expect(output).not.toContain('Stage summary:');
-      expect(exitSpy).toHaveBeenCalledWith(0);
+      expect(process.exitCode).toBeUndefined();
     } finally {
       if (previousAutoChild === undefined) {
         delete process.env.SHIPPER_AUTO_CHILD_RUN;
@@ -1788,7 +1796,7 @@ describe('shipCommand single-issue path', () => {
     expect(mockSpawn.mock.calls[0]?.[2]).toMatchObject({ stdio: 'inherit' });
     expect(mockSpawn.mock.calls[1]?.[2]).toMatchObject({ stdio: 'inherit' });
     expect(mockSpawn.mock.calls[2]?.[2]).toMatchObject({ stdio: 'inherit' });
-    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(process.exitCode).toBeUndefined();
     expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining('was reset to shipper:new'));
 
     errorSpy.mockRestore();
@@ -1802,7 +1810,7 @@ describe('shipCommand single-issue path', () => {
     await shipCommand(repo, '42', { auto: false, merge: false });
 
     expect(mockSpawn).not.toHaveBeenCalled();
-    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(process.exitCode).toBe(1);
     expect(errorSpy).toHaveBeenCalledWith(
       prefixed(
         'Issue #42 is marked shipper:failed and requires manual intervention before it can re-enter the pipeline.'
@@ -1847,7 +1855,7 @@ describe('shipCommand merge path', () => {
     expect(findGhCalls('pr', 'update-branch')).toHaveLength(1);
     expect(findGhCalls('pr', 'merge')).toHaveLength(1);
     expect(postMergeMock).toHaveBeenCalledTimes(1);
-    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(process.exitCode).toBeUndefined();
   });
 
   it('treats a failed behind-state rebase as a remediable merge failure', async () => {
@@ -1868,7 +1876,7 @@ describe('shipCommand merge path', () => {
     expect(findGhCalls('pr', 'edit')).toHaveLength(1);
     expect(findGhCalls('issue', 'edit')).toHaveLength(1);
     expect(findGhCalls('pr', 'comment')).toHaveLength(1);
-    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(process.exitCode).toBe(1);
 
     errorSpy.mockRestore();
   });
@@ -1884,7 +1892,7 @@ describe('shipCommand merge path', () => {
       'Merge failed for PR #456: PR #456 has merge conflicts that must be resolved.'
     );
     expect(findGhCalls('pr', 'merge')).toHaveLength(0);
-    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(process.exitCode).toBe(1);
 
     errorSpy.mockRestore();
   });
@@ -1937,7 +1945,7 @@ describe('shipCommand merge path', () => {
     expect(stderrOutput).toContain(expected);
     expect(mockFetchChecks).toHaveBeenCalledWith(repo, '456');
     expect(findGhCalls('pr', 'merge')).toHaveLength(0);
-    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(process.exitCode).toBe(1);
 
     errorSpy.mockRestore();
   });
@@ -1959,7 +1967,7 @@ describe('shipCommand merge path', () => {
       Array.from({ length: UNKNOWN_STATE_POLL_MAX }, () => [UNKNOWN_STATE_POLL_DELAY_MS])
     );
     expect(findGhCalls('pr', 'merge')).toHaveLength(0);
-    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(process.exitCode).toBe(1);
 
     errorSpy.mockRestore();
   });
@@ -1979,7 +1987,7 @@ describe('shipCommand merge path', () => {
     ]);
     expect(findGhCalls('pr', 'merge')).toHaveLength(1);
     expect(postMergeMock).toHaveBeenCalledTimes(1);
-    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(process.exitCode).toBeUndefined();
   });
 
   it('stops polling UNKNOWN when state resolves to a non-ready state', async () => {
@@ -1997,7 +2005,7 @@ describe('shipCommand merge path', () => {
     );
     expect(mockSleepMs.mock.calls).toEqual([[UNKNOWN_STATE_POLL_DELAY_MS]]);
     expect(findGhCalls('pr', 'merge')).toHaveLength(0);
-    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(process.exitCode).toBe(1);
 
     errorSpy.mockRestore();
   });
@@ -2014,7 +2022,7 @@ describe('shipCommand merge path', () => {
     expect(mockSleepMs).not.toHaveBeenCalled();
     expect(findGhCalls('pr', 'merge')).toHaveLength(1);
     expect(postMergeMock).toHaveBeenCalledTimes(1);
-    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(process.exitCode).toBeUndefined();
   });
 
   it('fails clearly on an unrecognized merge state instead of merging blindly', async () => {
@@ -2028,7 +2036,7 @@ describe('shipCommand merge path', () => {
       "Merge failed for PR #456: Unrecognized merge state 'MERGEABLE_LATER' for PR #456."
     );
     expect(findGhCalls('pr', 'merge')).toHaveLength(0);
-    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(process.exitCode).toBe(1);
 
     errorSpy.mockRestore();
   });
@@ -2046,14 +2054,15 @@ describe('shipCommand merge path', () => {
     setupReadyMergeFlow({ mergeStates: ['DIRTY'] });
     await shipCommand(repo, '123', { merge: true, auto: false });
     expect(hookSteps).toEqual(['pre']);
-    expect(exitSpy).toHaveBeenLastCalledWith(1);
+    expect(process.exitCode).toBe(1);
 
     hookSteps.length = 0;
+    process.exitCode = undefined;
     exitSpy.mockClear();
     setupReadyMergeFlow({ mergeStates: ['CLEAN'], mergeStdout: 'merged\n' });
     await shipCommand(repo, '123', { merge: true, auto: false });
     expect(hookSteps).toEqual(['pre', 'post']);
-    expect(exitSpy).toHaveBeenLastCalledWith(0);
+    expect(process.exitCode).toBeUndefined();
   });
 
   it('uses post-merge cleanup when gh pr merge errors but verification confirms the merge succeeded', async () => {
@@ -2074,7 +2083,7 @@ describe('shipCommand merge path', () => {
     expect(getConsoleOutput(logSpy)).toContain(
       'PR #456 merge succeeded despite reported error. Proceeding with post-merge cleanup.'
     );
-    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(process.exitCode).toBeUndefined();
 
     logSpy.mockRestore();
   });
@@ -2095,7 +2104,7 @@ describe('shipCommand merge path', () => {
     expect(findGhCalls('issue', 'edit')).toHaveLength(1);
     expect(findGhCalls('pr', 'comment')).toHaveLength(1);
     expect(getConsoleOutput(errorSpy)).toContain('Merge failed for PR #456: merge failed');
-    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(process.exitCode).toBe(1);
 
     errorSpy.mockRestore();
   });
@@ -2116,7 +2125,7 @@ describe('shipCommand merge path', () => {
     expect(findGhCalls('issue', 'edit')).toHaveLength(1);
     expect(findGhCalls('pr', 'comment')).toHaveLength(1);
     expect(getConsoleOutput(errorSpy)).toContain('Merge failed for PR #456: merge failed');
-    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(process.exitCode).toBe(1);
 
     errorSpy.mockRestore();
   });
@@ -2227,7 +2236,7 @@ describe('shipCommand sequential auto runner parking', () => {
     expect(output).toContain('✓ pass');
     expect(output).not.toContain('park');
     expect(output).not.toContain('resume');
-    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(process.exitCode).toBeUndefined();
 
     logSpy.mockRestore();
   });
@@ -2276,7 +2285,7 @@ describe('shipCommand sequential auto runner parking', () => {
 
     const issueOrder = getIssuedCalls(mockSpawn.mock.calls);
     expect(issueOrder.indexOf('2')).toBeLessThan(issueOrder.lastIndexOf('1'));
-    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(process.exitCode).toBeUndefined();
   });
 
   it('resumes multiple parked issues independently as their readiness changes', async () => {
@@ -2324,7 +2333,7 @@ describe('shipCommand sequential auto runner parking', () => {
     await runPromise;
 
     expect(getIssuedCalls(mockSpawn.mock.calls)).toEqual(['2', '1']);
-    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(process.exitCode).toBeUndefined();
   });
 
   it('keeps a successfully merged issue skipped when it reappears mid-run', async () => {
@@ -2367,7 +2376,7 @@ describe('shipCommand sequential auto runner parking', () => {
     expect(postMergeMock.mock.calls.map(([, issueNumber]) => Number(issueNumber))).toEqual([1, 2]);
     expect(mockIssues.get(1)?.labels).toEqual(['shipper:ready']);
     expect(mockIssues.has(2)).toBe(false);
-    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(process.exitCode).toBeUndefined();
   });
 
   it('runs the unblock pass before waiting for parked work when the normal queue is empty', async () => {
@@ -2421,7 +2430,7 @@ describe('shipCommand sequential auto runner parking', () => {
     const output = getConsoleOutput(logSpy);
     expect(output).toContain('Auto: attempting unblock of #3');
     expect(output).toContain('✓ pass');
-    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(process.exitCode).toBeUndefined();
 
     logSpy.mockRestore();
   });
@@ -2668,7 +2677,7 @@ describe('shipCommand sequential auto runner parking', () => {
       'interactive',
     ]);
     expect(mockSpawn.mock.calls[0]?.[2]).toMatchObject({ stdio: 'inherit' });
-    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(process.exitCode).toBeUndefined();
   });
 });
 
@@ -2732,7 +2741,7 @@ describe('shipCommand auto skip handling', () => {
     ).toHaveLength(1);
     expect(errorOutput).toContain(message);
     expect(logOutput).toContain(`✗ fail — ${message}`);
-    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(process.exitCode).toBeUndefined();
 
     logSpy.mockRestore();
     errorSpy.mockRestore();
@@ -2772,7 +2781,7 @@ describe('shipCommand auto merge-failure retry handling', () => {
     await shipCommand(repo, undefined, { auto: true, merge: false, parallel: 1 });
 
     expect(findGhCalls('pr', 'list')).toHaveLength(2);
-    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(process.exitCode).toBeUndefined();
   });
 
   it('blacklists a non-merge hook failure in sequential auto mode', async () => {
@@ -2792,7 +2801,7 @@ describe('shipCommand auto merge-failure retry handling', () => {
     await shipCommand(repo, undefined, { auto: true, merge: false, parallel: 1 });
 
     expect(findGhCalls('pr', 'list')).toHaveLength(1);
-    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(process.exitCode).toBeUndefined();
   });
 
   it('does not blacklist a child-process merge failure in parallel auto mode', async () => {
@@ -2830,7 +2839,7 @@ describe('shipCommand auto merge-failure retry handling', () => {
     await runPromise;
 
     expect(getIssuedCalls(mockSpawn.mock.calls)).toEqual(['1', '1']);
-    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(process.exitCode).toBeUndefined();
   });
 });
 
@@ -2932,7 +2941,7 @@ describe('shipCommand parallel auto runner', () => {
     child3.finish(0);
     await runPromise;
 
-    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(process.exitCode).toBeUndefined();
   });
 
   it('marks parallel ship children as auto-child runs', async () => {
@@ -2957,7 +2966,7 @@ describe('shipCommand parallel auto runner', () => {
     child.finish(0);
     await runPromise;
 
-    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(process.exitCode).toBeUndefined();
   });
 
   it('skips a successful completion when the same issue is still returned on refill', async () => {
@@ -2999,7 +3008,7 @@ describe('shipCommand parallel auto runner', () => {
     await runPromise;
 
     expect(getIssuedCalls(mockSpawn.mock.calls)).toEqual(['1', '2', '3']);
-    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(process.exitCode).toBeUndefined();
   });
 
   it('forwards an explicit model override to child ship processes', async () => {
@@ -3454,7 +3463,7 @@ describe('shipCommand parallel auto runner', () => {
     plannedIssues = plannedIssues.filter((issue) => issue.number !== 3);
     child3.finish(0);
     await runPromise;
-    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(process.exitCode).toBeUndefined();
   });
 
   it('waits for all active slots to drain before running the unblock pass', async () => {
@@ -3507,7 +3516,7 @@ describe('shipCommand parallel auto runner', () => {
     });
     expect(mockSelectIssuesForStage).toHaveBeenCalled();
     expect(getConsoleOutput(logSpy)).not.toContain('[#');
-    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(process.exitCode).toBeUndefined();
 
     logSpy.mockRestore();
   });
@@ -3527,7 +3536,7 @@ describe('shipCommand parallel auto runner', () => {
     });
     expect(mockSelectIssuesForStage).toHaveBeenCalled();
     expect(getConsoleOutput(logSpy)).not.toContain('[#');
-    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(process.exitCode).toBeUndefined();
 
     logSpy.mockRestore();
   });
@@ -3569,7 +3578,7 @@ describe('shipCommand parallel auto runner', () => {
     const output = getConsoleOutput(logSpy);
     expect(output).toContain('✗ fail — failed to write log file');
     expect(output).toContain('disk full');
-    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(process.exitCode).toBeUndefined();
 
     logSpy.mockRestore();
   });

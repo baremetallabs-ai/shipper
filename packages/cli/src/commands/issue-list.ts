@@ -28,10 +28,9 @@ interface ControlIssue {
 export async function issueListCommand(options: { status?: string }): Promise<void> {
   if (options.status) {
     if (!VALID_SHORT_NAMES.includes(options.status)) {
-      logger.error(
+      throw new Error(
         `Error: Invalid status '${options.status}'. Valid values: ${VALID_SHORT_NAMES.join(', ')}`
       );
-      process.exit(1);
     }
   }
 
@@ -51,8 +50,7 @@ export async function issueListCommand(options: { status?: string }): Promise<vo
     ]);
     issues = JSON.parse(output) as Issue[];
   } catch {
-    logger.error('Error: Failed to fetch issues.');
-    process.exit(1);
+    throw new Error('Error: Failed to fetch issues.');
   }
 
   // Group issues by their most-advanced status label

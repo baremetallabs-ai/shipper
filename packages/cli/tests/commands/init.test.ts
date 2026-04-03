@@ -137,7 +137,6 @@ vi.mock('node:readline/promises', () => ({
   createInterface: () => ({ question: questionMock, close: closeMock }),
 }));
 
-const exitMock = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
 vi.spyOn(console, 'log').mockImplementation(() => {});
 vi.spyOn(console, 'error').mockImplementation(() => {});
 
@@ -200,6 +199,7 @@ beforeEach(() => {
   mockExecFileAsync.mockReset();
   mockRunPrereqChecks.mockReset();
   mockRunPrereqChecks.mockReturnValue(true);
+  process.exitCode = undefined;
   mockExecFileAsync.mockImplementation((cmd: string, args: string[]) => {
     if (cmd === 'git' && args[0] === 'branch' && args[1] === '--show-current') {
       return Promise.resolve({ stdout: 'main\n', stderr: '' });
@@ -211,7 +211,6 @@ beforeEach(() => {
   });
   questionMock.mockReset();
   closeMock.mockReset();
-  exitMock.mockClear();
   (console.log as ReturnType<typeof vi.fn>).mockClear();
   (console.error as ReturnType<typeof vi.fn>).mockClear();
   // Default: settings.json doesn't exist, root .gitignore doesn't exist
@@ -411,14 +410,15 @@ describe('initCommand settings', () => {
     expect(written.cliVersion).toBe('1.2.3');
   });
 
-  it('exits with error on malformed existing settings.json', async () => {
+  it('throws on malformed existing settings.json', async () => {
     existsSyncMock.mockImplementation((p: string) => p === settingsPath);
     readFileSyncMock.mockImplementation((p: string) => {
       if (p === settingsPath) return '{bad';
       return '';
     });
-    await initCommand({ agent: 'claude' });
-    expect(exitMock).toHaveBeenCalledWith(1);
+    await expect(initCommand({ agent: 'claude' })).rejects.toThrow(
+      `Error: Malformed JSON in ${settingsPath}:`
+    );
     expect(findWriteCall(settingsPath)).toBeUndefined();
     expect(findWriteCall(path.resolve('.shipper', 'README.md'))).toBeUndefined();
     expect(mockGh).not.toHaveBeenCalled();
@@ -506,22 +506,19 @@ describe('initCommand agent selection', () => {
     await initCommand({ agent: 'codex' });
     const written = parseWrittenSettings();
     expect(written.commands).toEqual({ default: { agent: 'codex' } });
-    expect(exitMock).not.toHaveBeenCalledWith(1);
   });
 
   it('--agent copilot writes copilot agent to settings', async () => {
     await initCommand({ agent: 'copilot' });
     const written = parseWrittenSettings();
     expect(written.commands).toEqual({ default: { agent: 'copilot' } });
-    expect(exitMock).not.toHaveBeenCalledWith(1);
   });
 
-  it('--agent invalid prints validation error and exits', async () => {
-    await initCommand({ agent: 'invalid' });
-    expect(console.error).toHaveBeenCalledWith(
-      '[shipper] Error: Invalid agent "invalid". Must be one of: claude, codex, copilot'
+  it('--agent invalid throws validation error', async () => {
+    await expect(initCommand({ agent: 'invalid' })).rejects.toThrow(
+      'Error: Invalid agent "invalid". Must be one of: claude, codex, copilot'
     );
-    expect(exitMock).toHaveBeenCalledWith(1);
+    expect(console.error).not.toHaveBeenCalled();
   });
 
   it('re-init with different agent prints switching warning', async () => {
@@ -566,7 +563,6 @@ describe('initCommand agent selection', () => {
     await initCommand({});
     const written = parseWrittenSettings();
     expect(written.commands).toEqual({ default: { agent: 'codex' } });
-    expect(exitMock).not.toHaveBeenCalledWith(1);
   });
 
   it('interactive prompt accepts "Copilot CLI" and writes copilot agent to settings', async () => {
@@ -574,7 +570,6 @@ describe('initCommand agent selection', () => {
     await initCommand({});
     const written = parseWrittenSettings();
     expect(written.commands).toEqual({ default: { agent: 'copilot' } });
-    expect(exitMock).not.toHaveBeenCalledWith(1);
   });
 
   it('interactive prompt accepts "github copilot" alias', async () => {
@@ -591,7 +586,7 @@ describe('initCommand commit and push', () => {
 
     await initCommand({ agent: 'claude' });
 
-    expect(exitMock).toHaveBeenCalledWith(1);
+    expect(process.exitCode).toBe(1);
     expect(writeFileSyncMock).not.toHaveBeenCalled();
     expect(mockExecFileAsync).not.toHaveBeenCalled();
     expect(mockGh).not.toHaveBeenCalled();
@@ -858,11 +853,11 @@ describe('initCommand commit and push', () => {
     expect(mockExecFileAsync).toHaveBeenCalledWith('git', ['push', 'upstream', 'feature/init']);
   });
 
-  it('errors when push is requested without autocommit', async () => {
-    await initCommand({ agent: 'claude', push: true });
-
-    expect(console.error).toHaveBeenCalledWith('[shipper] Error: --push requires --autocommit.');
-    expect(exitMock).toHaveBeenCalledWith(1);
+  it('throws when push is requested without autocommit', async () => {
+    await expect(initCommand({ agent: 'claude', push: true })).rejects.toThrow(
+      'Error: --push requires --autocommit.'
+    );
+    expect(console.error).not.toHaveBeenCalled();
     expect(mockExecFileAsync).not.toHaveBeenCalled();
   });
 
@@ -877,7 +872,7 @@ describe('initCommand commit and push', () => {
     );
   });
 
-  it('errors and exits on detached HEAD only for the push path', async () => {
+  it('throws on detached HEAD only for the push path', async () => {
     mockExecFileAsync.mockImplementation((cmd: string, args: string[]) => {
       if (cmd === 'git' && args[0] === 'diff' && args[1] === '--cached' && args[2] === '--quiet') {
         return Promise.reject(new Error('exit code 1'));
@@ -888,17 +883,15 @@ describe('initCommand commit and push', () => {
       return Promise.resolve({ stdout: '', stderr: '' });
     });
 
-    await initCommand({ agent: 'claude', autocommit: true, push: true });
-
-    expect(console.error).toHaveBeenCalledWith(
-      '[shipper] Error: Failed to push from detached HEAD.\nCheck out a branch and retry with --push.'
+    await expect(initCommand({ agent: 'claude', autocommit: true, push: true })).rejects.toThrow(
+      'Error: Failed to push from detached HEAD.\nCheck out a branch and retry with --push.'
     );
-    expect(exitMock).toHaveBeenCalledWith(1);
+    expect(console.error).not.toHaveBeenCalled();
     expect(mockExecFileAsync).not.toHaveBeenCalledWith('git', expect.arrayContaining(['commit']));
     expect(mockExecFileAsync).not.toHaveBeenCalledWith('git', expect.arrayContaining(['push']));
   });
 
-  it('reports error with stderr when push fails', async () => {
+  it('throws error with stderr when push fails', async () => {
     mockExecFileAsync.mockImplementation((cmd: string, args: string[]) => {
       if (cmd === 'git' && args[0] === 'diff' && args[1] === '--cached' && args[2] === '--quiet') {
         return Promise.reject(new Error('exit code 1'));
@@ -915,14 +908,9 @@ describe('initCommand commit and push', () => {
       return Promise.resolve({ stdout: '', stderr: '' });
     });
 
-    await initCommand({ agent: 'claude', autocommit: true, push: true });
-
-    expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('Failed to push to feature/init')
+    await expect(initCommand({ agent: 'claude', autocommit: true, push: true })).rejects.toThrow(
+      'Error: Failed to push to feature/init.'
     );
-    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('protected branch'));
-    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('branch protection rules'));
-    expect(exitMock).toHaveBeenCalledWith(1);
     expect(mockExecFileAsync).toHaveBeenCalledWith('git', [
       'commit',
       '-m',
@@ -946,7 +934,9 @@ describe('initCommand commit and push', () => {
       return Promise.resolve({ stdout: '', stderr: '' });
     });
 
-    await initCommand({ agent: 'claude', autocommit: true, push: true });
+    await expect(initCommand({ agent: 'claude', autocommit: true, push: true })).rejects.toThrow(
+      'Error: Failed to push to feature/init.'
+    );
 
     const labelCalls = mockGh.mock.calls.filter((call) => call[0][0] === 'label');
     expect(labelCalls).toHaveLength(expectedLabels.length);

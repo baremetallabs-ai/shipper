@@ -19,12 +19,10 @@ export async function setupCommand(
       : `Run setup for ${repoName}. This is a fresh setup — no .shipper/ directory found.`;
   }
 
-  process.exit(
-    await runPrompt('setup', {
-      userInput,
-      mode: options.mode,
-      agent: options.agent,
-      model: options.model,
-    })
-  );
+  process.exitCode = await runPrompt('setup', {
+    userInput,
+    mode: options.mode,
+    agent: options.agent,
+    model: options.model,
+  });
 }

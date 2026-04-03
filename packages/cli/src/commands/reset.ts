@@ -155,9 +155,8 @@ export async function resetCommand(
 ): Promise<void> {
   const cleaned = issue.replace(/^#/, '');
   if (!/^\d+$/.test(cleaned)) {
-    logger.error('Error: Please provide a valid issue number.');
     logger.error('Usage: shipper reset <issue> [--to <stage>]');
-    process.exit(1);
+    throw new Error('Error: Please provide a valid issue number.');
   }
   const issueNum = Number(cleaned);
 
@@ -178,25 +177,22 @@ export async function resetCommand(
     ]);
     issueJson = result.stdout;
   } catch (error) {
-    logger.error(`Error: Failed to fetch issue #${issueNum}: ${toErrorMessage(error)}`);
-    process.exit(1);
+    throw new Error(`Error: Failed to fetch issue #${issueNum}: ${toErrorMessage(error)}`);
   }
 
   const issueData = parseIssueViewData(issueJson);
 
   if (issueData.state !== 'OPEN') {
-    logger.error(`Issue #${issueNum} is closed. Reset only works on open issues.`);
-    process.exit(1);
+    throw new Error(`Issue #${issueNum} is closed. Reset only works on open issues.`);
   }
 
   const labels = issueData.labels.map((label) => label.name);
 
   if (!opts.force && labels.includes(LOCKED_LABEL)) {
     if (!(await isLockStale(nwo, String(issueNum)))) {
-      logger.error(
+      throw new Error(
         `Issue #${issueNum} is locked by another shipper instance. Use --force to override.`
       );
-      process.exit(1);
     }
   }
 
@@ -209,24 +205,21 @@ export async function resetCommand(
   if (opts.to) {
     const parsedStage = parseStage(opts.to);
     if (!parsedStage) {
-      logger.error(getInvalidStageError(opts.to));
-      process.exit(1);
+      throw new Error(getInvalidStageError(opts.to));
     }
 
     if (!isFailedOnly) {
       const targetIndex = getStageIndex(parsedStage);
       const sameImplementedStage = currentStage.hasPrLabels && parsedStage === 'implemented';
       if (targetIndex === currentIndex && !sameImplementedStage) {
-        logger.error(
+        throw new Error(
           `Error: Issue #${issueNum} is already at ${getStageLabel(parsedStage)}. Reset only works backward.`
         );
-        process.exit(1);
       }
       if (targetIndex > currentIndex) {
-        logger.error(
+        throw new Error(
           `Error: ${getStageLabel(parsedStage)} is ahead of the current stage ${getStageLabel(currentStage.stage)}. Reset only works backward.`
         );
-        process.exit(1);
       }
     }
 
@@ -236,10 +229,9 @@ export async function resetCommand(
       ? ([...RESETTABLE_STAGE_NAMES] as WorkflowStage[])
       : getValidTargets(currentStage);
     if (validTargets.length === 0) {
-      logger.error(
+      throw new Error(
         `Error: Issue #${issueNum} is already at ${getStageLabel(currentStage.stage)}. Reset only works backward.`
       );
-      process.exit(1);
     }
 
     logger.log('\nReset targets:');
@@ -251,8 +243,7 @@ export async function resetCommand(
     const selection = await promptChoice(`Select [1-${validTargets.length}]: `, choiceNumbers);
     const selectedStage = validTargets[Number(selection) - 1];
     if (!selectedStage) {
-      logger.error('Error: Invalid reset target selected.');
-      process.exit(1);
+      throw new Error('Error: Invalid reset target selected.');
     }
     targetStage = selectedStage;
   }
@@ -284,6 +275,6 @@ export async function resetCommand(
 
   if (result.hasFailures) {
     logger.log('\nSome operations failed. Re-run the command to retry failed operations.');
-    process.exit(1);
+    process.exitCode = 1;
   }
 }

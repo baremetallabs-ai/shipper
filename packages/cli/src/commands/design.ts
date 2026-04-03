@@ -19,8 +19,7 @@ export async function designCommand(
   if (!issue) {
     const selected = await autoSelectIssue(repo, 'shipper:groomed');
     if (!selected) {
-      logger.error("No issues ready for design. Run 'shipper groom' first.");
-      process.exit(1);
+      throw new Error("No issues ready for design. Run 'shipper groom' first.");
     }
     logger.error(`Auto-selected #${selected.number}: ${selected.title}`);
     issue = String(selected.number);

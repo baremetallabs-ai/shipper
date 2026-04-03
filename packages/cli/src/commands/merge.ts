@@ -212,26 +212,22 @@ export async function lookupPR(ref: string, nwo: string): Promise<QueuedPR> {
     // Not a PR — try resolving as an issue number
     const resolved = await tryResolvePrForIssue(nwo, Number(ref));
     if (!resolved) {
-      logger.error(`Error: #${ref} is not a PR and no linked PR was found.`);
-      process.exit(1);
+      throw new Error(`Error: #${ref} is not a PR and no linked PR was found.`);
     }
     try {
       data = await fetchPRView(resolved, nwo);
     } catch {
-      logger.error(`Error: Failed to fetch resolved PR #${resolved}.`);
-      process.exit(1);
+      throw new Error(`Error: Failed to fetch resolved PR #${resolved}.`);
     }
   }
 
   if (data.state !== 'OPEN') {
-    logger.error(`Error: PR #${data.number} is not open (state: ${data.state}).`);
-    process.exit(1);
+    throw new Error(`Error: PR #${data.number} is not open (state: ${data.state}).`);
   }
 
   const hasReadyLabel = data.labels.some((l) => l.name === 'shipper:ready');
   if (!hasReadyLabel) {
-    logger.error(`Error: PR #${data.number} does not have the shipper:ready label.`);
-    process.exit(1);
+    throw new Error(`Error: PR #${data.number} does not have the shipper:ready label.`);
   }
 
   return {
@@ -284,21 +280,25 @@ function acquireLock(lockPath: string): void {
   }
 
   // Check if the process is still running
+  let processExists = false;
   try {
     process.kill(pid, 0); // Throws if process doesn't exist
-    logger.error(`Error: Another merge queue is running (PID ${pid}). Lock: ${lockPath}`);
-    process.exit(1);
+    processExists = true;
   } catch {
     // Process doesn't exist — stale lock
-    logger.log(`Removing stale lock (PID ${pid} no longer running).`);
-    try {
-      unlinkSync(lockPath);
-    } catch {
-      // Another process may have removed it
-    }
-    acquireLock(lockPath);
-    return;
   }
+
+  if (processExists) {
+    throw new Error(`Error: Another merge queue is running (PID ${pid}). Lock: ${lockPath}`);
+  }
+
+  logger.log(`Removing stale lock (PID ${pid} no longer running).`);
+  try {
+    unlinkSync(lockPath);
+  } catch {
+    // Another process may have removed it
+  }
+  acquireLock(lockPath);
 }
 
 function releaseLock(lockPath: string): void {
@@ -678,8 +678,7 @@ export async function mergeCommand(options: MergeOptions): Promise<void> {
   if (options.number) {
     const cleaned = options.number.replace(/^#/, '');
     if (!/^\d+$/.test(cleaned)) {
-      logger.error('Error: argument must be a numeric issue or PR number.');
-      process.exit(1);
+      throw new Error('Error: argument must be a numeric issue or PR number.');
     }
     logger.log(`Merge queue for ${nwo}`);
     if (options.dryRun) logger.log('[dry-run mode]');
@@ -693,19 +692,19 @@ export async function mergeCommand(options: MergeOptions): Promise<void> {
       },
       async () => await processPR(pr, nwo, options.dryRun)
     );
-    if (!merged) process.exit(1);
+    if (!merged) {
+      process.exitCode = 1;
+    }
     return;
   }
 
   if (!/^\d+$/.test(options.interval)) {
-    logger.error('Error: --interval must be a positive integer (seconds).');
-    process.exit(1);
+    throw new Error('Error: --interval must be a positive integer (seconds).');
   }
   const intervalSeconds = Number(options.interval);
 
   if (intervalSeconds < 1) {
-    logger.error('Error: --interval must be a positive integer (seconds).');
-    process.exit(1);
+    throw new Error('Error: --interval must be a positive integer (seconds).');
   }
 
   logger.log(`Merge queue for ${nwo}`);
@@ -716,6 +715,7 @@ export async function mergeCommand(options: MergeOptions): Promise<void> {
 
   const cleanup = () => {
     releaseLock(lockPath);
+    // Intentional: signal handlers run outside wrapAction() and must terminate after releasing the lock.
     process.exit(0);
   };
   process.on('SIGINT', cleanup);

@@ -37,7 +37,6 @@ vi.mock('@dnsquared/shipper-core', () => ({
 
 import { newCommand } from '../../src/commands/new.js';
 
-let exitMock: ReturnType<typeof vi.spyOn>;
 let errorMock: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
@@ -45,22 +44,18 @@ beforeEach(() => {
   mockResolveMode.mockImplementation((_step: string, override?: string) => override ?? 'default');
   mockRunPrompt.mockResolvedValue(0);
   delete process.env.SHIPPER_HEADLESS;
-  exitMock = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
-    throw new Error(`process.exit:${code ?? 0}`);
-  }) as typeof process.exit);
+  process.exitCode = undefined;
   errorMock = vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 
 afterEach(() => {
-  exitMock.mockRestore();
+  process.exitCode = undefined;
   errorMock.mockRestore();
 });
 
 describe('newCommand', () => {
   it('passes the selected mode through to runPrompt', async () => {
-    await expect(newCommand(['my', 'request'], { mode: 'headless' })).rejects.toThrow(
-      'process.exit:0'
-    );
+    await expect(newCommand(['my', 'request'], { mode: 'headless' })).resolves.toBeUndefined();
 
     expect(mockRunPrompt).toHaveBeenCalledWith(
       'new',
@@ -70,10 +65,11 @@ describe('newCommand', () => {
       })
     );
     expect(process.env.SHIPPER_HEADLESS).toBeUndefined();
+    expect(process.exitCode).toBe(0);
   });
 
   it('uses runPrompt without a mode override when none is provided', async () => {
-    await expect(newCommand(['my', 'request'])).rejects.toThrow('process.exit:0');
+    await expect(newCommand(['my', 'request'])).resolves.toBeUndefined();
 
     expect(mockRunPrompt).toHaveBeenCalledWith(
       'new',
@@ -83,12 +79,13 @@ describe('newCommand', () => {
       })
     );
     expect(process.env.SHIPPER_HEADLESS).toBeUndefined();
+    expect(process.exitCode).toBe(0);
   });
 
   it('forwards a log file path to runPrompt unchanged', async () => {
     await expect(
       newCommand(['my', 'request'], { logFile: '/tmp/example.jsonl', mode: 'headless' })
-    ).rejects.toThrow('process.exit:0');
+    ).resolves.toBeUndefined();
 
     expect(mockRunPrompt).toHaveBeenCalledWith(
       'new',
@@ -98,10 +95,11 @@ describe('newCommand', () => {
         logFile: '/tmp/example.jsonl',
       })
     );
+    expect(process.exitCode).toBe(0);
   });
 
   it('runs interactively with no user input when no mode override is provided', async () => {
-    await expect(newCommand([])).rejects.toThrow('process.exit:0');
+    await expect(newCommand([])).resolves.toBeUndefined();
 
     expect(mockResolveMode).toHaveBeenCalledWith('new', undefined);
     expect(mockRunPrompt).toHaveBeenCalledWith(
@@ -111,10 +109,11 @@ describe('newCommand', () => {
         mode: undefined,
       })
     );
+    expect(process.exitCode).toBe(0);
   });
 
   it('runs interactively with no user input when mode is interactive', async () => {
-    await expect(newCommand([], { mode: 'interactive' })).rejects.toThrow('process.exit:0');
+    await expect(newCommand([], { mode: 'interactive' })).resolves.toBeUndefined();
 
     expect(mockResolveMode).toHaveBeenCalledWith('new', 'interactive');
     expect(mockRunPrompt).toHaveBeenCalledWith(
@@ -124,46 +123,29 @@ describe('newCommand', () => {
         mode: 'interactive',
       })
     );
+    expect(process.exitCode).toBe(0);
   });
 
-  it('exits when no request is provided in explicit headless mode', async () => {
-    await expect(newCommand([], { mode: 'headless' })).rejects.toThrow('process.exit:1');
+  it('throws when no request is provided in explicit headless mode', async () => {
+    await expect(newCommand([], { mode: 'headless' })).rejects.toThrow(
+      'Error: A request is required when running in headless mode.'
+    );
 
     expect(mockResolveMode).toHaveBeenCalledWith('new', 'headless');
     expect(errorMock).toHaveBeenCalledWith(
-      '[shipper] Error: A request is required when running in headless mode.'
-    );
-    expect(errorMock).toHaveBeenCalledWith(
       '[shipper] Usage: shipper new <request...> --mode headless'
     );
     expect(mockRunPrompt).not.toHaveBeenCalled();
   });
 
-  it('exits when settings resolve bare invocation to headless mode', async () => {
+  it('throws when settings resolve bare invocation to headless mode', async () => {
     mockResolveMode.mockReturnValueOnce('headless');
 
-    await expect(newCommand([])).rejects.toThrow('process.exit:1');
+    await expect(newCommand([])).rejects.toThrow(
+      'Error: A request is required when running in headless mode.'
+    );
 
     expect(mockResolveMode).toHaveBeenCalledWith('new', undefined);
-    expect(errorMock).toHaveBeenCalledWith(
-      '[shipper] Error: A request is required when running in headless mode.'
-    );
-    expect(errorMock).toHaveBeenCalledWith(
-      '[shipper] Usage: shipper new <request...> --mode headless'
-    );
-    expect(mockRunPrompt).not.toHaveBeenCalled();
-  });
-
-  it('returns immediately after exiting on bare headless mode when process.exit is mocked', async () => {
-    exitMock.mockImplementation(((_code?: number) => {
-      return undefined as never;
-    }) as typeof process.exit);
-
-    await expect(newCommand([], { mode: 'headless' })).resolves.toBeUndefined();
-
-    expect(errorMock).toHaveBeenCalledWith(
-      '[shipper] Error: A request is required when running in headless mode.'
-    );
     expect(errorMock).toHaveBeenCalledWith(
       '[shipper] Usage: shipper new <request...> --mode headless'
     );
@@ -171,7 +153,7 @@ describe('newCommand', () => {
   });
 
   it('forwards codex without injecting a starter user message', async () => {
-    await expect(newCommand([], { agent: 'codex' })).rejects.toThrow('process.exit:0');
+    await expect(newCommand([], { agent: 'codex' })).resolves.toBeUndefined();
 
     expect(mockResolveMode).toHaveBeenCalledWith('new', undefined);
     expect(mockRunPrompt).toHaveBeenCalledWith(
@@ -181,5 +163,6 @@ describe('newCommand', () => {
         agent: 'codex',
       })
     );
+    expect(process.exitCode).toBe(0);
   });
 });

@@ -27,9 +27,8 @@ export async function priorityCommand(
 ): Promise<void> {
   const issueStr = issue.replace(/^#/, '');
   if (!/^\d+$/.test(issueStr)) {
-    logger.error('Error: Please provide a valid issue number.');
     printUsage();
-    process.exit(1);
+    throw new Error('Error: Please provide a valid issue number.');
   }
 
   let issueData: IssueData;
@@ -45,8 +44,7 @@ export async function priorityCommand(
     ]);
     issueData = JSON.parse(stdout.trim()) as IssueData;
   } catch {
-    logger.error(`Error: Issue #${issueStr} not found.`);
-    process.exit(1);
+    throw new Error(`Error: Issue #${issueStr} not found.`);
   }
 
   let isPr = false;
@@ -58,20 +56,17 @@ export async function priorityCommand(
   }
 
   if (isPr) {
-    logger.error(`Error: #${issueStr} is a pull request, not an issue.`);
-    process.exit(1);
+    throw new Error(`Error: #${issueStr} is a pull request, not an issue.`);
   }
 
   if (issueData.state !== 'OPEN') {
-    logger.error(`Error: Issue #${issueStr} is not open.`);
-    process.exit(1);
+    throw new Error(`Error: Issue #${issueStr} is not open.`);
   }
 
   const labels = issueData.labels.map((candidate) => candidate.name);
   const stageLabel = labels.find((label) => STAGE_LABEL_NAMES.includes(label));
   if (!stageLabel) {
-    logger.error(`Error: Issue #${issueStr} is not in the shipper workflow.`);
-    process.exit(1);
+    throw new Error(`Error: Issue #${issueStr} is not in the shipper workflow.`);
   }
 
   const hasHigh = labels.includes(PRIORITY_HIGH_LABEL);

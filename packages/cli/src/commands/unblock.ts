@@ -108,9 +108,8 @@ export async function unblockCommand(
   model?: string
 ): Promise<void> {
   if (!issue) {
-    logger.error('Error: Please provide an issue number.');
     logger.error('Usage: shipper unblock <issue>');
-    process.exit(1);
+    throw new Error('Error: Please provide an issue number.');
   }
 
   await withIssueLock(repo, issue, async () => {

@@ -1541,7 +1541,7 @@ async function shipAutoSequential(repo: string, agent?: AgentName, model?: strin
       logger.log(`  #${result.issue}   ${formatLogDisplayPath(logFile, homeDir)}`);
     }
   }
-  process.exit(0);
+  return;
 }
 
 async function shipAutoParallel(
@@ -1595,6 +1595,8 @@ async function shipAutoParallel(
         })
       );
 
+      // Intentional: signal handlers cannot propagate through normal async control flow
+      // after child shutdown and lock cleanup.
       process.exit(1);
     })();
   };
@@ -1713,7 +1715,7 @@ async function shipAutoParallel(
       logger.log(`  #${result.issue}   ${formatLogDisplayPath(logFile, homeDir)}`);
     }
   }
-  process.exit(0);
+  return;
 }
 
 async function attachIssueTotalTokens(
@@ -1758,8 +1760,7 @@ export async function shipCommand(
 
   // Non-auto path: issue is required (validated in index.ts)
   if (!issue) {
-    logger.error('Error: an issue number is required unless --auto is used.');
-    process.exit(1);
+    throw new Error('Error: an issue number is required unless --auto is used.');
   }
   const homeDir = homedir();
   const logsDir = path.join(homeDir, '.shipper', 'logs');
@@ -1776,5 +1777,7 @@ export async function shipCommand(
     logFile
   );
   logger.log(`\nLog file: ${formatLogDisplayPath(logFile, homeDir)}`);
-  process.exit(result.success ? 0 : 1);
+  if (!result.success) {
+    process.exitCode = 1;
+  }
 }

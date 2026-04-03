@@ -23,9 +23,6 @@ vi.mock('@dnsquared/shipper-core', () => ({
   releaseIssueLock: (repo: string, issue: string) => mockReleaseIssueLock(repo, issue),
 }));
 
-const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => {
-  throw new Error('process.exit');
-}) as never);
 const mockConsoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
 
 import { unlockCommand } from '../../src/commands/unlock.js';
@@ -52,29 +49,23 @@ describe('unlockCommand', () => {
     expect(mockIsLockStale).not.toHaveBeenCalled();
   });
 
-  it('exits with usage error when no issue and no --stale are provided', async () => {
-    await expect(unlockCommand(repo, undefined, { stale: false })).rejects.toThrow('process.exit');
-    expect(mockExit).toHaveBeenCalledWith(1);
-    expect(mockConsoleError).toHaveBeenNthCalledWith(
-      1,
-      '[shipper] Error: Please provide an issue number or use --stale.'
+  it('throws a usage error when no issue and no --stale are provided', async () => {
+    await expect(unlockCommand(repo, undefined, { stale: false })).rejects.toThrow(
+      'Error: Please provide an issue number or use --stale.'
     );
-    expect(mockConsoleError).toHaveBeenNthCalledWith(2, '[shipper] Usage: shipper unlock <issue>');
-    expect(mockConsoleError).toHaveBeenNthCalledWith(3, '[shipper]    or: shipper unlock --stale');
+    expect(mockConsoleError).toHaveBeenNthCalledWith(1, '[shipper] Usage: shipper unlock <issue>');
+    expect(mockConsoleError).toHaveBeenNthCalledWith(2, '[shipper]    or: shipper unlock --stale');
     expect(mockListIssues).not.toHaveBeenCalled();
     expect(mockIsLockStale).not.toHaveBeenCalled();
     expect(mockReleaseIssueLock).not.toHaveBeenCalled();
   });
 
-  it('exits with error when an issue and --stale are both provided', async () => {
-    await expect(unlockCommand(repo, '42', { stale: true })).rejects.toThrow('process.exit');
-    expect(mockExit).toHaveBeenCalledWith(1);
-    expect(mockConsoleError).toHaveBeenNthCalledWith(
-      1,
-      '[shipper] Error: --stale cannot be used with an issue number.'
+  it('throws when an issue and --stale are both provided', async () => {
+    await expect(unlockCommand(repo, '42', { stale: true })).rejects.toThrow(
+      'Error: --stale cannot be used with an issue number.'
     );
-    expect(mockConsoleError).toHaveBeenNthCalledWith(2, '[shipper] Usage: shipper unlock <issue>');
-    expect(mockConsoleError).toHaveBeenNthCalledWith(3, '[shipper]    or: shipper unlock --stale');
+    expect(mockConsoleError).toHaveBeenNthCalledWith(1, '[shipper] Usage: shipper unlock <issue>');
+    expect(mockConsoleError).toHaveBeenNthCalledWith(2, '[shipper]    or: shipper unlock --stale');
     expect(mockListIssues).not.toHaveBeenCalled();
     expect(mockIsLockStale).not.toHaveBeenCalled();
     expect(mockReleaseIssueLock).not.toHaveBeenCalled();

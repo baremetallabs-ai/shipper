@@ -23,8 +23,7 @@ export async function implementCommand(
   if (!issue) {
     const selected = await autoSelectIssue(repo, 'shipper:planned');
     if (!selected) {
-      logger.error("No issues ready for implementation. Run 'shipper plan' first.");
-      process.exit(1);
+      throw new Error("No issues ready for implementation. Run 'shipper plan' first.");
     }
     logger.error(`Auto-selected #${selected.number}: ${selected.title}`);
     issue = String(selected.number);
