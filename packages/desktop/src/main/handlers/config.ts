@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { app, ipcMain } from 'electron';
-import { gh } from '@dnsquared/shipper-core';
+import { gh, toErrorMessage } from '@dnsquared/shipper-core';
 
 import { parseRepo } from './shared.js';
 
@@ -201,12 +201,20 @@ function parseConfig(value: unknown): ParseConfigResult | null {
   };
 }
 
+function parseRepoList(json: string): string[] {
+  try {
+    const parsed = JSON.parse(json) as Array<{ nameWithOwner: string }>;
+    return parsed.map((repo) => repo.nameWithOwner);
+  } catch (error) {
+    throw new Error(`Failed to parse repository list from GitHub CLI: ${toErrorMessage(error)}`);
+  }
+}
+
 export function registerConfigHandlers(): void {
   ipcMain.handle('get-config', () => readConfig());
   ipcMain.handle('list-repos', async () => {
     const result = await gh(['repo', 'list', '--json', 'nameWithOwner', '--limit', '100']);
-    const parsed = JSON.parse(result.stdout) as Array<{ nameWithOwner: string }>;
-    return parsed.map((repo) => repo.nameWithOwner);
+    return parseRepoList(result.stdout);
   });
   ipcMain.handle('set-config', (_event, config: unknown) => {
     const parsedConfig = parseConfig(config);

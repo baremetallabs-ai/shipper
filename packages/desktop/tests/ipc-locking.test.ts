@@ -469,6 +469,16 @@ describe('desktop IPC locking', () => {
     });
   });
 
+  it('surfaces a descriptive error when list-repos returns malformed JSON', async () => {
+    await loadHandlers();
+    state.ghMock.mockResolvedValueOnce({ stdout: 'not json', stderr: '' });
+    const handler = getHandler('list-repos');
+
+    await expect(handler({}, undefined)).rejects.toThrow(
+      /Failed to parse repository list from GitHub CLI: Unexpected token/
+    );
+  });
+
   it('prefers settings.local.json over settings.json when resolving the init agent', async () => {
     await loadHandlers();
     const repoPath = mkdtempSync(join(tmpdir(), 'shipper-desktop-init-'));
