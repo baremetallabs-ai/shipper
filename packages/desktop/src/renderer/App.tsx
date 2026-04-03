@@ -58,9 +58,10 @@ import {
   getBackgroundRetryPayload,
   getBackgroundTitle,
   getNextAutoShipFailureState,
-  getWorkflowStageDisplayName,
+  getWorkflowStageCacheKey,
   selectNextAutoShipIssue,
   selectNextAutoUnblockIssue,
+  syncWorkflowStageCacheForRepo,
 } from './lib/app-utils.js';
 import {
   COLUMN_RESET_STAGE,
@@ -467,6 +468,7 @@ export default function App(): JSX.Element {
   const [autoMergeRepos, setAutoMergeRepos] = useState<Set<string>>(new Set());
   const [prerequisites, setPrerequisites] = useState<Prerequisites | null>(null);
   const [issues, setIssues] = useState<ListIssueItem[]>([]);
+  const [stageCache, setStageCache] = useState<Map<string, string>>(new Map());
   const [isLoading, setIsLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [resetSelection, setResetSelection] = useState<ResetSelection | null>(null);
@@ -692,6 +694,7 @@ export default function App(): JSX.Element {
       }
 
       setIssues(result.issues);
+      setStageCache((current) => syncWorkflowStageCacheForRepo(current, repo, result.issues));
       setLastUpdated(new Date());
       return result;
     } catch (error) {
@@ -2340,13 +2343,6 @@ export default function App(): JSX.Element {
           open={actionQueueOpen}
           onToggle={handleToggleActionQueue}
           commands={backgroundCommands.map((command) => {
-            const issue =
-              command.command === 'ship' &&
-              command.repo === activeRepo &&
-              command.issueNumber !== undefined
-                ? issues.find((candidate) => candidate.number === command.issueNumber)
-                : undefined;
-
             return {
               id: command.id,
               command: command.command,
@@ -2360,7 +2356,10 @@ export default function App(): JSX.Element {
                   ? Boolean(command.logFile)
                   : command.output.length > 0 || command.status !== 'queued',
               cancelled: command.cancelled,
-              workflowStage: issue ? getWorkflowStageDisplayName(issue.labels) : undefined,
+              workflowStage:
+                command.command === 'ship' && command.issueNumber !== undefined
+                  ? stageCache.get(getWorkflowStageCacheKey(command.repo, command.issueNumber))
+                  : undefined,
             };
           })}
           onCancel={(sessionId) => {
