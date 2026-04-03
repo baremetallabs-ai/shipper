@@ -15,8 +15,7 @@ export function ejectCommand(name?: string) {
   const agent = getSettings().commands.default.agent;
   const promptSet = agentPrompts[agent];
   if (!promptSet) {
-    logger.error(`Error: No bundled prompts found for agent "${agent}".`);
-    process.exit(1);
+    throw new Error(`Error: No bundled prompts found for agent "${agent}".`);
   }
   const allFilenames = Object.keys(promptSet).filter((filename) => filename !== 'setup.md');
   const cliNames = allFilenames.map(filenameToCliName);
@@ -25,10 +24,9 @@ export function ejectCommand(name?: string) {
 
   if (name) {
     if (!cliNames.includes(name)) {
-      logger.error(
+      throw new Error(
         `Error: Invalid prompt name "${name}". Valid prompt names: ${cliNames.join(', ')}`
       );
-      process.exit(1);
     }
   }
 
@@ -49,8 +47,7 @@ export function ejectCommand(name?: string) {
     }
 
     if (prompt === undefined) {
-      logger.error(`Error: No bundled prompt found for "${cliName}".`);
-      process.exit(1);
+      throw new Error(`Error: No bundled prompt found for "${cliName}".`);
     }
 
     writeFileSync(targetPath, prompt);

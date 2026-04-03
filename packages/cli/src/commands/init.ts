@@ -101,25 +101,21 @@ export async function initCommand(options: {
     checkGitHubRemote,
   ]);
   if (!ok) {
-    process.exit(1);
+    process.exitCode = 1;
     return;
   }
 
   if (options.push && !options.autocommit) {
-    logger.error('Error: --push requires --autocommit.');
-    process.exit(1);
-    return;
+    throw new Error('Error: --push requires --autocommit.');
   }
 
   // Resolve agent selection
   let agent: string;
   if (options.agent) {
     if (!VALID_AGENTS.includes(options.agent as (typeof VALID_AGENTS)[number])) {
-      logger.error(
+      throw new Error(
         `Error: Invalid agent "${options.agent}". Must be one of: ${VALID_AGENTS.join(', ')}`
       );
-      process.exit(1);
-      return;
     }
     agent = options.agent;
   } else {
@@ -145,11 +141,9 @@ export async function initCommand(options: {
       ) {
         agent = 'copilot';
       } else {
-        logger.error(
+        throw new Error(
           `Error: Unrecognized agent "${answer.trim()}". Expected "Claude Code", "Codex CLI", or "Copilot CLI".`
         );
-        process.exit(1);
-        return;
       }
     }
   }
@@ -275,9 +269,7 @@ export async function initCommand(options: {
         commands: migratedCommands,
       };
     } catch (err: unknown) {
-      logger.error(`Error: Malformed JSON in ${settingsPath}: ${toErrorMessage(err)}`);
-      process.exit(1);
-      return;
+      throw new Error(`Error: Malformed JSON in ${settingsPath}: ${toErrorMessage(err)}`);
     }
   }
 
@@ -371,11 +363,9 @@ export async function initCommand(options: {
         currentBranch = currentOut.trim();
 
         if (!currentBranch) {
-          logger.error(
+          throw new Error(
             'Error: Failed to push from detached HEAD.\nCheck out a branch and retry with --push.'
           );
-          process.exit(1);
-          return;
         }
       }
 
@@ -430,15 +420,13 @@ export async function initCommand(options: {
           await execFileAsync('git', ['push', remote, pushBranch]);
         } catch (err) {
           const stderr = getErrorStderr(err);
-          logger.error(
+          throw new Error(
             `Error: Failed to push to ${pushBranch}.` +
               (stderr ? `\n${stderr}` : '') +
               '\n\nThis may be due to branch protection rules.' +
               `\nPush manually with: git push ${remote} ${pushBranch}` +
               '\nOr adjust your branch protection settings.'
           );
-          process.exit(1);
-          return;
         }
 
         logger.log(`Committed and pushed .shipper/ files to ${pushBranch}`);

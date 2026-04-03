@@ -21,17 +21,13 @@ vi.mock('@dnsquared/shipper-core', () => ({
 
 import { adoptCommand, adoptAllCommand } from '../../src/commands/adopt.js';
 
-// Prevent process.exit from actually exiting
-const _mockExit = vi.spyOn(process, 'exit').mockImplementation((() => {
-  throw new Error('process.exit');
-}) as never);
-
 const mockConsoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
 const mockConsoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
 const mockConsoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
 beforeEach(() => {
   vi.clearAllMocks();
+  process.exitCode = undefined;
 });
 
 describe('adoptCommand', () => {
@@ -80,7 +76,7 @@ describe('adoptCommand', () => {
     expect(editCalls).toHaveLength(0);
   });
 
-  it('exits with error for non-existent issue', async () => {
+  it('throws for non-existent issue', async () => {
     mockGh.mockImplementation((args: string[]) => {
       if (args[0] === 'issue' && args[1] === 'view') {
         return Promise.reject(new Error('not found'));
@@ -88,11 +84,11 @@ describe('adoptCommand', () => {
       return Promise.resolve({ stdout: '', stderr: '' });
     });
 
-    await expect(adoptCommand('9999')).rejects.toThrow('process.exit');
-    expect(mockConsoleError).toHaveBeenCalledWith('[shipper] Error: Issue #9999 not found.');
+    await expect(adoptCommand('9999')).rejects.toThrow('Error: Issue #9999 not found.');
+    expect(mockConsoleError).not.toHaveBeenCalled();
   });
 
-  it('exits with error when issue number is a pull request', async () => {
+  it('throws when issue number is a pull request', async () => {
     mockGh.mockImplementation((args: string[]) => {
       if (args[0] === 'issue' && args[1] === 'view') {
         return Promise.resolve({ stdout: JSON.stringify({ number: 42, labels: [] }), stderr: '' });
@@ -103,10 +99,8 @@ describe('adoptCommand', () => {
       return Promise.resolve({ stdout: '', stderr: '' });
     });
 
-    await expect(adoptCommand('42')).rejects.toThrow('process.exit');
-    expect(mockConsoleError).toHaveBeenCalledWith(
-      '[shipper] Error: #42 is a pull request, not an issue.'
-    );
+    await expect(adoptCommand('42')).rejects.toThrow('Error: #42 is a pull request, not an issue.');
+    expect(mockConsoleError).not.toHaveBeenCalled();
   });
 
   it('strips # prefix from issue number', async () => {
@@ -125,11 +119,11 @@ describe('adoptCommand', () => {
     expect(mockGh).toHaveBeenCalledWith(['issue', 'view', '42', '--json', 'number,labels']);
   });
 
-  it('exits with error for non-numeric input', async () => {
-    await expect(adoptCommand('abc')).rejects.toThrow('process.exit');
-    expect(mockConsoleError).toHaveBeenCalledWith(
-      '[shipper] Error: Please provide a valid issue number.'
+  it('throws for non-numeric input and still prints usage', async () => {
+    await expect(adoptCommand('abc')).rejects.toThrow(
+      'Error: Please provide a valid issue number.'
     );
+    expect(mockConsoleError).toHaveBeenCalledWith('[shipper] Usage: shipper adopt <issue>');
   });
 });
 
@@ -183,7 +177,7 @@ describe('adoptAllCommand', () => {
     expect(editCalls).toHaveLength(0);
   });
 
-  it('exits with error when gh issue list fails', async () => {
+  it('throws when gh issue list fails', async () => {
     mockGh.mockImplementation((args: string[]) => {
       if (args[0] === 'issue' && args[1] === 'list') {
         return Promise.reject(new Error('gh issue list failed'));
@@ -191,11 +185,11 @@ describe('adoptAllCommand', () => {
       return Promise.resolve({ stdout: '', stderr: '' });
     });
 
-    await expect(adoptAllCommand()).rejects.toThrow('process.exit');
-    expect(mockConsoleError).toHaveBeenCalledWith('[shipper] Error: Failed to fetch issues.');
+    await expect(adoptAllCommand()).rejects.toThrow('Error: Failed to fetch issues.');
+    expect(mockConsoleError).not.toHaveBeenCalled();
   });
 
-  it('continues labeling remaining issues when one fails', async () => {
+  it('continues labeling remaining issues when one fails and sets process.exitCode', async () => {
     const issues = [
       { number: 10, labels: [] },
       { number: 12, labels: [] },
@@ -212,13 +206,14 @@ describe('adoptAllCommand', () => {
       return Promise.resolve({ stdout: '', stderr: '' });
     });
 
-    await expect(adoptAllCommand()).rejects.toThrow('process.exit');
+    await expect(adoptAllCommand()).resolves.toBeUndefined();
     expect(mockConsoleError).toHaveBeenCalledWith(
       "[shipper] Error: Failed to add 'shipper:new' label to issue #12."
     );
     expect(mockConsoleLog).toHaveBeenCalledWith(
       '[shipper] Adopted #10, #13 into shipper workflow.'
     );
+    expect(process.exitCode).toBe(1);
   });
 
   it('handles empty repo with no issues', async () => {

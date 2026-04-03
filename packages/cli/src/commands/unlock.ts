@@ -11,9 +11,8 @@ export async function unlockCommand(
   options: { stale?: boolean } = {}
 ): Promise<void> {
   if (options.stale && issue) {
-    logger.error('Error: --stale cannot be used with an issue number.');
     printUsage();
-    process.exit(1);
+    throw new Error('Error: --stale cannot be used with an issue number.');
   }
 
   if (options.stale) {
@@ -52,9 +51,8 @@ export async function unlockCommand(
   }
 
   if (!issue) {
-    logger.error('Error: Please provide an issue number or use --stale.');
     printUsage();
-    process.exit(1);
+    throw new Error('Error: Please provide an issue number or use --stale.');
   }
 
   await releaseIssueLock(repo, issue.replace(/^#/, ''));

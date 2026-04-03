@@ -23,8 +23,7 @@ export async function prOpenCommand(
   if (!issue) {
     const selected = await autoSelectIssue(repo, 'shipper:implemented');
     if (!selected) {
-      logger.error("No issues ready for PR. Run 'shipper implement' first.");
-      process.exit(1);
+      throw new Error("No issues ready for PR. Run 'shipper implement' first.");
     }
     logger.error(`Auto-selected #${selected.number}: ${selected.title}`);
     issue = String(selected.number);

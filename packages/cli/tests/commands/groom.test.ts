@@ -50,20 +50,14 @@ vi.mock('../../src/commands/ship.js', () => ({
 }));
 
 describe('groomCommand', () => {
-  let exitSpy: ReturnType<typeof vi.spyOn>;
-
   beforeEach(() => {
     vi.clearAllMocks();
     process.exitCode = undefined;
     resolveModeMock.mockImplementation((_step: string, override?: string) => override ?? 'default');
-    exitSpy = vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
-      throw new Error(`exit:${code}`);
-    });
   });
 
   afterEach(() => {
     process.exitCode = undefined;
-    exitSpy.mockRestore();
   });
 
   it('runs a single issue inside a worktree on the generated branch', async () => {
@@ -99,7 +93,6 @@ describe('groomCommand', () => {
       model: undefined,
     });
     expect(process.exitCode).toBe(0);
-    expect(exitSpy).not.toHaveBeenCalled();
   });
 
   it('creates a separate worktree for each issue in auto mode', async () => {
@@ -154,17 +147,16 @@ describe('groomCommand', () => {
     logSpy.mockRestore();
   });
 
-  it('rejects explicitly headless grooming before doing any work', async () => {
+  it('throws explicitly headless grooming before doing any work', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { groomCommand } = await import('../../src/commands/groom.js');
 
     await expect(
       groomCommand('owner/repo', '123', { auto: false, mode: 'headless' })
-    ).rejects.toThrow('exit:1');
-
-    expect(errorSpy).toHaveBeenCalledWith(
-      '[shipper] Error: groom does not support headless mode. Grooming requires interactive input.'
+    ).rejects.toThrow(
+      'Error: groom does not support headless mode. Grooming requires interactive input.'
     );
+    expect(errorSpy).not.toHaveBeenCalled();
     expect(autoSelectIssueMock).not.toHaveBeenCalled();
     expect(withWorktreeMock).not.toHaveBeenCalled();
     expect(runPromptMock).not.toHaveBeenCalled();
@@ -172,38 +164,15 @@ describe('groomCommand', () => {
     errorSpy.mockRestore();
   });
 
-  it('rejects settings-resolved headless grooming before doing any work', async () => {
+  it('throws settings-resolved headless grooming before doing any work', async () => {
     resolveModeMock.mockReturnValueOnce('headless');
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { groomCommand } = await import('../../src/commands/groom.js');
 
-    await expect(groomCommand('owner/repo', '123', { auto: false })).rejects.toThrow('exit:1');
-
-    expect(errorSpy).toHaveBeenCalledWith(
-      '[shipper] Error: groom does not support headless mode. Grooming requires interactive input.'
+    await expect(groomCommand('owner/repo', '123', { auto: false })).rejects.toThrow(
+      'Error: groom does not support headless mode. Grooming requires interactive input.'
     );
-    expect(autoSelectIssueMock).not.toHaveBeenCalled();
-    expect(withWorktreeMock).not.toHaveBeenCalled();
-    expect(runPromptMock).not.toHaveBeenCalled();
-
-    errorSpy.mockRestore();
-  });
-
-  it('returns immediately after exiting on headless grooming when process.exit is mocked', async () => {
-    exitSpy.mockRestore();
-    exitSpy = vi.spyOn(process, 'exit').mockImplementation(((_code?: number) => {
-      return undefined as never;
-    }) as typeof process.exit);
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const { groomCommand } = await import('../../src/commands/groom.js');
-
-    await expect(
-      groomCommand('owner/repo', '123', { auto: false, mode: 'headless' })
-    ).resolves.toBeUndefined();
-
-    expect(errorSpy).toHaveBeenCalledWith(
-      '[shipper] Error: groom does not support headless mode. Grooming requires interactive input.'
-    );
+    expect(errorSpy).not.toHaveBeenCalled();
     expect(autoSelectIssueMock).not.toHaveBeenCalled();
     expect(withWorktreeMock).not.toHaveBeenCalled();
     expect(runPromptMock).not.toHaveBeenCalled();
@@ -218,6 +187,5 @@ describe('groomCommand', () => {
     await expect(groomCommand('owner/repo', '123')).rejects.toThrow('worktree add failed');
 
     expect(runPromptMock).not.toHaveBeenCalled();
-    expect(exitSpy).not.toHaveBeenCalled();
   });
 });

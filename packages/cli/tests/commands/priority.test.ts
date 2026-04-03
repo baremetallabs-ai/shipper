@@ -34,9 +34,6 @@ vi.mock('@dnsquared/shipper-core', () => ({
 import { priorityCommand } from '../../src/commands/priority.js';
 
 const repo = 'owner/repo';
-const _exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {
-  throw new Error('process.exit');
-}) as never);
 const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
@@ -174,29 +171,34 @@ describe('priorityCommand', () => {
       return Promise.resolve({ stdout: '', stderr: '' });
     });
 
-    await expect(priorityCommand(repo, '42', 'high')).rejects.toThrow('process.exit');
-    expect(errorSpy).toHaveBeenCalledWith('[shipper] Error: #42 is a pull request, not an issue.');
+    await expect(priorityCommand(repo, '42', 'high')).rejects.toThrow(
+      'Error: #42 is a pull request, not an issue.'
+    );
+    expect(errorSpy).not.toHaveBeenCalled();
   });
 
   it('rejects closed issues', async () => {
     mockOpenIssue(['shipper:planned'], 'CLOSED');
 
-    await expect(priorityCommand(repo, '42', 'high')).rejects.toThrow('process.exit');
-    expect(errorSpy).toHaveBeenCalledWith('[shipper] Error: Issue #42 is not open.');
+    await expect(priorityCommand(repo, '42', 'high')).rejects.toThrow(
+      'Error: Issue #42 is not open.'
+    );
+    expect(errorSpy).not.toHaveBeenCalled();
   });
 
   it('rejects open issues that are not in the shipper workflow', async () => {
     mockOpenIssue(['bug']);
 
-    await expect(priorityCommand(repo, '42', 'high')).rejects.toThrow('process.exit');
-    expect(errorSpy).toHaveBeenCalledWith(
-      '[shipper] Error: Issue #42 is not in the shipper workflow.'
+    await expect(priorityCommand(repo, '42', 'high')).rejects.toThrow(
+      'Error: Issue #42 is not in the shipper workflow.'
     );
+    expect(errorSpy).not.toHaveBeenCalled();
   });
 
   it('rejects invalid issue numbers', async () => {
-    await expect(priorityCommand(repo, 'abc', 'high')).rejects.toThrow('process.exit');
-    expect(errorSpy).toHaveBeenCalledWith('[shipper] Error: Please provide a valid issue number.');
+    await expect(priorityCommand(repo, 'abc', 'high')).rejects.toThrow(
+      'Error: Please provide a valid issue number.'
+    );
     expect(errorSpy).toHaveBeenCalledWith(
       '[shipper] Usage: shipper priority <issue> <high|normal|low>'
     );

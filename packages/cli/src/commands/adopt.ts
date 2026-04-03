@@ -12,9 +12,8 @@ interface IssueData {
 export async function adoptCommand(issue: string): Promise<void> {
   const cleanRef = issue.replace(/^#/, '');
   if (!/^\d+$/.test(cleanRef)) {
-    logger.error('Error: Please provide a valid issue number.');
     logger.error('Usage: shipper adopt <issue>');
-    process.exit(1);
+    throw new Error('Error: Please provide a valid issue number.');
   }
 
   // Fetch issue data
@@ -24,8 +23,7 @@ export async function adoptCommand(issue: string): Promise<void> {
     const output = stdout.trim();
     issueData = JSON.parse(output) as IssueData;
   } catch {
-    logger.error(`Error: Issue #${cleanRef} not found.`);
-    process.exit(1);
+    throw new Error(`Error: Issue #${cleanRef} not found.`);
   }
 
   // Check if it's a PR
@@ -37,8 +35,7 @@ export async function adoptCommand(issue: string): Promise<void> {
     // Not a PR — continue
   }
   if (isPr) {
-    logger.error(`Error: #${cleanRef} is a pull request, not an issue.`);
-    process.exit(1);
+    throw new Error(`Error: #${cleanRef} is a pull request, not an issue.`);
   }
 
   // Check for existing shipper labels
@@ -57,8 +54,7 @@ export async function adoptCommand(issue: string): Promise<void> {
   try {
     await gh(['issue', 'edit', cleanRef, '--add-label', 'shipper:new']);
   } catch {
-    logger.error(`Error: Failed to add 'shipper:new' label to issue #${cleanRef}.`);
-    process.exit(1);
+    throw new Error(`Error: Failed to add 'shipper:new' label to issue #${cleanRef}.`);
   }
 
   logger.log(`Issue #${cleanRef} adopted into shipper workflow.`);
@@ -80,8 +76,7 @@ export async function adoptAllCommand(): Promise<void> {
     const output = stdout.trim();
     issues = JSON.parse(output) as IssueData[];
   } catch {
-    logger.error('Error: Failed to fetch issues.');
-    process.exit(1);
+    throw new Error('Error: Failed to fetch issues.');
   }
 
   const eligible = issues.filter(
@@ -112,6 +107,6 @@ export async function adoptAllCommand(): Promise<void> {
   }
 
   if (failed.length > 0) {
-    process.exit(1);
+    process.exitCode = 1;
   }
 }

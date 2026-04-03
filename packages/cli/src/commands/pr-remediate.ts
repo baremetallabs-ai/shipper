@@ -337,8 +337,7 @@ export async function prRemediateCommand(
 
   const prRef = pr;
   if (!prRef) {
-    logger.error('Error: No PR selected for remediation.');
-    process.exit(1);
+    throw new Error('Error: No PR selected for remediation.');
   }
 
   const run = async () => {

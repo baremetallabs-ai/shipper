@@ -14,10 +14,8 @@ export async function newCommand(
   if (!request) {
     const effectiveMode = resolveMode('new', options.mode);
     if (effectiveMode === 'headless') {
-      logger.error('Error: A request is required when running in headless mode.');
       logger.error('Usage: shipper new <request...> --mode headless');
-      process.exit(1);
-      return;
+      throw new Error('Error: A request is required when running in headless mode.');
     }
   }
 
@@ -28,5 +26,5 @@ export async function newCommand(
     model: options.model,
     logFile: options.logFile,
   });
-  process.exit(exitCode);
+  process.exitCode = exitCode;
 }

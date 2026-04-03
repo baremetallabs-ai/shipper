@@ -413,10 +413,6 @@ vi.mock('node:os', () => ({
 
 import { resetCommand } from '../../src/commands/reset.js';
 
-const _mockExit = vi.spyOn(process, 'exit').mockImplementation((() => {
-  throw new Error('process.exit');
-}) as never);
-
 const mockConsoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
 const mockConsoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
 vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -425,6 +421,7 @@ const prefixed = (message: string) => `[shipper] ${message}`;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  process.exitCode = undefined;
   mockConfirm.mockResolvedValue(true);
   mockPromptChoice.mockResolvedValue('1');
   mockIsLockStale.mockReturnValue(true);
@@ -572,10 +569,9 @@ function getLocalWorktreePath(name: string): string {
 }
 
 describe('resetCommand', () => {
-  it('exits with error for invalid issue number', async () => {
-    await expect(resetCommand('abc', { force: true })).rejects.toThrow('process.exit');
-    expect(mockConsoleError).toHaveBeenCalledWith(
-      prefixed('Error: Please provide a valid issue number.')
+  it('throws for invalid issue number', async () => {
+    await expect(resetCommand('abc', { force: true })).rejects.toThrow(
+      'Error: Please provide a valid issue number.'
     );
     expect(mockConsoleError).toHaveBeenCalledWith(
       prefixed('Usage: shipper reset <issue> [--to <stage>]')
@@ -583,19 +579,21 @@ describe('resetCommand', () => {
   });
 
   it('rejects partial numeric input like 18foo', async () => {
-    await expect(resetCommand('18foo', { force: true })).rejects.toThrow('process.exit');
+    await expect(resetCommand('18foo', { force: true })).rejects.toThrow(
+      'Error: Please provide a valid issue number.'
+    );
     expect(mockConsoleError).toHaveBeenCalledWith(
-      prefixed('Error: Please provide a valid issue number.')
+      prefixed('Usage: shipper reset <issue> [--to <stage>]')
     );
   });
 
-  it('exits with error for closed issues', async () => {
+  it('throws for closed issues', async () => {
     setupExecMock({ issueJson: mockIssueView('CLOSED', ['shipper:groomed']) });
 
-    await expect(resetCommand('18', { force: true })).rejects.toThrow('process.exit');
-    expect(mockConsoleError).toHaveBeenCalledWith(
-      prefixed('Issue #18 is closed. Reset only works on open issues.')
+    await expect(resetCommand('18', { force: true })).rejects.toThrow(
+      'Issue #18 is closed. Reset only works on open issues.'
     );
+    expect(mockConsoleError).not.toHaveBeenCalled();
   });
 
   it('strips # prefix from the issue number', async () => {
@@ -623,10 +621,10 @@ describe('resetCommand', () => {
     });
     mockIsLockStale.mockReturnValue(false);
 
-    await expect(resetCommand('18', { force: false, to: 'new' })).rejects.toThrow('process.exit');
-    expect(mockConsoleError).toHaveBeenCalledWith(
-      prefixed('Issue #18 is locked by another shipper instance. Use --force to override.')
+    await expect(resetCommand('18', { force: false, to: 'new' })).rejects.toThrow(
+      'Issue #18 is locked by another shipper instance. Use --force to override.'
     );
+    expect(mockConsoleError).not.toHaveBeenCalled();
   });
 
   it('allows reset with --force when shipper:locked is present', async () => {
@@ -810,7 +808,7 @@ describe('resetCommand', () => {
     expect(mockConsoleLog).not.toHaveBeenCalledWith(
       prefixed('Some operations failed. Re-run the command to retry failed operations.')
     );
-    expect(_mockExit).not.toHaveBeenCalled();
+    expect(process.exitCode).toBeUndefined();
   });
 
   it('prints skipped operations without retry guidance when no failures occurred', async () => {
@@ -843,10 +841,10 @@ describe('resetCommand', () => {
     expect(mockConsoleLog).not.toHaveBeenCalledWith(
       prefixed('Some operations failed. Re-run the command to retry failed operations.')
     );
-    expect(_mockExit).not.toHaveBeenCalled();
+    expect(process.exitCode).toBeUndefined();
   });
 
-  it('prints failures, later operations, retry guidance, and exits non-zero on partial failure', async () => {
+  it('prints failures, later operations, retry guidance, and sets process.exitCode on partial failure', async () => {
     setupExecMock({
       issueJson: mockIssueView('OPEN', ['shipper:planned']),
       commentIds: '101\n',
@@ -864,7 +862,7 @@ describe('resetCommand', () => {
       hasFailures: true,
     });
 
-    await expect(resetCommand('18', { force: true, to: 'new' })).rejects.toThrow('process.exit');
+    await expect(resetCommand('18', { force: true, to: 'new' })).resolves.toBeUndefined();
 
     expect(mockConsoleLog).toHaveBeenCalledWith(prefixed('  ✓ Close PR #42'));
     expect(mockConsoleLog).toHaveBeenCalledWith(
@@ -874,7 +872,7 @@ describe('resetCommand', () => {
     expect(mockConsoleLog).toHaveBeenCalledWith(
       prefixed('\nSome operations failed. Re-run the command to retry failed operations.')
     );
-    expect(_mockExit).toHaveBeenCalledWith(1);
+    expect(process.exitCode).toBe(1);
   });
 
   it('does not print retry guidance for reruns with only succeeded and skipped operations', async () => {
@@ -904,7 +902,7 @@ describe('resetCommand', () => {
     expect(mockConsoleLog).not.toHaveBeenCalledWith(
       prefixed('Some operations failed. Re-run the command to retry failed operations.')
     );
-    expect(_mockExit).not.toHaveBeenCalled();
+    expect(process.exitCode).toBeUndefined();
   });
 
   it('rejects resetting to the current stage', async () => {
@@ -913,11 +911,9 @@ describe('resetCommand', () => {
     });
 
     await expect(resetCommand('18', { force: true, to: 'groomed' })).rejects.toThrow(
-      'process.exit'
+      'Error: Issue #18 is already at shipper:groomed. Reset only works backward.'
     );
-    expect(mockConsoleError).toHaveBeenCalledWith(
-      prefixed('Error: Issue #18 is already at shipper:groomed. Reset only works backward.')
-    );
+    expect(mockConsoleError).not.toHaveBeenCalled();
   });
 
   it('rejects resetting to a later stage', async () => {
@@ -926,13 +922,9 @@ describe('resetCommand', () => {
     });
 
     await expect(resetCommand('18', { force: true, to: 'designed' })).rejects.toThrow(
-      'process.exit'
+      'Error: shipper:designed is ahead of the current stage shipper:groomed. Reset only works backward.'
     );
-    expect(mockConsoleError).toHaveBeenCalledWith(
-      prefixed(
-        'Error: shipper:designed is ahead of the current stage shipper:groomed. Reset only works backward.'
-      )
-    );
+    expect(mockConsoleError).not.toHaveBeenCalled();
   });
 
   it('rejects non-workflow stage names', async () => {
@@ -941,13 +933,9 @@ describe('resetCommand', () => {
     });
 
     await expect(resetCommand('18', { force: true, to: 'blocked' })).rejects.toThrow(
-      'process.exit'
+      'Error: blocked is not a valid workflow stage. Valid stages: new, groomed, designed, planned, implemented.'
     );
-    expect(mockConsoleError).toHaveBeenCalledWith(
-      prefixed(
-        'Error: blocked is not a valid workflow stage. Valid stages: new, groomed, designed, planned, implemented.'
-      )
-    );
+    expect(mockConsoleError).not.toHaveBeenCalled();
   });
 
   it('rejects non-workflow shipper labels', async () => {
@@ -956,13 +944,9 @@ describe('resetCommand', () => {
     });
 
     await expect(resetCommand('18', { force: true, to: 'shipper:blocked' })).rejects.toThrow(
-      'process.exit'
+      'Error: shipper:blocked is not a valid workflow stage. Valid stages: new, groomed, designed, planned, implemented.'
     );
-    expect(mockConsoleError).toHaveBeenCalledWith(
-      prefixed(
-        'Error: shipper:blocked is not a valid workflow stage. Valid stages: new, groomed, designed, planned, implemented.'
-      )
-    );
+    expect(mockConsoleError).not.toHaveBeenCalled();
   });
 
   it('rejects invalid stage names', async () => {
@@ -970,12 +954,10 @@ describe('resetCommand', () => {
       issueJson: mockIssueView('OPEN', ['shipper:planned']),
     });
 
-    await expect(resetCommand('18', { force: true, to: 'banana' })).rejects.toThrow('process.exit');
-    expect(mockConsoleError).toHaveBeenCalledWith(
-      prefixed(
-        'Error: banana is not a valid stage name. Valid stages: new, groomed, designed, planned, implemented.'
-      )
+    await expect(resetCommand('18', { force: true, to: 'banana' })).rejects.toThrow(
+      'Error: banana is not a valid stage name. Valid stages: new, groomed, designed, planned, implemented.'
     );
+    expect(mockConsoleError).not.toHaveBeenCalled();
   });
 
   describe('shipper:failed-only issues', () => {
@@ -1017,13 +999,9 @@ describe('resetCommand', () => {
       });
 
       await expect(resetCommand('18', { force: true, to: 'implemented' })).rejects.toThrow(
-        'process.exit'
+        'Error: shipper:implemented is ahead of the current stage shipper:planned. Reset only works backward.'
       );
-      expect(mockConsoleError).toHaveBeenCalledWith(
-        prefixed(
-          'Error: shipper:implemented is ahead of the current stage shipper:planned. Reset only works backward.'
-        )
-      );
+      expect(mockConsoleError).not.toHaveBeenCalled();
     });
   });
 });

@@ -66,6 +66,7 @@ beforeEach(() => {
   classifyChecksMock.mockReset();
   sleepMsMock.mockReset();
   sleepMsMock.mockResolvedValue(undefined);
+  process.exitCode = undefined;
   logMock.mockClear();
   warnMock.mockClear();
   errorMock.mockClear();
@@ -589,7 +590,7 @@ describe('lookupPR', () => {
     ]);
   });
 
-  it('exits with error when PR does not have shipper:ready label', async () => {
+  it('throws when PR does not have shipper:ready label', async () => {
     ghMock.mockResolvedValue({
       stdout: JSON.stringify({
         number: 42,
@@ -602,13 +603,13 @@ describe('lookupPR', () => {
       stderr: '',
     });
 
-    await expect(lookupPR('42', 'owner/repo')).rejects.toThrow('exit:1');
-    expect(errorMock).toHaveBeenCalledWith(
-      '[shipper] Error: PR #42 does not have the shipper:ready label.'
+    await expect(lookupPR('42', 'owner/repo')).rejects.toThrow(
+      'Error: PR #42 does not have the shipper:ready label.'
     );
+    expect(errorMock).not.toHaveBeenCalled();
   });
 
-  it('exits with error when PR is closed', async () => {
+  it('throws when PR is closed', async () => {
     ghMock.mockResolvedValue({
       stdout: JSON.stringify({
         number: 42,
@@ -621,8 +622,10 @@ describe('lookupPR', () => {
       stderr: '',
     });
 
-    await expect(lookupPR('42', 'owner/repo')).rejects.toThrow('exit:1');
-    expect(errorMock).toHaveBeenCalledWith('[shipper] Error: PR #42 is not open (state: CLOSED).');
+    await expect(lookupPR('42', 'owner/repo')).rejects.toThrow(
+      'Error: PR #42 is not open (state: CLOSED).'
+    );
+    expect(errorMock).not.toHaveBeenCalled();
   });
 
   it('resolves issue to linked PR when ref is not a PR', async () => {
@@ -643,24 +646,26 @@ describe('lookupPR', () => {
     });
   });
 
-  it('exits with error when issue has no linked PR', async () => {
+  it('throws when issue has no linked PR', async () => {
     ghMock.mockRejectedValue(new Error('not found'));
     tryResolvePrForIssueMock.mockResolvedValue(undefined);
 
-    await expect(lookupPR('99', 'owner/repo')).rejects.toThrow('exit:1');
-    expect(errorMock).toHaveBeenCalledWith(
-      '[shipper] Error: #99 is not a PR and no linked PR was found.'
+    await expect(lookupPR('99', 'owner/repo')).rejects.toThrow(
+      'Error: #99 is not a PR and no linked PR was found.'
     );
+    expect(errorMock).not.toHaveBeenCalled();
   });
 
-  it('exits with error when the resolved PR cannot be fetched', async () => {
+  it('throws when the resolved PR cannot be fetched', async () => {
     ghMock
       .mockRejectedValueOnce(new Error('not a PR'))
       .mockRejectedValueOnce(new Error('resolved PR missing'));
     tryResolvePrForIssueMock.mockResolvedValue('42');
 
-    await expect(lookupPR('10', 'owner/repo')).rejects.toThrow('exit:1');
-    expect(errorMock).toHaveBeenCalledWith('[shipper] Error: Failed to fetch resolved PR #42.');
+    await expect(lookupPR('10', 'owner/repo')).rejects.toThrow(
+      'Error: Failed to fetch resolved PR #42.'
+    );
+    expect(errorMock).not.toHaveBeenCalled();
   });
 });
 
@@ -714,9 +719,9 @@ describe('requirePassingChecks', () => {
 
     await expect(
       mergeCommand({ interval: '30', once: true, dryRun: false, number: '42' })
-    ).rejects.toThrow('exit:1');
-
+    ).resolves.toBeUndefined();
     expect(logMock).toHaveBeenCalledWith(expect.stringContaining('CI checks failed: ci'));
+    expect(process.exitCode).toBe(1);
   });
 
   it('retries when checks are pending and requirePassingChecks is true', async () => {
@@ -731,11 +736,11 @@ describe('requirePassingChecks', () => {
 
     await expect(
       mergeCommand({ interval: '30', once: true, dryRun: false, number: '42' })
-    ).rejects.toThrow('exit:1');
-
+    ).resolves.toBeUndefined();
     expect(logMock).toHaveBeenCalledWith(
       expect.stringContaining('Checks still running: ci. Will retry next cycle.')
     );
+    expect(process.exitCode).toBe(1);
   });
 
   it('merges when no checks exist and requirePassingChecks is true', async () => {
@@ -821,8 +826,7 @@ describe('requirePassingChecks', () => {
 
     await expect(
       mergeCommand({ interval: '30', once: true, dryRun: false, number: '42' })
-    ).rejects.toThrow('exit:1');
-
+    ).resolves.toBeUndefined();
     expect(findPrStateViewCalls()).toHaveLength(5);
     expect(sleepMsMock.mock.calls).toEqual([[1_000], [2_000], [4_000], [8_000]]);
     expect(findCalls('pr', 'edit')).toHaveLength(2);
@@ -830,6 +834,7 @@ describe('requirePassingChecks', () => {
     expect(findCalls('issue', 'edit')).toHaveLength(0);
     expect(findCalls('issue', 'close')).toHaveLength(0);
     expect(logMock).toHaveBeenCalledWith('[shipper]   PR #42 failed: Merge failed: merge failed');
+    expect(process.exitCode).toBe(1);
   });
 
   it('remediates when merge verification fails after a reported merge error', async () => {
@@ -842,8 +847,7 @@ describe('requirePassingChecks', () => {
 
     await expect(
       mergeCommand({ interval: '30', once: true, dryRun: false, number: '42' })
-    ).rejects.toThrow('exit:1');
-
+    ).resolves.toBeUndefined();
     expect(findPrStateViewCalls()).toHaveLength(5);
     expect(sleepMsMock.mock.calls).toEqual([[1_000], [2_000], [4_000], [8_000]]);
     expect(findCalls('pr', 'edit')).toHaveLength(2);
@@ -851,6 +855,7 @@ describe('requirePassingChecks', () => {
     expect(findCalls('issue', 'edit')).toHaveLength(0);
     expect(findCalls('issue', 'close')).toHaveLength(0);
     expect(logMock).toHaveBeenCalledWith('[shipper]   PR #42 failed: Merge failed: merge failed');
+    expect(process.exitCode).toBe(1);
   });
 });
 
@@ -875,7 +880,7 @@ describe('processPR state transitions', () => {
 
     await expect(
       mergeCommand({ interval: '30', once: true, dryRun: false, number: '42' })
-    ).rejects.toThrow('exit:1');
+    ).resolves.toBeUndefined();
 
     expect(ghMock).toHaveBeenCalledWith([
       'pr',
@@ -891,6 +896,7 @@ describe('processPR state transitions', () => {
     );
     expect(findCalls('pr', 'edit')).toHaveLength(0);
     expect(findCalls('pr', 'comment')).toHaveLength(0);
+    expect(process.exitCode).toBe(1);
   });
 
   it('remediates when updating a behind branch fails', async () => {
@@ -898,13 +904,14 @@ describe('processPR state transitions', () => {
 
     await expect(
       mergeCommand({ interval: '30', once: true, dryRun: false, number: '42' })
-    ).rejects.toThrow('exit:1');
+    ).resolves.toBeUndefined();
 
     expect(findCalls('pr', 'edit')).toHaveLength(2);
     expect(findCalls('pr', 'comment')).toHaveLength(1);
     expect(logMock).toHaveBeenCalledWith(
       '[shipper]   PR #42 failed: Failed to update branch: update failed'
     );
+    expect(process.exitCode).toBe(1);
   });
 
   it('remediates when a PR is dirty', async () => {
@@ -912,13 +919,14 @@ describe('processPR state transitions', () => {
 
     await expect(
       mergeCommand({ interval: '30', once: true, dryRun: false, number: '42' })
-    ).rejects.toThrow('exit:1');
+    ).resolves.toBeUndefined();
 
     expect(findCalls('pr', 'edit')).toHaveLength(2);
     expect(findCalls('pr', 'comment')).toHaveLength(1);
     expect(logMock).toHaveBeenCalledWith(
       '[shipper]   PR #42 failed: PR has merge conflicts that must be resolved manually.'
     );
+    expect(process.exitCode).toBe(1);
   });
 
   it('logs the dry-run branch update path for behind PRs', async () => {
@@ -926,7 +934,7 @@ describe('processPR state transitions', () => {
 
     await expect(
       mergeCommand({ interval: '30', once: true, dryRun: true, number: '42' })
-    ).rejects.toThrow('exit:1');
+    ).resolves.toBeUndefined();
 
     expect(logMock).toHaveBeenCalledWith(
       '[shipper]   [dry-run] Would run: gh pr update-branch --rebase'
@@ -939,6 +947,7 @@ describe('processPR state transitions', () => {
       'owner/repo',
       '--rebase',
     ]);
+    expect(process.exitCode).toBe(1);
   });
 
   it('remediates blocked PRs with failed checks', async () => {
@@ -953,11 +962,12 @@ describe('processPR state transitions', () => {
 
     await expect(
       mergeCommand({ interval: '30', once: true, dryRun: false, number: '42' })
-    ).rejects.toThrow('exit:1');
+    ).resolves.toBeUndefined();
 
     expect(logMock).toHaveBeenCalledWith('[shipper]   PR #42 failed: CI checks failed: ci');
     expect(findCalls('pr', 'edit')).toHaveLength(2);
     expect(findCalls('pr', 'comment')).toHaveLength(1);
+    expect(process.exitCode).toBe(1);
   });
 
   it('retries blocked PRs with pending checks', async () => {
@@ -972,13 +982,14 @@ describe('processPR state transitions', () => {
 
     await expect(
       mergeCommand({ interval: '30', once: true, dryRun: false, number: '42' })
-    ).rejects.toThrow('exit:1');
+    ).resolves.toBeUndefined();
 
     expect(logMock).toHaveBeenCalledWith(
       '[shipper]   Checks still running: ci. Will retry next cycle.'
     );
     expect(findCalls('pr', 'edit')).toHaveLength(0);
     expect(findCalls('pr', 'comment')).toHaveLength(0);
+    expect(process.exitCode).toBe(1);
   });
 
   it('retries blocked PRs that are likely awaiting review', async () => {
@@ -993,13 +1004,14 @@ describe('processPR state transitions', () => {
 
     await expect(
       mergeCommand({ interval: '30', once: true, dryRun: false, number: '42' })
-    ).rejects.toThrow('exit:1');
+    ).resolves.toBeUndefined();
 
     expect(logMock).toHaveBeenCalledWith(
       '[shipper]   PR is blocked (possibly awaiting review approval). Will retry next cycle.'
     );
     expect(findCalls('pr', 'edit')).toHaveLength(0);
     expect(findCalls('pr', 'comment')).toHaveLength(0);
+    expect(process.exitCode).toBe(1);
   });
 
   it('retries when the merge state is unknown', async () => {
@@ -1007,13 +1019,14 @@ describe('processPR state transitions', () => {
 
     await expect(
       mergeCommand({ interval: '30', once: true, dryRun: false, number: '42' })
-    ).rejects.toThrow('exit:1');
+    ).resolves.toBeUndefined();
 
     expect(logMock).toHaveBeenCalledWith(
       '[shipper]   Merge state not yet computed by GitHub. Will retry next cycle.'
     );
     expect(findCalls('pr', 'edit')).toHaveLength(0);
     expect(findCalls('pr', 'comment')).toHaveLength(0);
+    expect(process.exitCode).toBe(1);
   });
 
   it('retries when the merge state is unexpected', async () => {
@@ -1021,13 +1034,14 @@ describe('processPR state transitions', () => {
 
     await expect(
       mergeCommand({ interval: '30', once: true, dryRun: false, number: '42' })
-    ).rejects.toThrow('exit:1');
+    ).resolves.toBeUndefined();
 
     expect(logMock).toHaveBeenCalledWith(
       '[shipper]   Unexpected merge state: BANANA. Will retry next cycle.'
     );
     expect(findCalls('pr', 'edit')).toHaveLength(0);
     expect(findCalls('pr', 'comment')).toHaveLength(0);
+    expect(process.exitCode).toBe(1);
   });
 
   it.each(['HAS_HOOKS', 'UNSTABLE'])('merges PRs in the %s state', async (mergeStateStatus) => {
@@ -1092,13 +1106,14 @@ describe('processPR error paths', () => {
 
     await expect(
       mergeCommand({ interval: '30', once: true, dryRun: false, number: '42' })
-    ).rejects.toThrow('exit:1');
+    ).resolves.toBeUndefined();
 
     expect(logMock).toHaveBeenCalledWith(
       '[shipper]   PR #42 failed: Could not determine merge state: gh exploded'
     );
     expect(findCalls('pr', 'edit')).toHaveLength(2);
     expect(findCalls('pr', 'comment')).toHaveLength(1);
+    expect(process.exitCode).toBe(1);
   });
 
   it('remediates when merge state lookup returns malformed data', async () => {
@@ -1106,13 +1121,14 @@ describe('processPR error paths', () => {
 
     await expect(
       mergeCommand({ interval: '30', once: true, dryRun: false, number: '42' })
-    ).rejects.toThrow('exit:1');
+    ).resolves.toBeUndefined();
 
     expect(logMock).toHaveBeenCalledWith(
       '[shipper]   PR #42 failed: Could not determine merge state: GitHub CLI returned an invalid pull request view payload.'
     );
     expect(findCalls('pr', 'edit')).toHaveLength(2);
     expect(findCalls('pr', 'comment')).toHaveLength(1);
+    expect(process.exitCode).toBe(1);
   });
 
   it('remediates when fetching blocked-state checks fails', async () => {
@@ -1121,13 +1137,14 @@ describe('processPR error paths', () => {
 
     await expect(
       mergeCommand({ interval: '30', once: true, dryRun: false, number: '42' })
-    ).rejects.toThrow('exit:1');
+    ).resolves.toBeUndefined();
 
     expect(logMock).toHaveBeenCalledWith(
       '[shipper]   PR #42 failed: Could not fetch CI checks: checks down'
     );
     expect(findCalls('pr', 'edit')).toHaveLength(2);
     expect(findCalls('pr', 'comment')).toHaveLength(1);
+    expect(process.exitCode).toBe(1);
   });
 
   it('remediates when fetching required checks fails for a mergeable PR', async () => {
@@ -1136,13 +1153,14 @@ describe('processPR error paths', () => {
 
     await expect(
       mergeCommand({ interval: '30', once: true, dryRun: false, number: '42' })
-    ).rejects.toThrow('exit:1');
+    ).resolves.toBeUndefined();
 
     expect(logMock).toHaveBeenCalledWith(
       '[shipper]   PR #42 failed: Could not fetch CI checks: checks down'
     );
     expect(findCalls('pr', 'edit')).toHaveLength(2);
     expect(findCalls('pr', 'comment')).toHaveLength(1);
+    expect(process.exitCode).toBe(1);
   });
 });
 
@@ -1164,7 +1182,7 @@ describe('failPR remediation', () => {
 
     await expect(
       mergeCommand({ interval: '30', once: true, dryRun: false, number: '42' })
-    ).rejects.toThrow('exit:1');
+    ).resolves.toBeUndefined();
 
     expect(findCalls('pr', 'edit')).toEqual([
       ['pr', 'edit', '42', '-R', 'owner/repo', '--remove-label', 'shipper:ready'],
@@ -1183,6 +1201,7 @@ describe('failPR remediation', () => {
         ),
       ],
     ]);
+    expect(process.exitCode).toBe(1);
   });
 
   it('logs the dry-run remediation path without mutating the PR', async () => {
@@ -1190,13 +1209,14 @@ describe('failPR remediation', () => {
 
     await expect(
       mergeCommand({ interval: '30', once: true, dryRun: true, number: '42' })
-    ).rejects.toThrow('exit:1');
+    ).resolves.toBeUndefined();
 
     expect(logMock).toHaveBeenCalledWith(
       '[shipper]   [dry-run] Would remove shipper:ready, add shipper:pr-reviewed, comment on PR'
     );
     expect(findCalls('pr', 'edit')).toHaveLength(0);
     expect(findCalls('pr', 'comment')).toHaveLength(0);
+    expect(process.exitCode).toBe(1);
   });
 
   it('logs an error when remove-label fails and continues remediation', async () => {
@@ -1204,7 +1224,7 @@ describe('failPR remediation', () => {
 
     await expect(
       mergeCommand({ interval: '30', once: true, dryRun: false, number: '42' })
-    ).rejects.toThrow('exit:1');
+    ).resolves.toBeUndefined();
 
     expect(errorMock).toHaveBeenCalledWith(
       '[shipper]   Warning: Failed to remove shipper:ready label from PR #42'
@@ -1214,6 +1234,7 @@ describe('failPR remediation', () => {
       ['pr', 'edit', '42', '-R', 'owner/repo', '--add-label', 'shipper:pr-reviewed'],
     ]);
     expect(findCalls('pr', 'comment')).toHaveLength(1);
+    expect(process.exitCode).toBe(1);
   });
 
   it('logs an error when add-label fails and still comments on the PR', async () => {
@@ -1221,7 +1242,7 @@ describe('failPR remediation', () => {
 
     await expect(
       mergeCommand({ interval: '30', once: true, dryRun: false, number: '42' })
-    ).rejects.toThrow('exit:1');
+    ).resolves.toBeUndefined();
 
     expect(errorMock).toHaveBeenCalledWith(
       '[shipper]   Warning: Failed to add shipper:pr-reviewed label to PR #42'
@@ -1231,6 +1252,7 @@ describe('failPR remediation', () => {
       ['pr', 'edit', '42', '-R', 'owner/repo', '--add-label', 'shipper:pr-reviewed'],
     ]);
     expect(findCalls('pr', 'comment')).toHaveLength(1);
+    expect(process.exitCode).toBe(1);
   });
 
   it('logs an error when commenting fails without changing the exit path', async () => {
@@ -1238,7 +1260,7 @@ describe('failPR remediation', () => {
 
     await expect(
       mergeCommand({ interval: '30', once: true, dryRun: false, number: '42' })
-    ).rejects.toThrow('exit:1');
+    ).resolves.toBeUndefined();
 
     expect(errorMock).toHaveBeenCalledWith('[shipper]   Warning: Failed to comment on PR #42');
     expect(findCalls('pr', 'edit')).toEqual([
@@ -1246,6 +1268,7 @@ describe('failPR remediation', () => {
       ['pr', 'edit', '42', '-R', 'owner/repo', '--add-label', 'shipper:pr-reviewed'],
     ]);
     expect(findCalls('pr', 'comment')).toHaveLength(1);
+    expect(process.exitCode).toBe(1);
   });
 });
 
@@ -1265,31 +1288,22 @@ describe('mergeCommand validation', () => {
   it('rejects non-numeric PR or issue numbers', async () => {
     await expect(
       mergeCommand({ interval: '30', once: true, dryRun: false, number: 'abc' })
-    ).rejects.toThrow('exit:1');
-
-    expect(errorMock).toHaveBeenCalledWith(
-      '[shipper] Error: argument must be a numeric issue or PR number.'
-    );
+    ).rejects.toThrow('Error: argument must be a numeric issue or PR number.');
+    expect(errorMock).not.toHaveBeenCalled();
   });
 
   it('rejects non-numeric polling intervals', async () => {
     await expect(mergeCommand({ interval: 'abc', once: true, dryRun: false })).rejects.toThrow(
-      'exit:1'
+      'Error: --interval must be a positive integer (seconds).'
     );
-
-    expect(errorMock).toHaveBeenCalledWith(
-      '[shipper] Error: --interval must be a positive integer (seconds).'
-    );
+    expect(errorMock).not.toHaveBeenCalled();
   });
 
   it('rejects polling intervals smaller than one second', async () => {
     await expect(mergeCommand({ interval: '0', once: true, dryRun: false })).rejects.toThrow(
-      'exit:1'
+      'Error: --interval must be a positive integer (seconds).'
     );
-
-    expect(errorMock).toHaveBeenCalledWith(
-      '[shipper] Error: --interval must be a positive integer (seconds).'
-    );
+    expect(errorMock).not.toHaveBeenCalled();
   });
 });
 

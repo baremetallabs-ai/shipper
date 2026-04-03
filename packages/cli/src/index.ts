@@ -75,6 +75,7 @@ program.configureOutput({
 
 function exitWithError(err: unknown): never {
   logger.error(toErrorMessage(err));
+  // Intentional: canonical CLI error exit after wrapAction() has normalized the failure.
   process.exit(1);
 }
 
@@ -187,12 +188,10 @@ program
   .action(
     wrapAction(async (issue: string | undefined, options: { all: boolean }) => {
       if (options.all && issue) {
-        logger.error('Error: --all and an explicit issue number are mutually exclusive.');
-        process.exit(1);
+        throw new Error('Error: --all and an explicit issue number are mutually exclusive.');
       }
       if (!options.all && !issue) {
-        logger.error('Error: an issue number is required unless --all is used.');
-        process.exit(1);
+        throw new Error('Error: an issue number is required unless --all is used.');
       }
       if (options.all) {
         await adoptAllCommand();
@@ -261,29 +260,26 @@ addModelOption(
               }
             ) => {
               if (options.auto && issue) {
-                logger.error('Error: --auto and an explicit issue number are mutually exclusive.');
-                process.exit(1);
+                throw new Error(
+                  'Error: --auto and an explicit issue number are mutually exclusive.'
+                );
               }
               if (!options.auto && !issue) {
-                logger.error('Error: an issue number is required unless --auto is used.');
-                process.exit(1);
+                throw new Error('Error: an issue number is required unless --auto is used.');
               }
               if (options.auto && options.mode !== 'default') {
-                logger.error('Error: --auto and --mode are mutually exclusive.');
-                process.exit(1);
+                throw new Error('Error: --auto and --mode are mutually exclusive.');
               }
 
               if (options.parallel !== undefined && !options.auto) {
-                logger.error('Error: --parallel requires --auto');
-                process.exit(1);
+                throw new Error('Error: --parallel requires --auto');
               }
 
               let parallel: number | undefined;
               if (options.parallel !== undefined) {
                 parallel = Number(options.parallel);
                 if (!Number.isInteger(parallel) || parallel < 1) {
-                  logger.error('Error: --parallel requires a number');
-                  process.exit(1);
+                  throw new Error('Error: --parallel requires a number');
                 }
                 if (parallel === 1) {
                   parallel = undefined;
@@ -320,8 +316,9 @@ addModelOption(
               options: { auto: boolean; mode: string; agent?: string; model?: string }
             ) => {
               if (options.auto && issue) {
-                logger.error('Error: --auto and an explicit issue number are mutually exclusive.');
-                process.exit(1);
+                throw new Error(
+                  'Error: --auto and an explicit issue number are mutually exclusive.'
+                );
               }
               await groomCommand(requireResolvedRepo(), issue, {
                 auto: options.auto,
@@ -421,9 +418,12 @@ program
   .command('eject')
   .description('Scaffold prompt overrides for customization')
   .argument('[name]', 'prompt name to eject (e.g. groom, pr-open)')
-  .action((name?: string) => {
-    ejectCommand(name);
-  });
+  .action(
+    wrapAction((name?: string) => {
+      ejectCommand(name);
+      return Promise.resolve();
+    })
+  );
 
 program
   .command('reset')
@@ -596,6 +596,7 @@ if (argv[0] === 'ship') {
     const next = argv[i + 1];
     if (!next || next.startsWith('-')) {
       logger.error('Error: --parallel requires a number');
+      // Intentional: pre-parse validation runs before Commander action handlers and cannot use wrapAction().
       process.exit(1);
     }
   }
@@ -607,9 +608,11 @@ try {
   if (error instanceof CommanderError) {
     if (error.code === 'commander.optionMissingArgument' && error.message.includes('--parallel')) {
       writeSync(process.stderr.fd, 'Error: --parallel requires a number\n');
+      // Intentional: Commander parse errors happen outside wrapAction() and must terminate here.
       process.exit(1);
     }
 
+    // Intentional: preserve Commander-managed exit codes for help and usage failures.
     process.exit(error.exitCode);
   }
 

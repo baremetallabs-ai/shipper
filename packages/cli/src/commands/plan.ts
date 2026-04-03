@@ -19,8 +19,7 @@ export async function planCommand(
   if (!issue) {
     const selected = await autoSelectIssue(repo, 'shipper:designed');
     if (!selected) {
-      logger.error("No issues ready for planning. Run 'shipper design' first.");
-      process.exit(1);
+      throw new Error("No issues ready for planning. Run 'shipper design' first.");
     }
     logger.error(`Auto-selected #${selected.number}: ${selected.title}`);
     issue = String(selected.number);

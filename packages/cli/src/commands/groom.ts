@@ -64,11 +64,9 @@ export async function groomCommand(
 ): Promise<void> {
   const effectiveMode = resolveMode('groom', options.mode);
   if (effectiveMode === 'headless') {
-    logger.error(
+    throw new Error(
       'Error: groom does not support headless mode. Grooming requires interactive input.'
     );
-    process.exit(1);
-    return;
   }
 
   if (options.auto) {
@@ -105,9 +103,7 @@ export async function groomCommand(
   if (!issue) {
     const selected = await autoSelectIssue(repo, 'shipper:new');
     if (!selected) {
-      logger.error("No issues ready for grooming. Create one with 'shipper new'.");
-      process.exit(1);
-      return;
+      throw new Error("No issues ready for grooming. Create one with 'shipper new'.");
     }
     logger.error(`Auto-selected #${selected.number}: ${selected.title}`);
     issue = String(selected.number);
