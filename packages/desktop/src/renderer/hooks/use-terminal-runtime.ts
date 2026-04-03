@@ -4,6 +4,8 @@ import { Terminal } from '@xterm/xterm';
 
 import '@xterm/xterm/css/xterm.css';
 
+import { getShipperApi } from '../lib/shipper-api.js';
+
 type TerminalStatus = 'running' | 'waiting' | 'exited';
 
 interface UseTerminalRuntimeOptions {
@@ -59,14 +61,14 @@ export function useTerminalRuntime({
     if (prev.cols === cols && prev.rows === rows) return;
 
     lastSentSizeRef.current = { cols, rows };
-    void window.shipperAPI.ptyResize(sessionIdRef.current, cols, rows);
+    void getShipperApi().ptyResize(sessionIdRef.current, cols, rows);
   }, []);
 
   const clearQueuedWrites = useCallback(() => {
     queuedWritesRef.current = [];
     queuedWriteLengthRef.current = 0;
     if (writeFlushTimerRef.current !== null) {
-      window.clearTimeout(writeFlushTimerRef.current);
+      globalThis.clearTimeout(writeFlushTimerRef.current);
       writeFlushTimerRef.current = null;
     }
   }, []);
@@ -95,7 +97,7 @@ export function useTerminalRuntime({
       // Flush immediately if we've accumulated enough data.
       if (queuedWriteLengthRef.current >= WRITE_BATCH_THRESHOLD) {
         if (writeFlushTimerRef.current !== null) {
-          window.clearTimeout(writeFlushTimerRef.current);
+          globalThis.clearTimeout(writeFlushTimerRef.current);
           writeFlushTimerRef.current = null;
         }
         flushQueuedWrites();
@@ -105,7 +107,7 @@ export function useTerminalRuntime({
       // Otherwise schedule a flush on the next frame.
       if (writeFlushTimerRef.current !== null) return;
 
-      writeFlushTimerRef.current = window.setTimeout(() => {
+      writeFlushTimerRef.current = globalThis.setTimeout(() => {
         writeFlushTimerRef.current = null;
         flushQueuedWrites();
       }, WRITE_FLUSH_INTERVAL_MS);
@@ -155,15 +157,15 @@ export function useTerminalRuntime({
     const dataDisposable = terminal.onData((data) => {
       if (statusRef.current === 'exited') return;
       onInputRef.current?.();
-      void window.shipperAPI.ptyWrite(sessionIdRef.current, data);
+      void getShipperApi().ptyWrite(sessionIdRef.current, data);
     });
 
     // Debounced resize on container changes.
     const observer = new ResizeObserver(() => {
       if (resizeTimerRef.current !== null) {
-        window.clearTimeout(resizeTimerRef.current);
+        globalThis.clearTimeout(resizeTimerRef.current);
       }
-      resizeTimerRef.current = window.setTimeout(() => {
+      resizeTimerRef.current = globalThis.setTimeout(() => {
         resizeTimerRef.current = null;
         fitAndResize();
       }, RESIZE_DEBOUNCE_MS);
@@ -174,11 +176,11 @@ export function useTerminalRuntime({
     return () => {
       observer.disconnect();
       if (resizeTimerRef.current !== null) {
-        window.clearTimeout(resizeTimerRef.current);
+        globalThis.clearTimeout(resizeTimerRef.current);
         resizeTimerRef.current = null;
       }
       if (visibleFitFrameRef.current !== null) {
-        window.cancelAnimationFrame(visibleFitFrameRef.current);
+        globalThis.cancelAnimationFrame(visibleFitFrameRef.current);
         visibleFitFrameRef.current = null;
       }
       clearQueuedWrites();
@@ -198,7 +200,7 @@ export function useTerminalRuntime({
       return;
     }
 
-    visibleFitFrameRef.current = window.requestAnimationFrame(() => {
+    visibleFitFrameRef.current = globalThis.requestAnimationFrame(() => {
       visibleFitFrameRef.current = null;
       fitAndResize();
     });
@@ -206,7 +208,7 @@ export function useTerminalRuntime({
 
   // Subscribe to PTY output events.
   useEffect(() => {
-    const unsubscribe = window.shipperAPI.onPtyOutput((event) => {
+    const unsubscribe = getShipperApi().onPtyOutput((event) => {
       if (event.sessionId !== sessionIdRef.current) return;
 
       const { sequence, data } = event;
