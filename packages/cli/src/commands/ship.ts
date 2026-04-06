@@ -808,8 +808,8 @@ async function shipOneIssue(
             return { success: false, error: `unexpected label after stage "${stageName}"` };
           }
 
-          if (label === NEW_LABEL && previousLabel !== NEW_LABEL && (parkHooks || isAutoChildRun)) {
-            const msg = `Issue #${issueStr} was reset to ${NEW_LABEL} by stage "${stageName}" - stopping to avoid interactive groom stage.`;
+          if (label === NEW_LABEL && previousLabel !== NEW_LABEL) {
+            const msg = `Issue #${issueStr} was reset to ${NEW_LABEL} by stage "${stageName}" — stopping because the stage rejected backward.`;
             issueLogger.error(msg);
             printSummary(results, issueLogger);
             return { success: false, error: msg };
