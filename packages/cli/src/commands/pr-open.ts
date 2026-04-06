@@ -1,17 +1,25 @@
-import { logger, findBranchForIssue, getRepoRoot } from '@dnsquared/shipper-core';
-import { autoSelectIssue, resolveBaseBranch, resolveRef } from '@dnsquared/shipper-core';
+import {
+  autoSelectIssue,
+  findBranchForIssue,
+  formatConflictContext,
+  getRepoRoot,
+  getSettings,
+  handleAgentCrash,
+  logger,
+  processResult,
+  resolveBaseBranch,
+  resolveRef,
+  retryOnInvalidOutput,
+  runPrompt,
+  scrubOutputDir,
+  toErrorMessage,
+  truncateLargeInput,
+  withGitTransport,
+  withIssueLock,
+  withStageHooks,
+  withWorktree,
+} from '@dnsquared/shipper-core';
 import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
-import { formatConflictContext } from '@dnsquared/shipper-core';
-import { handleAgentCrash, processResult, scrubOutputDir } from '@dnsquared/shipper-core';
-import { retryOnInvalidOutput } from '@dnsquared/shipper-core';
-import { toErrorMessage } from '@dnsquared/shipper-core';
-import { truncateLargeInput } from '@dnsquared/shipper-core';
-import { withStageHooks } from '@dnsquared/shipper-core';
-import { getSettings } from '@dnsquared/shipper-core';
-import { withIssueLock } from '@dnsquared/shipper-core';
-import { withGitTransport } from '@dnsquared/shipper-core';
-import { withWorktree } from '@dnsquared/shipper-core';
-import { runPrompt } from '@dnsquared/shipper-core';
 
 export async function prOpenCommand(
   repo: string,
