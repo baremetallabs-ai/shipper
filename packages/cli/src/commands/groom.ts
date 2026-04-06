@@ -1,17 +1,17 @@
 import {
-  logger,
   autoSelectIssue,
   generateBranchName,
-  getSettings,
   getRepoRoot,
+  getSettings,
+  logger,
   resolveBaseBranch,
   resolveMode,
+  runPrompt,
+  withIssueLock,
+  withStageHooks,
+  withWorktree,
 } from '@dnsquared/shipper-core';
 import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
-import { withStageHooks } from '@dnsquared/shipper-core';
-import { withIssueLock } from '@dnsquared/shipper-core';
-import { withWorktree } from '@dnsquared/shipper-core';
-import { runPrompt } from '@dnsquared/shipper-core';
 import { printAutoSummary, type AutoResult } from './ship-auto.js';
 
 export interface GroomOptions {

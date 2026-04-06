@@ -1,45 +1,43 @@
 import path from 'node:path';
 
-import { getBranchForPR, getRepoRoot } from '@dnsquared/shipper-core';
 import {
-  logger,
-  fetchChecks,
+  autoSelectPrForStage,
   classifyChecks,
   enrichFailedChecks,
-  rerunFailedChecks,
-} from '@dnsquared/shipper-core';
-import { autoSelectPrForStage, resolveRef } from '@dnsquared/shipper-core';
-import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
-import { formatConflictContext } from '@dnsquared/shipper-core';
-import { gh } from '@dnsquared/shipper-core';
-import { isPlainObject } from '@dnsquared/shipper-core';
-import { toErrorMessage } from '@dnsquared/shipper-core';
-import { withStageHooks } from '@dnsquared/shipper-core';
-import { withIssueLock } from '@dnsquared/shipper-core';
-import { withWorktree } from '@dnsquared/shipper-core';
-import { runPrompt } from '@dnsquared/shipper-core';
-import { truncateLargeInput } from '@dnsquared/shipper-core';
-import { getSettings } from '@dnsquared/shipper-core';
-import type { PrReviewWait } from '@dnsquared/shipper-core';
-import {
   executeTransition,
+  fetchChecks,
+  formatConflictContext,
+  getBranchForPR,
+  getCommitsAheadCount,
+  getGitRevParse,
+  getRepoRoot,
+  getSettings,
+  gh,
   handleAgentCrash,
+  isPlainObject,
+  logger,
   postComment,
   postReplies,
   processResult,
-  retryOnInvalidOutput,
+  pushWithRetry,
+  rerunFailedChecks,
+  resolveRef,
   resolveTransition,
+  retryOnInvalidOutput,
+  runPrompt,
   scrubOutputDir,
   setupProtocolDirs,
+  sleepMs,
   syncWorktree,
-  getGitRevParse,
-  getCommitsAheadCount,
-  pushWithRetry,
+  toErrorMessage,
+  truncateLargeInput,
   validateStageOutput,
+  withIssueLock,
+  withStageHooks,
+  withWorktree,
   writeContextFile,
 } from '@dnsquared/shipper-core';
-
-import { sleepMs } from '@dnsquared/shipper-core';
+import type { AgentName, CommandMode, PrReviewWait } from '@dnsquared/shipper-core';
 
 const ZERO_CHECKS_GRACE_MS = 30_000;
 const CI_WAIT_TIMEOUT_MINUTES = 30;

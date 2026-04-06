@@ -1,23 +1,23 @@
 import {
-  logger,
-  gh,
-  resolveRef,
-  tryResolvePrForIssue,
   BLOCKED_LABEL,
   CONTROL_LABEL_NAMES,
-  FAILED_LABEL,
-  NEW_LABEL,
-  GROOMED_LABEL,
   DESIGNED_LABEL,
-  PLANNED_LABEL,
+  FAILED_LABEL,
+  GROOMED_LABEL,
   IMPLEMENTED_LABEL,
-  PR_OPEN_LABEL,
+  NEW_LABEL,
+  PLANNED_LABEL,
   PRIORITY_LABEL_NAMES,
+  PR_OPEN_LABEL,
   PR_REVIEWED_LABEL,
   READY_LABEL,
+  gh,
+  logger,
+  resolveRef,
+  tryResolvePrForIssue,
+  withIssueLock,
 } from '@dnsquared/shipper-core';
 import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
-import { withIssueLock } from '@dnsquared/shipper-core';
 import { groomCommand } from './groom.js';
 import { designCommand } from './design.js';
 import { planCommand } from './plan.js';
