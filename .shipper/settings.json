@@ -19,6 +19,7 @@
       "agent": "codex"
     }
   },
+  "installCommand": "npm install",
   "merge": {
     "requirePassingChecks": true
   },
