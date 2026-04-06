@@ -45,7 +45,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   withWorktree: withWorktreeMock,
 }));
 
-vi.mock('../../src/commands/ship.js', () => ({
+vi.mock('../../src/commands/ship-auto.js', () => ({
   printAutoSummary: printAutoSummaryMock,
 }));
 
