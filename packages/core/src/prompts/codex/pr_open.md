@@ -44,7 +44,7 @@ Run `./.shipper/scripts/install-deps.sh`. If the repository has no install comma
 
 > Check `CLAUDE.md` or `AGENTS.md` at the repo root for the exact verification commands to run. If neither exists, inspect the project configuration and run the real lint, format-check, type-check, build, and test commands that the repository defines.
 
-All relevant automated checks must pass before you prepare PR output.
+All relevant automated checks must pass before you prepare PR output. However, if a check requires infrastructure the sandbox cannot provide (e.g., Docker services, external API keys, or a `.env` file with secrets), note it as "deferred to CI" in the PR body and proceed. Do not trigger the environment failure escape hatch when the only thing blocked is a check that needs unavailable infrastructure — if all checks that can run in the sandbox pass, validation succeeded.
 
 ### Step 3: Remediate straightforward failures
 
