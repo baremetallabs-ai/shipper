@@ -12,7 +12,7 @@ import { withStageHooks } from '@dnsquared/shipper-core';
 import { withIssueLock } from '@dnsquared/shipper-core';
 import { withWorktree } from '@dnsquared/shipper-core';
 import { runPrompt } from '@dnsquared/shipper-core';
-import { printAutoSummary, type AutoResult } from './ship.js';
+import { printAutoSummary, type AutoResult } from './ship-auto.js';
 
 export interface GroomOptions {
   auto: boolean;
