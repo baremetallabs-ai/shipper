@@ -1,14 +1,19 @@
 import { openSync, closeSync, readFileSync, writeFileSync, unlinkSync, constants } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { logger, fetchChecks, classifyChecks, isPlainObject } from '@dnsquared/shipper-core';
-import { gh } from '@dnsquared/shipper-core';
-import { getSettings } from '@dnsquared/shipper-core';
-import { tryResolvePrForIssue } from '@dnsquared/shipper-core';
-import { getRepoNwo } from '@dnsquared/shipper-core';
-import { sleepMs } from '@dnsquared/shipper-core';
-import { toErrorMessage } from '@dnsquared/shipper-core';
-import { withStageHooks } from '@dnsquared/shipper-core';
+import {
+  classifyChecks,
+  fetchChecks,
+  getRepoNwo,
+  getSettings,
+  gh,
+  isPlainObject,
+  logger,
+  sleepMs,
+  toErrorMessage,
+  tryResolvePrForIssue,
+  withStageHooks,
+} from '@dnsquared/shipper-core';
 
 interface MergeOptions {
   interval: string;
