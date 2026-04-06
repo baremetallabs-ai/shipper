@@ -1,13 +1,21 @@
-import { logger, autoSelectIssue, generateBranchName, getRepoRoot } from '@dnsquared/shipper-core';
+import {
+  autoSelectIssue,
+  generateBranchName,
+  getRepoRoot,
+  getSettings,
+  handleAgentCrash,
+  logger,
+  processResult,
+  resolveBaseBranch,
+  retryOnInvalidOutput,
+  runPrompt,
+  scrubOutputDir,
+  toErrorMessage,
+  withIssueLock,
+  withStageHooks,
+  withWorktree,
+} from '@dnsquared/shipper-core';
 import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
-import { getSettings, resolveBaseBranch } from '@dnsquared/shipper-core';
-import { handleAgentCrash, processResult, scrubOutputDir } from '@dnsquared/shipper-core';
-import { retryOnInvalidOutput } from '@dnsquared/shipper-core';
-import { toErrorMessage } from '@dnsquared/shipper-core';
-import { withStageHooks } from '@dnsquared/shipper-core';
-import { withIssueLock } from '@dnsquared/shipper-core';
-import { withWorktree } from '@dnsquared/shipper-core';
-import { runPrompt } from '@dnsquared/shipper-core';
 
 export async function designCommand(
   repo: string,
