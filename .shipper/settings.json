@@ -19,9 +19,9 @@
       "agent": "codex"
     }
   },
-  "installCommand": "npm install",
   "merge": {
     "requirePassingChecks": true
   },
+  "installCommand": "npm install",
   "cliVersion": "2.0.0"
 }
