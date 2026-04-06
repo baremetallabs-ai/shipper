@@ -811,6 +811,7 @@ async function shipOneIssue(
           if (label === NEW_LABEL && previousLabel !== NEW_LABEL) {
             const msg = `Issue #${issueStr} was reset to ${NEW_LABEL} by stage "${stageName}" — stopping because the stage rejected backward.`;
             issueLogger.error(msg);
+            results[results.length - 1] = { stage: stageName, status: 'fail' };
             printSummary(results, issueLogger);
             return { success: false, error: msg };
           }

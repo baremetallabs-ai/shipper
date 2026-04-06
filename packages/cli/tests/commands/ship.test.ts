@@ -1655,6 +1655,7 @@ describe('shipCommand single-issue path', () => {
   });
 
   it('stops when a default-mode run resets an issue to shipper:new', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     mockIssueViewSequence(['shipper:planned', 'shipper:new']);
@@ -1663,12 +1664,15 @@ describe('shipCommand single-issue path', () => {
 
     expect(mockSpawn).toHaveBeenCalledTimes(1);
     expect(process.exitCode).toBe(1);
+    expect(getConsoleOutput(logSpy)).toContain('✗ implement — failed');
+    expect(getConsoleOutput(logSpy)).not.toContain('✓ implement');
     expect(errorSpy).toHaveBeenCalledWith(
       prefixed(
         'Issue #42 was reset to shipper:new by stage "implement" — stopping because the stage rejected backward.'
       )
     );
 
+    logSpy.mockRestore();
     errorSpy.mockRestore();
   });
 
