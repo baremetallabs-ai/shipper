@@ -547,7 +547,7 @@ export async function shipAutoParallel(
 
       await wait(3000);
 
-      for (const [, run] of activeRuns) {
+      for (const run of activeRuns.values()) {
         if (run.child.exitCode === null && run.child.signalCode === null) {
           run.child.kill('SIGKILL');
         }
