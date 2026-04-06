@@ -229,6 +229,7 @@ export function printUnblockSummary(attempts: UnblockAttempt[], homeDir = homedi
   logger.log('  Ref              Issue                                          Outcome');
   const finalByIssue = new Map<number, UnblockAttempt>();
   for (const a of attempts) {
+    // Preserve final-attempt order when an issue is retried later in the list.
     finalByIssue.delete(a.issue);
     finalByIssue.set(a.issue, a);
   }
