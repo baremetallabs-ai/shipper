@@ -206,6 +206,7 @@ describe('gh', () => {
     'No commit found on the pull request',
     'merge already in progress',
     'Already in progress',
+    'must be run in a work tree',
   ])('does not retry permanent failure "%s"', async (stderr) => {
     const err = permanentError(stderr);
     execFileMock.mockImplementationOnce((_cmd: string, _args: string[], ...rest: unknown[]) => {
