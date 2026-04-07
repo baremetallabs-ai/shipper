@@ -9,6 +9,7 @@ import { logger } from './logger.js';
 
 const REPOS_DIR = path.join(homedir(), '.shipper', 'repos');
 const execFileAsync = promisify(execFile);
+const INVALID_WORKTREE_PATTERNS = [/not a git repository/i, /invalid gitfile format/i];
 
 /**
  * Returns the local clone path for a GitHub repo (e.g. `owner/repo`).
@@ -61,7 +62,24 @@ async function isValidWorktree(dir: string): Promise<boolean> {
       encoding: 'utf-8',
     });
     return stdout.trim() === 'true';
-  } catch {
-    return false;
+  } catch (error) {
+    if (isInvalidWorktreeProbeError(error)) {
+      return false;
+    }
+
+    throw error;
   }
+}
+
+function isInvalidWorktreeProbeError(error: unknown): boolean {
+  return INVALID_WORKTREE_PATTERNS.some((pattern) => pattern.test(getErrorStderr(error)));
+}
+
+function getErrorStderr(error: unknown): string {
+  return typeof error === 'object' &&
+    error !== null &&
+    'stderr' in error &&
+    typeof error.stderr === 'string'
+    ? error.stderr
+    : '';
 }
