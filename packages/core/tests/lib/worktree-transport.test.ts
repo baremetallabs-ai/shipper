@@ -14,7 +14,11 @@ const execFileMock =
     ) => object
   >();
 const readFileMock = vi.fn<(path: string, encoding: string) => Promise<string>>();
-const accessMock = vi.fn<(path: string) => Promise<void>>();
+const accessMock = vi.fn<(path: string, mode?: number) => Promise<void>>();
+const chmodMock = vi.fn<(path: string, mode: number) => Promise<void>>();
+const mkdtempMock = vi.fn<(prefix: string) => Promise<string>>();
+const rmMock = vi.fn<(path: string, opts: Record<string, unknown>) => Promise<void>>();
+const writeFileMock = vi.fn<(path: string, content: string) => Promise<void>>();
 const getSettingsMock = vi.fn<() => Pick<Settings, 'installCommand'>>();
 
 vi.mock('node:child_process', async () => {
@@ -30,8 +34,12 @@ vi.mock('node:fs/promises', async () => {
   const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
   return {
     ...actual,
+    chmod: (...args: unknown[]) => chmodMock(...args),
+    mkdtemp: (...args: unknown[]) => mkdtempMock(...args),
     readFile: (...args: unknown[]) => readFileMock(...args),
+    rm: (...args: unknown[]) => rmMock(...args),
     access: (...args: unknown[]) => accessMock(...args),
+    writeFile: (...args: unknown[]) => writeFileMock(...args),
   };
 });
 
@@ -54,6 +62,7 @@ const protectedPathsArgs = [
 ];
 const checkoutArgs = ['checkout', 'HEAD', '--', '.'];
 const cleanArgs = ['clean', '-fd', '--exclude=.shipper'];
+const hooksPathArgs = ['rev-parse', '--git-path', 'hooks'];
 
 function queueSpawnExit(code = 0): void {
   spawnMock.mockImplementationOnce(() => {
@@ -129,10 +138,15 @@ function queueProtectedPathsLsFiles(stdout = ''): void {
   queueExecResult({ stdout });
 }
 
+function queueHooksPath(stdout = '/tmp/repo/.git/hooks\n'): void {
+  queueExecResult({ stdout });
+}
+
 function queueCleanBeforePush(): void {
   queueProtectedPathsLsFiles();
   queueExecResult();
   queueExecResult();
+  queueHooksPath();
 }
 
 function queueCleanBeforeForcePush(commitsAhead = '1\n'): void {
@@ -141,7 +155,7 @@ function queueCleanBeforeForcePush(commitsAhead = '1\n'): void {
 }
 
 function cleanBeforePushGitArgs(): string[][] {
-  return [protectedPathsArgs, checkoutArgs, cleanArgs];
+  return [protectedPathsArgs, checkoutArgs, cleanArgs, hooksPathArgs];
 }
 
 function cleanBeforeForcePushGitArgs(_commitsAhead = '1\n'): string[][] {
@@ -179,6 +193,10 @@ describe('syncWorktree', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     accessMock.mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+    chmodMock.mockResolvedValue(undefined);
+    mkdtempMock.mockResolvedValue('/tmp/shipper-pre-push-wrapper');
+    rmMock.mockResolvedValue(undefined);
+    writeFileMock.mockResolvedValue(undefined);
     getSettingsMock.mockReset();
     getSettingsMock.mockReturnValue({});
   });
@@ -664,7 +682,7 @@ describe('withGitTransport', () => {
       ...cleanBeforePushGitArgs(),
       ['push', '-u', 'origin', 'HEAD'],
     ]);
-    expect(execFileMock.mock.calls[7]?.[2]).toMatchObject({
+    expect(execFileMock.mock.calls[8]?.[2]).toMatchObject({
       cwd: '/tmp/wt',
       maxBuffer: 10 * 1024 * 1024,
     });

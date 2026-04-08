@@ -14,7 +14,11 @@ const execFileMock =
     ) => object
   >();
 const readFileMock = vi.fn<(path: string, encoding: string) => Promise<string>>();
-const accessMock = vi.fn<(path: string) => Promise<void>>();
+const accessMock = vi.fn<(path: string, mode?: number) => Promise<void>>();
+const chmodMock = vi.fn<(path: string, mode: number) => Promise<void>>();
+const mkdtempMock = vi.fn<(prefix: string) => Promise<string>>();
+const rmMock = vi.fn<(path: string, opts: Record<string, unknown>) => Promise<void>>();
+const writeFileMock = vi.fn<(path: string, content: string) => Promise<void>>();
 const getSettingsMock = vi.fn<() => Pick<Settings, 'installCommand'>>();
 
 vi.mock('node:child_process', async () => {
@@ -30,8 +34,12 @@ vi.mock('node:fs/promises', async () => {
   const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
   return {
     ...actual,
+    chmod: (...args: unknown[]) => chmodMock(...args),
+    mkdtemp: (...args: unknown[]) => mkdtempMock(...args),
     readFile: (...args: unknown[]) => readFileMock(...args),
+    rm: (...args: unknown[]) => rmMock(...args),
     access: (...args: unknown[]) => accessMock(...args),
+    writeFile: (...args: unknown[]) => writeFileMock(...args),
   };
 });
 
@@ -55,6 +63,7 @@ const protectedPathsArgs = [
 const resetIndexArgs = ['reset', 'HEAD', '--', '.'];
 const checkoutArgs = ['checkout', 'HEAD', '--', '.'];
 const cleanArgs = ['clean', '-fd', '--exclude=.shipper'];
+const hooksPathArgs = ['rev-parse', '--git-path', 'hooks'];
 
 function queueSpawnExit(code = 0): void {
   spawnMock.mockImplementationOnce(() => {
@@ -100,10 +109,15 @@ function queueProtectedPathsLsFiles(stdout = ''): void {
   queueExecResult({ stdout });
 }
 
+function queueHooksPath(stdout = '/tmp/repo/.git/hooks\n'): void {
+  queueExecResult({ stdout });
+}
+
 function queueCleanBeforePush(): void {
   queueProtectedPathsLsFiles();
   queueExecResult();
   queueExecResult();
+  queueHooksPath();
 }
 
 function queueCleanBeforeForcePush(commitsAhead = '1\n'): void {
@@ -112,7 +126,7 @@ function queueCleanBeforeForcePush(commitsAhead = '1\n'): void {
 }
 
 function cleanBeforePushGitArgs(): string[][] {
-  return [protectedPathsArgs, checkoutArgs, cleanArgs];
+  return [protectedPathsArgs, checkoutArgs, cleanArgs, hooksPathArgs];
 }
 
 function cleanBeforeForcePushGitArgs(_commitsAhead = '1\n'): string[][] {
@@ -130,6 +144,11 @@ function gitArgsFromExecCalls(): string[][] {
 describe('pushWorktree', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    accessMock.mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+    chmodMock.mockResolvedValue(undefined);
+    mkdtempMock.mockResolvedValue('/tmp/shipper-pre-push-wrapper');
+    rmMock.mockResolvedValue(undefined);
+    writeFileMock.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -157,11 +176,47 @@ describe('pushWorktree', () => {
       cwd: '/tmp/wt',
       maxBuffer: 10 * 1024 * 1024,
     });
-    expect(execFileMock.mock.calls[3]?.[2]).toMatchObject({
+    expect(execFileMock.mock.calls[4]?.[2]).toMatchObject({
       cwd: '/tmp/wt',
       maxBuffer: 10 * 1024 * 1024,
     });
     expect(gitArgsFromExecCalls()).not.toContainEqual(['rev-list', '--count', 'origin/main..HEAD']);
+  });
+
+  it('wraps an executable pre-push hook to unset worktree git env before push', async () => {
+    accessMock.mockResolvedValueOnce(undefined);
+    mkdtempMock.mockResolvedValueOnce('/tmp/shipper-pre-push-wrapper-123');
+    queueCleanBeforePush();
+    queueExecResult();
+
+    await expect(
+      pushWorktree({
+        wtPath: '/tmp/wt',
+        repoRoot: '/tmp/repo',
+        baseBranch: 'main',
+        pushMode: 'new-branch',
+      })
+    ).resolves.toBeUndefined();
+
+    expect(gitArgsFromExecCalls()).toEqual([
+      ...cleanBeforePushGitArgs(),
+      ['-c', 'core.hooksPath=/tmp/shipper-pre-push-wrapper-123', 'push', '-u', 'origin', 'HEAD'],
+    ]);
+    expect(writeFileMock).toHaveBeenCalledWith(
+      '/tmp/shipper-pre-push-wrapper-123/pre-push',
+      '#!/bin/sh\nunset GIT_DIR GIT_WORK_TREE\nexec "$SHIPPER_ORIGINAL_PRE_PUSH" "$@"\n'
+    );
+    expect(chmodMock).toHaveBeenCalledWith('/tmp/shipper-pre-push-wrapper-123/pre-push', 0o755);
+    expect(execFileMock.mock.calls[4]?.[2]).toMatchObject({
+      cwd: '/tmp/wt',
+      env: {
+        SHIPPER_ORIGINAL_PRE_PUSH: '/tmp/repo/.git/hooks/pre-push',
+      },
+    });
+    expect(rmMock).toHaveBeenCalledWith('/tmp/shipper-pre-push-wrapper-123', {
+      recursive: true,
+      force: true,
+    });
   });
 
   it('aborts before push when git checkout -- . fails', async () => {
@@ -194,7 +249,7 @@ describe('pushWorktree', () => {
       })
     ).rejects.toThrow('Failed to remove untracked files before push');
 
-    expect(gitArgsFromExecCalls()).toEqual([...cleanBeforePushGitArgs()]);
+    expect(gitArgsFromExecCalls()).toEqual([protectedPathsArgs, checkoutArgs, cleanArgs]);
   });
 
   it('fetches, rebases onto the remote branch, and force-pushes after a failed new-branch push', async () => {
@@ -490,6 +545,7 @@ describe('pushWorktree', () => {
       queueExecResult();
       queueExecResult();
       queueExecResult();
+      queueHooksPath();
       queueExecResult();
 
       await expect(
@@ -516,6 +572,7 @@ describe('pushWorktree', () => {
         ['commit', '--amend', '--allow-empty', '--no-edit', '--no-verify', '--no-gpg-sign'],
         checkoutArgs,
         cleanArgs,
+        hooksPathArgs,
         ['push', '-u', 'origin', 'HEAD'],
       ]);
       expect(execFileMock.mock.calls[4]?.[2]).toMatchObject({
@@ -587,6 +644,7 @@ describe('pushWorktree', () => {
       queueExecResult();
       queueExecResult();
       queueExecResult();
+      queueHooksPath();
       queueExecResult();
 
       await expect(
@@ -606,6 +664,7 @@ describe('pushWorktree', () => {
         ['commit', '--amend', '--allow-empty', '--no-edit', '--no-verify', '--no-gpg-sign'],
         checkoutArgs,
         cleanArgs,
+        hooksPathArgs,
         ['push', '-u', 'origin', 'HEAD'],
       ]);
       expect(consoleErrorSpy).toHaveBeenCalledWith(
@@ -625,6 +684,7 @@ describe('pushWorktree', () => {
       queueProtectedPathsLsFiles();
       queueExecResult();
       queueExecResult();
+      queueHooksPath();
       queueExecResult();
 
       await expect(
@@ -642,6 +702,7 @@ describe('pushWorktree', () => {
         protectedPathsArgs,
         checkoutArgs,
         cleanArgs,
+        hooksPathArgs,
         ['push', '-u', 'origin', 'HEAD'],
       ]);
       expect(gitArgsFromExecCalls()).not.toContainEqual([

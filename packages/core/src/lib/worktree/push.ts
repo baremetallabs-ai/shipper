@@ -1,3 +1,7 @@
+import { constants as fsConstants } from 'node:fs';
+import { access, chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { logger } from '../logger.js';
 import {
   MAX_PUSH_ATTEMPTS,
@@ -26,6 +30,13 @@ import {
 import { stripProtectedPaths } from './protected-paths.js';
 
 const HOOK_FAILURE_PATTERN = /husky|lefthook|pre-push|simple-git-hooks|overcommit/i;
+const PRE_PUSH_WRAPPER_PREFIX = 'shipper-pre-push-';
+
+interface PreparedPushCommand {
+  args: string[];
+  cleanup?: () => Promise<void>;
+  env?: typeof process.env;
+}
 
 function getPushArgs(pushMode: WorktreeGitOpts['pushMode'], forcePushBranch?: string): string[] {
   return pushMode === 'new-branch'
@@ -33,6 +44,58 @@ function getPushArgs(pushMode: WorktreeGitOpts['pushMode'], forcePushBranch?: st
     : forcePushBranch
       ? ['push', '--force-with-lease', 'origin', `HEAD:refs/heads/${forcePushBranch}`]
       : ['push', '--force-with-lease'];
+}
+
+function resolveGitPath(wtPath: string, gitPath: string): string {
+  return path.isAbsolute(gitPath) ? gitPath : path.resolve(wtPath, gitPath);
+}
+
+async function isExecutable(filePath: string): Promise<boolean> {
+  try {
+    await access(filePath, fsConstants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function preparePushCommand(
+  opts: WorktreeGitOpts,
+  pushMode: WorktreeGitOpts['pushMode'],
+  forcePushBranch?: string
+): Promise<PreparedPushCommand> {
+  const pushArgs = getPushArgs(pushMode, forcePushBranch);
+  const hooksPathArgs = ['rev-parse', '--git-path', 'hooks'];
+  const hooksPathResult = await execAsync('git', hooksPathArgs, { cwd: opts.wtPath });
+  if (hooksPathResult.code !== 0) {
+    throw formatTransportError(opts, formatCommandFailure('git', hooksPathArgs, hooksPathResult));
+  }
+
+  const hooksDir = resolveGitPath(opts.wtPath, hooksPathResult.stdout.trim());
+  const prePushHookPath = path.join(hooksDir, 'pre-push');
+  if (!(await isExecutable(prePushHookPath))) {
+    return { args: pushArgs };
+  }
+
+  const wrapperDir = await mkdtemp(path.join(tmpdir(), PRE_PUSH_WRAPPER_PREFIX));
+  const wrapperPath = path.join(wrapperDir, 'pre-push');
+  await writeFile(
+    wrapperPath,
+    ['#!/bin/sh', 'unset GIT_DIR GIT_WORK_TREE', 'exec "$SHIPPER_ORIGINAL_PRE_PUSH" "$@"', ''].join(
+      '\n'
+    )
+  );
+  await chmod(wrapperPath, 0o755);
+
+  return {
+    args: ['-c', `core.hooksPath=${wrapperDir}`, ...pushArgs],
+    cleanup: async () => {
+      await rm(wrapperDir, { recursive: true, force: true });
+    },
+    env: {
+      SHIPPER_ORIGINAL_PRE_PUSH: prePushHookPath,
+    },
+  };
 }
 
 async function pushWorktreeBranch(
@@ -83,10 +146,24 @@ async function pushWorktreeBranch(
     );
   }
 
-  return await execAsync('git', getPushArgs(pushMode, forcePushBranch), {
-    cwd: opts.wtPath,
-    maxBuffer: PUSH_OUTPUT_MAX_BUFFER,
-  });
+  const pushCommand = await preparePushCommand(opts, pushMode, forcePushBranch);
+  try {
+    return await execAsync('git', pushCommand.args, {
+      cwd: opts.wtPath,
+      env: pushCommand.env,
+      maxBuffer: PUSH_OUTPUT_MAX_BUFFER,
+    });
+  } finally {
+    if (pushCommand.cleanup) {
+      try {
+        await pushCommand.cleanup();
+      } catch (error) {
+        logger.error(
+          `Failed to remove temporary pre-push hook wrapper.\n${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    }
+  }
 }
 
 export async function pushWithRetry(
