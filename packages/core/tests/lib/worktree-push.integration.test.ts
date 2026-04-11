@@ -13,7 +13,11 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { pushWorktree } from '../../src/lib/worktree.js';
 
-const { GIT_DIR: _gitDir, GIT_WORK_TREE: _gitWorkTree, ...cleanEnv } = process.env;
+const cleanEnv = Object.fromEntries(
+  Object.entries(process.env).filter(
+    ([key]) => !key.startsWith('GIT_') && key !== 'SHIPPER_ORIGINAL_PRE_PUSH'
+  )
+);
 
 function runGit(cwd: string, args: string[]): string {
   return execFileSync('git', args, {
