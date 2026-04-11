@@ -509,6 +509,18 @@ export async function executeReset(
   }
 
   if (options.repoRoot) {
+    // Clear stale worktree registrations whose directories were already removed.
+    // Without this, git branch -D refuses to delete branches that still have a
+    // worktree entry even though the directory no longer exists.
+    try {
+      execFileSync('git', ['worktree', 'prune'], {
+        cwd: options.repoRoot,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (error) {
+      logger.warn(`Warning: git worktree prune failed: ${toErrorMessage(error)}`);
+    }
+
     for (const branch of scan.localBranches) {
       const description = `Delete local branch ${branch}`;
 
