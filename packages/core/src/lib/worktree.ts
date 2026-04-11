@@ -32,8 +32,14 @@ export interface CreateWorktreeOpts {
   stage?: string;
 }
 
-export async function createWorktree(opts: CreateWorktreeOpts): Promise<string> {
+export interface CreateWorktreeResult {
+  wtPath: string;
+  didResetToBase: boolean;
+}
+
+export async function createWorktree(opts: CreateWorktreeOpts): Promise<CreateWorktreeResult> {
   const wtPath = getWorktreePath(opts.repoRoot, opts.branch);
+  let branchReused = false;
 
   // Prune stale worktree registrations whose directories no longer exist
   await execAsync('git', ['worktree', 'prune'], { cwd: opts.repoRoot });
@@ -82,18 +88,17 @@ export async function createWorktree(opts: CreateWorktreeOpts): Promise<string> 
     }
 
     // Check if branch already exists (e.g. from a previous crashed run)
-    let branchExists = false;
     try {
       await execFileAsync('git', ['rev-parse', '--verify', opts.branch], {
         cwd: opts.repoRoot,
       });
-      branchExists = true;
+      branchReused = true;
     } catch {
       // Branch doesn't exist — create it
       args.push('-b', opts.branch);
     }
     args.push(wtPath);
-    if (branchExists) {
+    if (branchReused) {
       args.push(opts.branch);
     } else {
       args.push(startPoint);
@@ -104,7 +109,17 @@ export async function createWorktree(opts: CreateWorktreeOpts): Promise<string> 
 
   await spawnAsync('git', args, { cwd: opts.repoRoot });
 
-  return wtPath;
+  if (branchReused && opts.baseBranch) {
+    const resetTarget = `origin/${opts.baseBranch}`;
+    const resetResult = await execAsync('git', ['reset', '--hard', resetTarget], { cwd: wtPath });
+    if (resetResult.code !== 0) {
+      throw new Error(
+        `Failed to reset branch to ${resetTarget}: ${formatCommandFailure('git', ['reset', '--hard', resetTarget], resetResult)}`
+      );
+    }
+  }
+
+  return { wtPath, didResetToBase: branchReused };
 }
 
 export async function removeWorktree(repoRoot: string, wtPath: string): Promise<void> {
@@ -122,7 +137,10 @@ export async function withWorktree<T>(
 ): Promise<T> {
   const worktreeLogger = createLogger();
   worktreeLogger.worktreeStep('creating branch');
-  const wtPath = await createWorktree(opts);
+  const { wtPath, didResetToBase } = await createWorktree(opts);
+  if (didResetToBase && opts.baseBranch) {
+    worktreeLogger.worktreeStep(`resetting to origin/${opts.baseBranch}`);
+  }
   const hookEnv = {
     SHIPPER_STAGE: opts.stage ?? '',
     SHIPPER_WORKTREE_PATH: wtPath,
