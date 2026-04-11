@@ -154,8 +154,20 @@ beforeEach(() => {
 
   accessMock.mockRejectedValue(new Error('ENOENT'));
   mkdirMock.mockResolvedValue(undefined);
-  execFileMock.mockImplementation((_cmd: string, _args: string[], ...rest: unknown[]) => {
+  execFileMock.mockImplementation((_cmd: string, args: string[], ...rest: unknown[]) => {
     const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
+    if (args[0] === 'rev-parse' && args[1] === '--verify' && args[2] === defaultOpts.branch) {
+      const error = new Error('exit:128') as Error & {
+        code?: number;
+        stdout?: string;
+        stderr?: string;
+      };
+      error.code = 128;
+      error.stdout = '';
+      error.stderr = 'fatal: Needed a single revision';
+      cb(error, '', 'fatal: Needed a single revision');
+      return;
+    }
     cb(null, '', '');
   });
   runAdvisoryHookMock.mockResolvedValue(undefined);
@@ -177,7 +189,10 @@ describe('createWorktree', () => {
     queueExecResult({ stdout: 'abc123\n' }); // git rev-parse --verify origin/main
     queueExecResult({ code: 128, stderr: 'fatal: Needed a single revision' }); // branch missing
 
-    await expect(createWorktree(defaultOpts)).resolves.toBe(expectedWtPath);
+    await expect(createWorktree(defaultOpts)).resolves.toEqual({
+      wtPath: expectedWtPath,
+      didResetToBase: false,
+    });
 
     expect(gitArgsFromExecCalls()).toEqual([
       ['worktree', 'prune'],
@@ -231,9 +246,36 @@ describe('createWorktree', () => {
         createBranch: false,
         baseBranch: undefined,
       })
-    ).resolves.toBe(expectedWtPath);
+    ).resolves.toEqual({
+      wtPath: expectedWtPath,
+      didResetToBase: false,
+    });
 
     expect(gitArgsFromExecCalls()).toEqual([['worktree', 'prune']]);
+    expect(gitArgsFromSpawnCalls()).toEqual([
+      ['worktree', 'add', expectedWtPath, 'shipper/42-add-feature'],
+    ]);
+  });
+
+  it('resets a reused branch to origin/<baseBranch> after creating the worktree', async () => {
+    queueExecResult(); // git worktree prune
+    queueExecResult(); // git fetch origin main refspec
+    queueExecResult({ stdout: 'abc123\n' }); // git rev-parse --verify origin/main
+    queueExecResult({ stdout: 'abc123\n' }); // git rev-parse --verify branch
+    queueExecResult({ stdout: 'HEAD is now at abc123 reset\n' }); // git reset --hard origin/main
+
+    await expect(createWorktree(defaultOpts)).resolves.toEqual({
+      wtPath: expectedWtPath,
+      didResetToBase: true,
+    });
+
+    expect(gitArgsFromExecCalls()).toEqual([
+      ['worktree', 'prune'],
+      ['fetch', 'origin', 'refs/heads/main:refs/remotes/origin/main'],
+      ['rev-parse', '--verify', 'origin/main'],
+      ['rev-parse', '--verify', 'shipper/42-add-feature'],
+      ['reset', '--hard', 'origin/main'],
+    ]);
     expect(gitArgsFromSpawnCalls()).toEqual([
       ['worktree', 'add', expectedWtPath, 'shipper/42-add-feature'],
     ]);
@@ -343,6 +385,24 @@ describe('withWorktree', () => {
 
     expect(errorMock.mock.calls).toEqual([
       ['[shipper]   worktree: creating branch'],
+      ['[shipper]   worktree: running setup hooks'],
+      ['[shipper]   worktree: running agent'],
+      ['[shipper]   worktree: teardown complete'],
+    ]);
+  });
+
+  it('logs the reset marker before setup hooks when reusing an existing branch', async () => {
+    queueExecResult(); // git worktree prune
+    queueExecResult(); // git fetch origin main refspec
+    queueExecResult({ stdout: 'abc123\n' }); // git rev-parse --verify origin/main
+    queueExecResult({ stdout: 'abc123\n' }); // git rev-parse --verify branch
+    queueExecResult({ stdout: 'HEAD is now at abc123 reset\n' }); // git reset --hard origin/main
+
+    await withWorktree(defaultOpts, () => Promise.resolve(undefined));
+
+    expect(errorMock.mock.calls).toEqual([
+      ['[shipper]   worktree: creating branch'],
+      ['[shipper]   worktree: resetting to origin/main'],
       ['[shipper]   worktree: running setup hooks'],
       ['[shipper]   worktree: running agent'],
       ['[shipper]   worktree: teardown complete'],
