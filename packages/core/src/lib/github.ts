@@ -76,7 +76,7 @@ interface RawListIssueData {
   title: string;
   state: string;
   labels: { name: string }[];
-  author: { login: string };
+  author: { login: string } | null;
   createdAt: string;
   url: string;
 }
@@ -354,7 +354,7 @@ export async function listIssues(
     title: issue.title,
     labels: issue.labels.map((l) => l.name),
     state: issue.state,
-    author: issue.author.login,
+    author: issue.author?.login ?? 'ghost',
     createdAt: issue.createdAt,
     url: issue.url,
   }));
