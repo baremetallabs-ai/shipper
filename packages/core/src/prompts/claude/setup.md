@@ -164,7 +164,7 @@ For other package managers, set a worktree-local cache path in `.shipper/setting
 ### Issue-specific failure investigation
 
 1. Check the issue's current labels and confirm it is not stuck on an unexpected state or carrying a stale `shipper:locked` label.
-2. Read recent issue comments for error context, failure reports, or notes from prior agent runs.
+2. Read recent issue comments for error context, failure reports, or notes from prior agent runs. In both issue comments and PR comments, look specifically for `## Agent Feedback` sections. These optional sections are friction reports from prior agent runs that can include failed commands, confusing instructions, missing context, tooling limitations, and workflow suggestions. Surface any relevant Agent Feedback content you find to the user as debugging context.
 3. Check whether a branch exists for the issue, for example with `git branch -a | grep 'shipper/<issue-number>'` or `git branch -a | grep 'origin/shipper/<issue-number>'`.
 4. Check whether a matching worktree exists under `~/.shipper/worktrees/`.
 5. If `shipper:locked` is stale and no active agent is running, rerun the relevant Shipper command to trigger stale-lock detection, or remove it manually or via `shipper unlock`.
