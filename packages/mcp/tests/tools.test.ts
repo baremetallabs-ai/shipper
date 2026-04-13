@@ -7,8 +7,6 @@ const {
   mockIsLockStale,
   mockFetchIssue,
   mockTryResolvePr,
-  mockFetchChecks,
-  mockRerun,
   mockSpawnShipper,
 } = vi.hoisted(() => ({
   mockGh: vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>(),
@@ -17,8 +15,6 @@ const {
   mockIsLockStale: vi.fn(),
   mockFetchIssue: vi.fn(),
   mockTryResolvePr: vi.fn(),
-  mockFetchChecks: vi.fn(),
-  mockRerun: vi.fn(),
   mockSpawnShipper: vi.fn(),
 }));
 
@@ -33,8 +29,6 @@ vi.mock('@dnsquared/shipper-core', async () => {
     isLockStale: mockIsLockStale,
     fetchIssue: mockFetchIssue,
     tryResolvePrForIssue: mockTryResolvePr,
-    fetchChecks: mockFetchChecks,
-    rerunFailedChecks: mockRerun,
     getSettings: () => ({ agentTimeoutMinutes: 60 }),
   };
 });
@@ -225,28 +219,5 @@ describe('shipper_create_issue', () => {
     const firstCall = mockSpawnShipper.mock.calls[0];
     expect(firstCall?.[0]).toEqual(['new', 'Add dark mode', '--mode', 'headless']);
     expect(result.content[0]?.text).toContain('created #99');
-  });
-});
-
-describe('shipper_rerun_checks', () => {
-  it('reruns failed checks', async () => {
-    mockFetchChecks.mockResolvedValue([
-      { name: 'ci', state: 'failure', bucket: 'fail', link: 'https://x/actions/runs/1' },
-      { name: 'ok', state: 'success', bucket: 'pass' },
-    ]);
-    mockRerun.mockResolvedValue(undefined);
-
-    const getTool = collectTools();
-    const result = await getTool('shipper_rerun_checks')({ pr: 5 });
-    expect(mockRerun).toHaveBeenCalled();
-    expect(result.content[0]?.text).toContain('Rerunning 1 failed check(s)');
-  });
-
-  it('no-ops when nothing failed', async () => {
-    mockFetchChecks.mockResolvedValue([{ name: 'ok', state: 'success', bucket: 'pass' }]);
-    const getTool = collectTools();
-    const result = await getTool('shipper_rerun_checks')({ pr: 5 });
-    expect(mockRerun).not.toHaveBeenCalled();
-    expect(result.content[0]?.text).toContain('No failed checks');
   });
 });

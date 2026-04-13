@@ -6,8 +6,6 @@ import {
   FAILED_LABEL,
   LOCKED_LABEL,
   NEW_LABEL,
-  PRIORITY_HIGH_LABEL,
-  PRIORITY_LOW_LABEL,
   STAGE_LABEL_NAMES,
   classifyChecks,
   fetchChecks,
@@ -17,7 +15,6 @@ import {
   isLockStale,
   listIssues,
   releaseIssueLock,
-  rerunFailedChecks,
   tryResolvePrForIssue,
 } from '@dnsquared/shipper-core';
 import {
@@ -29,10 +26,6 @@ import {
 
 const STAGE_SHORT_NAMES = STAGE_LABEL_NAMES.map((l) => l.replace(/^shipper:/, ''));
 const STATUS_FILTER_VALUES = [...STAGE_SHORT_NAMES, 'blocked', 'failed'] as const;
-const RESET_STAGE_SHORT_NAMES = STAGE_SHORT_NAMES.slice(
-  0,
-  STAGE_SHORT_NAMES.indexOf('implemented') + 1
-);
 
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
 
@@ -295,26 +288,6 @@ export function registerTools(server: McpServer, repo: string): void {
   );
 
   server.registerTool(
-    'shipper_ship',
-    {
-      description:
-        'Run the full workflow pipeline for an issue (design → ready). Optionally merge the PR at the end. Headless mode. Refuses to operate on `shipper:new` issues because grooming requires interactive input — groom the issue first.',
-      inputSchema: { issue: issueSchema(), merge: z.boolean().optional() },
-    },
-    async ({ issue, merge }) => {
-      try {
-        await assertNotAtNew(repo, issue);
-        const args = ['ship', String(issue), '--mode', 'headless'];
-        if (merge) args.push('--merge');
-        const result = await spawnShipper(args, { timeoutMs: agentTimeoutMs() });
-        return formatSpawnResult(result, `shipper ${args.join(' ')}`);
-      } catch (err) {
-        return formatToolError(err);
-      }
-    }
-  );
-
-  server.registerTool(
     'shipper_create_issue',
     {
       description:
@@ -326,29 +299,6 @@ export function registerTools(server: McpServer, repo: string): void {
         const args = ['new', request, '--mode', 'headless'];
         const result = await spawnShipper(args, { timeoutMs: agentTimeoutMs() });
         return formatSpawnResult(result, `shipper new <request> --mode headless`);
-      } catch (err) {
-        return formatToolError(err);
-      }
-    }
-  );
-
-  server.registerTool(
-    'shipper_reset',
-    {
-      description:
-        'Reset an issue to an earlier workflow stage. Removes downstream artifacts (PRs, branches, worktrees, comments). Stage must be one of: ' +
-        RESET_STAGE_SHORT_NAMES.join(', ') +
-        '. Uses --force (skips confirmation and lock check).',
-      inputSchema: {
-        issue: issueSchema(),
-        to: z.enum(RESET_STAGE_SHORT_NAMES as [string, ...string[]]),
-      },
-    },
-    async ({ issue, to }) => {
-      try {
-        const args = ['reset', String(issue), '--force', '--to', to];
-        const result = await spawnShipper(args, { timeoutMs: FIVE_MINUTES_MS });
-        return formatSpawnResult(result, `shipper ${args.join(' ')}`);
       } catch (err) {
         return formatToolError(err);
       }
@@ -469,80 +419,6 @@ export function registerTools(server: McpServer, repo: string): void {
       }
     }
   );
-
-  server.registerTool(
-    'shipper_set_priority',
-    {
-      description:
-        'Set the priority of a shipper-managed issue. Swaps the shipper:priority-high / shipper:priority-low labels.',
-      inputSchema: {
-        issue: issueSchema(),
-        level: z.enum(['high', 'normal', 'low']),
-      },
-    },
-    async ({ issue, level }) => {
-      try {
-        if (await isPullRequest(repo, issue)) {
-          throw new Error(`#${issue} is a pull request, not an issue.`);
-        }
-        const data = await fetchIssueLabels(repo, issue);
-        if (data.state !== 'OPEN') {
-          throw new Error(`Issue #${issue} is not open.`);
-        }
-        const labelNames = data.labels.map((l) => l.name);
-        if (!labelNames.some((l) => STAGE_LABEL_NAMES.includes(l))) {
-          throw new Error(`Issue #${issue} is not in the shipper workflow.`);
-        }
-
-        const hasHigh = labelNames.includes(PRIORITY_HIGH_LABEL);
-        const hasLow = labelNames.includes(PRIORITY_LOW_LABEL);
-        if (level === 'normal' && !hasHigh && !hasLow) {
-          return textOk(`Issue #${issue} is already at normal priority.`);
-        }
-
-        const args = ['issue', 'edit', String(issue), '-R', repo];
-        let message: string;
-        if (level === 'high') {
-          args.push('--add-label', PRIORITY_HIGH_LABEL, '--remove-label', PRIORITY_LOW_LABEL);
-          message = `Issue #${issue} priority set to high.`;
-        } else if (level === 'low') {
-          args.push('--add-label', PRIORITY_LOW_LABEL, '--remove-label', PRIORITY_HIGH_LABEL);
-          message = `Issue #${issue} priority set to low.`;
-        } else {
-          args.push('--remove-label', PRIORITY_HIGH_LABEL, '--remove-label', PRIORITY_LOW_LABEL);
-          message = `Issue #${issue} priority set to normal.`;
-        }
-        await gh(args);
-        return textOk(message);
-      } catch (err) {
-        return formatToolError(err);
-      }
-    }
-  );
-
-  server.registerTool(
-    'shipper_rerun_checks',
-    {
-      description: 'Rerun failed CI checks on a pull request.',
-      inputSchema: { pr: issueSchema() },
-    },
-    async ({ pr }) => {
-      try {
-        const checks = await fetchChecks(repo, String(pr));
-        const classified = classifyChecks(checks);
-        if (classified.failed.length === 0) {
-          return textOk(`No failed checks on PR #${pr}.`);
-        }
-        await rerunFailedChecks(repo, classified.failed);
-        const names = classified.failed.map((c) => c.name).join(', ');
-        return textOk(
-          `Rerunning ${classified.failed.length} failed check(s) on PR #${pr}: ${names}`
-        );
-      } catch (err) {
-        return formatToolError(err);
-      }
-    }
-  );
 }
 
 export function registerInitErrorTools(server: McpServer, error: unknown): void {
@@ -551,15 +427,11 @@ export function registerInitErrorTools(server: McpServer, error: unknown): void 
     'shipper_get_issue',
     'shipper_get_pr_checks',
     'shipper_advance',
-    'shipper_ship',
     'shipper_create_issue',
-    'shipper_reset',
     'shipper_unblock',
     'shipper_merge',
     'shipper_unlock',
     'shipper_adopt',
-    'shipper_set_priority',
-    'shipper_rerun_checks',
   ];
   for (const name of names) {
     server.registerTool(
