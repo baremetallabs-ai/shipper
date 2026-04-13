@@ -23,6 +23,7 @@ const resolveBaseBranchMock = vi.fn(() => Promise.resolve('release/2026'));
 const resolveRefMock = vi.fn(() => Promise.resolve({ issueNumber: '239' }));
 const runPromptMock = vi.fn(() => Promise.resolve(0));
 const scrubOutputDirMock = vi.fn(() => Promise.resolve());
+const tryResolvePrForIssueMock = vi.fn(() => Promise.resolve(undefined));
 const loggerMock = {
   log: (message: string) => {
     console.log(`[shipper] ${message}`);
@@ -78,6 +79,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   resolveRef: resolveRefMock,
   runPrompt: runPromptMock,
   scrubOutputDir: scrubOutputDirMock,
+  tryResolvePrForIssue: tryResolvePrForIssueMock,
   truncateLargeInput: truncateLargeInputMock,
   withGitTransport: withGitTransportMock,
   withIssueLock: withIssueLockMock,
@@ -112,6 +114,7 @@ describe('prOpenCommand', () => {
     expect(process.exitCode).toBeUndefined();
 
     expect(resolveRefMock).toHaveBeenCalledWith('owner/repo', '239', 'issue');
+    expect(tryResolvePrForIssueMock).toHaveBeenCalledWith('owner/repo', 239);
     expect(resolveBaseBranchMock).toHaveBeenCalledWith('owner/repo', 'main');
     expect(scrubOutputDirMock).toHaveBeenCalledWith('/tmp/fake-wt');
     expect(withGitTransportMock).toHaveBeenCalledWith(
@@ -151,6 +154,7 @@ describe('prOpenCommand', () => {
       stage: 'pr_open',
       cwd: '/tmp/fake-wt',
       result: validatedResult,
+      prNumber: undefined,
     });
     expect(handleAgentCrashMock).not.toHaveBeenCalled();
 
@@ -217,6 +221,20 @@ describe('prOpenCommand', () => {
         cwd: '/tmp/fake-wt',
         userInput:
           'truncated:push-error.txt:git push --force-with-lease exited with code 1:\npre-push hook failed',
+      })
+    );
+  });
+
+  it('passes an already linked PR number through to processResult', async () => {
+    tryResolvePrForIssueMock.mockResolvedValueOnce('84');
+    const { prOpenCommand } = await import('../../src/commands/pr-open.js');
+
+    await expect(prOpenCommand('owner/repo', '239')).resolves.toBeUndefined();
+
+    expect(processResultMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: 'pr_open',
+        prNumber: '84',
       })
     );
   });
