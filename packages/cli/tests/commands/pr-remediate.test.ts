@@ -512,10 +512,15 @@ describe('prRemediateCommand', () => {
     );
     expect(rerunFailedChecksMock).not.toHaveBeenCalled();
     expect(resolveTransitionMock).toHaveBeenCalledWith('pr_remediate', 'accept');
-    expect(executeTransitionMock).toHaveBeenCalledWith('owner/repo', '10', {
-      add: ['shipper:ready'],
-      remove: ['shipper:pr-reviewed'],
-    });
+    expect(executeTransitionMock).toHaveBeenCalledWith(
+      'owner/repo',
+      '10',
+      {
+        add: ['shipper:ready'],
+        remove: ['shipper:pr-reviewed'],
+      },
+      '42'
+    );
   });
 
   it('fails fast when rebase drops all commits ahead of the base branch', async () => {
@@ -544,10 +549,15 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
       expectedDetail
     );
     expect(resolveTransitionMock).toHaveBeenCalledWith('pr_remediate', 'fail');
-    expect(executeTransitionMock).toHaveBeenCalledWith('owner/repo', '10', {
-      add: ['shipper:failed'],
-      remove: ['shipper:pr-reviewed'],
-    });
+    expect(executeTransitionMock).toHaveBeenCalledWith(
+      'owner/repo',
+      '10',
+      {
+        add: ['shipper:failed'],
+        remove: ['shipper:pr-reviewed'],
+      },
+      '42'
+    );
     expect(scrubOutputDirMock).not.toHaveBeenCalled();
     expect(runPromptMock).not.toHaveBeenCalled();
     expect(retryOnInvalidOutputMock).not.toHaveBeenCalled();
@@ -915,10 +925,15 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
       ['/tmp/fake-wt', 'pass-info.json', JSON.stringify({ pass: 2, maxPasses: 5 }, null, 2)],
     ]);
     expect(executeTransitionMock).toHaveBeenCalledTimes(1);
-    expect(executeTransitionMock).toHaveBeenCalledWith('owner/repo', '10', {
-      add: ['shipper:ready'],
-      remove: ['shipper:pr-reviewed'],
-    });
+    expect(executeTransitionMock).toHaveBeenCalledWith(
+      'owner/repo',
+      '10',
+      {
+        add: ['shipper:ready'],
+        remove: ['shipper:pr-reviewed'],
+      },
+      '42'
+    );
   });
 
   it('reruns failed CI checks before polling when no new commit was pushed and exits after a green rerun', async () => {
@@ -1169,6 +1184,7 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
         stage: 'pr_remediate',
         cwd: '/tmp/fake-wt',
         result,
+        prNumber: '42',
       });
     }
   );
