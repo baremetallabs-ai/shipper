@@ -40,6 +40,7 @@ export interface CreateWorktreeResult {
 export async function createWorktree(opts: CreateWorktreeOpts): Promise<CreateWorktreeResult> {
   const wtPath = getWorktreePath(opts.repoRoot, opts.branch);
   let branchReused = false;
+  let didResetToBase = false;
 
   // Prune stale worktree registrations whose directories no longer exist
   await execAsync('git', ['worktree', 'prune'], { cwd: opts.repoRoot });
@@ -109,7 +110,10 @@ export async function createWorktree(opts: CreateWorktreeOpts): Promise<CreateWo
 
   await spawnAsync('git', args, { cwd: opts.repoRoot });
 
-  if (branchReused && opts.baseBranch) {
+  const shouldResetToBase =
+    branchReused && opts.baseBranch && (opts.stage === 'design' || opts.stage === 'plan');
+
+  if (shouldResetToBase) {
     const resetTarget = `origin/${opts.baseBranch}`;
     const resetResult = await execAsync('git', ['reset', '--hard', resetTarget], { cwd: wtPath });
     if (resetResult.code !== 0) {
@@ -117,9 +121,10 @@ export async function createWorktree(opts: CreateWorktreeOpts): Promise<CreateWo
         `Failed to reset branch to ${resetTarget}: ${formatCommandFailure('git', ['reset', '--hard', resetTarget], resetResult)}`
       );
     }
+    didResetToBase = true;
   }
 
-  return { wtPath, didResetToBase: branchReused };
+  return { wtPath, didResetToBase };
 }
 
 export async function removeWorktree(repoRoot: string, wtPath: string): Promise<void> {
