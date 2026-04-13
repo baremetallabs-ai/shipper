@@ -1078,6 +1078,7 @@ describe('listIssues', () => {
         state: 'OPEN',
         author: { login: 'alice' },
         createdAt: '2025-01-01T00:00:00Z',
+        url: 'https://github.com/owner/repo/issues/1',
       },
       {
         number: 2,
@@ -1086,6 +1087,7 @@ describe('listIssues', () => {
         state: 'OPEN',
         author: { login: 'bob' },
         createdAt: '2025-01-02T00:00:00Z',
+        url: 'https://github.com/owner/repo/issues/2',
       },
       {
         number: 3,
@@ -1094,6 +1096,7 @@ describe('listIssues', () => {
         state: 'OPEN',
         author: { login: 'charlie' },
         createdAt: '2025-01-03T00:00:00Z',
+        url: 'https://github.com/owner/repo/issues/3',
       },
     ];
     queueExecFileResult(JSON.stringify(ghOutput));
@@ -1108,6 +1111,7 @@ describe('listIssues', () => {
         state: 'OPEN',
         author: 'alice',
         createdAt: '2025-01-01T00:00:00Z',
+        url: 'https://github.com/owner/repo/issues/1',
       },
       {
         number: 2,
@@ -1116,6 +1120,7 @@ describe('listIssues', () => {
         state: 'OPEN',
         author: 'bob',
         createdAt: '2025-01-02T00:00:00Z',
+        url: 'https://github.com/owner/repo/issues/2',
       },
     ]);
     expect(execFileMock).toHaveBeenCalledWith(
@@ -1126,7 +1131,7 @@ describe('listIssues', () => {
         '-R',
         repo,
         '--json',
-        'number,title,labels,state,author,createdAt',
+        'number,title,labels,state,author,createdAt,url',
         '--limit',
         '1000',
         '--state',
@@ -1166,7 +1171,7 @@ describe('listIssues', () => {
         '-R',
         repo,
         '--json',
-        'number,title,labels,state,author,createdAt',
+        'number,title,labels,state,author,createdAt,url',
         '--limit',
         '1000',
         '--state',
@@ -1192,7 +1197,7 @@ describe('listIssues', () => {
         '-R',
         repo,
         '--json',
-        'number,title,labels,state,author,createdAt',
+        'number,title,labels,state,author,createdAt,url',
         '--limit',
         '1000',
         '--state',

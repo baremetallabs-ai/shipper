@@ -35,6 +35,7 @@ function createIssue(number: number, labels: string[]): ListIssueItem {
     state: 'OPEN',
     author: 'octocat',
     createdAt: '2026-03-19T00:00:00Z',
+    url: `https://github.com/owner/repo/issues/${number}`,
   };
 }
 

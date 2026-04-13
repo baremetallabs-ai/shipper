@@ -149,7 +149,19 @@ export function IssueCard({
       )}
     >
       <div className="flex items-start justify-between gap-3">
-        <p className="text-sm font-medium text-muted-foreground">#{issue.number}</p>
+        <a
+          href={issue.url}
+          target="_blank"
+          rel="noreferrer"
+          draggable
+          onDragStart={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          className="text-sm font-medium text-muted-foreground no-underline hover:underline"
+        >
+          #{issue.number}
+        </a>
         <div className="flex items-center gap-1">
           {showOverflowMenu ? (
             <DropdownMenu>

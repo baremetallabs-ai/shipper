@@ -913,6 +913,52 @@ describe('desktop IPC locking', () => {
     expect(state.releaseIssueLockMock).not.toHaveBeenCalled();
   });
 
+  it('returns adoptable issues with url fields from gh issue list output', async () => {
+    await loadHandlers();
+    state.ghMock.mockResolvedValueOnce({
+      stdout: JSON.stringify([
+        {
+          number: 42,
+          title: 'Adopt this issue',
+          labels: [{ name: 'bug' }],
+          state: 'OPEN',
+          author: { login: 'octocat' },
+          createdAt: '2026-04-03T00:00:00Z',
+          url: 'https://github.com/owner/repo/issues/42',
+        },
+      ]),
+      stderr: '',
+    });
+    const handler = getHandler('list-adoptable-issues');
+
+    await expect(handler({}, { repo: 'owner/repo' })).resolves.toEqual({
+      ok: true,
+      issues: [
+        {
+          number: 42,
+          title: 'Adopt this issue',
+          labels: ['bug'],
+          state: 'OPEN',
+          author: 'octocat',
+          createdAt: '2026-04-03T00:00:00Z',
+          url: 'https://github.com/owner/repo/issues/42',
+        },
+      ],
+    });
+    expect(state.ghMock).toHaveBeenCalledWith([
+      'issue',
+      'list',
+      '-R',
+      'owner/repo',
+      '--state',
+      'open',
+      '--limit',
+      '1000',
+      '--json',
+      'number,title,labels,state,author,createdAt,url',
+    ]);
+  });
+
   it('sets high priority by adding the high label and removing the low label', async () => {
     await loadHandlers();
     state.ghMock.mockResolvedValueOnce({ stdout: '', stderr: '' });

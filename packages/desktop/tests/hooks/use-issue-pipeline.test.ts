@@ -37,6 +37,7 @@ function createIssue(number: number, labels: string[] = [PLANNED_LABEL]) {
     state: 'OPEN' as const,
     author: 'octocat',
     createdAt: '2026-04-03T00:00:00Z',
+    url: `https://github.com/owner/repo/issues/${number}`,
   };
 }
 
