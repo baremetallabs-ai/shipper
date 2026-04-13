@@ -31,6 +31,14 @@ export async function ensureRepoClone(repo: string): Promise<string> {
 
   if (await exists(clonePath)) {
     if (await isValidWorktree(clonePath)) {
+      await execFileAsync('git', ['reset', '--hard'], {
+        cwd: clonePath,
+        encoding: 'utf-8',
+      });
+      await execFileAsync('git', ['clean', '-fdx'], {
+        cwd: clonePath,
+        encoding: 'utf-8',
+      });
       await gh(['repo', 'sync', '--source', repo], { cwd: clonePath });
       return clonePath;
     }

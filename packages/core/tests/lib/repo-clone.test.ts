@@ -117,16 +117,184 @@ describe('ensureRepoClone', () => {
         cb(null, 'true\n', '');
       }
     );
+    execFileMock.mockImplementationOnce(
+      (_cmd: string, _args: string[], _opts: { cwd?: string; encoding?: string }, cb) => {
+        cb(null, '', '');
+      }
+    );
+    execFileMock.mockImplementationOnce(
+      (_cmd: string, _args: string[], _opts: { cwd?: string; encoding?: string }, cb) => {
+        cb(null, '', '');
+      }
+    );
     mockGh.mockResolvedValue({ stdout: '', stderr: '' });
 
     await expect(ensureRepoClone('owner/repo')).resolves.toBe(clonePath);
 
+    expect(execFileMock).toHaveBeenCalledTimes(3);
+    expect(execFileMock).toHaveBeenNthCalledWith(
+      1,
+      'git',
+      ['rev-parse', '--is-inside-work-tree'],
+      { cwd: clonePath, encoding: 'utf-8' },
+      expect.any(Function)
+    );
+    expect(execFileMock).toHaveBeenNthCalledWith(
+      2,
+      'git',
+      ['reset', '--hard'],
+      { cwd: clonePath, encoding: 'utf-8' },
+      expect.any(Function)
+    );
+    expect(execFileMock).toHaveBeenNthCalledWith(
+      3,
+      'git',
+      ['clean', '-fdx'],
+      { cwd: clonePath, encoding: 'utf-8' },
+      expect.any(Function)
+    );
     expect(mockGh).toHaveBeenCalledWith(['repo', 'sync', '--source', 'owner/repo'], {
       cwd: clonePath,
     });
+    expect(execFileMock.mock.invocationCallOrder[2]).toBeLessThan(
+      mockGh.mock.invocationCallOrder[0]
+    );
     expect(mockMkdir).not.toHaveBeenCalled();
     expect(mockRm).not.toHaveBeenCalled();
     expect(mockWarn).not.toHaveBeenCalled();
+  });
+
+  it('still resets and cleans an already-clean existing clone before syncing', async () => {
+    const clonePath = getRepoClonePath('owner/repo');
+    mockAccess.mockResolvedValue();
+    execFileMock.mockImplementationOnce(
+      (_cmd: string, _args: string[], _opts: { cwd?: string; encoding?: string }, cb) => {
+        cb(null, 'true\n', '');
+      }
+    );
+    execFileMock.mockImplementationOnce(
+      (_cmd: string, _args: string[], _opts: { cwd?: string; encoding?: string }, cb) => {
+        cb(null, '', '');
+      }
+    );
+    execFileMock.mockImplementationOnce(
+      (_cmd: string, _args: string[], _opts: { cwd?: string; encoding?: string }, cb) => {
+        cb(null, '', '');
+      }
+    );
+    mockGh.mockResolvedValue({ stdout: '', stderr: '' });
+
+    await expect(ensureRepoClone('owner/repo')).resolves.toBe(clonePath);
+
+    expect(execFileMock).toHaveBeenCalledTimes(3);
+    expect(execFileMock).toHaveBeenNthCalledWith(
+      2,
+      'git',
+      ['reset', '--hard'],
+      { cwd: clonePath, encoding: 'utf-8' },
+      expect.any(Function)
+    );
+    expect(execFileMock).toHaveBeenNthCalledWith(
+      3,
+      'git',
+      ['clean', '-fdx'],
+      { cwd: clonePath, encoding: 'utf-8' },
+      expect.any(Function)
+    );
+    expect(mockGh).toHaveBeenCalledWith(['repo', 'sync', '--source', 'owner/repo'], {
+      cwd: clonePath,
+    });
+    expect(execFileMock.mock.invocationCallOrder[2]).toBeLessThan(
+      mockGh.mock.invocationCallOrder[0]
+    );
+  });
+
+  it('rethrows git reset failures before cleaning or syncing', async () => {
+    const clonePath = getRepoClonePath('owner/repo');
+    const resetError = new Error('git reset failed');
+    mockAccess.mockResolvedValue();
+    execFileMock.mockImplementationOnce(
+      (_cmd: string, _args: string[], _opts: { cwd?: string; encoding?: string }, cb) => {
+        cb(null, 'true\n', '');
+      }
+    );
+    execFileMock.mockImplementationOnce(
+      (_cmd: string, _args: string[], _opts: { cwd?: string; encoding?: string }, cb) => {
+        cb(resetError);
+      }
+    );
+
+    await expect(ensureRepoClone('owner/repo')).rejects.toBe(resetError);
+
+    expect(execFileMock).toHaveBeenCalledTimes(2);
+    expect(execFileMock).toHaveBeenNthCalledWith(
+      1,
+      'git',
+      ['rev-parse', '--is-inside-work-tree'],
+      { cwd: clonePath, encoding: 'utf-8' },
+      expect.any(Function)
+    );
+    expect(execFileMock).toHaveBeenNthCalledWith(
+      2,
+      'git',
+      ['reset', '--hard'],
+      { cwd: clonePath, encoding: 'utf-8' },
+      expect.any(Function)
+    );
+    expect(execFileMock.mock.calls).not.toContainEqual([
+      'git',
+      ['clean', '-fdx'],
+      { cwd: clonePath, encoding: 'utf-8' },
+      expect.any(Function),
+    ]);
+    expect(mockGh).not.toHaveBeenCalled();
+  });
+
+  it('rethrows git clean failures before syncing', async () => {
+    const clonePath = getRepoClonePath('owner/repo');
+    const cleanError = new Error('git clean failed');
+    mockAccess.mockResolvedValue();
+    execFileMock.mockImplementationOnce(
+      (_cmd: string, _args: string[], _opts: { cwd?: string; encoding?: string }, cb) => {
+        cb(null, 'true\n', '');
+      }
+    );
+    execFileMock.mockImplementationOnce(
+      (_cmd: string, _args: string[], _opts: { cwd?: string; encoding?: string }, cb) => {
+        cb(null, '', '');
+      }
+    );
+    execFileMock.mockImplementationOnce(
+      (_cmd: string, _args: string[], _opts: { cwd?: string; encoding?: string }, cb) => {
+        cb(cleanError);
+      }
+    );
+
+    await expect(ensureRepoClone('owner/repo')).rejects.toBe(cleanError);
+
+    expect(execFileMock).toHaveBeenCalledTimes(3);
+    expect(execFileMock).toHaveBeenNthCalledWith(
+      1,
+      'git',
+      ['rev-parse', '--is-inside-work-tree'],
+      { cwd: clonePath, encoding: 'utf-8' },
+      expect.any(Function)
+    );
+    expect(execFileMock).toHaveBeenNthCalledWith(
+      2,
+      'git',
+      ['reset', '--hard'],
+      { cwd: clonePath, encoding: 'utf-8' },
+      expect.any(Function)
+    );
+    expect(execFileMock).toHaveBeenNthCalledWith(
+      3,
+      'git',
+      ['clean', '-fdx'],
+      { cwd: clonePath, encoding: 'utf-8' },
+      expect.any(Function)
+    );
+    expect(mockGh).not.toHaveBeenCalled();
   });
 
   it('creates parent directories and clones when the repo is missing', async () => {
@@ -140,6 +308,7 @@ describe('ensureRepoClone', () => {
     expect(mockMkdir).toHaveBeenCalledWith(path.join(homedir(), '.shipper', 'repos', 'owner'), {
       recursive: true,
     });
+    expect(execFileMock).not.toHaveBeenCalled();
     expect(mockGh).toHaveBeenCalledWith(['repo', 'clone', 'owner/repo', clonePath]);
   });
 
@@ -174,6 +343,14 @@ describe('ensureRepoClone', () => {
       expect(mockMkdir).toHaveBeenCalledWith(path.join(homedir(), '.shipper', 'repos', 'owner'), {
         recursive: true,
       });
+      expect(execFileMock).toHaveBeenCalledTimes(1);
+      expect(execFileMock).toHaveBeenNthCalledWith(
+        1,
+        'git',
+        ['rev-parse', '--is-inside-work-tree'],
+        { cwd: clonePath, encoding: 'utf-8' },
+        expect.any(Function)
+      );
       expect(mockGh).toHaveBeenCalledWith(['repo', 'clone', 'owner/repo', clonePath]);
       expect(mockGh).not.toHaveBeenCalledWith(['repo', 'sync', '--source', 'owner/repo'], {
         cwd: clonePath,
@@ -191,6 +368,7 @@ describe('ensureRepoClone', () => {
 
     await expect(ensureRepoClone('owner/repo')).rejects.toBe(probeError);
 
+    expect(execFileMock).toHaveBeenCalledTimes(1);
     expect(mockWarn).not.toHaveBeenCalled();
     expect(mockRm).not.toHaveBeenCalled();
     expect(mockMkdir).not.toHaveBeenCalled();
