@@ -74,7 +74,8 @@ async function isExecutable(filePath: string): Promise<boolean> {
 // the older GIT_CONFIG_PARAMETERS form. Any new nested `git` call here will
 // inherit the outer `-c` override unless those vars are neutralized. Reuse
 // NEUTRALIZE_LEAKED_GIT_CONFIG for direct nested `git` spawns; the wrapper
-// script body below repeats the same neutralization for hook-spawned children.
+// script body below applies the same leaked-config neutralization for hook-
+// spawned children and also clears GIT_DIR/GIT_WORK_TREE there.
 async function preparePushCommand(
   opts: WorktreeGitOpts,
   pushMode: WorktreeGitOpts['pushMode'],
