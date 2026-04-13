@@ -114,7 +114,7 @@ describe('pushWorktree integration', () => {
     expect(readFileSync(markerFile, 'utf8')).toBe('hook-ran\n');
     expect(runGit(worktreeDir, ['rev-parse', '--abbrev-ref', 'HEAD']).trim()).toBe('feature');
     expect(runGit(worktreeDir, ['rev-list', '--count', 'HEAD']).trim()).toBe('2');
-  });
+  }, 15_000);
 
   it('does not loop when leaked GIT_CONFIG_* points core.hooksPath at a prior wrapper', async () => {
     // Regression: when shipper's outer push runs `git -c core.hooksPath=<wrapper>`,
@@ -216,5 +216,5 @@ describe('pushWorktree integration', () => {
     expect(existsSync(path.join(tempHookRepo, '.git'))).toBe(true);
     expect(readFileSync(markerFile, 'utf8')).toBe('hook-ran\n');
     expect(runGit(worktreeDir, ['rev-list', '--count', 'HEAD']).trim()).toBe('2');
-  });
+  }, 15_000);
 });

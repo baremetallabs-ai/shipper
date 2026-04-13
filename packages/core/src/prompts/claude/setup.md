@@ -171,12 +171,12 @@ For other package managers, set a worktree-local cache path in `.shipper/setting
 
 ### Session debugging
 
-Every Shipper agent run writes a transcript and a metadata sidecar under `~/.shipper/sessions/<owner>-<repo>/` (the slug uses `-` as the separator, so `dnsquared/shipper-cli` becomes `dnsquared-shipper-cli`). Each run produces a pair of files that share a basename:
+Every Shipper agent run writes a metadata sidecar under `~/.shipper/sessions/<owner>-<repo>/` (the slug uses `-` as the separator, so `dnsquared/shipper-cli` becomes `dnsquared-shipper-cli`). Some runs also write a transcript file with the same basename:
 
-- `<issue>-<stage>-<timestamp>.jsonl` — the full agent transcript.
 - `<issue>-<stage>-<timestamp>.meta.json` — a small sidecar with run metadata.
+- `<issue>-<stage>-<timestamp>.jsonl` — the full agent transcript, when transcript logging is enabled for that run.
 
-To find sessions for a specific issue, list the directory and filter by the `<issue>-` filename prefix, or read the `.meta.json` files and match the `issue` field. The sidecar is the fastest way to triage without opening the transcript: it records at least `issue`, `stage`, `exitCode`, and the path to the log file, so a non-zero `exitCode` points you directly at the failed run.
+To find sessions for a specific issue, list the directory and filter by the `<issue>-` filename prefix, or read the `.meta.json` files and match the `issue` field. The sidecar is the fastest way to triage without opening a transcript: it records `issue`, `stage`, and `exitCode`, and may also include `logFile` when a transcript was written, so a non-zero `exitCode` points you to the failed run and, when available, its transcript.
 
 When you open a transcript, look for:
 
