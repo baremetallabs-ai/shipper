@@ -109,7 +109,7 @@ describe('getRepoClonePath', () => {
 });
 
 describe('ensureRepoClone', () => {
-  it('syncs an existing clone', async () => {
+  it('resets, cleans, and syncs an existing clone', async () => {
     const clonePath = getRepoClonePath('owner/repo');
     mockAccess.mockResolvedValue();
     execFileMock.mockImplementationOnce(
@@ -162,51 +162,6 @@ describe('ensureRepoClone', () => {
     expect(mockMkdir).not.toHaveBeenCalled();
     expect(mockRm).not.toHaveBeenCalled();
     expect(mockWarn).not.toHaveBeenCalled();
-  });
-
-  it('still resets and cleans an already-clean existing clone before syncing', async () => {
-    const clonePath = getRepoClonePath('owner/repo');
-    mockAccess.mockResolvedValue();
-    execFileMock.mockImplementationOnce(
-      (_cmd: string, _args: string[], _opts: { cwd?: string; encoding?: string }, cb) => {
-        cb(null, 'true\n', '');
-      }
-    );
-    execFileMock.mockImplementationOnce(
-      (_cmd: string, _args: string[], _opts: { cwd?: string; encoding?: string }, cb) => {
-        cb(null, '', '');
-      }
-    );
-    execFileMock.mockImplementationOnce(
-      (_cmd: string, _args: string[], _opts: { cwd?: string; encoding?: string }, cb) => {
-        cb(null, '', '');
-      }
-    );
-    mockGh.mockResolvedValue({ stdout: '', stderr: '' });
-
-    await expect(ensureRepoClone('owner/repo')).resolves.toBe(clonePath);
-
-    expect(execFileMock).toHaveBeenCalledTimes(3);
-    expect(execFileMock).toHaveBeenNthCalledWith(
-      2,
-      'git',
-      ['reset', '--hard'],
-      { cwd: clonePath, encoding: 'utf-8' },
-      expect.any(Function)
-    );
-    expect(execFileMock).toHaveBeenNthCalledWith(
-      3,
-      'git',
-      ['clean', '-fdx'],
-      { cwd: clonePath, encoding: 'utf-8' },
-      expect.any(Function)
-    );
-    expect(mockGh).toHaveBeenCalledWith(['repo', 'sync', '--source', 'owner/repo'], {
-      cwd: clonePath,
-    });
-    expect(execFileMock.mock.invocationCallOrder[2]).toBeLessThan(
-      mockGh.mock.invocationCallOrder[0]
-    );
   });
 
   it('rethrows git reset failures before cleaning or syncing', async () => {

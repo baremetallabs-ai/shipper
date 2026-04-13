@@ -31,14 +31,13 @@ export async function ensureRepoClone(repo: string): Promise<string> {
 
   if (await exists(clonePath)) {
     if (await isValidWorktree(clonePath)) {
-      await execFileAsync('git', ['reset', '--hard'], {
+      const gitOptions = {
         cwd: clonePath,
-        encoding: 'utf-8',
-      });
-      await execFileAsync('git', ['clean', '-fdx'], {
-        cwd: clonePath,
-        encoding: 'utf-8',
-      });
+        encoding: 'utf-8' as const,
+      };
+
+      await execFileAsync('git', ['reset', '--hard'], gitOptions);
+      await execFileAsync('git', ['clean', '-fdx'], gitOptions);
       await gh(['repo', 'sync', '--source', repo], { cwd: clonePath });
       return clonePath;
     }
