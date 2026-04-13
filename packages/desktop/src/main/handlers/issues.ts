@@ -28,6 +28,7 @@ interface RawListIssueData {
   labels: { name: string }[];
   author: { login: string } | null;
   createdAt: string;
+  url: string;
 }
 
 function parseIssueListJson(repo: string, json: string): RawListIssueData[] {
@@ -85,7 +86,7 @@ export function registerIssueHandlers(): void {
         '--limit',
         '1000',
         '--json',
-        'number,title,labels,state,author,createdAt',
+        'number,title,labels,state,author,createdAt,url',
       ]);
       const rawIssues = parseIssueListJson(repo, result.stdout);
       const issues: ListIssueItem[] = rawIssues
@@ -96,6 +97,7 @@ export function registerIssueHandlers(): void {
           state: issue.state,
           author: issue.author?.login ?? 'ghost',
           createdAt: issue.createdAt,
+          url: issue.url,
         }))
         .filter((issue) => !issue.labels.some((label) => label.startsWith('shipper:')));
       const response: ListIssuesSuccess = { ok: true, issues };

@@ -14,6 +14,7 @@ describe('useDragDrop', () => {
       state: 'OPEN' as const,
       author: 'octocat',
       createdAt: '2026-04-03T00:00:00Z',
+      url: 'https://github.com/owner/repo/issues/42',
     };
     const { result } = renderHook(() => useDragDrop());
 
@@ -34,6 +35,7 @@ describe('useDragDrop', () => {
       state: 'OPEN' as const,
       author: 'octocat',
       createdAt: '2026-04-03T00:00:00Z',
+      url: 'https://github.com/owner/repo/issues/7',
     };
     const { result } = renderHook(() => useDragDrop());
 

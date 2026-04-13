@@ -63,6 +63,7 @@ export interface ListIssueItem {
   state: string;
   author: string;
   createdAt: string;
+  url: string;
 }
 
 export interface ListIssuesOptions {
@@ -77,6 +78,7 @@ interface RawListIssueData {
   labels: { name: string }[];
   author: { login: string };
   createdAt: string;
+  url: string;
 }
 
 interface StageIssueListItem {
@@ -318,7 +320,7 @@ export async function listIssues(
     '-R',
     repo,
     '--json',
-    'number,title,labels,state,author,createdAt',
+    'number,title,labels,state,author,createdAt,url',
     '--limit',
     '1000',
     '--state',
@@ -354,6 +356,7 @@ export async function listIssues(
     state: issue.state,
     author: issue.author.login,
     createdAt: issue.createdAt,
+    url: issue.url,
   }));
 
   if (!options?.label) {

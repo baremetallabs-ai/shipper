@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { createEvent, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { ListIssueItem, WorkflowStage } from '@dnsquared/shipper-core';
@@ -66,6 +66,7 @@ function createIssue(overrides: Partial<ListIssueItem> = {}): ListIssueItem {
     state: 'open',
     author: 'dnsquared',
     createdAt: '2026-04-03T12:00:00.000Z',
+    url: 'https://github.com/owner/repo/issues/12',
     ...overrides,
   };
 }
@@ -131,6 +132,35 @@ describe('IssueCard', () => {
     expect(onGroom).toHaveBeenCalledWith(12);
     expect(onShip).toHaveBeenCalledWith(12);
     expect(onDragStart).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders the issue number as a GitHub link', () => {
+    render(<IssueCard issue={createIssue()} />);
+    const link = screen.getByRole('link', { name: '#12' });
+
+    expect(link).toHaveProperty('href', 'https://github.com/owner/repo/issues/12');
+    expect(link).toHaveProperty('target', '_blank');
+    expect(link).toHaveProperty('rel', 'noreferrer');
+  });
+
+  it('prevents drag from starting on the issue link', () => {
+    const onDragStart = vi.fn();
+
+    render(<IssueCard issue={createIssue()} draggable onDragStart={onDragStart} />);
+    const link = screen.getByRole('link', { name: '#12' });
+    const dragEvent = createEvent.dragStart(link, {
+      dataTransfer: { effectAllowed: 'move' },
+    });
+    fireEvent(link, dragEvent);
+
+    expect(dragEvent.defaultPrevented).toBe(true);
+    expect(onDragStart).not.toHaveBeenCalled();
+  });
+
+  it('keeps the issue title as plain text', () => {
+    render(<IssueCard issue={createIssue()} />);
+
+    expect(screen.queryByRole('link', { name: 'Extract renderer components' })).toBeNull();
   });
 
   it('invokes reset and priority menu actions', () => {
