@@ -1150,6 +1150,36 @@ describe('listIssues', () => {
     expect(result).toEqual([]);
   });
 
+  it('maps deleted issue authors to ghost', async () => {
+    queueExecFileResult(
+      JSON.stringify([
+        {
+          number: 4,
+          title: 'Ghost-authored issue',
+          labels: [{ name: 'shipper:groomed' }],
+          state: 'OPEN',
+          author: null,
+          createdAt: '2025-01-04T00:00:00Z',
+          url: 'https://github.com/owner/repo/issues/4',
+        },
+      ])
+    );
+
+    const result = await listIssues(repo);
+
+    expect(result).toEqual([
+      {
+        number: 4,
+        title: 'Ghost-authored issue',
+        labels: ['shipper:groomed'],
+        state: 'OPEN',
+        author: 'ghost',
+        createdAt: '2025-01-04T00:00:00Z',
+        url: 'https://github.com/owner/repo/issues/4',
+      },
+    ]);
+  });
+
   it('throws with context message on gh failure', async () => {
     queueExecFileError('gh failed');
     queueExecFileError('gh failed');
