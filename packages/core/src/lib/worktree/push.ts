@@ -69,6 +69,12 @@ async function isExecutable(filePath: string): Promise<boolean> {
   }
 }
 
+// Hazard: `git -c key=value ... push` propagates its override to nested `git`
+// invocations via GIT_CONFIG_COUNT, GIT_CONFIG_KEY_n / GIT_CONFIG_VALUE_n, and
+// the older GIT_CONFIG_PARAMETERS form. Any new nested `git` call here will
+// inherit the outer `-c` override unless those vars are neutralized. Reuse
+// NEUTRALIZE_LEAKED_GIT_CONFIG for direct nested `git` spawns; the wrapper
+// script body below repeats the same neutralization for hook-spawned children.
 async function preparePushCommand(
   opts: WorktreeGitOpts,
   pushMode: WorktreeGitOpts['pushMode'],
