@@ -169,7 +169,7 @@ describe('implement prompts', () => {
 
 describe('new prompts', () => {
   it.each(['claude', 'codex', 'copilot'])(
-    'describe relevant documentation scanning and labeling for %s',
+    'require grounded research and product-only interpretation for %s',
     (agent) => {
       const prompt = readFileSync(
         new URL(`../../src/prompts/${agent}/new.md`, import.meta.url),
@@ -178,7 +178,16 @@ describe('new prompts', () => {
 
       expect(prompt).toContain(expectedRelevantDocumentationSection);
       expect(prompt).toContain(
-        'File paths or module names are allowed only in the optional Starting Point and Relevant Documentation sections.'
+        'You **must read the codebase** (`Read`, `Glob`, `Grep`) to ground the issue before writing the Interpretation section.'
+      );
+      expect(prompt).toContain(
+        'Your product-level inferences, assumptions, and gap-filling go here — user-facing behavior, scope assumptions, expected outcomes.'
+      );
+      expect(prompt).toContain(
+        '**No technical content in this section:** no file paths, module or component names, class/function names, API shapes, data schemas, library or technology choices, or implementation approaches.'
+      );
+      expect(prompt).toContain(
+        'Technical references — file paths, module or component names, class/function names, API shapes, data schemas, and library or technology choices — are permitted **only** in the Starting Point and Relevant Documentation sections. The Request and Interpretation sections must stay product-oriented.'
       );
     }
   );
