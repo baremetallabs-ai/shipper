@@ -168,3 +168,18 @@ For other package managers, set a worktree-local cache path in `.shipper/setting
 3. Check whether a branch exists for the issue, for example with `git branch -a | grep 'shipper/<issue-number>'` or `git branch -a | grep 'origin/shipper/<issue-number>'`.
 4. Check whether a matching worktree exists under `~/.shipper/worktrees/`.
 5. If `shipper:locked` is stale and no active agent is running, rerun the relevant Shipper command to trigger stale-lock detection, or remove it manually or via `shipper unlock`.
+
+### Session debugging
+
+Every Shipper agent run writes a transcript and a metadata sidecar under `~/.shipper/sessions/<owner>-<repo>/` (the slug uses `-` as the separator, so `dnsquared/shipper-cli` becomes `dnsquared-shipper-cli`). Each run produces a pair of files that share a basename:
+
+- `<issue>-<stage>-<timestamp>.jsonl` — the full agent transcript.
+- `<issue>-<stage>-<timestamp>.meta.json` — a small sidecar with run metadata.
+
+To find sessions for a specific issue, list the directory and filter by the `<issue>-` filename prefix, or read the `.meta.json` files and match the `issue` field. The sidecar is the fastest way to triage without opening the transcript: it records at least `issue`, `stage`, `exitCode`, and the path to the log file, so a non-zero `exitCode` points you directly at the failed run.
+
+When you open a transcript, look for:
+
+- Error messages or stack traces from the agent or its tools.
+- The final assistant message, which usually states what the agent concluded or where it gave up.
+- Tool call failures — tool invocations that returned an error or non-zero result.
