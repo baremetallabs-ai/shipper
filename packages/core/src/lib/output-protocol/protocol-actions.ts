@@ -11,12 +11,17 @@ import { readPrSpec, readReviewPayload } from './protocol-validation.js';
 
 const PR_MIRROR_STAGES = new Set<StageName>(['pr_open', 'pr_review', 'pr_remediate']);
 
+export interface PrSpecResult {
+  url: string;
+  number: number;
+}
+
 function parsePrNumberFromUrl(url: string): number {
   const pathname = new URL(url).pathname;
-  const lastSegment = pathname.split('/').filter(Boolean).at(-1);
-  const prNumber = Number(lastSegment);
+  const match = /\/pull\/(\d+)\/?$/.exec(pathname);
+  const prNumber = Number(match?.[1]);
 
-  if (!lastSegment || !Number.isInteger(prNumber) || prNumber <= 0) {
+  if (!match?.[1] || !Number.isInteger(prNumber) || prNumber <= 0) {
     throw new Error(`Failed to parse PR number from URL: ${url}`);
   }
 
@@ -119,7 +124,16 @@ export async function createPrFromSpec(
   repo: string,
   cwd: string,
   specPath: string
-): Promise<{ url: string; number: number } | undefined> {
+): Promise<string | undefined> {
+  const result = await createPrFromSpecWithMetadata(repo, cwd, specPath);
+  return result?.url;
+}
+
+export async function createPrFromSpecWithMetadata(
+  repo: string,
+  cwd: string,
+  specPath: string
+): Promise<PrSpecResult | undefined> {
   const { spec } = await readPrSpec(cwd, specPath);
 
   const { stdout: existing } = await gh([
@@ -206,15 +220,10 @@ export async function processResult(opts: {
 }): Promise<ResultJson> {
   const { result } = opts;
   const commentPath = resolveOutputPath(opts.cwd, result.comment, 'comment path');
-  let createdPr:
-    | {
-        url: string;
-        number: number;
-      }
-    | undefined;
+  let createdPr: PrSpecResult | undefined;
 
   if (result.verdict === 'accept' && result.pr_spec) {
-    createdPr = await createPrFromSpec(opts.repo, opts.cwd, result.pr_spec);
+    createdPr = await createPrFromSpecWithMetadata(opts.repo, opts.cwd, result.pr_spec);
   }
 
   if (result.verdict === 'accept' && result.review_payload) {
@@ -226,13 +235,13 @@ export async function processResult(opts: {
 
   await postComment(opts.repo, opts.issueNumber, commentPath);
   const mirrorPrNumber = PR_MIRROR_STAGES.has(opts.stage)
-    ? String(createdPr?.number ?? opts.prNumber ?? '')
+    ? (createdPr?.number.toString() ?? opts.prNumber)
     : undefined;
   await executeTransition(
     opts.repo,
     opts.issueNumber,
     resolveTransition(opts.stage, result.verdict),
-    mirrorPrNumber || undefined
+    mirrorPrNumber
   );
 
   return result;

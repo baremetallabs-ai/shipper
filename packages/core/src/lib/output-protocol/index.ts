@@ -18,6 +18,7 @@ export {
 
 export {
   createPrFromSpec,
+  createPrFromSpecWithMetadata,
   executeTransition,
   handleAgentCrash,
   postComment,

@@ -16,6 +16,7 @@ vi.mock('../../src/lib/gh.js', () => ({
 
 const {
   createPrFromSpec,
+  createPrFromSpecWithMetadata,
   PROTOCOL_INPUT_DIR,
   PROTOCOL_OUTPUT_DIR,
   executeTransition,
@@ -392,10 +393,7 @@ describe('output protocol helpers', () => {
 
     await expect(
       createPrFromSpec('owner/repo', tempDir, outputRelative('pr-spec-248.json'))
-    ).resolves.toEqual({
-      url: 'https://github.com/owner/repo/pull/248',
-      number: 248,
-    });
+    ).resolves.toBe('https://github.com/owner/repo/pull/248');
 
     expect(ghMock).toHaveBeenNthCalledWith(1, [
       'pr',
@@ -425,6 +423,21 @@ describe('output protocol helpers', () => {
     ]);
   });
 
+  it('creates a PR from a spec file and returns metadata when requested', async () => {
+    await writeOutputFile('pr-body-248.md', 'body');
+    await writeOutputJson('pr-spec-248.json', buildPrSpec());
+    ghMock
+      .mockResolvedValueOnce({ stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ stdout: 'https://github.com/owner/repo/pull/248/\n', stderr: '' });
+
+    await expect(
+      createPrFromSpecWithMetadata('owner/repo', tempDir, outputRelative('pr-spec-248.json'))
+    ).resolves.toEqual({
+      url: 'https://github.com/owner/repo/pull/248/',
+      number: 248,
+    });
+  });
+
   it('short-circuits PR creation when a matching PR already exists', async () => {
     await writeOutputFile('pr-body-248.md', 'body');
     await writeOutputJson('pr-spec-248.json', buildPrSpec({ draft: true }));
@@ -435,12 +448,25 @@ describe('output protocol helpers', () => {
 
     await expect(
       createPrFromSpec('owner/repo', tempDir, outputRelative('pr-spec-248.json'))
+    ).resolves.toBe('https://github.com/owner/repo/pull/248');
+
+    expect(ghMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns metadata for an existing PR without creating a new PR', async () => {
+    await writeOutputFile('pr-body-248.md', 'body');
+    await writeOutputJson('pr-spec-248.json', buildPrSpec({ draft: true }));
+    ghMock.mockResolvedValueOnce({
+      stdout: 'https://github.com/owner/repo/pull/248\n',
+      stderr: '',
+    });
+
+    await expect(
+      createPrFromSpecWithMetadata('owner/repo', tempDir, outputRelative('pr-spec-248.json'))
     ).resolves.toEqual({
       url: 'https://github.com/owner/repo/pull/248',
       number: 248,
     });
-
-    expect(ghMock).toHaveBeenCalledTimes(1);
   });
 
   it('submits a review payload through the GitHub reviews API', async () => {
@@ -1194,6 +1220,8 @@ describe('output protocol helpers', () => {
     });
 
     it.each([
+      ['pr_open', 'reject', '66', ['shipper:planned'], ['shipper:implemented']],
+      ['pr_open', 'fail', '66', ['shipper:failed'], ['shipper:implemented']],
       ['pr_review', 'reject', '77', ['shipper:implemented'], ['shipper:pr-open']],
       ['pr_review', 'fail', '77', ['shipper:failed'], ['shipper:pr-open']],
       ['pr_remediate', 'reject', '88', ['shipper:pr-open'], ['shipper:pr-reviewed']],

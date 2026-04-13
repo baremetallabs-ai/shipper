@@ -13,6 +13,7 @@ import {
   runPrompt,
   scrubOutputDir,
   toErrorMessage,
+  tryResolvePrForIssue,
   truncateLargeInput,
   withGitTransport,
   withIssueLock,
@@ -39,6 +40,7 @@ export async function prOpenCommand(
     const resolved = await resolveRef(repo, issue, 'issue');
     issue = resolved.issueNumber;
   }
+  const existingPrNumber = await tryResolvePrForIssue(repo, Number(issue));
 
   const settings = getSettings();
   const baseBranch = await resolveBaseBranch(repo, settings.defaultBaseBranch);
@@ -119,6 +121,7 @@ export async function prOpenCommand(
               stage: 'pr_open',
               cwd: wtPath,
               result,
+              prNumber: existingPrNumber,
             });
           } catch (error) {
             const detail = toErrorMessage(error);
