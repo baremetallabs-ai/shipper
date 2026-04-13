@@ -245,16 +245,32 @@ describe('output protocol helpers', () => {
     expect(truncated.length).toBeLessThan(oversized.length);
   });
 
-  it('posts label transitions with gh issue edit', async () => {
-    await executeTransition('owner/repo', '248', {
-      add: ['shipper:planned'],
-      remove: ['shipper:designed'],
-    });
+  it('posts label transitions to the issue first, then mirrors them to the PR when provided', async () => {
+    await executeTransition(
+      'owner/repo',
+      '248',
+      {
+        add: ['shipper:planned'],
+        remove: ['shipper:designed'],
+      },
+      '84'
+    );
 
-    expect(ghMock).toHaveBeenCalledWith([
+    expect(ghMock).toHaveBeenNthCalledWith(1, [
       'issue',
       'edit',
       '248',
+      '-R',
+      'owner/repo',
+      '--add-label',
+      'shipper:planned',
+      '--remove-label',
+      'shipper:designed',
+    ]);
+    expect(ghMock).toHaveBeenNthCalledWith(2, [
+      'pr',
+      'edit',
+      '84',
       '-R',
       'owner/repo',
       '--add-label',
@@ -268,6 +284,53 @@ describe('output protocol helpers', () => {
     await executeTransition('owner/repo', '248', { add: [], remove: [] });
 
     expect(ghMock).not.toHaveBeenCalled();
+  });
+
+  it('treats PR mirror failures as warnings after a successful issue edit', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    ghMock
+      .mockResolvedValueOnce({ stdout: '', stderr: '' })
+      .mockRejectedValueOnce(new Error('pr edit failed'));
+
+    await expect(
+      executeTransition(
+        'owner/repo',
+        '248',
+        {
+          add: ['shipper:failed'],
+          remove: ['shipper:pr-reviewed'],
+        },
+        '84'
+      )
+    ).resolves.toBeUndefined();
+
+    expect(ghMock).toHaveBeenNthCalledWith(1, [
+      'issue',
+      'edit',
+      '248',
+      '-R',
+      'owner/repo',
+      '--add-label',
+      'shipper:failed',
+      '--remove-label',
+      'shipper:pr-reviewed',
+    ]);
+    expect(ghMock).toHaveBeenNthCalledWith(2, [
+      'pr',
+      'edit',
+      '84',
+      '-R',
+      'owner/repo',
+      '--add-label',
+      'shipper:failed',
+      '--remove-label',
+      'shipper:pr-reviewed',
+    ]);
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[shipper] Warning: Failed to mirror transition labels onto PR #84: pr edit failed'
+    );
+
+    warnSpy.mockRestore();
   });
 
   it('posts comments from body files', async () => {
@@ -329,7 +392,10 @@ describe('output protocol helpers', () => {
 
     await expect(
       createPrFromSpec('owner/repo', tempDir, outputRelative('pr-spec-248.json'))
-    ).resolves.toBe('https://github.com/owner/repo/pull/248');
+    ).resolves.toEqual({
+      url: 'https://github.com/owner/repo/pull/248',
+      number: 248,
+    });
 
     expect(ghMock).toHaveBeenNthCalledWith(1, [
       'pr',
@@ -369,7 +435,10 @@ describe('output protocol helpers', () => {
 
     await expect(
       createPrFromSpec('owner/repo', tempDir, outputRelative('pr-spec-248.json'))
-    ).resolves.toBe('https://github.com/owner/repo/pull/248');
+    ).resolves.toEqual({
+      url: 'https://github.com/owner/repo/pull/248',
+      number: 248,
+    });
 
     expect(ghMock).toHaveBeenCalledTimes(1);
   });
@@ -966,7 +1035,7 @@ describe('output protocol helpers', () => {
       ]);
     });
 
-    it('processes PR creation before posting the comment and changing labels', async () => {
+    it('processes PR creation before posting the comment and mirrors the transition onto the PR', async () => {
       const result = buildResult({ pr_spec: outputRelative('pr-spec-248.json') });
       await writeOutputFile('comment-248.md', 'summary');
       await writeOutputFile('pr-body-248.md', 'body');
@@ -1036,9 +1105,20 @@ describe('output protocol helpers', () => {
         '--remove-label',
         'shipper:implemented',
       ]);
+      expect(ghMock).toHaveBeenNthCalledWith(5, [
+        'pr',
+        'edit',
+        '248',
+        '-R',
+        'owner/repo',
+        '--add-label',
+        'shipper:pr-open',
+        '--remove-label',
+        'shipper:implemented',
+      ]);
     });
 
-    it('processes review submission before posting the comment and changing labels', async () => {
+    it('processes review submission before posting the comment and mirrors the transition onto the PR', async () => {
       const result = buildResult({ review_payload: outputRelative('review-payload-248.json') });
       await writeOutputFile('comment-248.md', 'summary');
       await writeOutputJson('review-payload-248.json', buildReviewPayload());
@@ -1100,6 +1180,152 @@ describe('output protocol helpers', () => {
         '--remove-label',
         'shipper:pr-open',
       ]);
+      expect(ghMock).toHaveBeenNthCalledWith(6, [
+        'pr',
+        'edit',
+        '77',
+        '-R',
+        'owner/repo',
+        '--add-label',
+        'shipper:pr-reviewed',
+        '--remove-label',
+        'shipper:pr-open',
+      ]);
+    });
+
+    it.each([
+      ['pr_review', 'reject', '77', ['shipper:implemented'], ['shipper:pr-open']],
+      ['pr_review', 'fail', '77', ['shipper:failed'], ['shipper:pr-open']],
+      ['pr_remediate', 'reject', '88', ['shipper:pr-open'], ['shipper:pr-reviewed']],
+      ['pr_remediate', 'fail', '88', ['shipper:failed'], ['shipper:pr-reviewed']],
+    ] as const)(
+      'mirrors %s %s transitions onto the provided PR',
+      async (stage, verdict, prNumber, addedLabels, removedLabels) => {
+        const result = buildResult({ verdict });
+        await writeOutputFile('comment-248.md', 'summary');
+
+        await expect(
+          processResult({
+            repo: 'owner/repo',
+            issueNumber: '248',
+            stage,
+            cwd: tempDir,
+            result,
+            prNumber,
+          })
+        ).resolves.toEqual(result);
+
+        expect(ghMock).toHaveBeenNthCalledWith(1, [
+          'issue',
+          'comment',
+          '248',
+          '-R',
+          'owner/repo',
+          '--body-file',
+          outputAbs('comment-248.md'),
+        ]);
+        expect(ghMock).toHaveBeenNthCalledWith(2, [
+          'issue',
+          'edit',
+          '248',
+          '-R',
+          'owner/repo',
+          ...addedLabels.flatMap((label) => ['--add-label', label]),
+          ...removedLabels.flatMap((label) => ['--remove-label', label]),
+        ]);
+        expect(ghMock).toHaveBeenNthCalledWith(3, [
+          'pr',
+          'edit',
+          prNumber,
+          '-R',
+          'owner/repo',
+          ...addedLabels.flatMap((label) => ['--add-label', label]),
+          ...removedLabels.flatMap((label) => ['--remove-label', label]),
+        ]);
+      }
+    );
+
+    it.each(['design', 'plan', 'implement', 'unblock'] as const)(
+      'does not mirror non-PR stage %s transitions even when prNumber is supplied',
+      async (stage) => {
+        const result = buildResult();
+        await writeOutputFile('comment-248.md', 'summary');
+
+        await expect(
+          processResult({
+            repo: 'owner/repo',
+            issueNumber: '248',
+            stage,
+            cwd: tempDir,
+            result,
+            prNumber: '77',
+          })
+        ).resolves.toEqual(result);
+
+        expect(ghMock).toHaveBeenCalledTimes(2);
+        expect(ghMock).toHaveBeenNthCalledWith(1, [
+          'issue',
+          'comment',
+          '248',
+          '-R',
+          'owner/repo',
+          '--body-file',
+          outputAbs('comment-248.md'),
+        ]);
+        expect(ghMock.mock.calls[1]?.[0]?.slice(0, 2)).toEqual(['issue', 'edit']);
+        expect(ghMock.mock.calls.some(([args]) => args[0] === 'pr' && args[1] === 'edit')).toBe(
+          false
+        );
+      }
+    );
+
+    it('logs a warning and completes when the PR mirror fails during processResult', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const result = buildResult({ verdict: 'fail' });
+      await writeOutputFile('comment-248.md', 'summary');
+      ghMock
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })
+        .mockRejectedValueOnce(new Error('pr edit failed'));
+
+      await expect(
+        processResult({
+          repo: 'owner/repo',
+          issueNumber: '248',
+          stage: 'pr_review',
+          cwd: tempDir,
+          result,
+          prNumber: '77',
+        })
+      ).resolves.toEqual(result);
+
+      expect(ghMock).toHaveBeenNthCalledWith(2, [
+        'issue',
+        'edit',
+        '248',
+        '-R',
+        'owner/repo',
+        '--add-label',
+        'shipper:failed',
+        '--remove-label',
+        'shipper:pr-open',
+      ]);
+      expect(ghMock).toHaveBeenNthCalledWith(3, [
+        'pr',
+        'edit',
+        '77',
+        '-R',
+        'owner/repo',
+        '--add-label',
+        'shipper:failed',
+        '--remove-label',
+        'shipper:pr-open',
+      ]);
+      expect(warnSpy).toHaveBeenCalledWith(
+        '[shipper] Warning: Failed to mirror transition labels onto PR #77: pr edit failed'
+      );
+
+      warnSpy.mockRestore();
     });
 
     it('requires a PR number when posting a review payload', async () => {

@@ -1,16 +1,33 @@
 import { readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { toErrorMessage } from '../errors.js';
 import { gh } from '../gh.js';
+import { logger } from '../logger.js';
 import type { ResultJson } from '../result-schema.js';
 import { resolveTransition, type LabelTransition, type StageName } from '../stage-transitions.js';
 import { resolveOutputPath } from './protocol-io.js';
 import { readPrSpec, readReviewPayload } from './protocol-validation.js';
 
+const PR_MIRROR_STAGES = new Set<StageName>(['pr_open', 'pr_review', 'pr_remediate']);
+
+function parsePrNumberFromUrl(url: string): number {
+  const pathname = new URL(url).pathname;
+  const lastSegment = pathname.split('/').filter(Boolean).at(-1);
+  const prNumber = Number(lastSegment);
+
+  if (!lastSegment || !Number.isInteger(prNumber) || prNumber <= 0) {
+    throw new Error(`Failed to parse PR number from URL: ${url}`);
+  }
+
+  return prNumber;
+}
+
 export async function executeTransition(
   repo: string,
   issueNumber: string,
-  transition: LabelTransition
+  transition: LabelTransition,
+  prNumber?: string
 ): Promise<void> {
   if (transition.add.length === 0 && transition.remove.length === 0) {
     return;
@@ -25,6 +42,26 @@ export async function executeTransition(
   }
 
   await gh(args);
+
+  if (!prNumber) {
+    return;
+  }
+
+  const prArgs = ['pr', 'edit', prNumber, '-R', repo];
+  for (const label of transition.add) {
+    prArgs.push('--add-label', label);
+  }
+  for (const label of transition.remove) {
+    prArgs.push('--remove-label', label);
+  }
+
+  try {
+    await gh(prArgs);
+  } catch (error) {
+    logger.warn(
+      `Warning: Failed to mirror transition labels onto PR #${prNumber}: ${toErrorMessage(error)}`
+    );
+  }
 }
 
 export async function postComment(
@@ -82,7 +119,7 @@ export async function createPrFromSpec(
   repo: string,
   cwd: string,
   specPath: string
-): Promise<string | undefined> {
+): Promise<{ url: string; number: number } | undefined> {
   const { spec } = await readPrSpec(cwd, specPath);
 
   const { stdout: existing } = await gh([
@@ -98,7 +135,8 @@ export async function createPrFromSpec(
     '.[0].url',
   ]);
   if (existing.trim()) {
-    return existing.trim();
+    const url = existing.trim();
+    return { url, number: parsePrNumberFromUrl(url) };
   }
 
   const bodyPath = resolveOutputPath(cwd, spec.body_file, 'PR body path');
@@ -121,7 +159,12 @@ export async function createPrFromSpec(
   }
 
   const { stdout } = await gh(args);
-  return stdout.trim() || undefined;
+  const url = stdout.trim();
+  if (!url) {
+    return undefined;
+  }
+
+  return { url, number: parsePrNumberFromUrl(url) };
 }
 
 export async function submitReviewPayload(
@@ -163,9 +206,15 @@ export async function processResult(opts: {
 }): Promise<ResultJson> {
   const { result } = opts;
   const commentPath = resolveOutputPath(opts.cwd, result.comment, 'comment path');
+  let createdPr:
+    | {
+        url: string;
+        number: number;
+      }
+    | undefined;
 
   if (result.verdict === 'accept' && result.pr_spec) {
-    await createPrFromSpec(opts.repo, opts.cwd, result.pr_spec);
+    createdPr = await createPrFromSpec(opts.repo, opts.cwd, result.pr_spec);
   }
 
   if (result.verdict === 'accept' && result.review_payload) {
@@ -176,10 +225,14 @@ export async function processResult(opts: {
   }
 
   await postComment(opts.repo, opts.issueNumber, commentPath);
+  const mirrorPrNumber = PR_MIRROR_STAGES.has(opts.stage)
+    ? String(createdPr?.number ?? opts.prNumber ?? '')
+    : undefined;
   await executeTransition(
     opts.repo,
     opts.issueNumber,
-    resolveTransition(opts.stage, result.verdict)
+    resolveTransition(opts.stage, result.verdict),
+    mirrorPrNumber || undefined
   );
 
   return result;

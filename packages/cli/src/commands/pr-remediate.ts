@@ -463,7 +463,12 @@ This typically means the branch's commits were already on the base branch throug
 
 Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
               await handleAgentCrash(repo, issueNumber, 'pr_remediate', detail);
-              await executeTransition(repo, issueNumber, resolveTransition('pr_remediate', 'fail'));
+              await executeTransition(
+                repo,
+                issueNumber,
+                resolveTransition('pr_remediate', 'fail'),
+                prRef
+              );
               return 1;
             }
 
@@ -523,6 +528,7 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
                   stage: 'pr_remediate',
                   cwd: wtPath,
                   result,
+                  prNumber: prRef,
                 });
                 return 0;
               } catch (error) {
@@ -639,7 +645,8 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
               await executeTransition(
                 repo,
                 issueNumber,
-                resolveTransition('pr_remediate', 'accept')
+                resolveTransition('pr_remediate', 'accept'),
+                prRef
               );
               return 0;
             }
