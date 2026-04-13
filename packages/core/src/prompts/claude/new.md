@@ -50,11 +50,11 @@ If a tool for asking the user questions is available (e.g., inside agentic codin
 
 # Request
 
-Reproduce the user's words verbatim or near-verbatim. Do not reword, add requirements, or expand scope beyond what the user said. If the request is one sentence, this section is one sentence.
+Capture the user's request as faithfully as possible without adding requirements or expanding scope beyond what they said. Keep this section product-oriented: if the original request includes technical references, restate the intent without carrying those details into this section. If the request is one sentence, this section is one sentence.
 
 # Interpretation
 
-Your product-level inferences, assumptions, and gap-filling go here — user-facing behavior, scope assumptions, expected outcomes. Frame everything as an assumption: "Assuming this means…", "I think this implies…", "This probably refers to…". **No technical content in this section:** no file paths, module or component names, class/function names, API shapes, data schemas, library or technology choices, or implementation approaches. Technical pointers belong in Starting Point. If you have nothing to add beyond the request, write "None — the request is self-contained."
+Your product-level inferences, assumptions, and gap-filling go here — user-facing behavior, scope assumptions, expected outcomes. Frame everything as an assumption: "Assuming this means…", "I think this implies…", "This probably refers to…". **No technical content in this section:** no file paths, module or component names, class/function names, API shapes, data schemas, library or technology choices, or implementation approaches. Technical pointers belong in Starting Point or Relevant Documentation. If you have nothing to add beyond the request, write "None — the request is self-contained."
 
 # Starting Point (optional — include only if codebase research surfaced obvious entry points)
 

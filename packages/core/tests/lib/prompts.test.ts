@@ -181,10 +181,19 @@ describe('new prompts', () => {
         'You **must read the codebase** (`Read`, `Glob`, `Grep`) to ground the issue before writing the Interpretation section.'
       );
       expect(prompt).toContain(
+        "Capture the user's request as faithfully as possible without adding requirements or expanding scope beyond what they said."
+      );
+      expect(prompt).toContain(
+        'Keep this section product-oriented: if the original request includes technical references, restate the intent without carrying those details into this section.'
+      );
+      expect(prompt).toContain(
         'Your product-level inferences, assumptions, and gap-filling go here — user-facing behavior, scope assumptions, expected outcomes.'
       );
       expect(prompt).toContain(
         '**No technical content in this section:** no file paths, module or component names, class/function names, API shapes, data schemas, library or technology choices, or implementation approaches.'
+      );
+      expect(prompt).toContain(
+        'Technical pointers belong in Starting Point or Relevant Documentation.'
       );
       expect(prompt).toContain(
         'Technical references — file paths, module or component names, class/function names, API shapes, data schemas, and library or technology choices — are permitted **only** in the Starting Point and Relevant Documentation sections. The Request and Interpretation sections must stay product-oriented.'
