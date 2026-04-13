@@ -204,9 +204,29 @@ describe('pushWorktree', () => {
     ]);
     expect(writeFileMock).toHaveBeenCalledWith(
       '/tmp/shipper-pre-push-wrapper-123/pre-push',
-      '#!/bin/sh\nunset GIT_DIR GIT_WORK_TREE\nexec "$SHIPPER_ORIGINAL_PRE_PUSH" "$@"\n'
+      [
+        '#!/bin/sh',
+        'unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS',
+        'if [ -n "${GIT_CONFIG_COUNT-}" ]; then',
+        '  i=0',
+        '  while [ "$i" -lt "$GIT_CONFIG_COUNT" ]; do',
+        '    unset "GIT_CONFIG_KEY_$i" "GIT_CONFIG_VALUE_$i"',
+        '    i=$((i + 1))',
+        '  done',
+        '  unset GIT_CONFIG_COUNT',
+        'fi',
+        'exec "$SHIPPER_ORIGINAL_PRE_PUSH" "$@"',
+        '',
+      ].join('\n')
     );
     expect(chmodMock).toHaveBeenCalledWith('/tmp/shipper-pre-push-wrapper-123/pre-push', 0o755);
+    expect(execFileMock.mock.calls[3]?.[2]).toMatchObject({
+      cwd: '/tmp/wt',
+      env: {
+        GIT_CONFIG_COUNT: '0',
+        GIT_CONFIG_PARAMETERS: '',
+      },
+    });
     expect(execFileMock.mock.calls[4]?.[2]).toMatchObject({
       cwd: '/tmp/wt',
       env: {

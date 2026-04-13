@@ -32,6 +32,16 @@ import { stripProtectedPaths } from './protected-paths.js';
 const HOOK_FAILURE_PATTERN = /husky|lefthook|pre-push|simple-git-hooks|overcommit/i;
 const PRE_PUSH_WRAPPER_PREFIX = 'shipper-pre-push-';
 
+// Neutralize git's leaked `-c key=value` overrides so a nested `git rev-parse`
+// reads the repo's actual config instead of the ambient outer push's hooksPath.
+// Setting GIT_CONFIG_COUNT=0 makes git ignore any GIT_CONFIG_KEY_n / VALUE_n
+// pairs propagated by the outer process; clearing GIT_CONFIG_PARAMETERS handles
+// the older single-string form.
+const NEUTRALIZE_LEAKED_GIT_CONFIG = {
+  GIT_CONFIG_COUNT: '0',
+  GIT_CONFIG_PARAMETERS: '',
+};
+
 interface PreparedPushCommand {
   args: string[];
   cleanup?: () => Promise<void>;
@@ -66,7 +76,10 @@ async function preparePushCommand(
 ): Promise<PreparedPushCommand> {
   const pushArgs = getPushArgs(pushMode, forcePushBranch);
   const hooksPathArgs = ['rev-parse', '--git-path', 'hooks'];
-  const hooksPathResult = await execAsync('git', hooksPathArgs, { cwd: opts.wtPath });
+  const hooksPathResult = await execAsync('git', hooksPathArgs, {
+    cwd: opts.wtPath,
+    env: NEUTRALIZE_LEAKED_GIT_CONFIG,
+  });
   if (hooksPathResult.code !== 0) {
     throw formatTransportError(opts, formatCommandFailure('git', hooksPathArgs, hooksPathResult));
   }
@@ -81,9 +94,20 @@ async function preparePushCommand(
   const wrapperPath = path.join(wrapperDir, 'pre-push');
   await writeFile(
     wrapperPath,
-    ['#!/bin/sh', 'unset GIT_DIR GIT_WORK_TREE', 'exec "$SHIPPER_ORIGINAL_PRE_PUSH" "$@"', ''].join(
-      '\n'
-    )
+    [
+      '#!/bin/sh',
+      'unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS',
+      'if [ -n "${GIT_CONFIG_COUNT-}" ]; then',
+      '  i=0',
+      '  while [ "$i" -lt "$GIT_CONFIG_COUNT" ]; do',
+      '    unset "GIT_CONFIG_KEY_$i" "GIT_CONFIG_VALUE_$i"',
+      '    i=$((i + 1))',
+      '  done',
+      '  unset GIT_CONFIG_COUNT',
+      'fi',
+      'exec "$SHIPPER_ORIGINAL_PRE_PUSH" "$@"',
+      '',
+    ].join('\n')
   );
   await chmod(wrapperPath, 0o755);
 
