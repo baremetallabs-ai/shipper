@@ -264,7 +264,7 @@ describe('createWorktree', () => {
     queueExecResult({ stdout: 'abc123\n' }); // git rev-parse --verify branch
     queueExecResult({ stdout: 'HEAD is now at abc123 reset\n' }); // git reset --hard origin/main
 
-    await expect(createWorktree(defaultOpts)).resolves.toEqual({
+    await expect(createWorktree({ ...defaultOpts, stage: 'design' })).resolves.toEqual({
       wtPath: expectedWtPath,
       didResetToBase: true,
     });
@@ -275,6 +275,28 @@ describe('createWorktree', () => {
       ['rev-parse', '--verify', 'origin/main'],
       ['rev-parse', '--verify', 'shipper/42-add-feature'],
       ['reset', '--hard', 'origin/main'],
+    ]);
+    expect(gitArgsFromSpawnCalls()).toEqual([
+      ['worktree', 'add', expectedWtPath, 'shipper/42-add-feature'],
+    ]);
+  });
+
+  it('does not reset a reused branch outside design and plan', async () => {
+    queueExecResult(); // git worktree prune
+    queueExecResult(); // git fetch origin main refspec
+    queueExecResult({ stdout: 'abc123\n' }); // git rev-parse --verify origin/main
+    queueExecResult({ stdout: 'abc123\n' }); // git rev-parse --verify branch
+
+    await expect(createWorktree(defaultOpts)).resolves.toEqual({
+      wtPath: expectedWtPath,
+      didResetToBase: false,
+    });
+
+    expect(gitArgsFromExecCalls()).toEqual([
+      ['worktree', 'prune'],
+      ['fetch', 'origin', 'refs/heads/main:refs/remotes/origin/main'],
+      ['rev-parse', '--verify', 'origin/main'],
+      ['rev-parse', '--verify', 'shipper/42-add-feature'],
     ]);
     expect(gitArgsFromSpawnCalls()).toEqual([
       ['worktree', 'add', expectedWtPath, 'shipper/42-add-feature'],
@@ -398,7 +420,7 @@ describe('withWorktree', () => {
     queueExecResult({ stdout: 'abc123\n' }); // git rev-parse --verify branch
     queueExecResult({ stdout: 'HEAD is now at abc123 reset\n' }); // git reset --hard origin/main
 
-    await withWorktree(defaultOpts, () => Promise.resolve(undefined));
+    await withWorktree({ ...defaultOpts, stage: 'plan' }, () => Promise.resolve(undefined));
 
     expect(errorMock.mock.calls).toEqual([
       ['[shipper]   worktree: creating branch'],
