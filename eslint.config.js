@@ -25,6 +25,7 @@ export default [
         project: [
           './packages/cli/tsconfig.eslint.json',
           './packages/core/tsconfig.eslint.json',
+          './packages/mcp/tsconfig.eslint.json',
           './packages/desktop/tsconfig.eslint.node.json',
           './packages/desktop/tsconfig.eslint.web.json',
         ],
