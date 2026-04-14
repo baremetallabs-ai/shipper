@@ -449,6 +449,22 @@ describe('shared helpers', () => {
     await expect(getLinkedIssueNumber(456, 'owner/repo')).resolves.toBe(123);
   });
 
+  it('uses the caller logger for linked-issue lookup warnings', async () => {
+    ghMock.mockRejectedValueOnce(new Error('gh failed'));
+    const localWarn = vi.fn<(message: string) => void>();
+
+    await expect(
+      getLinkedIssueNumber(456, 'owner/repo', {
+        log: vi.fn(),
+        warn: localWarn,
+        error: vi.fn(),
+      } as never)
+    ).resolves.toBeNull();
+
+    expect(localWarn).toHaveBeenCalledWith('Failed to fetch linked issue for PR #456');
+    expect(warnMock).not.toHaveBeenCalled();
+  });
+
   it('polls merged state with exponential backoff', async () => {
     let calls = 0;
     ghMock.mockImplementation(async (args: string[]) => {
@@ -470,5 +486,22 @@ describe('shared helpers', () => {
     expect(logMock).toHaveBeenCalledWith(
       '  [dry-run] Would remove shipper:ready and close issue #123'
     );
+  });
+
+  it('uses the caller logger for dry-run post-merge cleanup logs', async () => {
+    const localLog = vi.fn<(message: string) => void>();
+
+    await expect(
+      postMerge(pr, 123, 'owner/repo', true, {
+        log: localLog,
+        warn: vi.fn(),
+        error: vi.fn(),
+      } as never)
+    ).resolves.toBeUndefined();
+
+    expect(localLog).toHaveBeenCalledWith(
+      '  [dry-run] Would remove shipper:ready and close issue #123'
+    );
+    expect(logMock).not.toHaveBeenCalled();
   });
 });

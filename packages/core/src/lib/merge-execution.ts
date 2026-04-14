@@ -241,7 +241,11 @@ async function remediateMergeFailure(
   }
 }
 
-export async function getLinkedIssueNumber(prNumber: number, nwo: string): Promise<number | null> {
+export async function getLinkedIssueNumber(
+  prNumber: number,
+  nwo: string,
+  mergeLogger: Logger = logger
+): Promise<number | null> {
   try {
     const { stdout: json } = await gh([
       'pr',
@@ -256,7 +260,7 @@ export async function getLinkedIssueNumber(prNumber: number, nwo: string): Promi
     const match = /(?:^|\s)(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/im.exec(body);
     return match?.[1] ? Number(match[1]) : null;
   } catch {
-    logger.warn(`Failed to fetch linked issue for PR #${prNumber}`);
+    mergeLogger.warn(`Failed to fetch linked issue for PR #${prNumber}`);
     return null;
   }
 }
@@ -265,10 +269,11 @@ export async function postMerge(
   _pr: QueuedPR,
   issueNumber: number,
   nwo: string,
-  dryRun: boolean
+  dryRun: boolean,
+  mergeLogger: Logger = logger
 ): Promise<void> {
   if (dryRun) {
-    logger.log(`  [dry-run] Would remove shipper:ready and close issue #${issueNumber}`);
+    mergeLogger.log(`  [dry-run] Would remove shipper:ready and close issue #${issueNumber}`);
     return;
   }
 
@@ -276,37 +281,45 @@ export async function postMerge(
   try {
     await gh(['issue', 'edit', String(issueNumber), ...repoArgs, '--remove-label', READY_LABEL]);
   } catch (err) {
-    logger.warn(
+    mergeLogger.warn(
       `  Warning: Failed to remove shipper:ready label from issue #${issueNumber}: ${toErrorMessage(err)}`
     );
   }
 
   try {
     await gh(['issue', 'close', String(issueNumber), ...repoArgs]);
-    logger.log(`  Issue #${issueNumber} closed.`);
+    mergeLogger.log(`  Issue #${issueNumber} closed.`);
   } catch (err) {
-    logger.warn(`  Warning: Failed to close issue #${issueNumber}: ${toErrorMessage(err)}`);
+    mergeLogger.warn(`  Warning: Failed to close issue #${issueNumber}: ${toErrorMessage(err)}`);
   }
 }
 
-export async function isPrMerged(prNumber: number, nwo: string): Promise<boolean | null> {
+export async function isPrMerged(
+  prNumber: number,
+  nwo: string,
+  mergeLogger: Logger = logger
+): Promise<boolean | null> {
   try {
     const { stdout } = await gh(['pr', 'view', String(prNumber), '-R', nwo, '--json', 'state']);
     const { state } = JSON.parse(stdout) as PRStateViewData;
     return state === 'MERGED';
   } catch {
-    logger.warn(`Failed to check merge status for PR #${prNumber}`);
+    mergeLogger.warn(`Failed to check merge status for PR #${prNumber}`);
     return null;
   }
 }
 
-export async function pollPrMerged(prNumber: number, nwo: string): Promise<boolean> {
+export async function pollPrMerged(
+  prNumber: number,
+  nwo: string,
+  mergeLogger: Logger = logger
+): Promise<boolean> {
   for (let attempt = 0; attempt < MERGE_POLL_MAX_ATTEMPTS; attempt++) {
     if (attempt > 0) {
       await sleepMs(MERGE_POLL_BASE_DELAY_MS * 2 ** (attempt - 1));
     }
 
-    if ((await isPrMerged(prNumber, nwo)) === true) {
+    if ((await isPrMerged(prNumber, nwo, mergeLogger)) === true) {
       return true;
     }
   }
@@ -330,7 +343,7 @@ export async function executeMerge(options: ExecuteMergeOptions): Promise<boolea
     async () => {
       const completePostMerge = async (message: string): Promise<boolean> => {
         mergeLogger.log(message);
-        await postMerge(pr, issueNumber, nwo, false);
+        await postMerge(pr, issueNumber, nwo, false, mergeLogger);
         return true;
       };
 
@@ -412,7 +425,7 @@ export async function executeMerge(options: ExecuteMergeOptions): Promise<boolea
           }
           return await completePostMerge(`PR #${pr.number} merged successfully.`);
         } catch (err) {
-          const merged = await pollPrMerged(pr.number, nwo);
+          const merged = await pollPrMerged(pr.number, nwo, mergeLogger);
           if (merged) {
             return await completePostMerge(
               `PR #${pr.number} merge succeeded despite reported error. Proceeding with post-merge cleanup.`

@@ -25,7 +25,17 @@ const executeMergeMock = vi.fn<
     treatPendingChecksAsFailure: boolean;
   }) => Promise<boolean>
 >();
-const getLinkedIssueNumberMock = vi.fn<(prNumber: number, nwo: string) => Promise<number | null>>();
+const getLinkedIssueNumberMock = vi.fn<
+  (
+    prNumber: number,
+    nwo: string,
+    logger?: {
+      log(message: string): void;
+      warn(message: string): void;
+      error(message: string): void;
+    }
+  ) => Promise<number | null>
+>();
 const postMergeMock = vi.fn<
   (
     pr: {
@@ -37,7 +47,12 @@ const postMergeMock = vi.fn<
     },
     issueNumber: number,
     nwo: string,
-    dryRun: boolean
+    dryRun: boolean,
+    logger?: {
+      log(message: string): void;
+      warn(message: string): void;
+      error(message: string): void;
+    }
   ) => Promise<void>
 >();
 const sleepMsMock = vi.fn<(ms: number) => Promise<void>>(() => Promise.resolve());
@@ -74,7 +89,15 @@ vi.mock('@dnsquared/shipper-core', () => ({
     nwo: string;
     treatPendingChecksAsFailure: boolean;
   }) => executeMergeMock(options),
-  getLinkedIssueNumber: (prNumber: number, nwo: string) => getLinkedIssueNumberMock(prNumber, nwo),
+  getLinkedIssueNumber: (
+    prNumber: number,
+    nwo: string,
+    logger?: {
+      log(message: string): void;
+      warn(message: string): void;
+      error(message: string): void;
+    }
+  ) => getLinkedIssueNumberMock(prNumber, nwo, logger),
   postMerge: (
     pr: {
       number: number;
@@ -85,8 +108,13 @@ vi.mock('@dnsquared/shipper-core', () => ({
     },
     issueNumber: number,
     nwo: string,
-    dryRun: boolean
-  ) => postMergeMock(pr, issueNumber, nwo, dryRun),
+    dryRun: boolean,
+    logger?: {
+      log(message: string): void;
+      warn(message: string): void;
+      error(message: string): void;
+    }
+  ) => postMergeMock(pr, issueNumber, nwo, dryRun, logger),
   fetchChecks: vi.fn(() => Promise.resolve([])),
   classifyChecks: vi.fn(() => ({ pending: [], failed: [], passed: [], total: 0 })),
   sleepMs: (ms: number) => sleepMsMock(ms),
@@ -161,6 +189,13 @@ function mockLookupPrView(options?: {
           state,
           labels,
         }),
+        stderr: '',
+      };
+    }
+
+    if (args[0] === 'pr' && (args[1] === 'edit' || args[1] === 'comment')) {
+      return {
+        stdout: '',
         stderr: '',
       };
     }
@@ -302,15 +337,53 @@ describe('mergeCommand', () => {
     expect(process.exitCode).toBe(1);
   });
 
-  it('skips helper execution when no linked issue can be determined', async () => {
+  it('fails and dequeues PRs when no linked issue can be determined', async () => {
     mockLookupPrView();
     getLinkedIssueNumberMock.mockResolvedValueOnce(null);
 
     await mergeCommand({ interval: '30', once: true, dryRun: false, number: '42' });
 
     expect(executeMergeMock).not.toHaveBeenCalled();
-    expect(warnMock).toHaveBeenCalledWith(
-      '[shipper]   Warning: Could not determine linked issue for PR #42. Skipping post-merge actions.'
+    expect(logMock).toHaveBeenCalledWith(
+      "[shipper]   PR #42 failed: Could not determine linked issue for PR #42. Add a closing reference such as 'Closes #123' to the PR body and re-queue it."
+    );
+    const commentCall = ghMock.mock.calls.find(
+      ([args]) => args[0] === 'pr' && args[1] === 'comment'
+    )?.[0];
+    const commentBody = commentCall?.at(-1);
+    expect(commentBody).toContain('Merge failed for PR #42.');
+    expect(commentBody).toContain(
+      "Could not determine linked issue for PR #42. Add a closing reference such as 'Closes #123' to the PR body and re-queue it."
+    );
+    expect(ghMock.mock.calls.map(([args]) => args)).toContainEqual([
+      'pr',
+      'edit',
+      '42',
+      '-R',
+      'owner/repo',
+      '--remove-label',
+      'shipper:ready',
+    ]);
+    expect(ghMock.mock.calls.map(([args]) => args)).toContainEqual([
+      'pr',
+      'edit',
+      '42',
+      '-R',
+      'owner/repo',
+      '--add-label',
+      'shipper:pr-reviewed',
+    ]);
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('logs explicit queue-level context when the shared helper throws', async () => {
+    mockLookupPrView();
+    executeMergeMock.mockRejectedValueOnce(new Error('boom'));
+
+    await mergeCommand({ interval: '30', once: true, dryRun: false, number: '42' });
+
+    expect(errorMock).toHaveBeenCalledWith(
+      '[shipper]   Merge execution failed for PR #42; the shared merge helper already logged the detailed failure and applied remediation.'
     );
     expect(process.exitCode).toBe(1);
   });
@@ -393,7 +466,8 @@ describe('mergeCommand', () => {
       },
       10,
       'owner/repo',
-      true
+      true,
+      expect.any(Object)
     );
     expect(process.exitCode).toBeUndefined();
   });

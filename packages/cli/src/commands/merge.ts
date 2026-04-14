@@ -370,7 +370,7 @@ async function failPR(pr: QueuedPR, reason: string, nwo: string, dryRun: boolean
       prRef,
       ...repoArgs,
       '--body',
-      `Merge queue removed this PR from the queue.\n\n**Reason:** ${reason}\n\nThe \`shipper:pr-reviewed\` label has been re-applied so the PR can be remediated and re-queued.`,
+      `Merge failed for PR #${pr.number}.\n\n**Reason:** ${reason}\n\nThe \`shipper:pr-reviewed\` label has been re-applied so the PR can be remediated and re-queued.`,
     ]);
   } catch {
     logger.error(`  Warning: Failed to comment on PR #${pr.number}`);
@@ -378,24 +378,27 @@ async function failPR(pr: QueuedPR, reason: string, nwo: string, dryRun: boolean
 }
 
 async function runPostMergeActions(pr: QueuedPR, nwo: string, dryRun: boolean): Promise<void> {
-  const issueNumber = await getLinkedIssueNumber(pr.number, nwo);
+  const issueNumber = await getLinkedIssueNumber(pr.number, nwo, logger);
   if (issueNumber === null) {
     logger.warn(
       `  Warning: Could not determine linked issue for PR #${pr.number}. Skipping post-merge actions.`
     );
     return;
   }
-  await postMerge(pr, issueNumber, nwo, dryRun);
+  await postMerge(pr, issueNumber, nwo, dryRun, logger);
 }
 
 async function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): Promise<boolean> {
   logger.log(`  Processing PR #${pr.number}: ${pr.title}`);
 
   if (!dryRun) {
-    const issueNumber = await getLinkedIssueNumber(pr.number, nwo);
+    const issueNumber = await getLinkedIssueNumber(pr.number, nwo, logger);
     if (issueNumber === null) {
-      logger.warn(
-        `  Warning: Could not determine linked issue for PR #${pr.number}. Skipping post-merge actions.`
+      await failPR(
+        pr,
+        `Could not determine linked issue for PR #${pr.number}. Add a closing reference such as 'Closes #123' to the PR body and re-queue it.`,
+        nwo,
+        false
       );
       return false;
     }
@@ -409,6 +412,9 @@ async function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): Promise<bo
         treatPendingChecksAsFailure: false,
       });
     } catch {
+      logger.error(
+        `  Merge execution failed for PR #${pr.number}; the shared merge helper already logged the detailed failure and applied remediation.`
+      );
       return false;
     }
   }
