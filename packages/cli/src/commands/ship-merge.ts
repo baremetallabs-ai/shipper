@@ -1,39 +1,8 @@
 import type { WriteStream } from 'node:fs';
-import {
-  classifyChecks,
-  fetchChecks,
-  gh,
-  PR_REVIEWED_LABEL,
-  READY_LABEL,
-  sleepMs,
-  toErrorMessage,
-} from '@dnsquared/shipper-core';
-import type { Logger } from '@dnsquared/shipper-core';
-import { pollPrMerged, postMerge } from './merge.js';
-import type { QueuedPR } from './merge.js';
-
-interface PRMergeStateViewData {
-  mergeStateStatus: string;
-  mergeable: string;
-}
+import { executeMerge, gh } from '@dnsquared/shipper-core';
+import type { Logger, QueuedPR } from '@dnsquared/shipper-core';
 
 const MERGE_FAILURE_PREFIX = 'Merge failed for PR #';
-const UNKNOWN_STATE_POLL_MAX = 5;
-const UNKNOWN_STATE_POLL_DELAY_MS = 3_000;
-
-function writeStdoutBoth(logStream: WriteStream | undefined, chunk: string | Buffer): void {
-  process.stdout.write(chunk);
-  logStream?.write(chunk);
-}
-
-function formatMergeFailureMessage(prNumber: number, reason: string): string {
-  const prefix = `${MERGE_FAILURE_PREFIX}${prNumber}:`;
-  return reason.startsWith(prefix) ? reason : `${prefix} ${reason}`;
-}
-
-function isMergeReadyState(mergeState: string): boolean {
-  return mergeState === 'CLEAN' || mergeState === 'HAS_HOOKS' || mergeState === 'UNSTABLE';
-}
 
 export function isRetriableMergeFailure(error?: string): boolean {
   return error?.includes(MERGE_FAILURE_PREFIX) ?? false;
@@ -91,147 +60,6 @@ export async function resolvePrForIssue(issueNumber: number, nwo: string): Promi
   return { ...pr, labeledAt: '' };
 }
 
-async function getMergeStateStatus(prNumber: number, nwo: string): Promise<string> {
-  let output: string;
-  try {
-    const result = await gh([
-      'pr',
-      'view',
-      String(prNumber),
-      '-R',
-      nwo,
-      '--json',
-      'mergeStateStatus,mergeable',
-    ]);
-    output = result.stdout;
-  } catch (err) {
-    throw new Error(`Could not determine merge state for PR #${prNumber}: ${toErrorMessage(err)}`);
-  }
-
-  try {
-    const data = JSON.parse(output) as PRMergeStateViewData;
-
-    // GitHub may not compute mergeStateStatus when branch protection is absent,
-    // leaving it permanently UNKNOWN. Fall back to the mergeable field which is
-    // computed independently.
-    if (data.mergeStateStatus === 'UNKNOWN' && data.mergeable === 'MERGEABLE') {
-      return 'CLEAN';
-    }
-
-    return data.mergeStateStatus;
-  } catch (err) {
-    throw new Error(`Could not determine merge state for PR #${prNumber}: ${toErrorMessage(err)}`);
-  }
-}
-
-async function getBlockedMergeStateReason(pr: QueuedPR, nwo: string): Promise<string> {
-  let checks;
-  try {
-    checks = await fetchChecks(nwo, String(pr.number));
-  } catch (err) {
-    throw new Error(`Could not fetch CI checks for PR #${pr.number}: ${toErrorMessage(err)}`);
-  }
-
-  const { pending, failed } = classifyChecks(checks);
-
-  if (failed.length > 0) {
-    const names = failed.map((check) => check.name).join(', ');
-    return `PR #${pr.number} is blocked by failed CI checks: ${names}.`;
-  }
-
-  if (pending.length > 0) {
-    const names = pending.map((check) => check.name).join(', ');
-    return `PR #${pr.number} is blocked by pending CI checks: ${names}. Retry when they complete.`;
-  }
-
-  return `PR #${pr.number} is blocked, likely due to required reviews or branch protection requirements.`;
-}
-
-async function getMergeStateFailureReason(
-  pr: QueuedPR,
-  nwo: string,
-  mergeState: string,
-  afterRebase = false
-): Promise<string> {
-  if (mergeState === 'BEHIND') {
-    if (afterRebase) {
-      return `PR #${pr.number} is still behind its base branch after rebasing. Retry shortly.`;
-    }
-
-    return `PR #${pr.number} is behind its base branch and must be rebased before merging.`;
-  }
-
-  if (mergeState === 'DIRTY') {
-    return `PR #${pr.number} has merge conflicts that must be resolved.`;
-  }
-
-  if (mergeState === 'BLOCKED') {
-    return await getBlockedMergeStateReason(pr, nwo);
-  }
-
-  if (mergeState === 'UNKNOWN') {
-    return `GitHub has not computed merge state for PR #${pr.number} yet. Retry shortly.`;
-  }
-
-  return `Unrecognized merge state '${mergeState}' for PR #${pr.number}.`;
-}
-
-async function remediateMergeFailure(
-  pr: QueuedPR,
-  issueNumber: number,
-  nwo: string,
-  reason: string,
-  issueLogger: Logger
-): Promise<void> {
-  issueLogger.error(`\n${formatMergeFailureMessage(pr.number, reason)}`);
-
-  try {
-    await gh([
-      'pr',
-      'edit',
-      String(pr.number),
-      '-R',
-      nwo,
-      '--remove-label',
-      READY_LABEL,
-      '--add-label',
-      PR_REVIEWED_LABEL,
-    ]);
-  } catch {
-    issueLogger.error(`Warning: Failed to update labels on PR #${pr.number}`);
-  }
-
-  try {
-    await gh([
-      'issue',
-      'edit',
-      String(issueNumber),
-      '-R',
-      nwo,
-      '--remove-label',
-      READY_LABEL,
-      '--add-label',
-      PR_REVIEWED_LABEL,
-    ]);
-  } catch {
-    issueLogger.error(`Warning: Failed to update labels on issue #${issueNumber}`);
-  }
-
-  const comment = [
-    `Merge failed for PR #${pr.number}.`,
-    '',
-    `**Reason:** ${reason}`,
-    '',
-    `The \`${PR_REVIEWED_LABEL}\` label has been re-applied so the PR can be remediated and re-queued.`,
-  ].join('\n');
-
-  try {
-    await gh(['pr', 'comment', String(pr.number), '-R', nwo, '--body', comment]);
-  } catch {
-    issueLogger.error(`Warning: Failed to post failure comment on PR #${pr.number}`);
-  }
-}
-
 export async function mergePr(
   pr: QueuedPR,
   issueNumber: number,
@@ -239,79 +67,12 @@ export async function mergePr(
   issueLogger: Logger,
   logStream?: WriteStream
 ): Promise<void> {
-  const completePostMerge = async (message: string): Promise<void> => {
-    issueLogger.log(message);
-    await postMerge(pr, issueNumber, nwo, false);
-  };
-
-  try {
-    let mergeState = await getMergeStateStatus(pr.number, nwo);
-    let rebased = false;
-
-    if (mergeState === 'BEHIND') {
-      issueLogger.log(`PR #${pr.number} is behind its base branch. Rebasing before merge.`);
-      try {
-        const { stdout } = await gh([
-          'pr',
-          'update-branch',
-          String(pr.number),
-          '-R',
-          nwo,
-          '--rebase',
-        ]);
-        if (stdout.trim()) {
-          writeStdoutBoth(logStream, stdout);
-        }
-      } catch (err) {
-        throw new Error(
-          `Failed to rebase PR #${pr.number} onto its base branch: ${toErrorMessage(err)}`
-        );
-      }
-
-      rebased = true;
-      mergeState = await getMergeStateStatus(pr.number, nwo);
-    }
-
-    if (mergeState === 'UNKNOWN') {
-      issueLogger.log(`PR #${pr.number} merge state is UNKNOWN. Polling for resolution...`);
-      for (let i = 0; i < UNKNOWN_STATE_POLL_MAX && mergeState === 'UNKNOWN'; i++) {
-        await sleepMs(UNKNOWN_STATE_POLL_DELAY_MS);
-        mergeState = await getMergeStateStatus(pr.number, nwo);
-      }
-    }
-
-    if (!isMergeReadyState(mergeState)) {
-      throw new Error(await getMergeStateFailureReason(pr, nwo, mergeState, rebased));
-    }
-
-    try {
-      const { stdout } = await gh([
-        'pr',
-        'merge',
-        String(pr.number),
-        '-R',
-        nwo,
-        '--rebase',
-        '--delete-branch',
-      ]);
-      if (stdout.trim()) {
-        writeStdoutBoth(logStream, stdout);
-      }
-      await completePostMerge(`PR #${pr.number} merged successfully.`);
-      return;
-    } catch (err) {
-      const merged = await pollPrMerged(pr.number, nwo);
-      if (merged) {
-        await completePostMerge(
-          `PR #${pr.number} merge succeeded despite reported error. Proceeding with post-merge cleanup.`
-        );
-        return;
-      }
-      throw err;
-    }
-  } catch (err) {
-    const reason = toErrorMessage(err);
-    await remediateMergeFailure(pr, issueNumber, nwo, reason, issueLogger);
-    throw new Error(formatMergeFailureMessage(pr.number, reason));
-  }
+  await executeMerge({
+    pr,
+    issueNumber,
+    nwo,
+    logger: issueLogger,
+    logStream,
+    treatPendingChecksAsFailure: true,
+  });
 }

@@ -3,16 +3,19 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
   classifyChecks,
+  executeMerge,
   fetchChecks,
+  getLinkedIssueNumber,
   getRepoNwo,
   getSettings,
   gh,
   isPlainObject,
   logger,
+  postMerge,
   sleepMs,
   toErrorMessage,
   tryResolvePrForIssue,
-  withStageHooks,
+  type QueuedPR,
 } from '@dnsquared/shipper-core';
 
 interface MergeOptions {
@@ -21,14 +24,6 @@ interface MergeOptions {
   dryRun: boolean;
   repo?: string;
   number?: string;
-}
-
-export interface QueuedPR {
-  number: number;
-  title: string;
-  headRefName: string;
-  baseRefName: string;
-  labeledAt: string;
 }
 
 interface SearchNode {
@@ -59,13 +54,6 @@ interface GraphQLResponse {
 interface PRViewData {
   mergeStateStatus: string;
 }
-
-interface PRStateViewData {
-  state: string;
-}
-
-const MERGE_POLL_MAX_ATTEMPTS = 5;
-const MERGE_POLL_BASE_DELAY_MS = 1_000;
 
 export function parseGraphQLResponse(json: string): GraphQLResponse {
   const parsed: unknown = JSON.parse(json);
@@ -147,15 +135,6 @@ export function parsePRViewData(json: string): PRViewData {
   return { mergeStateStatus: parsed.mergeStateStatus };
 }
 
-export function parsePRStateViewData(json: string): PRStateViewData {
-  const parsed: unknown = JSON.parse(json);
-  if (!isPlainObject(parsed) || typeof parsed.state !== 'string') {
-    throw new Error('GitHub CLI returned an invalid pull request state payload.');
-  }
-
-  return { state: parsed.state };
-}
-
 async function resolveRepo(override?: string): Promise<string> {
   if (override) return override;
   return await getRepoNwo();
@@ -181,31 +160,6 @@ async function fetchPRView(ref: string, nwo: string): Promise<PRViewResult> {
     'number,title,headRefName,baseRefName,state,labels',
   ]);
   return JSON.parse(json) as PRViewResult;
-}
-
-export async function isPrMerged(prNumber: number, nwo: string): Promise<boolean | null> {
-  try {
-    const { stdout } = await gh(['pr', 'view', String(prNumber), '-R', nwo, '--json', 'state']);
-    const { state } = parsePRStateViewData(stdout);
-    return state === 'MERGED';
-  } catch {
-    logger.warn(`Failed to check merge status for PR #${prNumber}`);
-    return null;
-  }
-}
-
-export async function pollPrMerged(prNumber: number, nwo: string): Promise<boolean> {
-  for (let attempt = 0; attempt < MERGE_POLL_MAX_ATTEMPTS; attempt++) {
-    if (attempt > 0) {
-      await sleepMs(MERGE_POLL_BASE_DELAY_MS * 2 ** (attempt - 1));
-    }
-
-    if ((await isPrMerged(prNumber, nwo)) === true) {
-      return true;
-    }
-  }
-
-  return false;
 }
 
 export async function lookupPR(ref: string, nwo: string): Promise<QueuedPR> {
@@ -423,62 +377,6 @@ async function failPR(pr: QueuedPR, reason: string, nwo: string, dryRun: boolean
   }
 }
 
-export async function getLinkedIssueNumber(prNumber: number, nwo: string): Promise<number | null> {
-  try {
-    const { stdout: json } = await gh([
-      'pr',
-      'view',
-      String(prNumber),
-      '-R',
-      nwo,
-      '--json',
-      'body',
-    ]);
-    const { body } = JSON.parse(json) as { body: string };
-    const match = /(?:^|\s)(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/im.exec(body);
-    return match?.[1] ? Number(match[1]) : null;
-  } catch {
-    logger.warn(`Failed to fetch linked issue for PR #${prNumber}`);
-    return null;
-  }
-}
-
-export async function postMerge(
-  _pr: QueuedPR,
-  issueNumber: number,
-  nwo: string,
-  dryRun: boolean
-): Promise<void> {
-  // Clean up label and close issue
-  if (dryRun) {
-    logger.log(`  [dry-run] Would remove shipper:ready and close issue #${issueNumber}`);
-    return;
-  }
-
-  const repoArgs = ['-R', nwo];
-  try {
-    await gh([
-      'issue',
-      'edit',
-      String(issueNumber),
-      ...repoArgs,
-      '--remove-label',
-      'shipper:ready',
-    ]);
-  } catch (err) {
-    logger.warn(
-      `  Warning: Failed to remove shipper:ready label from issue #${issueNumber}: ${toErrorMessage(err)}`
-    );
-  }
-
-  try {
-    await gh(['issue', 'close', String(issueNumber), ...repoArgs]);
-    logger.log(`  Issue #${issueNumber} closed.`);
-  } catch (err) {
-    logger.warn(`  Warning: Failed to close issue #${issueNumber}: ${toErrorMessage(err)}`);
-  }
-}
-
 async function runPostMergeActions(pr: QueuedPR, nwo: string, dryRun: boolean): Promise<void> {
   const issueNumber = await getLinkedIssueNumber(pr.number, nwo);
   if (issueNumber === null) {
@@ -491,13 +389,29 @@ async function runPostMergeActions(pr: QueuedPR, nwo: string, dryRun: boolean): 
 }
 
 async function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): Promise<boolean> {
-  const completePostMerge = async (message: string): Promise<boolean> => {
-    logger.log(message);
-    await runPostMergeActions(pr, nwo, false);
-    return true;
-  };
-
   logger.log(`  Processing PR #${pr.number}: ${pr.title}`);
+
+  if (!dryRun) {
+    const issueNumber = await getLinkedIssueNumber(pr.number, nwo);
+    if (issueNumber === null) {
+      logger.warn(
+        `  Warning: Could not determine linked issue for PR #${pr.number}. Skipping post-merge actions.`
+      );
+      return false;
+    }
+
+    try {
+      return await executeMerge({
+        pr,
+        issueNumber,
+        nwo,
+        logger,
+        treatPendingChecksAsFailure: false,
+      });
+    } catch {
+      return false;
+    }
+  }
 
   // Check merge state
   let mergeState: string;
@@ -522,26 +436,7 @@ async function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): Promise<bo
 
   if (mergeState === 'BEHIND') {
     logger.log(`  Branch is behind base — updating...`);
-    if (dryRun) {
-      logger.log(`  [dry-run] Would run: gh pr update-branch --rebase`);
-      return false;
-    }
-    try {
-      const { stdout } = await gh([
-        'pr',
-        'update-branch',
-        String(pr.number),
-        '-R',
-        nwo,
-        '--rebase',
-      ]);
-      if (stdout.trim()) {
-        process.stdout.write(stdout);
-      }
-      logger.log(`  Branch updated. Will check again next cycle.`);
-    } catch (err) {
-      await failPR(pr, `Failed to update branch: ${toErrorMessage(err)}`, nwo, dryRun);
-    }
+    logger.log(`  [dry-run] Would run: gh pr update-branch --rebase`);
     return false;
   }
 
@@ -616,37 +511,9 @@ async function processPR(pr: QueuedPR, nwo: string, dryRun: boolean): Promise<bo
     }
   }
 
-  // Ready to merge
-  if (dryRun) {
-    logger.log(`  [dry-run] Would merge PR #${pr.number} with --rebase --delete-branch`);
-    await runPostMergeActions(pr, nwo, true);
-    return true;
-  }
-
-  try {
-    const { stdout } = await gh([
-      'pr',
-      'merge',
-      String(pr.number),
-      '-R',
-      nwo,
-      '--rebase',
-      '--delete-branch',
-    ]);
-    if (stdout.trim()) {
-      process.stdout.write(stdout);
-    }
-    return await completePostMerge(`  PR #${pr.number} merged successfully.`);
-  } catch (err) {
-    const merged = await pollPrMerged(pr.number, nwo);
-    if (merged) {
-      return await completePostMerge(
-        `  PR #${pr.number} merge succeeded despite reported error. Proceeding with post-merge cleanup.`
-      );
-    }
-    await failPR(pr, `Merge failed: ${toErrorMessage(err)}`, nwo, dryRun);
-    return false;
-  }
+  logger.log(`  [dry-run] Would merge PR #${pr.number} with --rebase --delete-branch`);
+  await runPostMergeActions(pr, nwo, true);
+  return true;
 }
 
 async function processQueue(nwo: string, dryRun: boolean): Promise<void> {
@@ -667,14 +534,7 @@ async function processQueue(nwo: string, dryRun: boolean): Promise<void> {
     return;
   }
 
-  await withStageHooks(
-    'merge',
-    {
-      issueNumber: String((await getLinkedIssueNumber(first.number, nwo)) ?? ''),
-      branchName: first.headRefName,
-    },
-    async () => await processPR(first, nwo, dryRun)
-  );
+  await processPR(first, nwo, dryRun);
 }
 
 export async function mergeCommand(options: MergeOptions): Promise<void> {
@@ -689,14 +549,7 @@ export async function mergeCommand(options: MergeOptions): Promise<void> {
     if (options.dryRun) logger.log('[dry-run mode]');
     const pr = await lookupPR(cleaned, nwo);
     logger.log(`Targeting PR #${pr.number}: ${pr.title}`);
-    const merged = await withStageHooks(
-      'merge',
-      {
-        issueNumber: String((await getLinkedIssueNumber(pr.number, nwo)) ?? ''),
-        branchName: pr.headRefName,
-      },
-      async () => await processPR(pr, nwo, options.dryRun)
-    );
+    const merged = await processPR(pr, nwo, options.dryRun);
     if (!merged) {
       process.exitCode = 1;
     }

@@ -46,6 +46,16 @@ const handleAgentCrashMock = vi.hoisted(() =>
 const buildReadyCheckMock = vi.hoisted(() =>
   vi.fn<(repo: string, pr: string) => Promise<ReadyCheck>>()
 );
+const executeMergeMock = vi.hoisted(() =>
+  vi.fn<
+    (options: {
+      pr: { number: number; title: string; headRefName: string; baseRefName: string };
+      issueNumber: number;
+      nwo: string;
+      treatPendingChecksAsFailure: boolean;
+    }) => Promise<boolean>
+  >(() => Promise.resolve(true))
+);
 const postMergeMock = vi.hoisted(() =>
   vi.fn<
     (_pr: unknown, issueNumber: number | string, repo: string, dryRun: boolean) => Promise<void>
@@ -187,6 +197,12 @@ vi.mock('@dnsquared/shipper-core', () => ({
     detail: string,
     summary?: string
   ) => handleAgentCrashMock(repo, issue, stage, detail, summary),
+  executeMerge: (options: {
+    pr: { number: number; title: string; headRefName: string; baseRefName: string };
+    issueNumber: number;
+    nwo: string;
+    treatPendingChecksAsFailure: boolean;
+  }) => executeMergeMock(options),
   STAGE_NAME_MAP: labelFixtures.stageNameMap,
   STAGE_LABEL_NAMES: labelFixtures.stageLabelNames,
   NEW_LABEL: 'shipper:new',
@@ -737,10 +753,15 @@ describe('shipCommand sequential auto runner parking', () => {
         lockState.lockedIssues.delete(issue);
       });
     });
+    executeMergeMock.mockReset();
     postMergeMock.mockClear();
     postMergeMock.mockImplementation((_pr: unknown, issueNumber: number | string) => {
       mockIssues.delete(Number(issueNumber));
       return Promise.resolve();
+    });
+    executeMergeMock.mockImplementation(async ({ pr, issueNumber, nwo }) => {
+      await postMergeMock(pr, issueNumber, nwo, false);
+      return true;
     });
     mockCreateWriteStream.mockClear();
     mockMkdirSync.mockClear();

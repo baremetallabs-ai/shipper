@@ -14,7 +14,6 @@ import {
   toErrorMessage,
   totalTokens as getTotalTokens,
   withIssueLock,
-  withStageHooks,
   STAGE_NAME_MAP,
   NEW_LABEL,
   PR_REVIEWED_LABEL,
@@ -23,9 +22,9 @@ import {
   BLOCKED_LABEL,
   LOCKED_LABEL,
   FAILED_LABEL,
+  type QueuedPR,
 } from '@dnsquared/shipper-core';
 import type { AgentName, CommandMode, Logger } from '@dnsquared/shipper-core';
-import type { QueuedPR } from './merge.js';
 import { buildReadyCheck, SKIP_PR_REMEDIATE_WAIT_ENV_VAR } from './pr-remediate.js';
 import { isRetriableMergeFailure, mergePr, resolvePrForIssue } from './ship-merge.js';
 
@@ -470,13 +469,7 @@ export async function shipOneIssue(
         }
 
         try {
-          await withStageHooks(
-            'merge',
-            { issueNumber: issueStr, branchName: pr.headRefName },
-            async () => {
-              await mergePr(pr, issueNumber, nwo, issueLogger, logStream);
-            }
-          );
+          await mergePr(pr, issueNumber, nwo, issueLogger, logStream);
           results.push({ stage: 'merge', status: 'pass' });
         } catch (err) {
           const msg = toErrorMessage(err);
