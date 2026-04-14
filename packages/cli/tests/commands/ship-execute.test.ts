@@ -46,6 +46,16 @@ const handleAgentCrashMock = vi.hoisted(() =>
 const buildReadyCheckMock = vi.hoisted(() =>
   vi.fn<(repo: string, pr: string) => Promise<ReadyCheck>>()
 );
+const executeMergeMock = vi.hoisted(() =>
+  vi.fn<
+    (options: {
+      pr: { number: number; title: string; headRefName: string; baseRefName: string };
+      issueNumber: number;
+      nwo: string;
+      treatPendingChecksAsFailure: boolean;
+    }) => Promise<boolean>
+  >(() => Promise.resolve(true))
+);
 const postMergeMock = vi.hoisted(() =>
   vi.fn<
     (_pr: unknown, issueNumber: number | string, repo: string, dryRun: boolean) => Promise<void>
@@ -180,6 +190,12 @@ vi.mock('@dnsquared/shipper-core', () => ({
     detail: string,
     summary?: string
   ) => handleAgentCrashMock(repo, issue, stage, detail, summary),
+  executeMerge: (options: {
+    pr: { number: number; title: string; headRefName: string; baseRefName: string };
+    issueNumber: number;
+    nwo: string;
+    treatPendingChecksAsFailure: boolean;
+  }) => executeMergeMock(options),
   STAGE_NAME_MAP: labelFixtures.stageNameMap,
   STAGE_LABEL_NAMES: labelFixtures.stageLabelNames,
   NEW_LABEL: 'shipper:new',
@@ -261,8 +277,6 @@ import {
   clearStaleLockIfNeeded,
   fetchIssueTimelines,
   gh,
-  fetchChecks,
-  classifyChecks,
   retryOnInvalidOutput,
   sortIssuesByLabelTime,
   totalTokens,
@@ -278,9 +292,6 @@ const _mockSelectIssuesForStage = vi.mocked(selectIssuesForStage);
 const _mockClearStaleLockIfNeeded = vi.mocked(clearStaleLockIfNeeded);
 const _mockFetchIssueTimelines = vi.mocked(fetchIssueTimelines);
 const mockGh = vi.mocked(gh);
-const mockFetchChecks = vi.mocked(fetchChecks);
-const mockClassifyChecks = vi.mocked(classifyChecks);
-const mockSleepMs = sleepMsMock;
 const _mockRetryOnInvalidOutput = vi.mocked(retryOnInvalidOutput);
 const mockResolveMode = resolveModeMock;
 const _mockSortIssuesByLabelTime = vi.mocked(sortIssuesByLabelTime);
@@ -298,8 +309,6 @@ const mockCreateWriteStream = fsMockState.mockCreateWriteStream;
 const mockMkdirSync = fsMockState.mockMkdirSync;
 const mockHomedir = osMockState.mockHomedir;
 const repo = 'owner/repo';
-const UNKNOWN_STATE_POLL_MAX = 5;
-const UNKNOWN_STATE_POLL_DELAY_MS = 3_000;
 const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((_code?: number) => {
   return undefined as never;
 }) as typeof process.exit);
@@ -359,83 +368,6 @@ function defaultWithStageHooks<T>(_stage: string, _env: unknown, fn: () => Promi
 
 function defaultWithIssueLock<T>(_repo: string, _issue: string, fn: () => Promise<T>): Promise<T> {
   return fn();
-}
-
-function setupReadyMergeFlow(options?: {
-  mergeStates?: string[];
-  mergeable?: string;
-  prNumber?: number;
-  issueNumber?: string;
-  updateBranchStdout?: string;
-  updateBranchError?: Error;
-  mergeStdout?: string;
-  mergeError?: Error;
-}): void {
-  const {
-    mergeStates = ['CLEAN'],
-    mergeable = 'UNKNOWN',
-    prNumber = 456,
-    issueNumber = '123',
-    updateBranchStdout = '',
-    updateBranchError,
-    mergeStdout = '',
-    mergeError,
-  } = options ?? {};
-
-  let mergeStateCall = 0;
-
-  mockGh.mockImplementation((args: string[]) => {
-    if (args[0] === 'issue' && args[1] === 'list') {
-      return { stdout: '[]', stderr: '' };
-    }
-
-    if (args[0] === 'issue' && args[1] === 'view') {
-      return { stdout: 'shipper:ready', stderr: '' };
-    }
-
-    if (args[0] === 'pr' && args[1] === 'list') {
-      return {
-        stdout: JSON.stringify([
-          {
-            number: prNumber,
-            title: 'Ready PR',
-            headRefName: `shipper/${issueNumber}`,
-            baseRefName: 'main',
-          },
-        ]),
-        stderr: '',
-      };
-    }
-
-    if (args[0] === 'pr' && args[1] === 'view') {
-      const index = Math.min(mergeStateCall, mergeStates.length - 1);
-      const mergeStateStatus = mergeStates[index] ?? mergeStates[mergeStates.length - 1] ?? 'CLEAN';
-      mergeStateCall++;
-      return {
-        stdout: JSON.stringify({ mergeStateStatus, mergeable }),
-        stderr: '',
-      };
-    }
-
-    if (args[0] === 'pr' && args[1] === 'update-branch') {
-      if (updateBranchError) throw updateBranchError;
-      return { stdout: updateBranchStdout, stderr: '' };
-    }
-
-    if (args[0] === 'pr' && args[1] === 'merge') {
-      if (mergeError) throw mergeError;
-      return { stdout: mergeStdout, stderr: '' };
-    }
-
-    if (
-      (args[0] === 'pr' && (args[1] === 'edit' || args[1] === 'comment')) ||
-      (args[0] === 'issue' && (args[1] === 'edit' || args[1] === 'close'))
-    ) {
-      return { stdout: '', stderr: '' };
-    }
-
-    throw new Error(`Unexpected gh args: ${args.join(' ')}`);
-  });
 }
 
 function findGhCalls(command: string, subcommand: string): string[][] {
@@ -1175,12 +1107,11 @@ describe('shipCommand single-issue path', () => {
 describe('shipCommand merge path', () => {
   beforeEach(() => {
     mockGh.mockReset();
-    mockFetchChecks.mockReset();
-    mockFetchChecks.mockResolvedValue([]);
-    mockClassifyChecks.mockReset();
-    mockClassifyChecks.mockReturnValue({ pending: [], failed: [], passed: [], total: 0 });
-    mockSleepMs.mockReset();
-    mockSleepMs.mockResolvedValue(undefined);
+    executeMergeMock.mockReset();
+    executeMergeMock.mockImplementation(async ({ pr, issueNumber, nwo }) => {
+      await postMergeMock(pr, issueNumber, nwo, false);
+      return true;
+    });
     mockWithStageHooks.mockReset();
     mockWithStageHooks.mockImplementation(defaultWithStageHooks);
     mockWithIssueLock.mockReset();
@@ -1193,289 +1124,128 @@ describe('shipCommand merge path', () => {
     exitSpy.mockClear();
   });
 
-  it('rebases a behind PR and merges it in the same invocation', async () => {
-    setupReadyMergeFlow({
-      mergeStates: ['BEHIND', 'CLEAN'],
-      updateBranchStdout: 'rebased\n',
-      mergeStdout: 'merged\n',
+  it('resolves the PR and delegates merge execution to the shared helper', async () => {
+    mockGh.mockImplementation((args: string[]) => {
+      if (args[0] === 'issue' && args[1] === 'view') {
+        return { stdout: 'shipper:ready', stderr: '' };
+      }
+
+      if (args[0] === 'pr' && args[1] === 'list') {
+        return {
+          stdout: JSON.stringify([
+            {
+              number: 456,
+              title: 'Ready PR',
+              headRefName: 'shipper/123',
+              baseRefName: 'main',
+            },
+          ]),
+          stderr: '',
+        };
+      }
+
+      throw new Error(`Unexpected gh args: ${args.join(' ')}`);
     });
 
     await shipCommand(repo, '123', { merge: true, auto: false });
 
-    expect(findGhCalls('pr', 'view')).toHaveLength(2);
-    expect(findGhCalls('pr', 'update-branch')).toHaveLength(1);
-    expect(findGhCalls('pr', 'merge')).toHaveLength(1);
+    expect(findGhCalls('pr', 'list')).toHaveLength(1);
+    const call = executeMergeMock.mock.calls[0]?.[0];
+    expect(call?.pr).toEqual(
+      expect.objectContaining({
+        number: 456,
+        headRefName: 'shipper/123',
+        baseRefName: 'main',
+      })
+    );
+    expect(call?.issueNumber).toBe(123);
+    expect(call?.nwo).toBe(repo);
+    expect(call?.treatPendingChecksAsFailure).toBe(true);
     expect(postMergeMock).toHaveBeenCalledTimes(1);
+    expect(mockWithStageHooks).not.toHaveBeenCalled();
     expect(process.exitCode).toBeUndefined();
   });
 
-  it('treats a failed behind-state rebase as a remediable merge failure', async () => {
-    setupReadyMergeFlow({
-      mergeStates: ['BEHIND'],
-      updateBranchError: new Error('rebase conflict'),
+  it('keeps helper-raised merge failures retriable', async () => {
+    mockGh.mockImplementation((args: string[]) => {
+      if (args[0] === 'issue' && args[1] === 'view') {
+        return { stdout: 'shipper:ready', stderr: '' };
+      }
+
+      if (args[0] === 'pr' && args[1] === 'list') {
+        return {
+          stdout: JSON.stringify([
+            {
+              number: 456,
+              title: 'Ready PR',
+              headRefName: 'shipper/123',
+              baseRefName: 'main',
+            },
+          ]),
+          stderr: '',
+        };
+      }
+
+      throw new Error(`Unexpected gh args: ${args.join(' ')}`);
     });
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-
-    await shipCommand(repo, '123', { merge: true, auto: false });
-
-    const stderrOutput = getConsoleOutput(errorSpy);
-    expect(stderrOutput).toContain(
-      'Merge failed for PR #456: Failed to rebase PR #456 onto its base branch: rebase conflict'
+    executeMergeMock.mockRejectedValueOnce(
+      new Error('Merge failed for PR #456: pending CI checks are still running.')
     );
-    expect(pollPrMergedMock).not.toHaveBeenCalled();
-    expect(findGhCalls('pr', 'merge')).toHaveLength(0);
-    expect(findGhCalls('pr', 'edit')).toHaveLength(1);
-    expect(findGhCalls('issue', 'edit')).toHaveLength(1);
-    expect(findGhCalls('pr', 'comment')).toHaveLength(1);
-    expect(process.exitCode).toBe(1);
-
-    errorSpy.mockRestore();
-  });
-
-  it('fails early for DIRTY merge state without attempting gh pr merge', async () => {
-    setupReadyMergeFlow({ mergeStates: ['DIRTY'] });
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     await shipCommand(repo, '123', { merge: true, auto: false });
 
-    const stderrOutput = getConsoleOutput(errorSpy);
-    expect(stderrOutput).toContain(
-      'Merge failed for PR #456: PR #456 has merge conflicts that must be resolved.'
-    );
-    expect(findGhCalls('pr', 'merge')).toHaveLength(0);
+    expect(executeMergeMock).toHaveBeenCalledTimes(1);
     expect(process.exitCode).toBe(1);
-
-    errorSpy.mockRestore();
   });
 
-  it.each([
-    {
-      name: 'failed checks',
-      classification: {
-        pending: [],
-        failed: [{ name: 'test' }],
-        passed: [],
-        total: 1,
-      },
-      expected: 'Merge failed for PR #456: PR #456 is blocked by failed CI checks: test.',
-    },
-    {
-      name: 'pending checks',
-      classification: {
-        pending: [{ name: 'lint' }],
-        failed: [],
-        passed: [],
-        total: 1,
-      },
-      expected:
-        'Merge failed for PR #456: PR #456 is blocked by pending CI checks: lint. Retry when they complete.',
-    },
-    {
-      name: 'review requirements',
-      classification: {
-        pending: [],
-        failed: [],
-        passed: [],
-        total: 0,
-      },
-      expected:
-        'Merge failed for PR #456: PR #456 is blocked, likely due to required reviews or branch protection requirements.',
-    },
-  ])('reports actionable BLOCKED reasons for $name', async ({ classification, expected }) => {
-    setupReadyMergeFlow({ mergeStates: ['BLOCKED'] });
-    mockFetchChecks.mockResolvedValue([
-      { name: 'test', state: 'FAILURE', bucket: 'fail' },
-      { name: 'lint', state: 'PENDING', bucket: 'pending' },
-    ]);
-    mockClassifyChecks.mockReturnValue(classification);
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  it('does not reclassify non-merge helper failures as retriable', async () => {
+    mockGh.mockImplementation((args: string[]) => {
+      if (args[0] === 'issue' && args[1] === 'view') {
+        return { stdout: 'shipper:ready', stderr: '' };
+      }
+
+      if (args[0] === 'pr' && args[1] === 'list') {
+        return {
+          stdout: JSON.stringify([
+            {
+              number: 456,
+              title: 'Ready PR',
+              headRefName: 'shipper/123',
+              baseRefName: 'main',
+            },
+          ]),
+          stderr: '',
+        };
+      }
+
+      throw new Error(`Unexpected gh args: ${args.join(' ')}`);
+    });
+    executeMergeMock.mockRejectedValueOnce(new Error('pre-merge hook exited with code 1'));
 
     await shipCommand(repo, '123', { merge: true, auto: false });
 
-    const stderrOutput = getConsoleOutput(errorSpy);
-    expect(stderrOutput).toContain(expected);
-    expect(mockFetchChecks).toHaveBeenCalledWith(repo, '456');
-    expect(findGhCalls('pr', 'merge')).toHaveLength(0);
+    expect(executeMergeMock).toHaveBeenCalledTimes(1);
     expect(process.exitCode).toBe(1);
-
-    errorSpy.mockRestore();
   });
 
-  it('fails early when GitHub reports UNKNOWN merge state and PR is not mergeable', async () => {
-    setupReadyMergeFlow({
-      mergeStates: Array.from({ length: UNKNOWN_STATE_POLL_MAX + 1 }, () => 'UNKNOWN'),
-      mergeable: 'UNKNOWN',
+  it('fails before delegation when PR resolution finds no matching PR', async () => {
+    mockGh.mockImplementation((args: string[]) => {
+      if (args[0] === 'issue' && args[1] === 'view') {
+        return { stdout: 'shipper:ready', stderr: '' };
+      }
+
+      if (args[0] === 'pr' && args[1] === 'list') {
+        return { stdout: '[]', stderr: '' };
+      }
+
+      throw new Error(`Unexpected gh args: ${args.join(' ')}`);
     });
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     await shipCommand(repo, '123', { merge: true, auto: false });
 
-    const stderrOutput = getConsoleOutput(errorSpy);
-    expect(stderrOutput).toContain(
-      'Merge failed for PR #456: GitHub has not computed merge state for PR #456 yet. Retry shortly.'
-    );
-    expect(mockSleepMs.mock.calls).toEqual(
-      Array.from({ length: UNKNOWN_STATE_POLL_MAX }, () => [UNKNOWN_STATE_POLL_DELAY_MS])
-    );
-    expect(findGhCalls('pr', 'merge')).toHaveLength(0);
-    expect(process.exitCode).toBe(1);
-
-    errorSpy.mockRestore();
-  });
-
-  it('resolves UNKNOWN merge state after polling and merges successfully', async () => {
-    setupReadyMergeFlow({
-      mergeStates: ['UNKNOWN', 'UNKNOWN', 'CLEAN'],
-      mergeable: 'UNKNOWN',
-      mergeStdout: 'merged\n',
-    });
-
-    await shipCommand(repo, '123', { merge: true, auto: false });
-
-    expect(mockSleepMs.mock.calls).toEqual([
-      [UNKNOWN_STATE_POLL_DELAY_MS],
-      [UNKNOWN_STATE_POLL_DELAY_MS],
-    ]);
-    expect(findGhCalls('pr', 'merge')).toHaveLength(1);
-    expect(postMergeMock).toHaveBeenCalledTimes(1);
-    expect(process.exitCode).toBeUndefined();
-  });
-
-  it('stops polling UNKNOWN when state resolves to a non-ready state', async () => {
-    setupReadyMergeFlow({
-      mergeStates: ['UNKNOWN', 'DIRTY'],
-      mergeable: 'UNKNOWN',
-    });
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-
-    await shipCommand(repo, '123', { merge: true, auto: false });
-
-    const stderrOutput = getConsoleOutput(errorSpy);
-    expect(stderrOutput).toContain(
-      'Merge failed for PR #456: PR #456 has merge conflicts that must be resolved.'
-    );
-    expect(mockSleepMs.mock.calls).toEqual([[UNKNOWN_STATE_POLL_DELAY_MS]]);
-    expect(findGhCalls('pr', 'merge')).toHaveLength(0);
-    expect(process.exitCode).toBe(1);
-
-    errorSpy.mockRestore();
-  });
-
-  it('merges when mergeStateStatus is UNKNOWN but mergeable is MERGEABLE', async () => {
-    setupReadyMergeFlow({
-      mergeStates: ['UNKNOWN'],
-      mergeable: 'MERGEABLE',
-      mergeStdout: 'merged\n',
-    });
-
-    await shipCommand(repo, '123', { merge: true, auto: false });
-
-    expect(mockSleepMs).not.toHaveBeenCalled();
-    expect(findGhCalls('pr', 'merge')).toHaveLength(1);
-    expect(postMergeMock).toHaveBeenCalledTimes(1);
-    expect(process.exitCode).toBeUndefined();
-  });
-
-  it('fails clearly on an unrecognized merge state instead of merging blindly', async () => {
-    setupReadyMergeFlow({ mergeStates: ['MERGEABLE_LATER'] });
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-
-    await shipCommand(repo, '123', { merge: true, auto: false });
-
-    const stderrOutput = getConsoleOutput(errorSpy);
-    expect(stderrOutput).toContain(
-      "Merge failed for PR #456: Unrecognized merge state 'MERGEABLE_LATER' for PR #456."
-    );
-    expect(findGhCalls('pr', 'merge')).toHaveLength(0);
-    expect(process.exitCode).toBe(1);
-
-    errorSpy.mockRestore();
-  });
-
-  it('runs the merge post hook only on success', async () => {
-    const hookSteps: string[] = [];
-    mockWithStageHooks.mockImplementation((_stage: string, _env: unknown, fn) => {
-      hookSteps.push('pre');
-      return fn().then((result) => {
-        hookSteps.push('post');
-        return result;
-      });
-    });
-
-    setupReadyMergeFlow({ mergeStates: ['DIRTY'] });
-    await shipCommand(repo, '123', { merge: true, auto: false });
-    expect(hookSteps).toEqual(['pre']);
-    expect(process.exitCode).toBe(1);
-
-    hookSteps.length = 0;
-    process.exitCode = undefined;
-    exitSpy.mockClear();
-    setupReadyMergeFlow({ mergeStates: ['CLEAN'], mergeStdout: 'merged\n' });
-    await shipCommand(repo, '123', { merge: true, auto: false });
-    expect(hookSteps).toEqual(['pre', 'post']);
-    expect(process.exitCode).toBeUndefined();
-  });
-
-  it('uses post-merge cleanup when gh pr merge errors but verification confirms the merge succeeded', async () => {
-    setupReadyMergeFlow({
-      mergeStates: ['CLEAN'],
-      mergeError: new Error('merge timed out'),
-    });
-    pollPrMergedMock.mockResolvedValue(true);
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-
-    await shipCommand(repo, '123', { merge: true, auto: false });
-
-    expect(pollPrMergedMock).toHaveBeenCalledWith(456, repo);
-    expect(postMergeMock).toHaveBeenCalledTimes(1);
-    expect(findGhCalls('pr', 'edit')).toHaveLength(0);
-    expect(findGhCalls('issue', 'edit')).toHaveLength(0);
-    expect(findGhCalls('pr', 'comment')).toHaveLength(0);
-    expect(getConsoleOutput(logSpy)).toContain(
-      'PR #456 merge succeeded despite reported error. Proceeding with post-merge cleanup.'
-    );
-    expect(process.exitCode).toBeUndefined();
-
-    logSpy.mockRestore();
-  });
-
-  it('remediates when gh pr merge errors and verification confirms the merge did not succeed', async () => {
-    setupReadyMergeFlow({
-      mergeStates: ['CLEAN'],
-      mergeError: new Error('merge failed'),
-    });
-    pollPrMergedMock.mockResolvedValue(false);
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-
-    await shipCommand(repo, '123', { merge: true, auto: false });
-
-    expect(pollPrMergedMock).toHaveBeenCalledWith(456, repo);
-    expect(postMergeMock).not.toHaveBeenCalled();
-    expect(findGhCalls('pr', 'edit')).toHaveLength(1);
-    expect(findGhCalls('issue', 'edit')).toHaveLength(1);
-    expect(findGhCalls('pr', 'comment')).toHaveLength(1);
-    expect(getConsoleOutput(errorSpy)).toContain('Merge failed for PR #456: merge failed');
-    expect(process.exitCode).toBe(1);
-
-    errorSpy.mockRestore();
-  });
-
-  it('remediates when polling exhausts without confirming merge after a reported merge error', async () => {
-    setupReadyMergeFlow({
-      mergeStates: ['CLEAN'],
-      mergeError: new Error('merge failed'),
-    });
-    pollPrMergedMock.mockResolvedValue(false);
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-
-    await shipCommand(repo, '123', { merge: true, auto: false });
-
-    expect(pollPrMergedMock).toHaveBeenCalledWith(456, repo);
-    expect(postMergeMock).not.toHaveBeenCalled();
-    expect(findGhCalls('pr', 'edit')).toHaveLength(1);
-    expect(findGhCalls('issue', 'edit')).toHaveLength(1);
-    expect(findGhCalls('pr', 'comment')).toHaveLength(1);
-    expect(getConsoleOutput(errorSpy)).toContain('Merge failed for PR #456: merge failed');
+    expect(executeMergeMock).not.toHaveBeenCalled();
+    expect(getConsoleOutput(errorSpy)).toContain('No open PR found for issue #123.');
     expect(process.exitCode).toBe(1);
 
     errorSpy.mockRestore();

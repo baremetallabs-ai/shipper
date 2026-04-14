@@ -39,6 +39,16 @@ const handleAgentCrashMock = vi.hoisted(() =>
     (repo: string, issue: string, stage: string, detail: string, summary?: string) => Promise<void>
   >(() => Promise.resolve())
 );
+const executeMergeMock = vi.hoisted(() =>
+  vi.fn<
+    (options: {
+      pr: { number: number; title: string; headRefName: string; baseRefName: string };
+      issueNumber: number;
+      nwo: string;
+      treatPendingChecksAsFailure: boolean;
+    }) => Promise<boolean>
+  >(() => Promise.resolve(true))
+);
 const postMergeMock = vi.hoisted(() =>
   vi.fn<
     (_pr: unknown, issueNumber: number | string, repo: string, dryRun: boolean) => Promise<void>
@@ -179,6 +189,12 @@ vi.mock('@dnsquared/shipper-core', () => ({
     detail: string,
     summary?: string
   ) => handleAgentCrashMock(repo, issue, stage, detail, summary),
+  executeMerge: (options: {
+    pr: { number: number; title: string; headRefName: string; baseRefName: string };
+    issueNumber: number;
+    nwo: string;
+    treatPendingChecksAsFailure: boolean;
+  }) => executeMergeMock(options),
   STAGE_NAME_MAP: labelFixtures.stageNameMap,
   STAGE_LABEL_NAMES: labelFixtures.stageLabelNames,
   NEW_LABEL: 'shipper:new',
@@ -343,7 +359,7 @@ function defaultWithStageHooks<T>(_stage: string, _env: unknown, fn: () => Promi
 function defaultWithIssueLock<T>(_repo: string, _issue: string, fn: () => Promise<T>): Promise<T> {
   return fn();
 }
-function setupReadyMergeFlow(options?: {
+function _setupReadyMergeFlow(options?: {
   mergeStates?: string[];
   mergeable?: string;
   prNumber?: number;
@@ -643,8 +659,13 @@ describe('shipCommand auto merge-failure retry handling', () => {
     mockWithIssueLock.mockReset();
     mockWithIssueLock.mockImplementation(defaultWithIssueLock);
     mockSpawn.mockReset();
+    executeMergeMock.mockReset();
     postMergeMock.mockClear();
     postMergeMock.mockResolvedValue(undefined);
+    executeMergeMock.mockImplementation(async ({ pr, issueNumber, nwo }) => {
+      await postMergeMock(pr, issueNumber, nwo, false);
+      return true;
+    });
     exitSpy.mockClear();
   });
 
@@ -657,7 +678,32 @@ describe('shipCommand auto merge-failure retry handling', () => {
       }
       return [];
     });
-    setupReadyMergeFlow({ mergeStates: ['DIRTY'] });
+    mockGh.mockImplementation((args: string[]) => {
+      if (args[0] === 'issue' && args[1] === 'view') {
+        return { stdout: 'shipper:ready', stderr: '' };
+      }
+
+      if (args[0] === 'pr' && args[1] === 'list') {
+        return {
+          stdout: JSON.stringify([
+            {
+              number: 456,
+              title: 'Retry merge PR',
+              headRefName: 'shipper/123',
+              baseRefName: 'main',
+            },
+          ]),
+          stderr: '',
+        };
+      }
+
+      return { stdout: '[]', stderr: '' };
+    });
+    executeMergeMock
+      .mockRejectedValueOnce(
+        new Error('Merge failed for PR #456: PR #456 has merge conflicts that must be resolved.')
+      )
+      .mockResolvedValueOnce(true);
 
     await shipCommand(repo, undefined, { auto: true, merge: false, parallel: 1 });
 
@@ -674,10 +720,28 @@ describe('shipCommand auto merge-failure retry handling', () => {
       }
       return [];
     });
-    setupReadyMergeFlow({ mergeStates: ['CLEAN'] });
-    mockWithStageHooks.mockImplementation(() => {
-      throw new Error('pre-merge hook exited with code 1');
+    mockGh.mockImplementation((args: string[]) => {
+      if (args[0] === 'issue' && args[1] === 'view') {
+        return { stdout: 'shipper:ready', stderr: '' };
+      }
+
+      if (args[0] === 'pr' && args[1] === 'list') {
+        return {
+          stdout: JSON.stringify([
+            {
+              number: 456,
+              title: 'Hook failure PR',
+              headRefName: 'shipper/123',
+              baseRefName: 'main',
+            },
+          ]),
+          stderr: '',
+        };
+      }
+
+      return { stdout: '[]', stderr: '' };
     });
+    executeMergeMock.mockRejectedValueOnce(new Error('pre-merge hook exited with code 1'));
 
     await shipCommand(repo, undefined, { auto: true, merge: false, parallel: 1 });
 
