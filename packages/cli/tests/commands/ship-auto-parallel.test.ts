@@ -913,6 +913,62 @@ describe('shipCommand parallel auto runner', () => {
     expect(process.exitCode).toBeUndefined();
   });
 
+  it('silently excludes shipper:new issues from parallel auto selection and summary', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
+      if (label === 'shipper:planned') {
+        return withDefaultPriority([{ number: 2, title: 'Eligible issue' }]);
+      }
+
+      if (label === 'shipper:new') {
+        return withDefaultPriority([{ number: 1, title: 'Needs grooming' }]);
+      }
+
+      return [];
+    });
+
+    const child = new FakeChildProcess();
+    mockSpawn.mockReturnValueOnce(child as never);
+
+    const runPromise = shipCommand(repo, undefined, { auto: true, merge: false, parallel: 2 });
+
+    await flushMicrotasks();
+
+    expect(getIssuedCalls(mockSpawn.mock.calls)).toEqual(['2']);
+
+    child.finish(0);
+    await runPromise;
+
+    const output = getConsoleOutput(logSpy);
+    expect(output).toContain('Auto run complete.');
+    expect(output).toContain('Eligible issue');
+    expect(output).not.toContain('Needs grooming');
+    expect(output).not.toContain('shipper:new');
+
+    logSpy.mockRestore();
+  });
+
+  it('reports no eligible issues when shipper:new is the only workflow issue in parallel auto mode', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
+      if (label === 'shipper:new') {
+        return withDefaultPriority([{ number: 1, title: 'Needs grooming' }]);
+      }
+
+      return [];
+    });
+
+    await shipCommand(repo, undefined, { auto: true, merge: false, parallel: 2 });
+
+    expect(mockSpawn).not.toHaveBeenCalled();
+    const output = getConsoleOutput(logSpy);
+    expect(output).toContain('Auto run complete. No eligible issues found.');
+    expect(output).not.toContain('Needs grooming');
+    expect(output).not.toContain('#1');
+
+    logSpy.mockRestore();
+  });
+
   it('skips a successful completion when the same issue is still returned on refill', async () => {
     const plannedIssues = [
       { number: 1, title: 'Issue one' },

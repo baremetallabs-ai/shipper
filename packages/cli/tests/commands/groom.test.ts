@@ -49,15 +49,35 @@ vi.mock('../../src/commands/ship-auto.js', () => ({
   printAutoSummary: printAutoSummaryMock,
 }));
 
+const stdinIsTTYDescriptor = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY');
+
+function setStdinIsTTY(value: boolean): void {
+  Object.defineProperty(process.stdin, 'isTTY', {
+    configurable: true,
+    value,
+  });
+}
+
+function restoreStdinIsTTY(): void {
+  if (stdinIsTTYDescriptor) {
+    Object.defineProperty(process.stdin, 'isTTY', stdinIsTTYDescriptor);
+    return;
+  }
+
+  Reflect.deleteProperty(process.stdin, 'isTTY');
+}
+
 describe('groomCommand', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.exitCode = undefined;
     resolveModeMock.mockImplementation((_step: string, override?: string) => override ?? 'default');
+    setStdinIsTTY(true);
   });
 
   afterEach(() => {
     process.exitCode = undefined;
+    restoreStdinIsTTY();
   });
 
   it('runs a single issue inside a worktree on the generated branch', async () => {
@@ -176,6 +196,40 @@ describe('groomCommand', () => {
     expect(autoSelectIssueMock).not.toHaveBeenCalled();
     expect(withWorktreeMock).not.toHaveBeenCalled();
     expect(runPromptMock).not.toHaveBeenCalled();
+
+    errorSpy.mockRestore();
+  });
+
+  it('throws for non-interactive single-issue grooming before doing any work', async () => {
+    setStdinIsTTY(false);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { groomCommand } = await import('../../src/commands/groom.js');
+
+    await expect(groomCommand('owner/repo', '123', { auto: false })).rejects.toThrow(
+      'Error: shipper groom requires an interactive terminal. stdin is not a TTY.'
+    );
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(autoSelectIssueMock).not.toHaveBeenCalled();
+    expect(withWorktreeMock).not.toHaveBeenCalled();
+    expect(runPromptMock).not.toHaveBeenCalled();
+    expect(printAutoSummaryMock).not.toHaveBeenCalled();
+
+    errorSpy.mockRestore();
+  });
+
+  it('throws for non-interactive auto grooming before the auto loop starts', async () => {
+    setStdinIsTTY(false);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { groomCommand } = await import('../../src/commands/groom.js');
+
+    await expect(groomCommand('owner/repo', undefined, { auto: true })).rejects.toThrow(
+      'Error: shipper groom requires an interactive terminal. stdin is not a TTY.'
+    );
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(autoSelectIssueMock).not.toHaveBeenCalled();
+    expect(withWorktreeMock).not.toHaveBeenCalled();
+    expect(runPromptMock).not.toHaveBeenCalled();
+    expect(printAutoSummaryMock).not.toHaveBeenCalled();
 
     errorSpy.mockRestore();
   });

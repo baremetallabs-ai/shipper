@@ -68,6 +68,9 @@ export async function groomCommand(
       'Error: groom does not support headless mode. Grooming requires interactive input.'
     );
   }
+  if (!process.stdin.isTTY) {
+    throw new Error('Error: shipper groom requires an interactive terminal. stdin is not a TTY.');
+  }
 
   if (options.auto) {
     const results: AutoResult[] = [];

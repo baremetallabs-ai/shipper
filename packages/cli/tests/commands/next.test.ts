@@ -150,6 +150,35 @@ describe('nextCommand', () => {
     });
   });
 
+  it('surfaces groom failures unchanged for shipper:new issues', async () => {
+    mockGh.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        number: 159,
+        labels: [{ name: 'shipper:new' }],
+      }),
+      stderr: '',
+    });
+    const error = new Error(
+      'Error: shipper groom requires an interactive terminal. stdin is not a TTY.'
+    );
+    mockGroomCommand.mockRejectedValueOnce(error);
+
+    await expect(nextCommand(repo, '159')).rejects.toThrow(error.message);
+
+    expect(mockGroomCommand).toHaveBeenCalledWith(repo, '159', {
+      auto: false,
+      mode: undefined,
+      agent: undefined,
+      model: undefined,
+    });
+    expect(mockDesignCommand).not.toHaveBeenCalled();
+    expect(mockPlanCommand).not.toHaveBeenCalled();
+    expect(mockImplementCommand).not.toHaveBeenCalled();
+    expect(mockPrOpenCommand).not.toHaveBeenCalled();
+    expect(mockPrReviewCommand).not.toHaveBeenCalled();
+    expect(mockPrRemediateCommand).not.toHaveBeenCalled();
+  });
+
   it('forwards mode, agent, and model overrides to downstream workflow commands', async () => {
     mockGh.mockResolvedValueOnce({
       stdout: JSON.stringify({

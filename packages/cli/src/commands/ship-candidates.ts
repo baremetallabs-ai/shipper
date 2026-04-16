@@ -14,6 +14,7 @@ import {
   toErrorMessage,
   withIssueLock,
   STAGE_LABEL_NAMES,
+  NEW_LABEL,
   BLOCKED_LABEL,
   LOCKED_LABEL,
 } from '@dnsquared/shipper-core';
@@ -21,7 +22,9 @@ import type { AgentName } from '@dnsquared/shipper-core';
 import { prepareUnblockContext } from './unblock.js';
 import { formatLogDisplayPath } from './ship-execute.js';
 
-export const AUTO_PRIORITY_LABELS: string[] = [...STAGE_LABEL_NAMES].reverse();
+export const AUTO_PRIORITY_LABELS: string[] = STAGE_LABEL_NAMES.filter(
+  (label) => label !== NEW_LABEL
+).reverse();
 
 export interface UnblockAttempt {
   issue: number;

@@ -186,7 +186,7 @@ afterEach(() => {
 });
 
 describe('AUTO_PRIORITY_LABELS', () => {
-  it('contains all 8 expected labels in priority order', () => {
+  it('contains the 7 expected auto-ship labels in priority order', () => {
     expect(AUTO_PRIORITY_LABELS).toEqual([
       'shipper:ready',
       'shipper:pr-reviewed',
@@ -195,7 +195,6 @@ describe('AUTO_PRIORITY_LABELS', () => {
       'shipper:planned',
       'shipper:designed',
       'shipper:groomed',
-      'shipper:new',
     ]);
   });
 
@@ -203,8 +202,8 @@ describe('AUTO_PRIORITY_LABELS', () => {
     expect(AUTO_PRIORITY_LABELS[0]).toBe('shipper:ready');
   });
 
-  it('has shipper:new as the lowest priority', () => {
-    expect(AUTO_PRIORITY_LABELS[AUTO_PRIORITY_LABELS.length - 1]).toBe('shipper:new');
+  it('excludes shipper:new from auto-ship priorities', () => {
+    expect(AUTO_PRIORITY_LABELS).not.toContain('shipper:new');
   });
 });
 
@@ -258,6 +257,50 @@ describe('selectNextCandidate', () => {
 
     const result = await selectNextCandidate(repo, new Set([5]));
     expect(result).toBeNull();
+  });
+
+  it('never queries shipper:new when auto-selecting the next candidate', async () => {
+    mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
+      if (label === 'shipper:groomed') {
+        return [{ number: 20, title: 'Eligible issue', priority: 1 }];
+      }
+
+      if (label === 'shipper:new') {
+        return [{ number: 10, title: 'New issue', priority: 1 }];
+      }
+
+      return [];
+    });
+
+    const result = await selectNextCandidate(repo, new Set());
+
+    expect(result).toEqual({ number: 20, title: 'Eligible issue' });
+    expect(mockSelectIssuesForStage).not.toHaveBeenCalledWith(
+      repo,
+      'shipper:new',
+      expect.any(Set),
+      expect.objectContaining({ skipTimeline: true })
+    );
+  });
+
+  it('returns null when shipper:new is the only workflow issue', async () => {
+    mockSelectIssuesForStage.mockImplementation((_repo: string, label: string) => {
+      if (label === 'shipper:new') {
+        return [{ number: 10, title: 'New issue', priority: 1 }];
+      }
+
+      return [];
+    });
+
+    const result = await selectNextCandidate(repo, new Set());
+
+    expect(result).toBeNull();
+    expect(mockSelectIssuesForStage).not.toHaveBeenCalledWith(
+      repo,
+      'shipper:new',
+      expect.any(Set),
+      expect.objectContaining({ skipTimeline: true })
+    );
   });
 
   it('does not fetch timelines when only one candidate exists across all stages', async () => {
