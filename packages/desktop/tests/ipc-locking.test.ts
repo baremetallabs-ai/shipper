@@ -48,7 +48,11 @@ const state = vi.hoisted(() => ({
   browserWindowLoadUrlMock: vi.fn(),
   browserWindowLoadFileMock: vi.fn(),
   browserWindowGetAllWindowsMock: vi.fn(),
+  shellOpenExternalMock: vi.fn<(url: string) => Promise<void>>(),
   webContentsSendMock: vi.fn(),
+  webContentsOnMock: vi.fn(),
+  webContentsGetUrlMock: vi.fn(),
+  webContentsSetWindowOpenHandlerMock: vi.fn(),
   ipcHandleMock: vi.fn(),
   browserWindowEventHandlers: new Map<string, (...args: unknown[]) => void>(),
 }));
@@ -123,7 +127,10 @@ vi.mock('electron', () => {
     static getAllWindows = state.browserWindowGetAllWindowsMock;
 
     webContents = {
+      getURL: state.webContentsGetUrlMock,
+      on: state.webContentsOnMock,
       send: state.webContentsSendMock,
+      setWindowOpenHandler: state.webContentsSetWindowOpenHandlerMock,
     };
 
     on = state.browserWindowOnMock;
@@ -143,6 +150,9 @@ vi.mock('electron', () => {
     BrowserWindow: MockBrowserWindow,
     ipcMain: {
       handle: state.ipcHandleMock,
+    },
+    shell: {
+      openExternal: state.shellOpenExternalMock,
     },
   };
 });
@@ -209,6 +219,12 @@ async function loadHandlers(): Promise<Map<string, IpcHandler>> {
   state.browserWindowGetAllWindowsMock.mockReturnValue([]);
   state.browserWindowLoadUrlMock.mockResolvedValue(undefined);
   state.browserWindowLoadFileMock.mockResolvedValue(undefined);
+  state.shellOpenExternalMock.mockReset();
+  state.shellOpenExternalMock.mockResolvedValue(undefined);
+  state.webContentsOnMock.mockReset();
+  state.webContentsGetUrlMock.mockReset();
+  state.webContentsGetUrlMock.mockReturnValue('http://localhost:3000/');
+  state.webContentsSetWindowOpenHandlerMock.mockReset();
   state.browserWindowOnMock.mockImplementation(
     (event: string, handler: (...args: unknown[]) => void) => {
       state.browserWindowEventHandlers.set(event, handler);

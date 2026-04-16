@@ -4,6 +4,7 @@ import { app, BrowserWindow } from 'electron';
 
 import { PtyManager } from './pty-manager.js';
 import { BackgroundManager } from './background-manager.js';
+import { configureExternalLinks } from './external-links.js';
 import { registerBackgroundHandlers } from './handlers/background.js';
 import { registerConfigHandlers } from './handlers/config.js';
 import { registerIssueHandlers } from './handlers/issues.js';
@@ -31,6 +32,7 @@ function createWindow(): BrowserWindow {
     },
   });
 
+  configureExternalLinks(window.webContents);
   ptyManager.setWindow(window);
   backgroundManager.setWindow(window);
 
