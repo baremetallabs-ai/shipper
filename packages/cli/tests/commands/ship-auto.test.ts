@@ -1257,32 +1257,56 @@ describe('shipCommand sequential auto runner parking', () => {
     expect(getIssuedCalls(mockSpawn.mock.calls)).toEqual(['1', '1', '1', '1']);
   });
 
-  it('gives sequential auto groom runs inherited stdio when resolveMode returns interactive', async () => {
+  it('silently excludes shipper:new issues from sequential auto selection and summary', async () => {
     setMockIssues([
       {
         number: 1,
         title: 'Needs grooming',
         labels: ['shipper:new'],
-        nextLabels: ['shipper:groomed', 'shipper:ready'],
+        nextLabels: ['shipper:groomed'],
+      },
+      {
+        number: 2,
+        title: 'Eligible issue',
+        labels: ['shipper:planned'],
+        nextLabels: ['shipper:ready'],
+        prNumber: 102,
       },
     ]);
-    mockResolveMode.mockImplementation((step, override) =>
-      step === 'groom' ? 'interactive' : (override ?? 'default')
-    );
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     await shipCommand(repo, undefined, { auto: true, merge: false, parallel: 1 });
 
-    const cliEntrypoint = process.argv[1];
-    expect(cliEntrypoint).toBeDefined();
-    expect(mockSpawn.mock.calls[0]?.[1]).toEqual([
-      cliEntrypoint,
-      'next',
-      '1',
-      '--mode',
-      'interactive',
+    expect(getIssuedCalls(mockSpawn.mock.calls)).toEqual(['2']);
+    const output = getConsoleOutput(logSpy);
+    expect(output).toContain('Auto run complete.');
+    expect(output).toContain('Eligible issue');
+    expect(output).not.toContain('Needs grooming');
+    expect(output).not.toContain('shipper:new');
+
+    logSpy.mockRestore();
+  });
+
+  it('reports no eligible issues when shipper:new is the only workflow issue', async () => {
+    setMockIssues([
+      {
+        number: 1,
+        title: 'Needs grooming',
+        labels: ['shipper:new'],
+        nextLabels: ['shipper:groomed'],
+      },
     ]);
-    expect(mockSpawn.mock.calls[0]?.[2]).toMatchObject({ stdio: 'inherit' });
-    expect(process.exitCode).toBe(1);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await shipCommand(repo, undefined, { auto: true, merge: false, parallel: 1 });
+
+    expect(mockSpawn).not.toHaveBeenCalled();
+    const output = getConsoleOutput(logSpy);
+    expect(output).toContain('Auto run complete. No eligible issues found.');
+    expect(output).not.toContain('Needs grooming');
+    expect(output).not.toContain('#1');
+
+    logSpy.mockRestore();
   });
 });
 
