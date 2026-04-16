@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WebContents } from 'electron';
 
-type WindowOpenHandler = (details: { url: string }) => { action: 'deny' | 'allow' };
+type WindowOpenHandler = (details: { url: string }) => {
+  action: 'deny' | 'allow';
+};
 type WillNavigateHandler = (event: { preventDefault: () => void }, url: string) => void;
 
 const state = vi.hoisted(() => ({
@@ -72,6 +74,7 @@ describe('configureExternalLinks', () => {
 
     expect(handler({ url: 'https://example.com/issues/627' })).toEqual({ action: 'deny' });
     expect(handler({ url: 'http://example.com/issues/627' })).toEqual({ action: 'deny' });
+    expect(handler({ url: 'http://localhost:3000/settings' })).toEqual({ action: 'deny' });
     expect(handler({ url: 'mailto:test@example.com' })).toEqual({ action: 'deny' });
     expect(handler({ url: 'file:///tmp/example.txt' })).toEqual({ action: 'deny' });
     expect(handler({ url: 'not a url' })).toEqual({ action: 'deny' });
@@ -92,22 +95,38 @@ describe('configureExternalLinks', () => {
 
     const handler = getWillNavigateHandler();
     const externalEvent = { preventDefault: vi.fn() };
-    const sameUrlEvent = { preventDefault: vi.fn() };
+    const sameOriginEvent = { preventDefault: vi.fn() };
     const mailtoEvent = { preventDefault: vi.fn() };
 
     handler(externalEvent, 'https://github.com/dnsquared/shipper/issues/627');
-    handler(sameUrlEvent, 'http://localhost:3000/issues');
+    handler(sameOriginEvent, 'http://localhost:3000/settings');
     handler(mailtoEvent, 'mailto:test@example.com');
 
     await Promise.resolve();
 
     expect(externalEvent.preventDefault).toHaveBeenCalledTimes(1);
-    expect(sameUrlEvent.preventDefault).not.toHaveBeenCalled();
+    expect(sameOriginEvent.preventDefault).not.toHaveBeenCalled();
     expect(mailtoEvent.preventDefault).not.toHaveBeenCalled();
     expect(state.openExternalMock).toHaveBeenCalledTimes(1);
     expect(state.openExternalMock).toHaveBeenCalledWith(
       'https://github.com/dnsquared/shipper/issues/627'
     );
+  });
+
+  it('still treats http(s) URLs as external when the renderer is not served from http(s)', async () => {
+    const { webContents, getWillNavigateHandler } = createWebContents('file:///app/index.html');
+
+    configureExternalLinks(webContents as WebContents);
+
+    const handler = getWillNavigateHandler();
+    const event = { preventDefault: vi.fn() };
+
+    handler(event, 'https://example.com/issues/627');
+
+    await Promise.resolve();
+
+    expect(event.preventDefault).toHaveBeenCalledTimes(1);
+    expect(state.openExternalMock).toHaveBeenCalledWith('https://example.com/issues/627');
   });
 
   it('swallows shell.openExternal rejections for denied window opens', async () => {
