@@ -154,6 +154,8 @@ export async function selectBlockedIssues(
     return [];
   }
 
+  issues = issues.filter((issue) => !issue.labels.some((label) => label.name === NEW_LABEL));
+
   // Sort by stage priority — issues with higher-priority stage labels come first
   issues.sort((a, b) => {
     const aLabels = new Set(a.labels.map((l) => l.name));

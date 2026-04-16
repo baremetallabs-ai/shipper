@@ -1,3 +1,4 @@
+import type { ReadStream } from 'node:tty';
 import {
   autoSelectIssue,
   generateBranchName,
@@ -68,7 +69,8 @@ export async function groomCommand(
       'Error: groom does not support headless mode. Grooming requires interactive input.'
     );
   }
-  if (!process.stdin.isTTY) {
+  const stdin = Reflect.get(process, 'stdin') as ReadStream | undefined;
+  if (!stdin?.isTTY) {
     throw new Error('Error: shipper groom requires an interactive terminal. stdin is not a TTY.');
   }
 
