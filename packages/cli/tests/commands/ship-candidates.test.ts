@@ -450,11 +450,6 @@ describe('selectBlockedIssues', () => {
   it('returns issues sorted by stage priority', async () => {
     const issues = [
       {
-        number: 10,
-        title: 'New issue',
-        labels: [{ name: 'shipper:new' }, { name: 'shipper:blocked' }],
-      },
-      {
         number: 20,
         title: 'PR reviewed issue',
         labels: [{ name: 'shipper:pr-reviewed' }, { name: 'shipper:blocked' }],
@@ -471,8 +466,27 @@ describe('selectBlockedIssues', () => {
     expect(result).toEqual([
       { number: 20, title: 'PR reviewed issue' },
       { number: 30, title: 'Planned issue' },
-      { number: 10, title: 'New issue' },
     ]);
+  });
+
+  it('silently excludes blocked shipper:new issues from the unblock pass', async () => {
+    const issues = [
+      {
+        number: 10,
+        title: 'New issue',
+        labels: [{ name: 'shipper:new' }, { name: 'shipper:blocked' }],
+      },
+      {
+        number: 20,
+        title: 'Planned issue',
+        labels: [{ name: 'shipper:planned' }, { name: 'shipper:blocked' }],
+      },
+    ];
+    mockGh.mockResolvedValue({ stdout: JSON.stringify(issues), stderr: '' });
+
+    const result = await selectBlockedIssues(repo);
+
+    expect(result).toEqual([{ number: 20, title: 'Planned issue' }]);
   });
 
   it('returns empty array when gh throws', async () => {
