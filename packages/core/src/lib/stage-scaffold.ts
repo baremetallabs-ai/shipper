@@ -11,8 +11,7 @@ import {
 } from './output-protocol/index.js';
 import type { DiffFileHunks } from './output-protocol/diff-parse.js';
 import { runPrompt, type RunPromptOpts } from './prompt-runner.js';
-import { formatConflictContext, withGitTransport } from './worktree.js';
-import { withWorktree } from './worktree.js';
+import { formatConflictContext, withGitTransport, withWorktree } from './worktree.js';
 
 export type ScaffoldStage = 'design' | 'plan' | 'implement' | 'pr-open' | 'pr-review';
 export type ScaffoldResultStage = 'design' | 'plan' | 'implement' | 'pr_open' | 'pr_review';
