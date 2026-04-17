@@ -66,7 +66,13 @@ import { initCommand } from '../src/commands/init.js';
 import { newCommand } from '../src/commands/new.js';
 import { priorityCommand } from '../src/commands/priority.js';
 import { groomCommand } from '../src/commands/groom.js';
+import { designCommand } from '../src/commands/design.js';
+import { planCommand } from '../src/commands/plan.js';
+import { implementCommand } from '../src/commands/implement.js';
+import { unblockCommand } from '../src/commands/unblock.js';
 import { prReviewCommand } from '../src/commands/pr-review.js';
+import { prOpenCommand } from '../src/commands/pr-open.js';
+import { prRemediateCommand } from '../src/commands/pr-remediate.js';
 import { setupCommand } from '../src/commands/setup.js';
 import { unlockCommand } from '../src/commands/unlock.js';
 import {
@@ -83,7 +89,13 @@ const mockInitCommand = vi.mocked(initCommand);
 const mockNewCommand = vi.mocked(newCommand);
 const mockPriorityCommand = vi.mocked(priorityCommand);
 const mockGroomCommand = vi.mocked(groomCommand);
+const mockDesignCommand = vi.mocked(designCommand);
+const mockPlanCommand = vi.mocked(planCommand);
+const mockImplementCommand = vi.mocked(implementCommand);
+const mockUnblockCommand = vi.mocked(unblockCommand);
 const mockPrReviewCommand = vi.mocked(prReviewCommand);
+const mockPrOpenCommand = vi.mocked(prOpenCommand);
+const mockPrRemediateCommand = vi.mocked(prRemediateCommand);
 const mockSetupCommand = vi.mocked(setupCommand);
 const mockUnlockCommand = vi.mocked(unlockCommand);
 const mockRunPreflight = vi.mocked(runPreflight);
@@ -293,7 +305,13 @@ describe('shipper-cli', () => {
       vi.resetModules();
       mockNewCommand.mockReset();
       mockGroomCommand.mockReset();
+      mockDesignCommand.mockReset();
+      mockPlanCommand.mockReset();
+      mockImplementCommand.mockReset();
+      mockUnblockCommand.mockReset();
       mockPrReviewCommand.mockReset();
+      mockPrOpenCommand.mockReset();
+      mockPrRemediateCommand.mockReset();
       mockSetupCommand.mockReset();
       mockRunPreflight.mockClear();
       mockWarnTrackedOutputFiles.mockClear();
@@ -313,7 +331,7 @@ describe('shipper-cli', () => {
       await import('../src/index.ts');
     }
 
-    it('passes mode, model, and logFile to newCommand', async () => {
+    it('passes mode, agent, model, and logFile to newCommand', async () => {
       process.argv = [
         'node',
         'src/index.ts',
@@ -321,6 +339,8 @@ describe('shipper-cli', () => {
         'request',
         '--mode',
         'headless',
+        '--agent',
+        'claude',
         '--model',
         'sonnet',
         '--log-file',
@@ -331,6 +351,7 @@ describe('shipper-cli', () => {
 
       expect(mockNewCommand).toHaveBeenCalledWith(['request'], {
         mode: 'headless',
+        agent: 'claude',
         model: 'sonnet',
         logFile: '/tmp/example.jsonl',
       });
@@ -349,8 +370,19 @@ describe('shipper-cli', () => {
       });
     });
 
-    it('passes mode through groomCommand options', async () => {
-      process.argv = ['node', 'src/index.ts', 'groom', '42', '--mode', 'interactive'];
+    it('passes mode, agent, and model through groomCommand options', async () => {
+      process.argv = [
+        'node',
+        'src/index.ts',
+        'groom',
+        '42',
+        '--mode',
+        'interactive',
+        '--agent',
+        'codex',
+        '--model',
+        'gpt-5',
+      ];
 
       await importEntrypoint();
 
@@ -358,12 +390,137 @@ describe('shipper-cli', () => {
       expect(mockGroomCommand).toHaveBeenCalledWith('owner/repo', '42', {
         auto: false,
         mode: 'interactive',
-        agent: undefined,
-        model: undefined,
+        agent: 'codex',
+        model: 'gpt-5',
       });
     });
 
-    it('passes mode and model to pr review', async () => {
+    it('passes mode, agent, and model to setup', async () => {
+      process.argv = [
+        'node',
+        'src/index.ts',
+        'setup',
+        'repo',
+        '--mode',
+        'headless',
+        '--agent',
+        'copilot',
+        '--model',
+        'gpt-5',
+      ];
+
+      await importEntrypoint();
+
+      expect(mockLoadSettings).toHaveBeenCalled();
+      expect(mockRunPreflight).not.toHaveBeenCalled();
+      expect(mockSetupCommand).toHaveBeenCalledWith(['repo'], {
+        mode: 'headless',
+        agent: 'copilot',
+        model: 'gpt-5',
+      });
+    });
+
+    it('passes mode, agent, and model to design', async () => {
+      process.argv = [
+        'node',
+        'src/index.ts',
+        'design',
+        '42',
+        '--mode',
+        'interactive',
+        '--agent',
+        'claude',
+        '--model',
+        'sonnet',
+      ];
+
+      await importEntrypoint();
+
+      expect(mockDesignCommand).toHaveBeenCalledWith(
+        'owner/repo',
+        '42',
+        'interactive',
+        'claude',
+        'sonnet'
+      );
+    });
+
+    it('passes mode, agent, and model to plan', async () => {
+      process.argv = [
+        'node',
+        'src/index.ts',
+        'plan',
+        '42',
+        '--mode',
+        'headless',
+        '--agent',
+        'codex',
+        '--model',
+        'gpt-5',
+      ];
+
+      await importEntrypoint();
+
+      expect(mockPlanCommand).toHaveBeenCalledWith(
+        'owner/repo',
+        '42',
+        'headless',
+        'codex',
+        'gpt-5'
+      );
+    });
+
+    it('passes mode, agent, and model to implement', async () => {
+      process.argv = [
+        'node',
+        'src/index.ts',
+        'implement',
+        '42',
+        '--mode',
+        'interactive',
+        '--agent',
+        'claude',
+        '--model',
+        'gpt-5.4',
+      ];
+
+      await importEntrypoint();
+
+      expect(mockImplementCommand).toHaveBeenCalledWith(
+        'owner/repo',
+        '42',
+        'interactive',
+        'claude',
+        'gpt-5.4'
+      );
+    });
+
+    it('passes mode, agent, and model to unblock', async () => {
+      process.argv = [
+        'node',
+        'src/index.ts',
+        'unblock',
+        '42',
+        '--mode',
+        'headless',
+        '--agent',
+        'copilot',
+        '--model',
+        'sonnet',
+      ];
+
+      await importEntrypoint();
+
+      expect(mockUnblockCommand).toHaveBeenCalledWith(
+        'owner/repo',
+        '42',
+        'headless',
+        'copilot',
+        'sonnet'
+      );
+    });
+
+    it('passes mode, agent, and model to pr review', async () => {
       process.argv = [
         'node',
         'src/index.ts',
@@ -372,6 +529,8 @@ describe('shipper-cli', () => {
         '7',
         '--mode',
         'interactive',
+        '--agent',
+        'claude',
         '--model',
         'gpt-5',
       ];
@@ -382,23 +541,61 @@ describe('shipper-cli', () => {
         'owner/repo',
         '7',
         'interactive',
-        undefined,
+        'claude',
         'gpt-5'
       );
     });
 
-    it('loads settings explicitly for setup and does not run preflight', async () => {
-      process.argv = ['node', 'src/index.ts', 'setup', 'repo', '--mode', 'headless'];
+    it('passes mode, agent, and model to pr open', async () => {
+      process.argv = [
+        'node',
+        'src/index.ts',
+        'pr',
+        'open',
+        '42',
+        '--mode',
+        'interactive',
+        '--agent',
+        'codex',
+        '--model',
+        'gpt-5',
+      ];
 
       await importEntrypoint();
 
-      expect(mockLoadSettings).toHaveBeenCalled();
-      expect(mockRunPreflight).not.toHaveBeenCalled();
-      expect(mockSetupCommand).toHaveBeenCalledWith(['repo'], {
-        mode: 'headless',
-        model: undefined,
-        agent: undefined,
-      });
+      expect(mockPrOpenCommand).toHaveBeenCalledWith(
+        'owner/repo',
+        '42',
+        'interactive',
+        'codex',
+        'gpt-5'
+      );
+    });
+
+    it('passes mode, agent, and model to pr remediate', async () => {
+      process.argv = [
+        'node',
+        'src/index.ts',
+        'pr',
+        'remediate',
+        '7',
+        '--mode',
+        'headless',
+        '--agent',
+        'copilot',
+        '--model',
+        'sonnet',
+      ];
+
+      await importEntrypoint();
+
+      expect(mockPrRemediateCommand).toHaveBeenCalledWith(
+        'owner/repo',
+        '7',
+        'headless',
+        'copilot',
+        'sonnet'
+      );
     });
 
     it('rejects the removed --headless option on new', async () => {
