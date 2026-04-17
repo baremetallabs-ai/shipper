@@ -31,9 +31,11 @@ npx vitest run packages/cli/tests/lib/branch.test.ts   # Run a single test file
 
 ## CI
 
-Pull requests to `main` run two required GitHub Actions jobs: `check` on Ubuntu and `desktop-macos` on macOS.
+**PR Jobs:** Every pull request to `main` runs two GitHub Actions CI jobs: `check` on Ubuntu and `desktop-macos` on macOS.
 
-`desktop-macos` builds `packages/core`, builds and tests `packages/desktop`, and runs a dir-style `electron-builder` packaging smoke without publishing release artifacts. Failures in either required job block merge.
+**desktop-macos:** Builds `packages/core`, builds and tests `packages/desktop`, and runs an unpacked (`--dir`) `electron-builder` packaging smoke test without publishing release artifacts.
+
+**Merge gating:** `check` is required today. `desktop-macos` is intended to be required as well and becomes merge-blocking once it is added to `main`'s required status checks.
 
 ## Architecture
 
