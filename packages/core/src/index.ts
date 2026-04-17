@@ -4,6 +4,8 @@ export * from './lib/checks.js';
 export * from './lib/errors.js';
 export * from './lib/frontmatter.js';
 export * from './lib/gh.js';
+export * from './lib/gh-json.js';
+export * from './lib/gh-schemas.js';
 export * from './lib/github.js';
 export * from './lib/hooks.js';
 export * from './lib/labels.js';
