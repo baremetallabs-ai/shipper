@@ -3,18 +3,11 @@ import {
   getBranchForPR,
   getRepoRoot,
   gh,
-  handleAgentCrash,
   logger,
   parseDiffHunks,
-  processResult,
   resolveRef,
-  retryOnInvalidOutput,
-  runPrompt,
-  scrubOutputDir,
-  toErrorMessage,
-  withIssueLock,
-  withStageHooks,
-  withWorktree,
+  runStageScaffold,
+  simpleInvoker,
   writeContextFile,
 } from '@dnsquared/shipper-core';
 import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
@@ -45,100 +38,51 @@ export async function prReviewCommand(
     issueNumber = resolved.issueNumber;
   }
 
-  await withIssueLock(repo, issueNumber, async () => {
-    const repoRoot = await getRepoRoot();
-    const branch = await getBranchForPR(repo, pr);
+  await runStageScaffold({
+    repo,
+    issueNumber,
+    stage: 'pr-review',
+    resultStage: 'pr_review',
+    createBranch: false,
+    initialFailure: 'crash',
+    prNumber: { value: pr },
+    resolveLocked: async () => {
+      const repoRoot = await getRepoRoot();
+      const branch = await getBranchForPR(repo, pr);
+      return { repoRoot, branch };
+    },
+    invoker: simpleInvoker({
+      promptName: 'pr_review',
+      baseRunPromptOpts: { repo, issueRef: issueNumber, prRef: pr, mode, agent, model },
+      setup: async (wtPath) => {
+        const { stdout: diff } = await gh(['pr', 'diff', pr, '-R', repo]);
+        const diffHunks = parseDiffHunks(diff);
+        await writeContextFile(wtPath, 'pr-diff.patch', diff);
 
-    await withStageHooks('pr-review', { issueNumber, branchName: branch }, async () => {
-      await withWorktree(
-        { repoRoot, branch, createBranch: false, issueNumber, stage: 'pr-review' },
-        async (wtPath) => {
-          await scrubOutputDir(wtPath);
-          const { stdout: diff } = await gh(['pr', 'diff', pr, '-R', repo]);
-          const diffHunks = parseDiffHunks(diff);
-          await writeContextFile(wtPath, 'pr-diff.patch', diff);
+        const { stdout: prFilesRaw } = await gh([
+          'api',
+          `repos/${repo}/pulls/${pr}/files`,
+          '--paginate',
+          '--slurp',
+        ]);
+        const parsedPrFiles = (JSON.parse(prFilesRaw) as Array<Array<{ filename: string }>>).flat();
+        const prFiles = JSON.stringify(parsedPrFiles);
+        const prFileSet = new Set(parsedPrFiles.map((file) => file.filename));
+        await writeContextFile(wtPath, 'pr-files.json', prFiles);
 
-          const { stdout: prFilesRaw } = await gh([
-            'api',
-            `repos/${repo}/pulls/${pr}/files`,
-            '--paginate',
-            '--slurp',
-          ]);
-          const parsedPrFiles = (
-            JSON.parse(prFilesRaw) as Array<Array<{ filename: string }>>
-          ).flat();
-          const prFiles = JSON.stringify(parsedPrFiles);
-          const prFileSet = new Set(parsedPrFiles.map((file) => file.filename));
-          await writeContextFile(wtPath, 'pr-files.json', prFiles);
+        const { stdout: prMetadata } = await gh([
+          'pr',
+          'view',
+          pr,
+          '-R',
+          repo,
+          '--json',
+          'headRefOid,author,title,headRefName',
+        ]);
+        await writeContextFile(wtPath, 'pr-metadata.json', prMetadata);
 
-          const { stdout: prMetadata } = await gh([
-            'pr',
-            'view',
-            pr,
-            '-R',
-            repo,
-            '--json',
-            'headRefOid,author,title,headRefName',
-          ]);
-          await writeContextFile(wtPath, 'pr-metadata.json', prMetadata);
-
-          const exitCode = await runPrompt('pr_review', {
-            repo,
-            issueRef: issueNumber,
-            prRef: pr,
-            cwd: wtPath,
-            mode,
-            agent,
-            model,
-          });
-          if (exitCode !== 0) {
-            const detail = `Agent exited with code ${exitCode}`;
-            logger.error(detail);
-            await handleAgentCrash(
-              repo,
-              issueNumber,
-              'pr_review',
-              detail,
-              `The \`pr_review\` agent run exited with code ${exitCode}.`
-            );
-            process.exitCode = 1;
-            return;
-          }
-          try {
-            const result = await retryOnInvalidOutput({
-              cwd: wtPath,
-              stage: 'pr_review',
-              prFiles: prFileSet,
-              diffHunks,
-              retry: (userInput) =>
-                runPrompt('pr_review', {
-                  repo,
-                  issueRef: issueNumber,
-                  prRef: pr,
-                  cwd: wtPath,
-                  mode,
-                  agent,
-                  model,
-                  userInput,
-                }),
-            });
-            await processResult({
-              repo,
-              issueNumber,
-              stage: 'pr_review',
-              cwd: wtPath,
-              result,
-              prNumber: pr,
-            });
-          } catch (error) {
-            const detail = toErrorMessage(error);
-            logger.error(detail);
-            await handleAgentCrash(repo, issueNumber, 'pr_review', detail);
-            process.exitCode = 1;
-            return;
-          }
-        }
-      );
-    });
+        return { prFiles: prFileSet, diffHunks };
+      },
+    }),
   });
 }

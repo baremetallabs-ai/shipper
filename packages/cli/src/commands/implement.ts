@@ -1,22 +1,12 @@
 import {
   autoSelectIssue,
-  formatConflictContext,
   generateBranchName,
   getRepoRoot,
   getSettings,
-  handleAgentCrash,
   logger,
-  processResult,
   resolveBaseBranch,
-  retryOnInvalidOutput,
-  runPrompt,
-  scrubOutputDir,
-  toErrorMessage,
-  truncateLargeInput,
-  withGitTransport,
-  withIssueLock,
-  withStageHooks,
-  withWorktree,
+  runStageScaffold,
+  transportInvoker,
 } from '@dnsquared/shipper-core';
 import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
 
@@ -36,99 +26,24 @@ export async function implementCommand(
     issue = String(selected.number);
   }
 
-  await withIssueLock(repo, issue, async () => {
-    const repoRoot = await getRepoRoot();
-    const branch = await generateBranchName(repo, issue);
-    const settings = getSettings();
-    const baseBranch = await resolveBaseBranch(repo, settings.defaultBaseBranch);
-
-    await withStageHooks('implement', { issueNumber: issue, branchName: branch }, async () => {
-      await withWorktree(
-        {
-          repoRoot,
-          branch,
-          createBranch: true,
-          baseBranch,
-          issueNumber: issue,
-          stage: 'implement',
-        },
-        async (wtPath) => {
-          await scrubOutputDir(wtPath);
-          const getTransportUserInput = async (
-            conflictContext?: Parameters<typeof formatConflictContext>[0],
-            pushError?: string,
-            installError?: string
-          ): Promise<string | undefined> => {
-            if (conflictContext) {
-              return await truncateLargeInput(
-                wtPath,
-                formatConflictContext(conflictContext),
-                'conflict-context.txt'
-              );
-            }
-            if (pushError) {
-              return await truncateLargeInput(wtPath, pushError, 'push-error.txt');
-            }
-            if (installError) {
-              return await truncateLargeInput(wtPath, installError, 'install-error.txt');
-            }
-            return undefined;
-          };
-          const transportCode = await withGitTransport(
-            { wtPath, repoRoot, baseBranch, pushMode: 'new-branch' },
-            async (conflictContext, pushError, installError) => {
-              return runPrompt('implement', {
-                repo,
-                issueRef: issue,
-                cwd: wtPath,
-                mode,
-                agent,
-                model,
-                userInput: await getTransportUserInput(conflictContext, pushError, installError),
-              });
-            }
-          );
-          if (transportCode !== 0) {
-            process.exitCode = transportCode;
-            return;
-          }
-          try {
-            const result = await retryOnInvalidOutput({
-              cwd: wtPath,
-              stage: 'implement',
-              retry: async (userInput) =>
-                withGitTransport(
-                  { wtPath, repoRoot, baseBranch, pushMode: 'new-branch' },
-                  async (conflictContext, pushError, installError) =>
-                    runPrompt('implement', {
-                      repo,
-                      issueRef: issue,
-                      cwd: wtPath,
-                      mode,
-                      agent,
-                      model,
-                      userInput:
-                        (await getTransportUserInput(conflictContext, pushError, installError)) ??
-                        userInput,
-                    })
-                ),
-            });
-            await processResult({
-              repo,
-              issueNumber: issue,
-              stage: 'implement',
-              cwd: wtPath,
-              result,
-            });
-          } catch (error) {
-            const detail = toErrorMessage(error);
-            logger.error(detail);
-            await handleAgentCrash(repo, issue, 'implement', detail);
-            process.exitCode = 1;
-            return;
-          }
-        }
-      );
-    });
+  await runStageScaffold({
+    repo,
+    issueNumber: issue,
+    stage: 'implement',
+    resultStage: 'implement',
+    createBranch: true,
+    initialFailure: 'propagate',
+    resolveLocked: async () => {
+      const repoRoot = await getRepoRoot();
+      const branch = await generateBranchName(repo, issue);
+      const settings = getSettings();
+      const baseBranch = await resolveBaseBranch(repo, settings.defaultBaseBranch);
+      return { repoRoot, branch, baseBranch };
+    },
+    invoker: transportInvoker({
+      promptName: 'implement',
+      pushMode: 'new-branch',
+      baseRunPromptOpts: { repo, issueRef: issue, mode, agent, model },
+    }),
   });
 }

@@ -1,49 +1,26 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { toError, toErrorMessage } from '../../../core/src/lib/errors.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { RunPromptOpts } from '../../../core/src/lib/prompt-runner.js';
+import type { StageScaffoldOpts } from '../../../core/src/lib/stage-scaffold.js';
 
 const autoSelectPrForStageMock = vi.fn();
 const getBranchForPRMock = vi.fn(() => Promise.resolve('shipper/10-feature'));
 const getRepoRootMock = vi.fn(() => Promise.resolve('/tmp/fake-repo'));
-const ghMock = vi.fn();
-const handleAgentCrashMock = vi.fn(() => Promise.resolve());
-const validatedResult = {
-  verdict: 'accept' as const,
-  comment: '.shipper/output/comment-10.md',
-};
-const processResultMock = vi.fn(() => Promise.resolve(validatedResult));
-const retryOnInvalidOutputMock = vi.fn<
-  (opts: {
-    cwd: string;
-    stage: string;
-    prFiles?: Set<string>;
-    diffHunks?: Map<string, { left: Array<[number, number]>; right: Array<[number, number]> }>;
-    retry: (message: string) => Promise<number>;
-  }) => Promise<typeof validatedResult>
->(() => Promise.resolve(validatedResult));
+const ghMock = vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>();
+const parseDiffHunksMock =
+  vi.fn<
+    (diff: string) => Map<string, { left: Array<[number, number]>; right: Array<[number, number]> }>
+  >();
 const resolveRefMock = vi.fn(() => Promise.resolve({ prNumber: '42', issueNumber: '10' }));
-const runPromptMock = vi.fn(() => Promise.resolve(0));
-const scrubOutputDirMock = vi.fn(() => Promise.resolve());
-const loggerMock = {
-  log: (message: string) => {
-    console.log(`[shipper] ${message}`);
-  },
-  warn: (message: string) => {
-    console.warn(`[shipper] ${message}`);
-  },
-  error: (message: string) => {
-    console.error(`[shipper] ${message}`);
-  },
-};
-const withIssueLockMock = vi.fn((_repo: unknown, _issue: unknown, fn: () => Promise<unknown>) =>
-  fn()
+const runPromptMock = vi.fn<(name: string, opts: RunPromptOpts) => Promise<number>>(() =>
+  Promise.resolve(0)
 );
-const withStageHooksMock = vi.fn((_stage: unknown, _env: unknown, fn: () => Promise<unknown>) =>
-  fn()
+const runStageScaffoldMock = vi.fn<(opts: StageScaffoldOpts) => Promise<void>>(() =>
+  Promise.resolve()
 );
-const withWorktreeMock = vi.fn((_opts: unknown, fn: (wtPath: string) => Promise<unknown>) =>
-  fn('/tmp/fake-wt')
-);
-const writeContextFileMock = vi.fn(() => Promise.resolve());
+const writeContextFileMock = vi.fn<
+  (wtPath: string, filename: string, content: string) => Promise<void>
+>(() => Promise.resolve());
+const loggerErrorMock = vi.fn<(message: string) => void>();
 const repo = 'owner/repo';
 const diffFixture = [
   'diff --git a/src/file.ts b/src/file.ts',
@@ -64,33 +41,36 @@ const parsedDiffHunks = new Map([
     },
   ],
 ]);
-const parseDiffHunksMock = vi.fn(() => parsedDiffHunks);
 
-vi.mock('@dnsquared/shipper-core', () => ({
-  logger: loggerMock,
-  toError,
-  toErrorMessage,
-  autoSelectPrForStage: autoSelectPrForStageMock,
-  getBranchForPR: getBranchForPRMock,
-  getRepoRoot: getRepoRootMock,
-  gh: ghMock,
-  handleAgentCrash: handleAgentCrashMock,
-  parseDiffHunks: parseDiffHunksMock,
-  processResult: processResultMock,
-  retryOnInvalidOutput: retryOnInvalidOutputMock,
-  resolveRef: resolveRefMock,
-  runPrompt: runPromptMock,
-  scrubOutputDir: scrubOutputDirMock,
-  withIssueLock: withIssueLockMock,
-  withStageHooks: withStageHooksMock,
-  withWorktree: withWorktreeMock,
-  writeContextFile: writeContextFileMock,
-}));
+vi.mock('../../../core/src/lib/prompt-runner.js', () => {
+  return {
+    runPrompt: (name: string, opts: RunPromptOpts) => runPromptMock(name, opts),
+  };
+});
+
+vi.mock('@dnsquared/shipper-core', async () => {
+  const stageScaffold = await vi.importActual<
+    typeof import('../../../core/src/lib/stage-scaffold.js')
+  >('../../../core/src/lib/stage-scaffold.js');
+  return {
+    autoSelectPrForStage: autoSelectPrForStageMock,
+    getBranchForPR: getBranchForPRMock,
+    getRepoRoot: getRepoRootMock,
+    gh: (...args: [string[]]) => ghMock(...args),
+    logger: {
+      error: (...args: [string]) => {
+        loggerErrorMock(...args);
+      },
+    },
+    parseDiffHunks: (...args: [string]) => parseDiffHunksMock(...args),
+    resolveRef: resolveRefMock,
+    runStageScaffold: (opts: StageScaffoldOpts) => runStageScaffoldMock(opts),
+    simpleInvoker: stageScaffold.simpleInvoker,
+    writeContextFile: (...args: [string, string, string]) => writeContextFileMock(...args),
+  };
+});
 
 describe('prReviewCommand', () => {
-  let exitSpy: ReturnType<typeof vi.spyOn>;
-  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
-
   beforeEach(() => {
     vi.clearAllMocks();
     process.exitCode = undefined;
@@ -102,41 +82,62 @@ describe('prReviewCommand', () => {
           '{"headRefOid":"abc123","author":{"login":"author"},"title":"PR","headRefName":"branch"}',
         stderr: '',
       });
-    exitSpy = vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
-      throw new Error(`exit:${code}`);
-    });
-    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    parseDiffHunksMock.mockReturnValue(parsedDiffHunks);
   });
 
-  afterEach(() => {
-    process.exitCode = undefined;
-    exitSpy.mockRestore();
-    consoleErrorSpy.mockRestore();
-  });
-
-  it('writes review context and processes results inside the PR head-branch worktree', async () => {
+  it('passes the pr-review scaffold config and preserves pre-lock ref resolution', async () => {
     const { prReviewCommand } = await import('../../src/commands/pr-review.js');
 
     await expect(prReviewCommand(repo, '42')).resolves.toBeUndefined();
 
     expect(resolveRefMock).toHaveBeenCalledWith(repo, '42', 'both');
+    expect(resolveRefMock.mock.invocationCallOrder[0]).toBeLessThan(
+      runStageScaffoldMock.mock.invocationCallOrder[0]
+    );
+
+    const scaffoldArgs = runStageScaffoldMock.mock.calls[0]?.[0];
+    expect(scaffoldArgs).toBeDefined();
+    if (!scaffoldArgs) {
+      throw new Error('Expected scaffold arguments');
+    }
+
+    expect(scaffoldArgs.repo).toBe(repo);
+    expect(scaffoldArgs.issueNumber).toBe('10');
+    expect(scaffoldArgs.stage).toBe('pr-review');
+    expect(scaffoldArgs.resultStage).toBe('pr_review');
+    expect(scaffoldArgs.createBranch).toBe(false);
+    expect(scaffoldArgs.initialFailure).toBe('crash');
+    expect(scaffoldArgs.prNumber).toEqual({ value: '42' });
+
+    await expect(scaffoldArgs.resolveLocked()).resolves.toEqual({
+      repoRoot: '/tmp/fake-repo',
+      branch: 'shipper/10-feature',
+    });
     expect(getBranchForPRMock).toHaveBeenCalledWith(repo, '42');
-    expect(withStageHooksMock).toHaveBeenCalledWith(
-      'pr-review',
-      { issueNumber: '10', branchName: 'shipper/10-feature' },
-      expect.any(Function)
-    );
-    expect(withWorktreeMock).toHaveBeenCalledWith(
-      {
-        repoRoot: '/tmp/fake-repo',
-        branch: 'shipper/10-feature',
-        createBranch: false,
-        issueNumber: '10',
-        stage: 'pr-review',
-      },
-      expect.any(Function)
-    );
-    expect(scrubOutputDirMock).toHaveBeenCalledWith('/tmp/fake-wt');
+  });
+
+  it('builds setup and prompt invocations that preserve review context parity', async () => {
+    const { prReviewCommand } = await import('../../src/commands/pr-review.js');
+
+    await prReviewCommand(repo, '42');
+
+    const scaffoldArgs = runStageScaffoldMock.mock.calls[0]?.[0];
+    expect(scaffoldArgs).toBeDefined();
+    if (!scaffoldArgs) {
+      throw new Error('Expected scaffold arguments');
+    }
+
+    const invoker = scaffoldArgs.invoker({
+      wtPath: '/tmp/fake-wt',
+      repoRoot: '/tmp/fake-repo',
+      branch: 'shipper/10-feature',
+      baseBranch: undefined,
+    });
+
+    await expect(invoker.setup?.()).resolves.toEqual({
+      prFiles: new Set(['src/file.ts']),
+      diffHunks: parsedDiffHunks,
+    });
     expect(ghMock).toHaveBeenNthCalledWith(1, ['pr', 'diff', '42', '-R', repo]);
     expect(ghMock).toHaveBeenNthCalledWith(2, [
       'api',
@@ -172,6 +173,8 @@ describe('prReviewCommand', () => {
       '{"headRefOid":"abc123","author":{"login":"author"},"title":"PR","headRefName":"branch"}'
     );
     expect(parseDiffHunksMock).toHaveBeenCalledWith(diffFixture);
+
+    await expect(invoker.initial()).resolves.toBe(0);
     expect(runPromptMock).toHaveBeenCalledWith('pr_review', {
       repo,
       issueRef: '10',
@@ -181,37 +184,9 @@ describe('prReviewCommand', () => {
       agent: undefined,
       model: undefined,
     });
-    const retryCall = retryOnInvalidOutputMock.mock.calls[0]?.[0] as
-      | {
-          cwd: string;
-          stage: string;
-          prFiles?: Set<string>;
-          diffHunks?: Map<
-            string,
-            { left: Array<[number, number]>; right: Array<[number, number]> }
-          >;
-          retry: (message: string) => Promise<number>;
-        }
-      | undefined;
-    expect(retryCall?.cwd).toBe('/tmp/fake-wt');
-    expect(retryCall?.stage).toBe('pr_review');
-    expect(retryCall?.prFiles).toEqual(new Set(['src/file.ts']));
-    expect(retryCall?.diffHunks).toEqual(parsedDiffHunks);
-    expect(retryCall?.retry).toEqual(expect.any(Function));
-    expect(ghMock).toHaveBeenCalledTimes(3);
-    expect(processResultMock).toHaveBeenCalledWith({
-      repo,
-      issueNumber: '10',
-      stage: 'pr_review',
-      cwd: '/tmp/fake-wt',
-      result: validatedResult,
-      prNumber: '42',
-    });
-    expect(handleAgentCrashMock).not.toHaveBeenCalled();
-    expect(process.exitCode).toBeUndefined();
-    expect(exitSpy).not.toHaveBeenCalled();
 
-    await expect(retryCall?.retry('Fix result')).resolves.toBe(0);
+    runPromptMock.mockResolvedValueOnce(0);
+    await expect(invoker.retry('Fix result')).resolves.toBe(0);
     expect(runPromptMock).toHaveBeenLastCalledWith('pr_review', {
       repo,
       issueRef: '10',
@@ -224,51 +199,28 @@ describe('prReviewCommand', () => {
     });
   });
 
-  it('reports non-zero prompt exits and skips output validation', async () => {
-    runPromptMock.mockResolvedValueOnce(23);
+  it('preserves auto-selection behavior when no PR is provided', async () => {
+    autoSelectPrForStageMock.mockResolvedValueOnce({
+      pr: '84',
+      issue: { number: 321, title: 'Selected issue' },
+    });
     const { prReviewCommand } = await import('../../src/commands/pr-review.js');
 
-    await expect(prReviewCommand(repo, '42')).resolves.toBeUndefined();
+    await expect(prReviewCommand(repo)).resolves.toBeUndefined();
 
-    expect(writeContextFileMock).toHaveBeenCalledTimes(3);
-    expect(retryOnInvalidOutputMock).not.toHaveBeenCalled();
-    expect(processResultMock).not.toHaveBeenCalled();
-    expect(handleAgentCrashMock).toHaveBeenCalledWith(
+    expect(autoSelectPrForStageMock).toHaveBeenCalledWith(
       repo,
-      '10',
-      'pr_review',
-      'Agent exited with code 23',
-      'The `pr_review` agent run exited with code 23.'
+      'shipper:pr-open',
+      "No PRs ready for review. Run 'shipper pr open' first."
     );
-    expect(consoleErrorSpy).toHaveBeenCalledWith('[shipper] Agent exited with code 23');
-    expect(process.exitCode).toBe(1);
-  });
-
-  it('reports protocol crashes during result processing and exits with code 1', async () => {
-    processResultMock.mockRejectedValueOnce(new Error('Missing result.json'));
-    const { prReviewCommand } = await import('../../src/commands/pr-review.js');
-
-    await expect(prReviewCommand(repo, '42')).resolves.toBeUndefined();
-
-    expect(retryOnInvalidOutputMock).toHaveBeenCalledTimes(1);
-    expect(handleAgentCrashMock).toHaveBeenCalledWith(
-      repo,
-      '10',
-      'pr_review',
-      'Missing result.json'
+    expect(loggerErrorMock).toHaveBeenCalledWith(
+      'Auto-selected PR #84 (issue #321: Selected issue)'
     );
-    expect(consoleErrorSpy).toHaveBeenCalledWith('[shipper] Missing result.json');
-    expect(process.exitCode).toBe(1);
-  });
-
-  it('fails hard when worktree creation fails', async () => {
-    withWorktreeMock.mockRejectedValueOnce(new Error('worktree add failed'));
-    const { prReviewCommand } = await import('../../src/commands/pr-review.js');
-
-    await expect(prReviewCommand(repo, '42')).rejects.toThrow('worktree add failed');
-
-    expect(runPromptMock).not.toHaveBeenCalled();
-    expect(writeContextFileMock).not.toHaveBeenCalled();
-    expect(processResultMock).not.toHaveBeenCalled();
+    expect(runStageScaffoldMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        issueNumber: '321',
+        prNumber: { value: '84' },
+      })
+    );
   });
 });
