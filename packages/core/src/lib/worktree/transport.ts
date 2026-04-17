@@ -8,6 +8,7 @@ import {
   formatTransportError,
   spawnAsync,
   syncWithRemoteBranch,
+  type CommandResult,
   type ConflictContext,
   type WorktreeGitOpts,
 } from './helpers.js';
@@ -25,13 +26,13 @@ type RebaseRetryOutcome = { kind: 'success' } | { kind: 'agent-non-zero'; code: 
 
 async function rebaseWithRetries(
   opts: WorktreeGitOpts,
-  initialRebase: { code: number; stdout: string; stderr: string },
+  initialRebase: CommandResult,
   runConflictAgent: (conflictContext: ConflictContext) => Promise<number>
 ): Promise<RebaseRetryOutcome> {
   const targetRef = `origin/${opts.baseBranch}`;
   let conflictContext = await getConflictContextOrThrow(opts, targetRef, initialRebase);
 
-  for (let attempt = 1; attempt <= MAX_REBASE_ATTEMPTS; attempt++) {
+  for (let attempt = 1; ; attempt++) {
     const agentCode = await runConflictAgent(conflictContext);
     if (agentCode !== 0) {
       return { kind: 'agent-non-zero', code: agentCode };
@@ -79,11 +80,6 @@ async function rebaseWithRetries(
     }
     conflictContext = nextConflictContext;
   }
-
-  throw formatTransportError(
-    opts,
-    `Could not complete rebase onto ${targetRef} after ${MAX_REBASE_ATTEMPTS} conflict resolution attempts.`
-  );
 }
 
 export async function syncWorktree(
