@@ -2,50 +2,23 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { toErrorMessage } from './errors.js';
 import { gh } from './gh.js';
+import {
+  parseIssue,
+  parseIssueList,
+  parseIssueTitleLabelsList,
+  parsePrNumberBodyView,
+  parsePrSummaryList,
+  parsePullRequest,
+  parseTimelineLabelEvent,
+  type Issue as IssuePayload,
+  type PullRequest as PullRequestPayload,
+  type TimelineLabelEventPayload,
+} from './gh-schemas.js';
 import { getPriorityTier } from './labels.js';
 import { isLockStale, releaseIssueLock } from './lock.js';
 import { logger } from './logger.js';
-import { isPlainObject } from './type-guards.js';
 
 const execFileAsync = promisify(execFile);
-
-interface IssueComment {
-  author: { login: string };
-  body: string;
-  createdAt: string;
-}
-
-interface IssueData {
-  number: number;
-  title: string;
-  state: string;
-  labels: { name: string }[];
-  body: string;
-  comments: IssueComment[];
-  author: { login: string };
-  createdAt: string;
-}
-
-interface ReviewComment {
-  author: { login: string };
-  body: string;
-  state: string;
-  submittedAt: string | null;
-}
-
-interface PRData {
-  number: number;
-  title: string;
-  state: string;
-  labels: { name: string }[];
-  body: string;
-  comments: IssueComment[];
-  author: { login: string };
-  createdAt: string;
-  headRefName: string;
-  baseRefName: string;
-  reviews: ReviewComment[];
-}
 
 export interface ResolvedRef {
   issueNumber: string;
@@ -69,145 +42,6 @@ export interface ListIssueItem {
 export interface ListIssuesOptions {
   label?: string;
   state?: 'open' | 'closed' | 'all';
-}
-
-interface RawListIssueData {
-  number: number;
-  title: string;
-  state: string;
-  labels: { name: string }[];
-  author: { login: string } | null;
-  createdAt: string;
-  url: string;
-}
-
-interface StageIssueListItem {
-  number: number;
-  title: string;
-  labels: { name: string }[];
-}
-
-function parseAuthor(value: unknown, context: string): { login: string } {
-  if (!isPlainObject(value) || typeof value.login !== 'string') {
-    throw new Error(`Invalid ${context} author payload.`);
-  }
-
-  return { login: value.login };
-}
-
-function parseLabels(value: unknown, context: string): { name: string }[] {
-  if (!Array.isArray(value)) {
-    throw new Error(`Invalid ${context} labels payload.`);
-  }
-
-  return value.map((label) => {
-    if (!isPlainObject(label) || typeof label.name !== 'string') {
-      throw new Error(`Invalid ${context} label payload.`);
-    }
-
-    return { name: label.name };
-  });
-}
-
-function parseComments(value: unknown, context: string): IssueComment[] {
-  if (!Array.isArray(value)) {
-    throw new Error(`Invalid ${context} comments payload.`);
-  }
-
-  return value.map((comment) => {
-    if (
-      !isPlainObject(comment) ||
-      typeof comment.body !== 'string' ||
-      typeof comment.createdAt !== 'string'
-    ) {
-      throw new Error(`Invalid ${context} comment payload.`);
-    }
-
-    return {
-      author: parseAuthor(comment.author, `${context} comment`),
-      body: comment.body,
-      createdAt: comment.createdAt,
-    };
-  });
-}
-
-function parseReviews(value: unknown): ReviewComment[] {
-  if (!Array.isArray(value)) {
-    throw new Error('Invalid PR reviews payload.');
-  }
-
-  return value.map((review) => {
-    if (
-      !isPlainObject(review) ||
-      typeof review.body !== 'string' ||
-      typeof review.state !== 'string' ||
-      (review.submittedAt !== null && typeof review.submittedAt !== 'string')
-    ) {
-      throw new Error('Invalid PR review payload.');
-    }
-
-    return {
-      author: parseAuthor(review.author, 'PR review'),
-      body: review.body,
-      state: review.state,
-      submittedAt: review.submittedAt,
-    };
-  });
-}
-
-function parseIssueData(json: string): IssueData {
-  const parsed: unknown = JSON.parse(json);
-  if (
-    !isPlainObject(parsed) ||
-    typeof parsed.number !== 'number' ||
-    typeof parsed.title !== 'string' ||
-    typeof parsed.state !== 'string' ||
-    typeof parsed.body !== 'string' ||
-    typeof parsed.createdAt !== 'string'
-  ) {
-    throw new Error('Invalid issue payload.');
-  }
-
-  return {
-    number: parsed.number,
-    title: parsed.title,
-    state: parsed.state,
-    labels: parseLabels(parsed.labels, 'issue'),
-    body: parsed.body,
-    comments: parseComments(parsed.comments, 'issue'),
-    author: parseAuthor(parsed.author, 'issue'),
-    createdAt: parsed.createdAt,
-  };
-}
-
-function parsePRData(json: string): PRData {
-  const parsed: unknown = JSON.parse(json);
-  if (
-    !isPlainObject(parsed) ||
-    typeof parsed.number !== 'number' ||
-    typeof parsed.title !== 'string' ||
-    typeof parsed.state !== 'string' ||
-    typeof parsed.body !== 'string' ||
-    typeof parsed.createdAt !== 'string' ||
-    typeof parsed.headRefName !== 'string' ||
-    typeof parsed.baseRefName !== 'string'
-  ) {
-    throw new Error('Invalid pull request payload.');
-  }
-
-  return {
-    number: parsed.number,
-    title: parsed.title,
-    state: parsed.state,
-    labels: parseLabels(parsed.labels, 'PR'),
-    body: parsed.body,
-    comments: parseComments(parsed.comments, 'PR'),
-    author: parseAuthor(parsed.author, 'PR'),
-    createdAt: parsed.createdAt,
-    headRefName: parsed.headRefName,
-    baseRefName: parsed.baseRefName,
-    reviews: parseReviews(parsed.reviews),
-  };
 }
 
 export interface StageIssueCandidate {
@@ -277,7 +111,7 @@ export async function fetchIssue(repo: string, ref: string): Promise<string> {
     throw new Error(`Failed to fetch issue ${ref}: ${toErrorMessage(err)}`);
   }
 
-  const data = parseIssueData(json);
+  const data = parseIssue(json);
   return formatIssue(data);
 }
 
@@ -298,7 +132,7 @@ export async function fetchPR(repo: string, ref: string): Promise<string> {
     throw new Error(`Failed to fetch PR ${ref}: ${toErrorMessage(err)}`);
   }
 
-  const data = parsePRData(json);
+  const data = parsePullRequest(json);
   return formatPR(data);
 }
 
@@ -339,16 +173,7 @@ export async function listIssues(
     throw new Error(`Failed to list issues for ${repo}: ${toErrorMessage(err)}`);
   }
 
-  let raw: RawListIssueData[];
-  try {
-    raw = JSON.parse(json) as RawListIssueData[];
-  } catch (err) {
-    const preview = json.length > 200 ? `${json.slice(0, 200)}…` : json;
-    throw new Error(
-      `Failed to list issues for ${repo}: ${toErrorMessage(err)}. Output: ${preview}`
-    );
-  }
-
+  const raw = parseIssueList(json);
   const mapped = raw.map((issue) => ({
     number: issue.number,
     title: issue.title,
@@ -366,7 +191,7 @@ export async function listIssues(
   return mapped;
 }
 
-export function formatIssue(data: IssueData): string {
+export function formatIssue(data: IssuePayload): string {
   const labels = data.labels.map((l) => l.name).join(', ') || 'none';
   const parts: string[] = [
     `<issue number="${data.number}" title="${escapeAttr(data.title)}" state="${data.state}" labels="${escapeAttr(labels)}" author="${data.author.login}" created="${data.createdAt}">`,
@@ -392,6 +217,7 @@ export async function tryResolvePrForIssue(
   repo: string,
   issueNumber: number
 ): Promise<string | undefined> {
+  let output = '';
   try {
     const result = await gh([
       'pr',
@@ -405,21 +231,22 @@ export async function tryResolvePrForIssue(
       '--limit',
       '100',
     ]);
-    const output = result.stdout.trim();
-    const prs = JSON.parse(output) as { number: number; headRefName: string }[];
-    const match = prs.find(
-      (pr) =>
-        pr.headRefName === `shipper/${issueNumber}` ||
-        pr.headRefName.startsWith(`shipper/${issueNumber}-`)
-    );
-    return match ? String(match.number) : undefined;
+    output = result.stdout.trim();
   } catch {
     logger.warn(`Failed to resolve PR for issue #${issueNumber}`);
     return undefined;
   }
+
+  const prs = parsePrSummaryList(output);
+  const match = prs.find(
+    (pr) =>
+      pr.headRefName === `shipper/${issueNumber}` ||
+      pr.headRefName.startsWith(`shipper/${issueNumber}-`)
+  );
+  return match ? String(match.number) : undefined;
 }
 
-export function formatPR(data: PRData): string {
+export function formatPR(data: PullRequestPayload): string {
   const labels = data.labels.map((l) => l.name).join(', ') || 'none';
   const parts: string[] = [
     `<pr number="${data.number}" title="${escapeAttr(data.title)}" state="${data.state}" labels="${escapeAttr(labels)}" author="${data.author.login}" created="${data.createdAt}" head="${escapeAttr(data.headRefName)}" base="${escapeAttr(data.baseRefName)}">`,
@@ -454,11 +281,7 @@ export function formatPR(data: PRData): string {
   return parts.join('\n');
 }
 
-export interface TimelineLabelEvent {
-  event: string;
-  label?: { name: string };
-  created_at?: string;
-}
+export type TimelineLabelEvent = TimelineLabelEventPayload;
 
 export function sortIssuesByLabelTime<T extends { number: number; title: string }>(
   issues: T[],
@@ -491,6 +314,7 @@ export async function fetchIssueTimelines(
   const timelinesByIssue = new Map<number, TimelineLabelEvent[]>();
 
   for (const issueNumber of issueNumbers) {
+    let output = '';
     try {
       const result = await gh([
         'api',
@@ -499,15 +323,17 @@ export async function fetchIssueTimelines(
         '--jq',
         '.[] | select(.event == "labeled") | {event, label, created_at}',
       ]);
-      const output = result.stdout.trim();
-      const events: TimelineLabelEvent[] = output
-        ? output.split('\n').map((line) => JSON.parse(line) as TimelineLabelEvent)
-        : [];
-      timelinesByIssue.set(issueNumber, events);
+      output = result.stdout.trim();
     } catch {
       logger.warn(`Failed to fetch timeline for issue #${issueNumber}`);
       timelinesByIssue.set(issueNumber, []);
+      continue;
     }
+
+    const events: TimelineLabelEvent[] = output
+      ? output.split('\n').map((line) => parseTimelineLabelEvent(line))
+      : [];
+    timelinesByIssue.set(issueNumber, events);
   }
 
   return timelinesByIssue;
@@ -527,7 +353,7 @@ export async function selectIssuesForStage(
     label === 'shipper:new'
       ? '-label:shipper:failed'
       : '-label:shipper:blocked -label:shipper:failed';
-  let issues: StageIssueListItem[];
+  let output = '';
   try {
     const result = await gh([
       'issue',
@@ -545,14 +371,15 @@ export async function selectIssuesForStage(
       '--json',
       'number,title,labels',
     ]);
-    const output = result.stdout.trim();
-    issues = JSON.parse(output) as StageIssueListItem[];
+    output = result.stdout.trim();
   } catch {
     logger.warn(`Failed to fetch issues for stage ${label}`);
     return [];
   }
+  const issues = parseIssueTitleLabelsList(output);
 
   // Fetch locked issues for the same stage and check for stale locks
+  let lockedOutput = '';
   try {
     const result = await gh([
       'issue',
@@ -572,16 +399,16 @@ export async function selectIssuesForStage(
       '--json',
       'number,title,labels',
     ]);
-    const lockedOutput = result.stdout.trim();
-    const lockedIssues = JSON.parse(lockedOutput) as StageIssueListItem[];
-    for (const issue of lockedIssues) {
-      if (await isLockStale(repo, String(issue.number))) {
-        issues.push(issue);
-        staleLocked?.add(issue.number);
-      }
-    }
+    lockedOutput = result.stdout.trim();
   } catch {
     logger.error('Warning: Could not check for stale-locked issues. Proceeding without them.');
+  }
+  const lockedIssues = lockedOutput ? parseIssueTitleLabelsList(lockedOutput) : [];
+  for (const issue of lockedIssues) {
+    if (await isLockStale(repo, String(issue.number))) {
+      issues.push(issue);
+      staleLocked?.add(issue.number);
+    }
   }
 
   if (issues.length <= 1 || options?.skipTimeline) {
@@ -673,7 +500,7 @@ export async function resolveRef(
 
   if (prResult) {
     const output = prResult.stdout.trim();
-    const prData = JSON.parse(output) as { number: number; body: string };
+    const prData = parsePrNumberBodyView(output);
     const prNumber = String(prData.number);
     const match = /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/i.exec(prData.body);
     const linkedIssue = match?.[1];

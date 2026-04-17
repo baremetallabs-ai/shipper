@@ -1,38 +1,23 @@
 import { toErrorMessage } from './errors.js';
 import { gh } from './gh.js';
+import {
+  parsePrChecks,
+  parseRunViewJobs,
+  type PrChecksLine as ParsedPrChecksLine,
+} from './gh-schemas.js';
 import { logger } from './logger.js';
 
 export interface FailedStep {
   name: string;
 }
 
-export interface PRChecksLine {
-  name: string;
-  state: string;
-  bucket: string;
-  link?: string;
-  failedSteps?: FailedStep[];
-}
+export type PRChecksLine = ParsedPrChecksLine & { failedSteps?: FailedStep[] };
 
 export interface CheckClassification {
   pending: PRChecksLine[];
   failed: PRChecksLine[];
   passed: PRChecksLine[];
   total: number;
-}
-
-interface RunViewStep {
-  name: string;
-  conclusion: string | null;
-  number: number;
-  status: string;
-}
-
-interface RunViewJob {
-  name: string;
-  conclusion: string | null;
-  databaseId: number;
-  steps: RunViewStep[];
 }
 
 export async function fetchChecks(repo: string, prNumber: string): Promise<PRChecksLine[]> {
@@ -45,7 +30,10 @@ export async function fetchChecks(repo: string, prNumber: string): Promise<PRChe
     '--json',
     'name,state,bucket,link',
   ]);
-  return JSON.parse(stdout) as PRChecksLine[];
+  return parsePrChecks(stdout).map((check) => ({
+    ...check,
+    link: check.link ?? undefined,
+  }));
 }
 
 /**
@@ -70,7 +58,7 @@ export async function enrichFailedChecks(
       }
 
       const { stdout: jobsStdout } = await gh(['run', 'view', runId, '-R', repo, '--json', 'jobs']);
-      const { jobs } = JSON.parse(jobsStdout) as { jobs: RunViewJob[] };
+      const { jobs } = parseRunViewJobs(jobsStdout);
       const job = jobs.find((candidate) => candidate.name === check.name);
       if (!job) {
         continue;

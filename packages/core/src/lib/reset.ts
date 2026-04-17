@@ -12,8 +12,8 @@ import {
   STAGE_LABEL_NAMES,
 } from './labels.js';
 import { gh } from './gh.js';
+import { parseCommentIdCreatedAt, parseMatchingRefs, parsePrSummaryList } from './gh-schemas.js';
 import { logger } from './logger.js';
-import { isPlainObject } from './type-guards.js';
 import { removeWorktree } from './worktree.js';
 
 const IMPLEMENTED_STAGE_INDEX = STAGE_LABEL_NAMES.indexOf(IMPLEMENTED_LABEL);
@@ -74,39 +74,6 @@ export interface ResetResult {
 function hasMessageMatch(error: unknown, patterns: string[]): boolean {
   const message = toErrorMessage(error).toLowerCase();
   return patterns.some((pattern) => message.includes(pattern.toLowerCase()));
-}
-function parsePrEntries(json: string): PREntry[] {
-  const parsed: unknown = JSON.parse(json);
-  if (!Array.isArray(parsed)) {
-    throw new Error('GitHub CLI returned an invalid PR list payload.');
-  }
-
-  return parsed.map((entry) => {
-    if (
-      !isPlainObject(entry) ||
-      typeof entry.number !== 'number' ||
-      typeof entry.headRefName !== 'string'
-    ) {
-      throw new Error('GitHub CLI returned an invalid PR entry.');
-    }
-
-    return { number: entry.number, headRefName: entry.headRefName };
-  });
-}
-
-function parseMatchingRefs(json: string): string[] {
-  const parsed: unknown = JSON.parse(json);
-  if (!Array.isArray(parsed)) {
-    throw new Error('GitHub CLI returned an invalid matching refs payload.');
-  }
-
-  return parsed.map((entry) => {
-    if (!isPlainObject(entry) || typeof entry.ref !== 'string') {
-      throw new Error('GitHub CLI returned an invalid matching ref entry.');
-    }
-
-    return entry.ref;
-  });
 }
 
 async function getStageTimestamp(
@@ -266,7 +233,7 @@ export async function scanArtifacts(
             .split('\n')
             .filter((line) => line !== '');
           for (const line of lines) {
-            const comment = JSON.parse(line) as { id: number; created_at: string };
+            const comment = parseCommentIdCreatedAt(line);
             if (Date.parse(comment.created_at) > cutoff) {
               commentIds.push(comment.id);
             }
@@ -298,7 +265,7 @@ export async function scanArtifacts(
       '--json',
       'number,headRefName',
     ]);
-    const allPrs = parsePrEntries(prJson);
+    const allPrs = parsePrSummaryList(prJson);
     prs = allPrs.filter(
       (pr) =>
         pr.headRefName === `shipper/${issueNum}` ||
@@ -350,7 +317,7 @@ export async function scanArtifacts(
           `repos/${nwo}/git/matching-refs/heads/shipper/${issueNum}`,
         ]);
         remoteBranches = parseMatchingRefs(refsJson)
-          .map((ref) => ref.replace(/^refs\/heads\//, ''))
+          .map((entry) => entry.ref.replace(/^refs\/heads\//, ''))
           .filter(
             (branchName) =>
               branchName === `shipper/${issueNum}` || branchName.startsWith(`shipper/${issueNum}-`)
@@ -588,7 +555,7 @@ export async function executeReset(
           '--json',
           'number,headRefName',
         ]);
-        const branchPrs = parsePrEntries(prJson).filter((pr) => pr.headRefName === branchName);
+        const branchPrs = parsePrSummaryList(prJson).filter((pr) => pr.headRefName === branchName);
         if (branchPrs.length > 0) {
           recordOperation(
             description,

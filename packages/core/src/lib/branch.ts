@@ -2,19 +2,10 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 import { gh } from './gh.js';
+import { parsePrHeadRefNameView } from './gh-schemas.js';
 import { logger } from './logger.js';
-import { isPlainObject } from './type-guards.js';
 
 const execFileAsync = promisify(execFile);
-
-function parseHeadRefName(json: string): string {
-  const parsed: unknown = JSON.parse(json);
-  if (!isPlainObject(parsed) || typeof parsed.headRefName !== 'string') {
-    throw new Error('GitHub CLI returned an invalid headRefName payload.');
-  }
-
-  return parsed.headRefName;
-}
 
 export async function getRepoRoot(): Promise<string> {
   const { stdout } = await execFileAsync('git', ['rev-parse', '--show-toplevel'], {
@@ -166,5 +157,5 @@ export async function findBranchForIssue(issueRef: string): Promise<string> {
 
 export async function getBranchForPR(repo: string, prRef: string): Promise<string> {
   const { stdout } = await gh(['pr', 'view', prRef, '-R', repo, '--json', 'headRefName']);
-  return parseHeadRefName(stdout);
+  return parsePrHeadRefNameView(stdout).headRefName;
 }
