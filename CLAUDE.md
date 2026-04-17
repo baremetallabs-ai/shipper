@@ -45,7 +45,7 @@ npx vitest run packages/cli/tests/lib/branch.test.ts   # Run a single test file
 
 **Ephemeral worktrees:** Implementation and PR commands use temporary git worktrees stored in `~/.shipper/worktrees/`. `withWorktree()` in `packages/core/src/lib/worktree.ts` handles create -> callback -> cleanup with signal handler support.
 
-**GitHub integration:** All GitHub interaction goes through the `gh` CLI. See `packages/core/src/lib/github.ts`.
+**GitHub integration:** All GitHub interaction goes through the `gh` CLI. See `packages/core/src/lib/github.ts`. Any structured `gh --json` payload must be parsed through `packages/core/src/lib/gh-schemas.ts` or `packages/core/src/lib/gh-json.ts`; do not use `JSON.parse(...) as T` for `gh` output.
 
 **Workflow state machine via labels:** `shipper:new` -> `shipper:groomed` -> `shipper:designed` -> `shipper:planned` -> `shipper:implemented` -> `shipper:pr-open` -> `shipper:pr-reviewed` -> `shipper:ready`. Control labels: `shipper:blocked` and `shipper:locked`. The `next` command auto-advances based on the current workflow label.
 
@@ -53,7 +53,7 @@ npx vitest run packages/cli/tests/lib/branch.test.ts   # Run a single test file
 
 - **ESM-only** with `.js` extensions on relative imports
 - **Strict TypeScript** with `noUncheckedIndexedAccess`, `noUnusedLocals`, `noUnusedParameters`, and `verbatimModuleSyntax`
-- **Runtime dependencies:** the CLI package depends on `commander` and `@dnsquared/shipper-core`; the core package uses only Node built-ins at runtime
+- **Runtime dependencies:** the CLI package depends on `commander` and `@dnsquared/shipper-core`; the core package's only runtime dependency is `zod` and otherwise uses Node built-ins
 - **Conventional commits** enforced via Husky and Commitlint: `type(scope): subject`
 - **Prettier:** single quotes, trailing commas (es5), 100 char width, semicolons
 - **File naming:** kebab-case for files, camelCase for functions, PascalCase for interfaces

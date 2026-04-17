@@ -1,4 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import {
+  parseIssueNumberLabels,
+  parseIssueNumberLabelsList,
+} from '../../../core/src/lib/gh-schemas.js';
 
 const { mockGh } = vi.hoisted(() => ({
   mockGh: vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>(),
@@ -17,6 +21,8 @@ vi.mock('@dnsquared/shipper-core', () => ({
     },
   },
   gh: (args: string[]) => mockGh(args),
+  parseIssueNumberLabels,
+  parseIssueNumberLabelsList,
 }));
 
 import { adoptCommand, adoptAllCommand } from '../../src/commands/adopt.js';

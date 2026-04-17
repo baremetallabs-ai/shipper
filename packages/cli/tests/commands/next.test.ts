@@ -8,6 +8,11 @@ import { prOpenCommand } from '../../src/commands/pr-open.js';
 import { prReviewCommand } from '../../src/commands/pr-review.js';
 import { prRemediateCommand } from '../../src/commands/pr-remediate.js';
 
+const { parseIssueNumberLabelsMock } = vi.hoisted(() => ({
+  parseIssueNumberLabelsMock: (json: string) =>
+    JSON.parse(json) as { number: number; labels: Array<{ name: string }> },
+}));
+
 vi.mock('@dnsquared/shipper-core', () => ({
   logger: {
     log: (message: string) => {
@@ -21,6 +26,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
     },
   },
   gh: vi.fn(),
+  parseIssueNumberLabels: parseIssueNumberLabelsMock,
   resolveRef: vi.fn(),
   tryResolvePrForIssue: vi.fn(),
   BLOCKED_LABEL: 'shipper:blocked',

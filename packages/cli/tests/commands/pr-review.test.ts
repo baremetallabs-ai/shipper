@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RunPromptOpts } from '../../../core/src/lib/prompt-runner.js';
 import type { StageScaffoldOpts } from '../../../core/src/lib/stage-scaffold.js';
+import { parsePrFilesPages } from '../../../core/src/lib/gh-schemas.js';
 
 const autoSelectPrForStageMock = vi.fn();
 const getBranchForPRMock = vi.fn(() => Promise.resolve('shipper/10-feature'));
@@ -63,6 +64,7 @@ vi.mock('@dnsquared/shipper-core', async () => {
       },
     },
     parseDiffHunks: (...args: [string]) => parseDiffHunksMock(...args),
+    parsePrFilesPages,
     resolveRef: resolveRefMock,
     runStageScaffold: (opts: StageScaffoldOpts) => runStageScaffoldMock(opts),
     simpleInvoker: stageScaffold.simpleInvoker,

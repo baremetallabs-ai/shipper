@@ -14,6 +14,8 @@ import {
   gh,
   isLockStale,
   listIssues,
+  parseIssueLabelsState,
+  parseIssueTitleLabelsList,
   releaseIssueLock,
   tryResolvePrForIssue,
 } from '@dnsquared/shipper-core';
@@ -45,11 +47,7 @@ function agentTimeoutMs(): number {
   return minutes * 60 * 1000;
 }
 
-interface GhIssueLabelsOnly {
-  number: number;
-  title: string;
-  labels: { name: string }[];
-}
+type GhIssueLabelsOnly = ReturnType<typeof parseIssueTitleLabelsList>[number];
 
 async function listShipperIssuesRaw(repo: string): Promise<GhIssueLabelsOnly[]> {
   const searchLabels = [...STAGE_LABEL_NAMES, BLOCKED_LABEL, FAILED_LABEL].join(',');
@@ -67,7 +65,7 @@ async function listShipperIssuesRaw(repo: string): Promise<GhIssueLabelsOnly[]> 
     '--json',
     'number,title,labels',
   ]);
-  return JSON.parse(stdout) as GhIssueLabelsOnly[];
+  return parseIssueTitleLabelsList(stdout);
 }
 
 function renderIssueList(issues: GhIssueLabelsOnly[], statusFilter: string | undefined): string {
@@ -157,11 +155,7 @@ function renderIssueList(issues: GhIssueLabelsOnly[], statusFilter: string | und
   return out.length === 0 ? 'No shipper-managed issues found.' : out;
 }
 
-interface GhIssueLabelsState {
-  number: number;
-  state: string;
-  labels: { name: string }[];
-}
+type GhIssueLabelsState = ReturnType<typeof parseIssueLabelsState>;
 
 async function fetchIssueLabels(repo: string, issue: number): Promise<GhIssueLabelsState> {
   const { stdout } = await gh([
@@ -173,7 +167,7 @@ async function fetchIssueLabels(repo: string, issue: number): Promise<GhIssueLab
     '--json',
     'number,state,labels',
   ]);
-  return JSON.parse(stdout.trim()) as GhIssueLabelsState;
+  return parseIssueLabelsState(stdout.trim());
 }
 
 const GROOM_MANUAL_MESSAGE =

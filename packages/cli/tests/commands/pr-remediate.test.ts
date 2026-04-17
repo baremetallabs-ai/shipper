@@ -7,6 +7,7 @@ import type {
 } from '@dnsquared/shipper-core';
 import { toError, toErrorMessage } from '../../../core/src/lib/errors.js';
 import { isPlainObject } from '../../../core/src/lib/type-guards.js';
+import { parsePrBaseRefNameView, parsePrCreatedAtView } from '../../../core/src/lib/gh-schemas.js';
 
 type MockPrReviewWait =
   | { mode: 'timer'; durationMinutes: number }
@@ -85,6 +86,8 @@ vi.mock('@dnsquared/shipper-core', () => ({
   toError,
   toErrorMessage,
   isPlainObject,
+  parsePrBaseRefNameView,
+  parsePrCreatedAtView,
   resolveRef: resolveRefMock,
   autoSelectPrForStage: autoSelectPrForStageMock,
   formatConflictContext: formatConflictContextMock,

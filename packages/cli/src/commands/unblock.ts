@@ -1,6 +1,8 @@
 import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
 import {
   logger,
+  parseIssueStateTitle,
+  parsePrStateMergedTitle,
   fetchIssue,
   gh,
   handleAgentCrash,
@@ -13,17 +15,6 @@ import {
   withIssueLock,
   writeContextFile,
 } from '@dnsquared/shipper-core';
-
-interface DependencyIssueData {
-  title: string;
-  state: string;
-}
-
-interface DependencyPrData {
-  title: string;
-  state: string;
-  mergedAt: string | null;
-}
 
 function extractIssueRefs(issueXml: string, issueStr: string): string[] {
   const refs = new Set<string>();
@@ -41,10 +32,10 @@ function extractIssueRefs(issueXml: string, issueStr: string): string[] {
 async function fetchDependencyStates(repo: string, refs: string[]): Promise<string> {
   const sections = await Promise.all(
     refs.map(async (ref) => {
-      let issue: DependencyIssueData;
+      let issueStdout = '';
       try {
         const issueResult = await gh(['issue', 'view', ref, '-R', repo, '--json', 'state,title']);
-        issue = JSON.parse(issueResult.stdout) as DependencyIssueData;
+        issueStdout = issueResult.stdout;
       } catch (error) {
         return [
           `## #${ref}`,
@@ -53,7 +44,9 @@ async function fetchDependencyStates(repo: string, refs: string[]): Promise<stri
           `- **Detail**: ${toErrorMessage(error)}`,
         ].join('\n');
       }
+      const issue = parseIssueStateTitle(issueStdout);
 
+      let prStdout = '';
       try {
         const prResult = await gh([
           'pr',
@@ -64,15 +57,7 @@ async function fetchDependencyStates(repo: string, refs: string[]): Promise<stri
           '--json',
           'state,mergedAt,title',
         ]);
-        const pr = JSON.parse(prResult.stdout) as DependencyPrData;
-        const state = pr.mergedAt ? `MERGED (merged ${pr.mergedAt.slice(0, 10)})` : pr.state;
-
-        return [
-          `## #${ref}`,
-          '- **Type**: PR',
-          `- **Title**: ${pr.title}`,
-          `- **State**: ${state}`,
-        ].join('\n');
+        prStdout = prResult.stdout;
       } catch {
         // Not a PR — render as issue instead.
         return [
@@ -82,6 +67,16 @@ async function fetchDependencyStates(repo: string, refs: string[]): Promise<stri
           `- **State**: ${issue.state}`,
         ].join('\n');
       }
+
+      const pr = parsePrStateMergedTitle(prStdout);
+      const state = pr.mergedAt ? `MERGED (merged ${pr.mergedAt.slice(0, 10)})` : pr.state;
+
+      return [
+        `## #${ref}`,
+        '- **Type**: PR',
+        `- **Title**: ${pr.title}`,
+        `- **State**: ${state}`,
+      ].join('\n');
     })
   );
 

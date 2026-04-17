@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { toError, toErrorMessage } from '../../../core/src/lib/errors.js';
+import { parseIssueTitleLabelsList } from '../../../core/src/lib/gh-schemas.js';
 
 const osMockState = vi.hoisted(() => ({
   mockHomedir: vi.fn(() => '/mock-home'),
@@ -122,6 +123,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   BLOCKED_LABEL: 'shipper:blocked',
   LOCKED_LABEL: 'shipper:locked',
   FAILED_LABEL: 'shipper:failed',
+  parseIssueTitleLabelsList,
 }));
 
 vi.mock('node:os', async () => {
@@ -501,18 +503,12 @@ describe('selectBlockedIssues', () => {
     }
   });
 
-  it('returns empty array and warns when the blocked issues response is invalid JSON', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      mockGh.mockResolvedValue({ stdout: '{not json', stderr: '' });
+  it('throws the shared validation error when the blocked issues response is invalid JSON', async () => {
+    mockGh.mockResolvedValue({ stdout: '{not json', stderr: '' });
 
-      const result = await selectBlockedIssues(repo);
-
-      expect(result).toEqual([]);
-      expect(warnSpy).toHaveBeenCalledWith(prefixed('Failed to parse blocked issues response'));
-    } finally {
-      warnSpy.mockRestore();
-    }
+    await expect(selectBlockedIssues(repo)).rejects.toThrow(
+      'gh returned an invalid IssueTitleLabelsList payload: not valid JSON'
+    );
   });
 
   it('passes --search flag to exclude shipper:locked issues', async () => {

@@ -1,0 +1,22 @@
+[
+  {
+    "comments": [
+      {
+        "author": "dnsquared",
+        "body": "🟢 nit: `./worktree.js` is imported twice (lines 14 and 15). Consolidating into a single `import { formatConflictContext, withGitTransport, withWorktree } from './worktree.js';` is stylistically cleaner. Optional — no lint rule enforces this today and it has no runtime effect.",
+        "createdAt": "2026-04-17T20:39:31Z",
+        "id": 3103131337
+      },
+      {
+        "author": "dnsquared",
+        "body": "Consolidated the duplicate `./worktree.js` imports into a single import in `stage-scaffold.ts`.\n",
+        "createdAt": "2026-04-17T20:50:27Z",
+        "id": 3103176355
+      }
+    ],
+    "isOutdated": true,
+    "isResolved": false,
+    "line": null,
+    "path": "packages/core/src/lib/stage-scaffold.ts"
+  }
+]

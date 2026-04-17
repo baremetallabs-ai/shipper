@@ -1,0 +1,36 @@
+[
+  {
+    "headRefName": "shipper/630-extract-layered-helpers-for-stage-command-scaffold",
+    "number": 643
+  },
+  {
+    "headRefName": "shipper/640-add-regular-macos-ci-validation-for-the-desktop-pa",
+    "number": 642
+  },
+  {
+    "headRefName": "shipper/627-open-issue-links-in-the-system-default-browser-fro",
+    "number": 629
+  },
+  {
+    "headRefName": "shipper/626-regression-ship-auto-picks-shipper-new-and-runs-gr",
+    "number": 628
+  },
+  {
+    "headRefName": "shipper/612-unify-merge-execution-across-shipper-ship-merge-an",
+    "number": 621
+  },
+  {
+    "headRefName": "shipper/616-ensurerepoclone-fails-when-managed-clone-has-local",
+    "number": 620
+  },
+  {
+    "headRefName": "shipper/608-document-git-config-env-propagation-hazard-in-push",
+    "number": 619
+  },
+  { "headRefName": "shipper/606-desktop-add-open-in-browser-link-on-issue-cards", "number": 618 },
+  {
+    "headRefName": "shipper/604-feat-setup-agent-should-check-agent-feedback-comme",
+    "number": 617
+  },
+  { "headRefName": "shipper/603-add-basic-session-debugging-guidance-to-setup-agen", "number": 615 }
+]

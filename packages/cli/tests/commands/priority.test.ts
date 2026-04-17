@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { parseIssueLabelsState } from '../../../core/src/lib/gh-schemas.js';
 
 const { mockGh } = vi.hoisted(() => ({
   mockGh: vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>(),
@@ -17,6 +18,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
     },
   },
   gh: (args: string[]) => mockGh(args),
+  parseIssueLabelsState,
   PRIORITY_HIGH_LABEL: 'shipper:priority-high',
   PRIORITY_LOW_LABEL: 'shipper:priority-low',
   STAGE_LABEL_NAMES: [

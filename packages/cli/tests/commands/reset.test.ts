@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { parseIssueLabelsState } from '../../../core/src/lib/gh-schemas.js';
 import { isPlainObject } from '../../../core/src/lib/type-guards.js';
 
 type ErrnoError = Error & { code?: string };
@@ -376,6 +377,7 @@ vi.mock('@dnsquared/shipper-core', async () => {
     getRepoRoot: () => mockGetRepoRoot(),
     gh: (args: string[]) => mockGh(args),
     isPlainObject,
+    parseIssueLabelsState,
     isLockStale: (repo: string, issue: string) => mockIsLockStale(repo, issue),
     STAGE_LABEL_NAMES,
     IMPLEMENTED_LABEL,

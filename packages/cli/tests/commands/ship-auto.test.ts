@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { toError, toErrorMessage } from '../../../core/src/lib/errors.js';
+import { parseIssueTitleLabelsList, parseQueuedPrList } from '../../../core/src/lib/gh-schemas.js';
 
 const fsMockState = vi.hoisted(() => ({
   capturedLogs: new Map<string, string>(),
@@ -236,6 +237,8 @@ vi.mock('@dnsquared/shipper-core', () => ({
   }),
   releaseIssueLock: vi.fn<(repo: string, issue: string) => Promise<void>>(() => Promise.resolve()),
   runPrompt: vi.fn<(name: string, opts: unknown) => Promise<number>>(() => Promise.resolve(0)),
+  parseIssueTitleLabelsList,
+  parseQueuedPrList,
 }));
 
 vi.mock('node:fs', async () => {

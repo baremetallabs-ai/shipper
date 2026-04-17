@@ -1,13 +1,9 @@
-import { gh, logger } from '@dnsquared/shipper-core';
-
-interface IssueLabel {
-  name: string;
-}
-
-interface IssueData {
-  number: number;
-  labels: IssueLabel[];
-}
+import {
+  gh,
+  logger,
+  parseIssueNumberLabels,
+  parseIssueNumberLabelsList,
+} from '@dnsquared/shipper-core';
 
 export async function adoptCommand(issue: string): Promise<void> {
   const cleanRef = issue.replace(/^#/, '');
@@ -17,14 +13,14 @@ export async function adoptCommand(issue: string): Promise<void> {
   }
 
   // Fetch issue data
-  let issueData: IssueData;
+  let output = '';
   try {
     const { stdout } = await gh(['issue', 'view', cleanRef, '--json', 'number,labels']);
-    const output = stdout.trim();
-    issueData = JSON.parse(output) as IssueData;
+    output = stdout.trim();
   } catch {
     throw new Error(`Error: Issue #${cleanRef} not found.`);
   }
+  const issueData = parseIssueNumberLabels(output);
 
   // Check if it's a PR
   let isPr = false;
@@ -61,7 +57,7 @@ export async function adoptCommand(issue: string): Promise<void> {
 }
 
 export async function adoptAllCommand(): Promise<void> {
-  let issues: IssueData[];
+  let output = '';
   try {
     const { stdout } = await gh([
       'issue',
@@ -73,11 +69,11 @@ export async function adoptAllCommand(): Promise<void> {
       '--json',
       'number,labels',
     ]);
-    const output = stdout.trim();
-    issues = JSON.parse(output) as IssueData[];
+    output = stdout.trim();
   } catch {
     throw new Error('Error: Failed to fetch issues.');
   }
+  const issues = parseIssueNumberLabelsList(output);
 
   const eligible = issues.filter(
     (issue) => !issue.labels.some((l) => l.name.startsWith('shipper:'))

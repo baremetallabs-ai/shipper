@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { toError, toErrorMessage } from '../../../core/src/lib/errors.js';
+import { parseIssueStateTitle, parsePrStateMergedTitle } from '../../../core/src/lib/gh-schemas.js';
 
 const fetchIssueMock = vi.fn();
 const ghMock = vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>();
@@ -39,6 +40,8 @@ vi.mock('@dnsquared/shipper-core', () => ({
   logger: loggerMock,
   toError,
   toErrorMessage,
+  parseIssueStateTitle,
+  parsePrStateMergedTitle,
   fetchIssue: fetchIssueMock,
   gh: ghMock,
   handleAgentCrash: handleAgentCrashMock,

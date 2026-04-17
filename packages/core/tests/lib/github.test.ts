@@ -781,6 +781,8 @@ describe('selectIssuesForStage', () => {
       JSON.stringify([{ number: 1, title: 'Normal', labels: [{ name: 'shipper:new' }] }])
     );
     queueExecFileError('gh failed');
+    queueExecFileError('gh failed');
+    queueExecFileError('gh failed');
     const stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const result = await selectIssuesForStage(repo, 'shipper:new');
