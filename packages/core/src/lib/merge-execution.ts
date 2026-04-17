@@ -2,21 +2,13 @@ import type { Writable } from 'node:stream';
 import { classifyChecks, fetchChecks } from './checks.js';
 import { toErrorMessage } from './errors.js';
 import { gh } from './gh.js';
+import { parsePrBodyView, parsePrMergeStateView, parsePrStateView } from './gh-schemas.js';
 import { withStageHooks } from './hooks.js';
 import { PR_REVIEWED_LABEL, READY_LABEL } from './labels.js';
 import type { Logger } from './logger.js';
 import { logger } from './logger.js';
 import { getSettings } from './settings.js';
 import { sleepMs } from './sleep.js';
-
-interface PRMergeStateViewData {
-  mergeStateStatus: string;
-  mergeable: string;
-}
-
-interface PRStateViewData {
-  state: string;
-}
 
 export interface QueuedPR {
   number: number;
@@ -81,20 +73,16 @@ async function getMergeStateStatus(prNumber: number, nwo: string): Promise<strin
     throw new Error(`Could not determine merge state for PR #${prNumber}: ${toErrorMessage(err)}`);
   }
 
-  try {
-    const data = JSON.parse(output) as PRMergeStateViewData;
+  const data = parsePrMergeStateView(output);
 
-    // GitHub may not compute mergeStateStatus when branch protection is absent,
-    // leaving it permanently UNKNOWN. Fall back to the mergeable field which is
-    // computed independently.
-    if (data.mergeStateStatus === 'UNKNOWN' && data.mergeable === 'MERGEABLE') {
-      return 'CLEAN';
-    }
-
-    return data.mergeStateStatus;
-  } catch (err) {
-    throw new Error(`Could not determine merge state for PR #${prNumber}: ${toErrorMessage(err)}`);
+  // GitHub may not compute mergeStateStatus when branch protection is absent,
+  // leaving it permanently UNKNOWN. Fall back to the mergeable field which is
+  // computed independently.
+  if (data.mergeStateStatus === 'UNKNOWN' && data.mergeable === 'MERGEABLE') {
+    return 'CLEAN';
   }
+
+  return data.mergeStateStatus;
 }
 
 async function getBlockedMergeState(pr: QueuedPR, nwo: string): Promise<BlockedMergeState> {
@@ -246,23 +234,18 @@ export async function getLinkedIssueNumber(
   nwo: string,
   mergeLogger: Logger = logger
 ): Promise<number | null> {
+  let json = '';
   try {
-    const { stdout: json } = await gh([
-      'pr',
-      'view',
-      String(prNumber),
-      '-R',
-      nwo,
-      '--json',
-      'body',
-    ]);
-    const { body } = JSON.parse(json) as { body: string };
-    const match = /(?:^|\s)(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/im.exec(body);
-    return match?.[1] ? Number(match[1]) : null;
+    const { stdout } = await gh(['pr', 'view', String(prNumber), '-R', nwo, '--json', 'body']);
+    json = stdout;
   } catch {
     mergeLogger.warn(`Failed to fetch linked issue for PR #${prNumber}`);
     return null;
   }
+
+  const { body } = parsePrBodyView(json);
+  const match = /(?:^|\s)(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/im.exec(body);
+  return match?.[1] ? Number(match[1]) : null;
 }
 
 export async function postMerge(
@@ -299,14 +282,17 @@ export async function isPrMerged(
   nwo: string,
   mergeLogger: Logger = logger
 ): Promise<boolean | null> {
+  let stdout = '';
   try {
-    const { stdout } = await gh(['pr', 'view', String(prNumber), '-R', nwo, '--json', 'state']);
-    const { state } = JSON.parse(stdout) as PRStateViewData;
-    return state === 'MERGED';
+    const result = await gh(['pr', 'view', String(prNumber), '-R', nwo, '--json', 'state']);
+    stdout = result.stdout;
   } catch {
     mergeLogger.warn(`Failed to check merge status for PR #${prNumber}`);
     return null;
   }
+
+  const { state } = parsePrStateView(stdout);
+  return state === 'MERGED';
 }
 
 export async function pollPrMerged(
