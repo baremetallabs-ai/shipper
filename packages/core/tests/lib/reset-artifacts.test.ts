@@ -290,6 +290,47 @@ describe('scanArtifacts', () => {
     ]);
   });
 
+  it('throws when comment cleanup receives an invalid comment payload after a successful gh call', async () => {
+    setupScanGh({
+      comments: '{"id":"bad","created_at":"2026-04-17T00:00:00Z"}\n',
+      timeline: '2026-04-17T00:00:00Z\n',
+    });
+
+    await expect(
+      scanArtifacts(18, 'owner/repo', 'implemented', ['shipper:planned'], {
+        repoName: 'shipper',
+      })
+    ).rejects.toThrow('gh returned an invalid CommentIdCreatedAt payload: expected number at id');
+  });
+
+  it('throws when PR discovery receives an invalid PR summary payload after a successful gh call', async () => {
+    setupScanGh({
+      prs: JSON.stringify([{ number: 'bad', headRefName: 'shipper/18-open-pr' }]),
+    });
+    setupScanExecFileSync();
+
+    await expect(
+      scanArtifacts(18, 'owner/repo', 'new', ['shipper:implemented'], {
+        repoRoot: '/repo',
+        repoName: 'shipper',
+      })
+    ).rejects.toThrow(
+      'gh returned an invalid PrSummaryList payload: expected number at [0].number'
+    );
+  });
+
+  it('throws when matching refs receive an invalid payload after a successful gh call', async () => {
+    setupScanGh({
+      remoteRefs: JSON.stringify([{ ref: 123 }]),
+    });
+
+    await expect(
+      scanArtifacts(18, 'owner/repo', 'new', ['shipper:implemented'], {
+        repoName: 'shipper',
+      })
+    ).rejects.toThrow('gh returned an invalid MatchingRefs payload: expected string at [0].ref');
+  });
+
   it('tolerates git fetch failures and still scans stale remote refs', async () => {
     setupScanGh();
     setupScanExecFileSync({
@@ -681,6 +722,41 @@ describe('executeReset', () => {
       reason: 'could not verify open PR state: lookup failed',
     });
     expect(result.hasFailures).toBe(true);
+  });
+
+  it('throws when branch-level PR verification receives an invalid payload after a successful gh call', async () => {
+    mockGh.mockImplementation((args: string[]) => {
+      if (
+        args[0] === 'pr' &&
+        args[1] === 'list' &&
+        args[2] === '-R' &&
+        args[3] === 'owner/repo' &&
+        args[4] === '--head' &&
+        args[5] === 'shipper/18-open-pr'
+      ) {
+        return Promise.resolve(
+          ok(JSON.stringify([{ number: 'bad', headRefName: 'shipper/18-open-pr' }]))
+        );
+      }
+
+      if (args[0] === 'issue' && args[1] === 'comment') {
+        return Promise.resolve(ok());
+      }
+
+      return Promise.reject(new Error(`Unexpected gh call: ${args.join(' ')}`));
+    });
+
+    await expect(
+      executeReset(
+        18,
+        makeScan({
+          branchesToDelete: ['shipper/18-open-pr'],
+        }),
+        'owner/repo'
+      )
+    ).rejects.toThrow(
+      'gh returned an invalid PrSummaryList payload: expected number at [0].number'
+    );
   });
 
   it('reports an already removed worktree as skipped', async () => {

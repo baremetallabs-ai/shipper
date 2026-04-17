@@ -30,10 +30,7 @@ export async function fetchChecks(repo: string, prNumber: string): Promise<PRChe
     '--json',
     'name,state,bucket,link',
   ]);
-  return parsePrChecks(stdout).map((check) => ({
-    ...check,
-    link: check.link ?? undefined,
-  }));
+  return parsePrChecks(stdout);
 }
 
 /**

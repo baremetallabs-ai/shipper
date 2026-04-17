@@ -1,7 +1,10 @@
 import { z } from 'zod';
 import { parseGhJson } from './gh-json.js';
 
-function makeParser<T>(schema: z.ZodType<T>, shapeName: string): (json: string) => T {
+function makeParser<TOutput, TInput = unknown>(
+  schema: z.ZodType<TOutput, z.ZodTypeDef, TInput>,
+  shapeName: string
+): (json: string) => TOutput {
   return (json) => parseGhJson(json, schema, shapeName);
 }
 
@@ -212,9 +215,9 @@ export const PrChecksLineSchema = z.object({
     .nullish()
     .transform((value) => value ?? undefined),
 });
-export type PrChecksLine = z.infer<typeof PrChecksLineSchema>;
+export type PrChecksLine = z.output<typeof PrChecksLineSchema>;
 export const PrChecksSchema = z.array(PrChecksLineSchema);
-export type PrChecks = z.infer<typeof PrChecksSchema>;
+export type PrChecks = z.output<typeof PrChecksSchema>;
 export const parsePrChecks = makeParser(PrChecksSchema, 'PrChecks');
 
 export const RunViewStepSchema = z.object({

@@ -220,28 +220,31 @@ export async function scanArtifacts(
         );
       } else {
         const cutoff = cutoffDate.getTime() + 60_000;
+        let raw = '';
         try {
-          const { stdout: raw } = await gh([
+          const { stdout } = await gh([
             'api',
             `repos/${nwo}/issues/${issueNum}/comments`,
             '--paginate',
             '--jq',
             '.[] | {id, created_at}',
           ]);
-          const lines = raw
-            .trim()
-            .split('\n')
-            .filter((line) => line !== '');
-          for (const line of lines) {
-            const comment = parseCommentIdCreatedAt(line);
-            if (Date.parse(comment.created_at) > cutoff) {
-              commentIds.push(comment.id);
-            }
-          }
+          raw = stdout;
         } catch (error) {
           logger.warn(
             `Warning: Could not fetch comments for issue #${issueNum}: ${toErrorMessage(error)}`
           );
+        }
+
+        const lines = raw
+          .trim()
+          .split('\n')
+          .filter((line) => line !== '');
+        for (const line of lines) {
+          const comment = parseCommentIdCreatedAt(line);
+          if (Date.parse(comment.created_at) > cutoff) {
+            commentIds.push(comment.id);
+          }
         }
       }
     } else {
@@ -252,8 +255,9 @@ export async function scanArtifacts(
   }
 
   let prs: PREntry[] = [];
+  let prJson = '';
   try {
-    const { stdout: prJson } = await gh([
+    const { stdout } = await gh([
       'pr',
       'list',
       '-R',
@@ -265,17 +269,18 @@ export async function scanArtifacts(
       '--json',
       'number,headRefName',
     ]);
-    const allPrs = parsePrSummaryList(prJson);
-    prs = allPrs.filter(
-      (pr) =>
-        pr.headRefName === `shipper/${issueNum}` ||
-        pr.headRefName.startsWith(`shipper/${issueNum}-`) ||
-        pr.headRefName === `${issueNum}` ||
-        pr.headRefName.startsWith(`${issueNum}-`)
-    );
+    prJson = stdout;
   } catch (error) {
     logger.warn(`Warning: Could not fetch PRs for issue #${issueNum}: ${toErrorMessage(error)}`);
   }
+  const allPrs = parsePrSummaryList(prJson);
+  prs = allPrs.filter(
+    (pr) =>
+      pr.headRefName === `shipper/${issueNum}` ||
+      pr.headRefName.startsWith(`shipper/${issueNum}-`) ||
+      pr.headRefName === `${issueNum}` ||
+      pr.headRefName.startsWith(`${issueNum}-`)
+  );
 
   let remoteBranches: string[] = [];
   if (targetStage !== 'implemented') {
@@ -311,22 +316,24 @@ export async function scanArtifacts(
         );
       }
     } else {
+      let refsJson = '';
       try {
-        const { stdout: refsJson } = await gh([
+        const { stdout } = await gh([
           'api',
           `repos/${nwo}/git/matching-refs/heads/shipper/${issueNum}`,
         ]);
-        remoteBranches = parseMatchingRefs(refsJson)
-          .map((entry) => entry.ref.replace(/^refs\/heads\//, ''))
-          .filter(
-            (branchName) =>
-              branchName === `shipper/${issueNum}` || branchName.startsWith(`shipper/${issueNum}-`)
-          );
+        refsJson = stdout;
       } catch (error) {
         logger.warn(
           `Warning: Could not scan remote branches for issue #${issueNum}: ${toErrorMessage(error)}`
         );
       }
+      remoteBranches = parseMatchingRefs(refsJson)
+        .map((entry) => entry.ref.replace(/^refs\/heads\//, ''))
+        .filter(
+          (branchName) =>
+            branchName === `shipper/${issueNum}` || branchName.startsWith(`shipper/${issueNum}-`)
+        );
     }
   }
 
@@ -542,8 +549,9 @@ export async function executeReset(
       recordOperation(description, 'failed', reason);
       continue;
     } else {
+      let prJson = '';
       try {
-        const { stdout: prJson } = await gh([
+        const { stdout } = await gh([
           'pr',
           'list',
           '-R',
@@ -555,20 +563,22 @@ export async function executeReset(
           '--json',
           'number,headRefName',
         ]);
-        const branchPrs = parsePrSummaryList(prJson).filter((pr) => pr.headRefName === branchName);
-        if (branchPrs.length > 0) {
-          recordOperation(
-            description,
-            'failed',
-            `still has an open PR: ${branchPrs.map((pr) => `#${pr.number}`).join(', ')}`
-          );
-          continue;
-        }
+        prJson = stdout;
       } catch (error) {
         recordOperation(
           description,
           'failed',
           `could not verify open PR state: ${toErrorMessage(error)}`
+        );
+        continue;
+      }
+
+      const branchPrs = parsePrSummaryList(prJson).filter((pr) => pr.headRefName === branchName);
+      if (branchPrs.length > 0) {
+        recordOperation(
+          description,
+          'failed',
+          `still has an open PR: ${branchPrs.map((pr) => `#${pr.number}`).join(', ')}`
         );
         continue;
       }
