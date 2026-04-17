@@ -237,7 +237,7 @@ describe('syncWorktree', () => {
     ]);
   });
 
-  it('reruns installCommand after rebase --continue succeeds in conflict resolution', async () => {
+  it('stages resolved files before rebase --continue and reruns installCommand after conflict resolution', async () => {
     getSettingsMock.mockReturnValue({ installCommand: 'npm ci' });
     queueSpawnExit();
     queueExecResult({ stdout: 'feature/test-branch\n' }); // getCurrentBranch
@@ -253,6 +253,7 @@ describe('syncWorktree', () => {
       .mockResolvedValueOnce(
         ['<<<<<<< HEAD', 'left', '=======', 'right', '>>>>>>> origin/main'].join('\n')
       );
+    queueExecResult();
     queueExecResult();
     queueExecResult();
     const resolveConflicts = vi.fn().mockResolvedValue(0);
@@ -286,12 +287,19 @@ describe('syncWorktree', () => {
     });
     expect(spawnMock).toHaveBeenCalledTimes(1);
     expectFetchSpawn();
-    expectInstallExec(5);
-    expect(gitArgsFromExecCalls()).toEqual([
+    expectInstallExec(6);
+    const gitArgs = gitArgsFromExecCalls();
+    expect(gitArgs.slice(3, 6)).toEqual([
+      ['diff', '--name-only', '--diff-filter=U'],
+      ['add', '-u'],
+      ['rebase', '--continue'],
+    ]);
+    expect(gitArgs).toEqual([
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
       ['diff', '--name-only', '--diff-filter=U'],
+      ['add', '-u'],
       ['rebase', '--continue'],
     ]);
   });
@@ -306,6 +314,7 @@ describe('syncWorktree', () => {
     readFileMock.mockResolvedValueOnce(
       ['<<<<<<< HEAD', 'old', '=======', 'new', '>>>>>>> origin/main'].join('\n')
     );
+    queueExecResult();
     queueExecResult({ code: 1, stderr: 'No changes - did you forget to use git add?' });
     queueExecResult({ stdout: '' });
     queueExecResult({ stdout: '.git\n' });
@@ -327,12 +336,13 @@ describe('syncWorktree', () => {
     expect(resolveConflicts).toHaveBeenCalledTimes(1);
     expect(spawnMock).toHaveBeenCalledTimes(1);
     expectFetchSpawn();
-    expectInstallExec(7);
+    expectInstallExec(8);
     expect(gitArgsFromExecCalls()).toEqual([
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       ['rev-parse', '--verify', 'origin/feature/test-branch'],
       ['rebase', '--autostash', 'origin/main'],
       ['diff', '--name-only', '--diff-filter=U'],
+      ['add', '-u'],
       ['rebase', '--continue'],
       ['diff', '--name-only', '--diff-filter=U'],
       ['rev-parse', '--git-dir'],
