@@ -29,6 +29,12 @@ npx vitest run packages/cli/tests/lib/branch.test.ts   # Run a single test file
 
 **Important:** Always run tests via `npm run test` (workspace scripts), never `npx vitest run` from the repo root. The root has no vitest config — running there picks up all test files without per-package alias resolution and will produce false failures.
 
+## CI
+
+Pull requests to `main` run two required GitHub Actions jobs: `check` on Ubuntu and `desktop-macos` on macOS.
+
+`desktop-macos` builds `packages/core`, builds and tests `packages/desktop`, and runs a dir-style `electron-builder` packaging smoke without publishing release artifacts. Failures in either required job block merge.
+
 ## Architecture
 
 **Command pattern:** Each CLI command lives in `packages/cli/src/commands/<name>.ts` and exports a single async function. Commands follow: validate input -> check prerequisites -> execute action, usually by dispatching to shared core helpers.

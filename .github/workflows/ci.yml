@@ -19,3 +19,28 @@ jobs:
       - run: npm run type-check
       - run: npm run build
       - run: npm run test:coverage
+
+  desktop-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Build core
+        run: npm run build --workspace=packages/core
+
+      - name: Build desktop
+        run: npm run build --workspace=packages/desktop
+
+      - name: Test desktop
+        run: npm run test --workspace=packages/desktop
+
+      - name: Packaging smoke
+        run: npx electron-builder --dir
+        working-directory: packages/desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
