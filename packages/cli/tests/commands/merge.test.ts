@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { GhPayloadError } from '../../../core/src/lib/gh-json.js';
+import {
+  parseMergeQueueSearch,
+  parsePrMergeStateView,
+  parsePrViewForMerge,
+} from '../../../core/src/lib/gh-schemas.js';
 import { toError, toErrorMessage } from '../../../core/src/lib/errors.js';
-import { isPlainObject } from '../../../core/src/lib/type-guards.js';
 
 const tryResolvePrForIssueMock =
   vi.fn<(repo: string, issueNumber: number) => Promise<string | undefined>>();
@@ -69,9 +74,12 @@ vi.mock('@dnsquared/shipper-core', () => ({
       console.error(`[shipper] ${message}`);
     },
   },
+  GhPayloadError,
+  parseMergeQueueSearch,
+  parsePrMergeStateView,
+  parsePrViewForMerge,
   toError,
   toErrorMessage,
-  isPlainObject,
   getSettings: () => getSettingsMock(),
   gh: (args: string[]) => ghMock(args),
   tryResolvePrForIssue: (repo: string, issueNumber: number) =>
@@ -150,8 +158,7 @@ afterEach(() => {
   process.exitCode = undefined;
 });
 
-const { parseGraphQLResponse, parsePRViewData, lookupPR, mergeCommand } =
-  await import('../../src/commands/merge.js');
+const { lookupPR, mergeCommand } = await import('../../src/commands/merge.js');
 
 function mockLookupPrView(options?: {
   ref?: string;
@@ -204,54 +211,6 @@ function mockLookupPrView(options?: {
   });
 }
 
-describe('parseGraphQLResponse', () => {
-  it('parses a valid GraphQL response', () => {
-    const parsed = parseGraphQLResponse(
-      JSON.stringify({
-        data: {
-          search: {
-            nodes: [
-              {
-                number: 42,
-                title: 'Test PR',
-                headRefName: 'shipper/42',
-                baseRefName: 'main',
-                timelineItems: {
-                  nodes: [{ createdAt: '2026-04-14T00:00:00Z', label: { name: 'shipper:ready' } }],
-                },
-              },
-            ],
-            pageInfo: { hasNextPage: false, endCursor: null },
-          },
-        },
-      })
-    );
-
-    expect(parsed.data.search.nodes).toHaveLength(1);
-    expect(parsed.data.search.pageInfo.hasNextPage).toBe(false);
-  });
-
-  it('throws when search results are missing', () => {
-    expect(() => parseGraphQLResponse(JSON.stringify({ data: {} }))).toThrow(
-      'GitHub GraphQL response was missing search results.'
-    );
-  });
-});
-
-describe('parsePRViewData', () => {
-  it('parses a valid pull request payload', () => {
-    expect(parsePRViewData(JSON.stringify({ mergeStateStatus: 'CLEAN' }))).toEqual({
-      mergeStateStatus: 'CLEAN',
-    });
-  });
-
-  it('throws when mergeStateStatus is missing', () => {
-    expect(() => parsePRViewData(JSON.stringify({ state: 'OPEN' }))).toThrow(
-      'GitHub CLI returned an invalid pull request view payload.'
-    );
-  });
-});
-
 describe('lookupPR', () => {
   it('returns a queued PR for an open ready PR', async () => {
     mockLookupPrView();
@@ -284,6 +243,26 @@ describe('lookupPR', () => {
       expect.objectContaining({ number: 99 })
     );
     expect(tryResolvePrForIssueMock).toHaveBeenCalledWith('owner/repo', 42);
+  });
+
+  it('propagates shared validation errors for malformed payloads', async () => {
+    ghMock.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        number: 42,
+        title: 'Broken PR',
+        headRefName: 'feat',
+        baseRefName: 'main',
+        state: 'OPEN',
+        labels: [{}],
+      }),
+      stderr: '',
+    });
+
+    const promise = lookupPR('42', 'owner/repo');
+    await expect(promise).rejects.toThrow(GhPayloadError);
+    await expect(promise).rejects.toThrow(
+      'gh returned an invalid PrViewForMerge payload: expected string at labels[0].name'
+    );
   });
 });
 

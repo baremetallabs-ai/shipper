@@ -14,8 +14,9 @@ import {
   getSettings,
   gh,
   handleAgentCrash,
-  isPlainObject,
   logger,
+  parsePrBaseRefNameView,
+  parsePrCreatedAtView,
   postComment,
   postReplies,
   processResult,
@@ -49,15 +50,6 @@ class PollingInterruptedError extends Error {
   constructor() {
     super('Check polling interrupted.');
   }
-}
-
-function parseCreatedAt(json: string): string {
-  const parsed: unknown = JSON.parse(json);
-  if (!isPlainObject(parsed) || typeof parsed.createdAt !== 'string') {
-    throw new Error('GitHub CLI returned an invalid createdAt payload.');
-  }
-
-  return parsed.createdAt;
 }
 
 async function waitForChecks(repo: string, pr: string, timeoutMinutes: number): Promise<void> {
@@ -252,7 +244,7 @@ export async function buildReadyCheck(
     }
 
     const { stdout } = await gh(['pr', 'view', pr, '-R', repo, '--json', 'createdAt']);
-    const createdAt = parseCreatedAt(stdout);
+    const createdAt = parsePrCreatedAtView(stdout).createdAt;
     const deadline = new Date(createdAt).getTime() + prReviewWait.durationMinutes * 60_000;
 
     return () => Promise.resolve(Date.now() >= deadline);
@@ -267,7 +259,7 @@ export async function buildReadyCheck(
       ? null
       : await (async () => {
           const { stdout } = await gh(['pr', 'view', pr, '-R', repo, '--json', 'createdAt']);
-          const createdAt = parseCreatedAt(stdout);
+          const createdAt = parsePrCreatedAtView(stdout).createdAt;
           return new Date(createdAt).getTime() + minDurationMinutes * 60_000;
         })();
   let consecutiveFailures = 0;
@@ -349,7 +341,7 @@ export async function prRemediateCommand(
       '--json',
       'baseRefName',
     ]);
-    const { baseRefName: baseBranch } = JSON.parse(baseBranchStdout) as { baseRefName: string };
+    const { baseRefName: baseBranch } = parsePrBaseRefNameView(baseBranchStdout);
 
     return await withStageHooks('pr-remediate', { issueNumber, branchName: branch }, async () => {
       const { prReviewWait } = getSettings();
@@ -358,7 +350,7 @@ export async function prRemediateCommand(
         if (prReviewWait.mode === 'timer') {
           if (prReviewWait.durationMinutes > 0) {
             const { stdout } = await gh(['pr', 'view', prRef, '-R', repo, '--json', 'createdAt']);
-            const createdAt = parseCreatedAt(stdout);
+            const createdAt = parsePrCreatedAtView(stdout).createdAt;
             const elapsedMs = Date.now() - new Date(createdAt).getTime();
             const waitMs = prReviewWait.durationMinutes * 60_000;
             const remainingMs = waitMs - elapsedMs;
@@ -383,7 +375,7 @@ export async function prRemediateCommand(
             (maxDeadline === null || Date.now() < maxDeadline)
           ) {
             const { stdout } = await gh(['pr', 'view', prRef, '-R', repo, '--json', 'createdAt']);
-            const createdAt = parseCreatedAt(stdout);
+            const createdAt = parsePrCreatedAtView(stdout).createdAt;
             const minDeadline =
               new Date(createdAt).getTime() + prReviewWait.minDurationMinutes * 60_000;
             const remainingMs = minDeadline - Date.now();

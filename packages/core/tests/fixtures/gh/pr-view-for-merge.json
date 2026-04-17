@@ -1,0 +1,15 @@
+{
+  "baseRefName": "main",
+  "headRefName": "shipper/630-extract-layered-helpers-for-stage-command-scaffold",
+  "labels": [
+    {
+      "id": "LA_kwDORc0F5c8AAAACZ6ymqg",
+      "name": "shipper:ready",
+      "description": "Ready for final review and merge",
+      "color": "0E8A16"
+    }
+  ],
+  "number": 643,
+  "state": "MERGED",
+  "title": "refactor(#630): extract layered stage-command scaffold"
+}

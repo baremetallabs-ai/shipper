@@ -1,0 +1,555 @@
+{
+  "data": {
+    "search": {
+      "nodes": [
+        {
+          "number": 643,
+          "title": "refactor(#630): extract layered stage-command scaffold",
+          "headRefName": "shipper/630-extract-layered-helpers-for-stage-command-scaffold",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [
+              { "createdAt": "2026-04-17T20:32:10Z", "label": { "name": "shipper:pr-open" } },
+              { "createdAt": "2026-04-17T20:39:36Z", "label": { "name": "shipper:pr-reviewed" } },
+              { "createdAt": "2026-04-17T20:53:43Z", "label": { "name": "shipper:ready" } }
+            ]
+          }
+        },
+        {
+          "number": 642,
+          "title": "feat(#640): add macOS desktop CI validation",
+          "headRefName": "shipper/640-add-regular-macos-ci-validation-for-the-desktop-pa",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [
+              { "createdAt": "2026-04-17T18:55:02Z", "label": { "name": "shipper:pr-open" } },
+              { "createdAt": "2026-04-17T18:57:19Z", "label": { "name": "shipper:pr-reviewed" } },
+              { "createdAt": "2026-04-17T19:16:53Z", "label": { "name": "shipper:ready" } }
+            ]
+          }
+        },
+        {
+          "number": 629,
+          "title": "feat(#627): open desktop links in the default browser",
+          "headRefName": "shipper/627-open-issue-links-in-the-system-default-browser-fro",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [
+              { "createdAt": "2026-04-16T20:13:28Z", "label": { "name": "shipper:pr-open" } },
+              { "createdAt": "2026-04-16T20:16:31Z", "label": { "name": "shipper:pr-reviewed" } },
+              { "createdAt": "2026-04-16T20:37:48Z", "label": { "name": "shipper:ready" } }
+            ]
+          }
+        },
+        {
+          "number": 628,
+          "title": "fix(#626): exclude shipper:new from auto ship",
+          "headRefName": "shipper/626-regression-ship-auto-picks-shipper-new-and-runs-gr",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [
+              { "createdAt": "2026-04-16T19:31:32Z", "label": { "name": "shipper:pr-open" } },
+              { "createdAt": "2026-04-16T19:37:14Z", "label": { "name": "shipper:pr-reviewed" } },
+              { "createdAt": "2026-04-16T19:54:38Z", "label": { "name": "shipper:ready" } }
+            ]
+          }
+        },
+        {
+          "number": 621,
+          "title": "refactor(#612): unify merge execution across ship --merge and merge",
+          "headRefName": "shipper/612-unify-merge-execution-across-shipper-ship-merge-an",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [
+              { "createdAt": "2026-04-14T00:50:09Z", "label": { "name": "shipper:pr-open" } },
+              { "createdAt": "2026-04-14T01:10:26Z", "label": { "name": "shipper:pr-reviewed" } },
+              { "createdAt": "2026-04-14T01:31:05Z", "label": { "name": "shipper:ready" } }
+            ]
+          }
+        },
+        {
+          "number": 620,
+          "title": "fix(#616): reset managed clones before sync",
+          "headRefName": "shipper/616-ensurerepoclone-fails-when-managed-clone-has-local",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [
+              { "createdAt": "2026-04-13T23:18:10Z", "label": { "name": "shipper:pr-open" } },
+              { "createdAt": "2026-04-13T23:21:56Z", "label": { "name": "shipper:pr-reviewed" } },
+              { "createdAt": "2026-04-13T23:49:06Z", "label": { "name": "shipper:ready" } }
+            ]
+          }
+        },
+        {
+          "number": 619,
+          "title": "docs(#608): warn about leaked git config in push",
+          "headRefName": "shipper/608-document-git-config-env-propagation-hazard-in-push",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [
+              { "createdAt": "2026-04-13T22:31:21Z", "label": { "name": "shipper:pr-open" } },
+              { "createdAt": "2026-04-13T22:38:25Z", "label": { "name": "shipper:pr-reviewed" } },
+              { "createdAt": "2026-04-13T22:57:01Z", "label": { "name": "shipper:ready" } }
+            ]
+          }
+        },
+        {
+          "number": 618,
+          "title": "feat(#606): add browser links to issue cards",
+          "headRefName": "shipper/606-desktop-add-open-in-browser-link-on-issue-cards",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [
+              { "createdAt": "2026-04-13T21:44:49Z", "label": { "name": "shipper:pr-open" } },
+              { "createdAt": "2026-04-13T21:48:08Z", "label": { "name": "shipper:pr-reviewed" } },
+              { "createdAt": "2026-04-13T22:09:54Z", "label": { "name": "shipper:ready" } }
+            ]
+          }
+        },
+        {
+          "number": 617,
+          "title": "feat(#604): setup agent checks Agent Feedback comments",
+          "headRefName": "shipper/604-feat-setup-agent-should-check-agent-feedback-comme",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [
+              { "createdAt": "2026-04-13T20:43:56Z", "label": { "name": "shipper:pr-open" } },
+              { "createdAt": "2026-04-13T20:46:17Z", "label": { "name": "shipper:pr-reviewed" } },
+              { "createdAt": "2026-04-13T21:09:57Z", "label": { "name": "shipper:ready" } }
+            ]
+          }
+        },
+        {
+          "number": 615,
+          "title": "feat(#603): add session debugging setup guidance",
+          "headRefName": "shipper/603-add-basic-session-debugging-guidance-to-setup-agen",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [
+              { "createdAt": "2026-04-13T19:45:54Z", "label": { "name": "shipper:pr-open" } },
+              { "createdAt": "2026-04-13T19:49:01Z", "label": { "name": "shipper:pr-reviewed" } },
+              { "createdAt": "2026-04-13T20:17:07Z", "label": { "name": "shipper:ready" } }
+            ]
+          }
+        },
+        {
+          "number": 614,
+          "title": "fix(#602): tighten new prompt guardrails",
+          "headRefName": "shipper/602-new-agent-occasionally-over-specifies-with-ungroun",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [
+              { "createdAt": "2026-04-13T18:42:15Z", "label": { "name": "shipper:pr-open" } },
+              { "createdAt": "2026-04-13T18:47:16Z", "label": { "name": "shipper:pr-reviewed" } },
+              { "createdAt": "2026-04-13T19:12:37Z", "label": { "name": "shipper:ready" } }
+            ]
+          }
+        },
+        {
+          "number": 613,
+          "title": "fix(#610): mirror shipper labels onto prs",
+          "headRefName": "shipper/610-bug-pr-shipper-labels-never-synced-after-stage-tra",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [{ "createdAt": "2026-04-13T18:24:05Z", "label": { "name": "shipper:ready" } }]
+          }
+        },
+        {
+          "number": 609,
+          "title": "fix(#605): reset reused design and plan worktrees to latest base",
+          "headRefName": "shipper/605-fix-design-and-plan-worktrees-don-t-reset-to-lates",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [
+              { "createdAt": "2026-04-13T17:10:28Z", "label": { "name": "shipper:ready" } },
+              { "createdAt": "2026-04-13T17:21:55Z", "label": { "name": "shipper:ready" } }
+            ]
+          }
+        },
+        {
+          "number": 321,
+          "title": "refactor(#252): restructure pr_remediate into multi-pass loop",
+          "headRefName": "shipper/252-refactor-prompts-restructure-pr-remediate-into-mul",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [{ "createdAt": "2026-03-15T20:06:44Z", "label": { "name": "shipper:ready" } }]
+          }
+        },
+        {
+          "number": 320,
+          "title": "feat(worktree): move groom, design, plan, pr-review to worktrees (#316)",
+          "headRefName": "shipper/316-feat-worktree-move-groom-design-plan-and-pr-review",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [{ "createdAt": "2026-03-15T19:16:03Z", "label": { "name": "shipper:ready" } }]
+          }
+        },
+        {
+          "number": 315,
+          "title": "refactor(prompts): migrate pr_open/pr_review to file protocol (#251)",
+          "headRefName": "shipper/251-refactor-prompts-migrate-pr-open-pr-review-to-file",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [{ "createdAt": "2026-03-15T16:06:17Z", "label": { "name": "shipper:ready" } }]
+          }
+        },
+        {
+          "number": 313,
+          "title": "feat(core): add priority labels that influence grooming and auto-selection",
+          "headRefName": "shipper/299-feat-core-add-priority-labels-that-influence-groom",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [{ "createdAt": "2026-03-15T14:16:58Z", "label": { "name": "shipper:ready" } }]
+          }
+        },
+        {
+          "number": 312,
+          "title": "refactor(prompts): migrate design/plan/implement/unblock to output protocol",
+          "headRefName": "shipper/250-refactor-prompts-migrate-design-plan-implement-unb",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [
+              { "createdAt": "2026-03-14T08:47:44Z", "label": { "name": "shipper:ready" } },
+              { "createdAt": "2026-03-14T09:04:12Z", "label": { "name": "shipper:pr-reviewed" } },
+              { "createdAt": "2026-03-14T09:48:49Z", "label": { "name": "shipper:ready" } }
+            ]
+          }
+        },
+        {
+          "number": 311,
+          "title": "refactor(settings): remove deprecated hooks property",
+          "headRefName": "shipper/296-refactor-settings-remove-deprecated-hooks-property",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [
+              { "createdAt": "2026-03-15T14:14:43Z", "label": { "name": "shipper:ready" } },
+              { "createdAt": "2026-03-15T14:15:22Z", "label": { "name": "shipper:pr-reviewed" } },
+              { "createdAt": "2026-03-15T14:23:20Z", "label": { "name": "shipper:ready" } },
+              { "createdAt": "2026-03-15T14:57:23Z", "label": { "name": "shipper:ready" } }
+            ]
+          }
+        },
+        {
+          "number": 310,
+          "title": "feat(prompts): surface pre-push hook checks in planner verification",
+          "headRefName": "shipper/306-planner-should-surface-pre-push-hook-checks-in-ver",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [{ "createdAt": "2026-03-14T07:15:27Z", "label": { "name": "shipper:ready" } }]
+          }
+        },
+        {
+          "number": 307,
+          "title": "feat(core): add file-based output protocol infrastructure (#248)",
+          "headRefName": "shipper/248-refactor-prompts-file-based-output-protocol-core-i",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [{ "createdAt": "2026-03-14T03:27:00Z", "label": { "name": "shipper:ready" } }]
+          }
+        },
+        {
+          "number": 304,
+          "title": "feat(desktop): convert issue list to kanban pipeline board",
+          "headRefName": "shipper/257-feat-desktop-convert-issue-list-to-kanban-pipeline",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [{ "createdAt": "2026-03-14T03:07:41Z", "label": { "name": "shipper:ready" } }]
+          }
+        },
+        {
+          "number": 303,
+          "title": "fix(reset): preserve branches when resetting to implemented",
+          "headRefName": "shipper/298-fix-reset-preserve-branches-when-resetting-to-impl",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [
+              { "createdAt": "2026-03-14T02:32:52Z", "label": { "name": "shipper:ready" } },
+              { "createdAt": "2026-03-14T02:33:27Z", "label": { "name": "shipper:pr-reviewed" } },
+              { "createdAt": "2026-03-14T02:38:45Z", "label": { "name": "shipper:ready" } }
+            ]
+          }
+        },
+        {
+          "number": 302,
+          "title": "chore(core): move worktree caches under .shipper/tmp (#300)",
+          "headRefName": "shipper/300-chore-core-move-worktree-caches-under-shipper-tmp",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [{ "createdAt": "2026-03-14T02:28:12Z", "label": { "name": "shipper:ready" } }]
+          }
+        },
+        {
+          "number": 301,
+          "title": "docs(session-debugger): use static skill paths (#290)",
+          "headRefName": "shipper/290-session-debugger-skill-triggers-excessive-permissi",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [{ "createdAt": "2026-03-14T02:39:42Z", "label": { "name": "shipper:ready" } }]
+          }
+        },
+        {
+          "number": 297,
+          "title": "fix(core): redirect XDG_CACHE_HOME into worktree",
+          "headRefName": "shipper/294-fix-core-redirect-xdg-cache-home-into-worktree-to",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [
+              { "createdAt": "2026-03-14T01:38:02Z", "label": { "name": "shipper:ready" } },
+              { "createdAt": "2026-03-14T01:38:41Z", "label": { "name": "shipper:pr-reviewed" } },
+              { "createdAt": "2026-03-14T01:40:51Z", "label": { "name": "shipper:ready" } }
+            ]
+          }
+        },
+        {
+          "number": 295,
+          "title": "feat(core): add push retry loop in withGitTransport",
+          "headRefName": "shipper/293-add-retry-loop-for-push-failures-in-withgittranspo",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [{ "createdAt": "2026-03-14T01:34:44Z", "label": { "name": "shipper:ready" } }]
+          }
+        },
+        {
+          "number": 291,
+          "title": "feat(prompts): add opt-in Agent Feedback section to all stage comments",
+          "headRefName": "shipper/245-feat-prompts-add-opt-in-agent-feedback-section-to",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [{ "createdAt": "2026-03-14T00:57:20Z", "label": { "name": "shipper:ready" } }]
+          }
+        },
+        {
+          "number": 288,
+          "title": "feat(test): add code coverage measurement for unit tests",
+          "headRefName": "shipper/269-add-code-coverage-measurement-for-unit-tests",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [{ "createdAt": "2026-03-13T19:16:12Z", "label": { "name": "shipper:ready" } }]
+          }
+        },
+        {
+          "number": 287,
+          "title": "feat(cli): separate blocked and failed issue list sections",
+          "headRefName": "shipper/283-give-blocked-and-failed-issues-their-own-sections",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [
+              { "createdAt": "2026-03-13T19:18:26Z", "label": { "name": "shipper:ready" } },
+              { "createdAt": "2026-03-13T19:19:19Z", "label": { "name": "shipper:pr-reviewed" } },
+              { "createdAt": "2026-03-13T19:21:36Z", "label": { "name": "shipper:ready" } }
+            ]
+          }
+        },
+        {
+          "number": 286,
+          "title": "feat(desktop): support multiple repos with tab UX",
+          "headRefName": "shipper/253-feat-desktop-support-multiple-repos-with-tab-ux",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [
+              { "createdAt": "2026-03-13T19:15:48Z", "label": { "name": "shipper:ready" } },
+              { "createdAt": "2026-03-13T19:40:34Z", "label": { "name": "shipper:pr-reviewed" } },
+              { "createdAt": "2026-03-13T19:45:40Z", "label": { "name": "shipper:ready" } }
+            ]
+          }
+        },
+        {
+          "number": 285,
+          "title": "fix(ship): stop auto loop on shipper:new regression (#270)",
+          "headRefName": "shipper/270-fix-ship-bail-out-of-auto-loop-when-issue-regresse",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [
+              { "createdAt": "2026-03-13T18:18:02Z", "label": { "name": "shipper:ready" } },
+              { "createdAt": "2026-03-13T19:40:24Z", "label": { "name": "shipper:pr-reviewed" } },
+              { "createdAt": "2026-03-13T19:45:38Z", "label": { "name": "shipper:ready" } },
+              { "createdAt": "2026-03-13T19:49:16Z", "label": { "name": "shipper:pr-reviewed" } },
+              { "createdAt": "2026-03-13T19:51:20Z", "label": { "name": "shipper:ready" } }
+            ]
+          }
+        },
+        {
+          "number": 284,
+          "title": "feat(desktop): add test infrastructure and baseline test (#282)",
+          "headRefName": "shipper/282-feat-desktop-add-test-infrastructure-and-baseline",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [
+              { "createdAt": "2026-03-13T17:53:57Z", "label": { "name": "shipper:ready" } },
+              { "createdAt": "2026-03-13T17:54:32Z", "label": { "name": "shipper:pr-reviewed" } },
+              { "createdAt": "2026-03-13T17:58:05Z", "label": { "name": "shipper:ready" } }
+            ]
+          }
+        },
+        {
+          "number": 281,
+          "title": "refactor(lint): enable strict preset and promote warnings to errors (#278)",
+          "headRefName": "shipper/278-refactor-lint-enable-strict-preset-and-promote-war",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [{ "createdAt": "2026-03-13T16:42:34Z", "label": { "name": "shipper:ready" } }]
+          }
+        },
+        {
+          "number": 277,
+          "title": "feat(desktop): restyle app with retro terminal theme",
+          "headRefName": "shipper/255-restyle-desktop-app-with-retro-terminal-theme",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [
+              { "createdAt": "2026-03-13T15:14:39Z", "label": { "name": "shipper:ready" } },
+              { "createdAt": "2026-03-13T15:15:10Z", "label": { "name": "shipper:pr-reviewed" } },
+              { "createdAt": "2026-03-13T15:17:14Z", "label": { "name": "shipper:ready" } }
+            ]
+          }
+        },
+        {
+          "number": 276,
+          "title": "fix(#258): complete shipper:failed label integration",
+          "headRefName": "shipper/258-add-shipper-failed-label-to-the-label-system",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [{ "createdAt": "2026-03-13T15:05:26Z", "label": { "name": "shipper:ready" } }]
+          }
+        },
+        {
+          "number": 275,
+          "title": "feat(settings): support model override in command settings",
+          "headRefName": "shipper/265-support-model-override-in-command-settings",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [
+              { "createdAt": "2026-03-13T15:11:19Z", "label": { "name": "shipper:ready" } },
+              { "createdAt": "2026-03-13T15:11:56Z", "label": { "name": "shipper:pr-reviewed" } },
+              { "createdAt": "2026-03-13T15:14:15Z", "label": { "name": "shipper:ready" } }
+            ]
+          }
+        },
+        {
+          "number": 274,
+          "title": "fix(scripts): return comment databaseId from gh-api-get-review-threads",
+          "headRefName": "shipper/263-fix-scripts-gh-api-get-review-threads-sh-does-not",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [{ "createdAt": "2026-03-13T11:36:40Z", "label": { "name": "shipper:ready" } }]
+          }
+        },
+        {
+          "number": 273,
+          "title": "feat(core): sandbox-proof worktree environments for package manager caches",
+          "headRefName": "shipper/264-sandbox-proof-worktree-environments-for-package-ma",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [{ "createdAt": "2026-03-13T15:11:22Z", "label": { "name": "shipper:ready" } }]
+          }
+        },
+        {
+          "number": 272,
+          "title": "feat(unlock): add --stale flag to clear all stale locks",
+          "headRefName": "shipper/262-feat-unlock-add-stale-flag-to-clear-all-stale-lock",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [{ "createdAt": "2026-03-13T15:08:30Z", "label": { "name": "shipper:ready" } }]
+          }
+        },
+        {
+          "number": 271,
+          "title": "feat(ship): park sequential auto issues during pr-remediate waits",
+          "headRefName": "shipper/244-feat-ship-advance-other-issues-while-waiting-for-p",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [
+              { "createdAt": "2026-03-13T15:08:46Z", "label": { "name": "shipper:ready" } },
+              { "createdAt": "2026-03-13T15:09:32Z", "label": { "name": "shipper:pr-reviewed" } },
+              { "createdAt": "2026-03-13T16:40:33Z", "label": { "name": "shipper:ready" } },
+              { "createdAt": "2026-03-13T16:45:34Z", "label": { "name": "shipper:ready" } },
+              { "createdAt": "2026-03-13T16:48:38Z", "label": { "name": "shipper:ready" } }
+            ]
+          }
+        },
+        {
+          "number": 267,
+          "title": "feat(desktop): adopt shadcn/ui for UI components",
+          "headRefName": "shipper/254-use-shadcn-ui-for-desktop-app-components",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [{ "createdAt": "2026-03-13T09:55:17Z", "label": { "name": "shipper:ready" } }]
+          }
+        },
+        {
+          "number": 266,
+          "title": "feat(core): move git transport operations out of sandboxed agent",
+          "headRefName": "shipper/239-move-git-transport-operations-out-of-sandboxed-age",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [{ "createdAt": "2026-03-12T15:06:22Z", "label": { "name": "shipper:ready" } }]
+          }
+        },
+        {
+          "number": 261,
+          "title": "fix(ship): replace review-cycle cap with total-transition cap",
+          "headRefName": "shipper/240-fix-ship-replace-review-cycle-cap-with-total-trans",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [{ "createdAt": "2026-03-12T14:11:02Z", "label": { "name": "shipper:ready" } }]
+          }
+        },
+        {
+          "number": 259,
+          "title": "docs(#243): sync README, CLAUDE.md, and state-machine.md with current codebase",
+          "headRefName": "shipper/243-docs-audit-and-update-readme-md-claude-md-and-stat",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [{ "createdAt": "2026-03-11T21:34:29Z", "label": { "name": "shipper:ready" } }]
+          }
+        },
+        {
+          "number": 256,
+          "title": "fix(ship): add merge-state pre-checks to ship --merge",
+          "headRefName": "shipper/242-fix-ship-add-merge-state-pre-checks-to-ship-merge",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [{ "createdAt": "2026-03-12T01:42:50Z", "label": { "name": "shipper:ready" } }]
+          }
+        },
+        {
+          "number": 249,
+          "title": "docs(#241): add settings schema and troubleshooting to setup prompts",
+          "headRefName": "shipper/241-setup-prompt-lacks-settings-schema-and-troubleshoo",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [{ "createdAt": "2026-03-11T20:14:57Z", "label": { "name": "shipper:ready" } }]
+          }
+        },
+        {
+          "number": 246,
+          "title": "refactor(#238): consolidate label definitions into single source of truth",
+          "headRefName": "shipper/238-refactor-consolidate-label-definitions-into-a-sing",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [{ "createdAt": "2026-03-11T19:26:56Z", "label": { "name": "shipper:ready" } }]
+          }
+        },
+        {
+          "number": 237,
+          "title": "fix(init): eliminate retry noise by syncing labels with --force",
+          "headRefName": "shipper/233-fix-eliminate-retry-noise-during-init-label-creati",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [{ "createdAt": "2026-03-11T13:20:48Z", "label": { "name": "shipper:ready" } }]
+          }
+        },
+        {
+          "number": 236,
+          "title": "feat(desktop): scaffold Electron desktop app (#196)",
+          "headRefName": "shipper/196-scaffold-electron-desktop-app",
+          "baseRefName": "main",
+          "timelineItems": {
+            "nodes": [{ "createdAt": "2026-03-11T03:24:43Z", "label": { "name": "shipper:ready" } }]
+          }
+        }
+      ],
+      "pageInfo": { "hasNextPage": true, "endCursor": "Y3Vyc29yOjUw" }
+    }
+  }
+}

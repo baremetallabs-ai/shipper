@@ -5,6 +5,7 @@ import {
   gh,
   handleAgentCrash,
   logger,
+  parseIssueTitleLabelsList,
   processResult,
   retryOnInvalidOutput,
   runPrompt,
@@ -146,13 +147,7 @@ export async function selectBlockedIssues(
 
   if (!output) return [];
 
-  let issues: { number: number; title: string; labels: { name: string }[] }[];
-  try {
-    issues = JSON.parse(output) as { number: number; title: string; labels: { name: string }[] }[];
-  } catch {
-    logger.warn('Failed to parse blocked issues response');
-    return [];
-  }
+  let issues = parseIssueTitleLabelsList(output);
 
   issues = issues.filter((issue) => !issue.labels.some((label) => label.name === NEW_LABEL));
 

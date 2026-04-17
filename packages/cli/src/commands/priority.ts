@@ -1,20 +1,11 @@
 import {
   gh,
   logger,
+  parseIssueLabelsState,
   PRIORITY_HIGH_LABEL,
   PRIORITY_LOW_LABEL,
   STAGE_LABEL_NAMES,
 } from '@dnsquared/shipper-core';
-
-interface IssueLabel {
-  name: string;
-}
-
-interface IssueData {
-  number: number;
-  state: string;
-  labels: IssueLabel[];
-}
 
 function printUsage(): void {
   logger.error('Usage: shipper priority <issue> <high|normal|low>');
@@ -31,9 +22,9 @@ export async function priorityCommand(
     throw new Error('Error: Please provide a valid issue number.');
   }
 
-  let issueData: IssueData;
+  let stdout = '';
   try {
-    const { stdout } = await gh([
+    const result = await gh([
       'issue',
       'view',
       issueStr,
@@ -42,10 +33,11 @@ export async function priorityCommand(
       '--json',
       'number,state,labels',
     ]);
-    issueData = JSON.parse(stdout.trim()) as IssueData;
+    stdout = result.stdout.trim();
   } catch {
     throw new Error(`Error: Issue #${issueStr} not found.`);
   }
+  const issueData = parseIssueLabelsState(stdout);
 
   let isPr = false;
   try {

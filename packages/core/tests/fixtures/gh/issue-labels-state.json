@@ -1,0 +1,18 @@
+{
+  "labels": [
+    {
+      "id": "LA_kwDORc0F5c8AAAACZ6ymWw",
+      "name": "shipper:planned",
+      "description": "Implementation planned",
+      "color": "FEF2C0"
+    },
+    {
+      "id": "LA_kwDORc0F5c8AAAACaDLRwA",
+      "name": "shipper:locked",
+      "description": "Locked by an active shipper instance",
+      "color": "D93F0B"
+    }
+  ],
+  "number": 638,
+  "state": "OPEN"
+}

@@ -1,0 +1,204 @@
+[
+  {
+    "author": {
+      "id": "MDQ6VXNlcjI2MDEzODk=",
+      "is_bot": false,
+      "login": "dnsquared",
+      "name": "Dan Nixon"
+    },
+    "createdAt": "2026-04-17T17:56:38Z",
+    "labels": [
+      {
+        "id": "LA_kwDORc0F5c8AAAACZ6yl9g",
+        "name": "shipper:new",
+        "description": "New issue from shipper",
+        "color": "C2E0C6"
+      }
+    ],
+    "number": 641,
+    "state": "OPEN",
+    "title": "Update contributor docs to reflect the four-package monorepo and fix stale Vitest guidance",
+    "url": "https://github.com/dnsquared/shipper-cli/issues/641"
+  },
+  {
+    "author": {
+      "id": "MDQ6VXNlcjI2MDEzODk=",
+      "is_bot": false,
+      "login": "dnsquared",
+      "name": "Dan Nixon"
+    },
+    "createdAt": "2026-04-17T17:55:48Z",
+    "labels": [],
+    "number": 640,
+    "state": "CLOSED",
+    "title": "Add regular macOS CI validation for the desktop packaging path",
+    "url": "https://github.com/dnsquared/shipper-cli/issues/640"
+  },
+  {
+    "author": {
+      "id": "MDQ6VXNlcjI2MDEzODk=",
+      "is_bot": false,
+      "login": "dnsquared",
+      "name": "Dan Nixon"
+    },
+    "createdAt": "2026-04-17T17:54:55Z",
+    "labels": [
+      {
+        "id": "LA_kwDORc0F5c8AAAACZ6yl9g",
+        "name": "shipper:new",
+        "description": "New issue from shipper",
+        "color": "C2E0C6"
+      }
+    ],
+    "number": 639,
+    "state": "OPEN",
+    "title": "Replace ambient env-var contract between ship parent and child with explicit runtime context",
+    "url": "https://github.com/dnsquared/shipper-cli/issues/639"
+  },
+  {
+    "author": {
+      "id": "MDQ6VXNlcjI2MDEzODk=",
+      "is_bot": false,
+      "login": "dnsquared",
+      "name": "Dan Nixon"
+    },
+    "createdAt": "2026-04-17T17:53:47Z",
+    "labels": [
+      {
+        "id": "LA_kwDORc0F5c8AAAACZ6ymWw",
+        "name": "shipper:planned",
+        "description": "Implementation planned",
+        "color": "FEF2C0"
+      },
+      {
+        "id": "LA_kwDORc0F5c8AAAACaDLRwA",
+        "name": "shipper:locked",
+        "description": "Locked by an active shipper instance",
+        "color": "D93F0B"
+      }
+    ],
+    "number": 638,
+    "state": "OPEN",
+    "title": "Consolidate gh CLI JSON parsing into a single validation layer",
+    "url": "https://github.com/dnsquared/shipper-cli/issues/638"
+  },
+  {
+    "author": {
+      "id": "MDQ6VXNlcjI2MDEzODk=",
+      "is_bot": false,
+      "login": "dnsquared",
+      "name": "Dan Nixon"
+    },
+    "createdAt": "2026-04-17T17:52:23Z",
+    "labels": [
+      {
+        "id": "LA_kwDORc0F5c8AAAACZ6yl9g",
+        "name": "shipper:new",
+        "description": "New issue from shipper",
+        "color": "C2E0C6"
+      }
+    ],
+    "number": 637,
+    "state": "OPEN",
+    "title": "Curate @dnsquared/shipper-core public API and guard internals with ESLint",
+    "url": "https://github.com/dnsquared/shipper-cli/issues/637"
+  },
+  {
+    "author": {
+      "id": "MDQ6VXNlcjI2MDEzODk=",
+      "is_bot": false,
+      "login": "dnsquared",
+      "name": "Dan Nixon"
+    },
+    "createdAt": "2026-04-17T17:51:08Z",
+    "labels": [
+      {
+        "id": "LA_kwDORc0F5c8AAAACZ6ymGQ",
+        "name": "shipper:groomed",
+        "description": "Product-groomed",
+        "color": "BFD4F2"
+      }
+    ],
+    "number": 636,
+    "state": "OPEN",
+    "title": "Collapse the triple-wrapped option plumbing for prompt-running commands",
+    "url": "https://github.com/dnsquared/shipper-cli/issues/636"
+  },
+  {
+    "author": {
+      "id": "MDQ6VXNlcjI2MDEzODk=",
+      "is_bot": false,
+      "login": "dnsquared",
+      "name": "Dan Nixon"
+    },
+    "createdAt": "2026-04-17T17:50:21Z",
+    "labels": [],
+    "number": 635,
+    "state": "CLOSED",
+    "title": "Lock renewal race: remove-and-re-add heartbeat lets concurrent acquires steal the lock",
+    "url": "https://github.com/dnsquared/shipper-cli/issues/635"
+  },
+  {
+    "author": {
+      "id": "MDQ6VXNlcjI2MDEzODk=",
+      "is_bot": false,
+      "login": "dnsquared",
+      "name": "Dan Nixon"
+    },
+    "createdAt": "2026-04-17T17:49:06Z",
+    "labels": [
+      {
+        "id": "LA_kwDORc0F5c8AAAACZ6yl9g",
+        "name": "shipper:new",
+        "description": "New issue from shipper",
+        "color": "C2E0C6"
+      }
+    ],
+    "number": 634,
+    "state": "OPEN",
+    "title": "Replace desktop renderer deep imports into core with the package barrel, and guard with ESLint",
+    "url": "https://github.com/dnsquared/shipper-cli/issues/634"
+  },
+  {
+    "author": {
+      "id": "MDQ6VXNlcjI2MDEzODk=",
+      "is_bot": false,
+      "login": "dnsquared",
+      "name": "Dan Nixon"
+    },
+    "createdAt": "2026-04-17T17:47:49Z",
+    "labels": [
+      {
+        "id": "LA_kwDORc0F5c8AAAACZ6ymGQ",
+        "name": "shipper:groomed",
+        "description": "Product-groomed",
+        "color": "BFD4F2"
+      }
+    ],
+    "number": 633,
+    "state": "OPEN",
+    "title": "Extract shared rebase-retry helper from worktree transport",
+    "url": "https://github.com/dnsquared/shipper-cli/issues/633"
+  },
+  {
+    "author": {
+      "id": "MDQ6VXNlcjI2MDEzODk=",
+      "is_bot": false,
+      "login": "dnsquared",
+      "name": "Dan Nixon"
+    },
+    "createdAt": "2026-04-17T17:46:55Z",
+    "labels": [
+      {
+        "id": "LA_kwDORc0F5c8AAAACZ6yl9g",
+        "name": "shipper:new",
+        "description": "New issue from shipper",
+        "color": "C2E0C6"
+      }
+    ],
+    "number": 632,
+    "state": "OPEN",
+    "title": "Reduce CLI command test reliance on wholesale core mocks",
+    "url": "https://github.com/dnsquared/shipper-cli/issues/632"
+  }
+]

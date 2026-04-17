@@ -1,0 +1,98 @@
+[
+  {
+    "labels": [
+      {
+        "id": "LA_kwDORc0F5c8AAAACZ6yl9g",
+        "name": "shipper:new",
+        "description": "New issue from shipper",
+        "color": "C2E0C6"
+      }
+    ],
+    "number": 641,
+    "title": "Update contributor docs to reflect the four-package monorepo and fix stale Vitest guidance"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDORc0F5c8AAAACZ6yl9g",
+        "name": "shipper:new",
+        "description": "New issue from shipper",
+        "color": "C2E0C6"
+      }
+    ],
+    "number": 639,
+    "title": "Replace ambient env-var contract between ship parent and child with explicit runtime context"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDORc0F5c8AAAACZ6yl9g",
+        "name": "shipper:new",
+        "description": "New issue from shipper",
+        "color": "C2E0C6"
+      }
+    ],
+    "number": 637,
+    "title": "Curate @dnsquared/shipper-core public API and guard internals with ESLint"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDORc0F5c8AAAACZ6yl9g",
+        "name": "shipper:new",
+        "description": "New issue from shipper",
+        "color": "C2E0C6"
+      }
+    ],
+    "number": 634,
+    "title": "Replace desktop renderer deep imports into core with the package barrel, and guard with ESLint"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDORc0F5c8AAAACZ6yl9g",
+        "name": "shipper:new",
+        "description": "New issue from shipper",
+        "color": "C2E0C6"
+      }
+    ],
+    "number": 632,
+    "title": "Reduce CLI command test reliance on wholesale core mocks"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDORc0F5c8AAAACZ6yl9g",
+        "name": "shipper:new",
+        "description": "New issue from shipper",
+        "color": "C2E0C6"
+      }
+    ],
+    "number": 631,
+    "title": "Promote ship stages to in-process API; drop CLI self-spawn"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDORc0F5c8AAAACZ6yl9g",
+        "name": "shipper:new",
+        "description": "New issue from shipper",
+        "color": "C2E0C6"
+      }
+    ],
+    "number": 624,
+    "title": "Make shipper MCP server repo directory configurable via env var"
+  },
+  {
+    "labels": [
+      {
+        "id": "LA_kwDORc0F5c8AAAACZ6yl9g",
+        "name": "shipper:new",
+        "description": "New issue from shipper",
+        "color": "C2E0C6"
+      }
+    ],
+    "number": 622,
+    "title": "Support token-based GitHub auth for container/CI usage"
+  }
+]

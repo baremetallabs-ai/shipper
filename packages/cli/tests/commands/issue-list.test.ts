@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { parseIssueTitleLabelsList } from '../../../core/src/lib/gh-schemas.js';
 
 const {
   mockGh,
@@ -49,6 +50,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
     },
   },
   gh: (args: string[]) => mockGh(args),
+  parseIssueTitleLabelsList,
   STAGE_LABEL_NAMES: stageLabels,
   DISPLAY_NAME_MAP: displayNameMap,
   CONTROL_LABEL_NAMES: controlLabelNames,

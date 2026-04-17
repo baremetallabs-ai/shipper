@@ -100,6 +100,19 @@ export const IssueLabelsStateSchema = z.object({
 export type IssueLabelsState = z.infer<typeof IssueLabelsStateSchema>;
 export const parseIssueLabelsState = makeParser(IssueLabelsStateSchema, 'IssueLabelsState');
 
+export const IssueWithLabelsBodySchema = z.object({
+  number: z.number(),
+  title: z.string(),
+  state: z.string(),
+  labels: z.array(LabelSchema),
+  body: z.string(),
+});
+export type IssueWithLabelsBody = z.infer<typeof IssueWithLabelsBodySchema>;
+export const parseIssueWithLabelsBody = makeParser(
+  IssueWithLabelsBodySchema,
+  'IssueWithLabelsBody'
+);
+
 export const IssueStateTitleSchema = z.object({
   title: z.string(),
   state: z.string(),
@@ -182,13 +195,13 @@ export const PrHeadRefNameViewSchema = z.object({
 export type PrHeadRefNameView = z.infer<typeof PrHeadRefNameViewSchema>;
 export const parsePrHeadRefNameView = makeParser(PrHeadRefNameViewSchema, 'PrHeadRefNameView');
 
-export const DependencyPrSchema = z.object({
+export const PrStateMergedTitleSchema = z.object({
   title: z.string(),
   state: z.string(),
   mergedAt: z.string().nullable(),
 });
-export type DependencyPr = z.infer<typeof DependencyPrSchema>;
-export const parseDependencyPr = makeParser(DependencyPrSchema, 'DependencyPr');
+export type PrStateMergedTitle = z.infer<typeof PrStateMergedTitleSchema>;
+export const parsePrStateMergedTitle = makeParser(PrStateMergedTitleSchema, 'PrStateMergedTitle');
 
 export const PrChecksLineSchema = z.object({
   name: z.string(),

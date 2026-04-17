@@ -17,9 +17,9 @@ import {
   getStageLabel,
   getValidTargets,
   gh,
-  isPlainObject,
   isClean,
   isLockStale,
+  parseIssueLabelsState,
   parseStage,
   scanArtifacts,
   toErrorMessage,
@@ -38,36 +38,6 @@ const NON_RESETTABLE_STAGE_NAMES = new Set(
     label.replace(/^shipper:/, '')
   )
 );
-
-interface IssueViewData {
-  number: number;
-  state: string;
-  labels: { name: string }[];
-}
-
-function parseIssueViewData(json: string): IssueViewData {
-  const parsed: unknown = JSON.parse(json);
-  if (
-    !isPlainObject(parsed) ||
-    typeof parsed.number !== 'number' ||
-    typeof parsed.state !== 'string' ||
-    !Array.isArray(parsed.labels)
-  ) {
-    throw new Error('GitHub CLI returned an invalid issue payload.');
-  }
-
-  return {
-    number: parsed.number,
-    state: parsed.state,
-    labels: parsed.labels.map((label) => {
-      if (!isPlainObject(label) || typeof label.name !== 'string') {
-        throw new Error('GitHub CLI returned an invalid issue label.');
-      }
-
-      return { name: label.name };
-    }),
-  };
-}
 
 function getInvalidStageError(input: string): string {
   const normalized = input.replace(/^shipper:/, '');
@@ -180,7 +150,7 @@ export async function resetCommand(
     throw new Error(`Error: Failed to fetch issue #${issueNum}: ${toErrorMessage(error)}`);
   }
 
-  const issueData = parseIssueViewData(issueJson);
+  const issueData = parseIssueLabelsState(issueJson);
 
   if (issueData.state !== 'OPEN') {
     throw new Error(`Issue #${issueNum} is closed. Reset only works on open issues.`);

@@ -4,6 +4,7 @@ import {
   getRepoRoot,
   gh,
   logger,
+  parsePrFilesPages,
   parseDiffHunks,
   resolveRef,
   runStageScaffold,
@@ -65,7 +66,7 @@ export async function prReviewCommand(
           '--paginate',
           '--slurp',
         ]);
-        const parsedPrFiles = (JSON.parse(prFilesRaw) as Array<Array<{ filename: string }>>).flat();
+        const parsedPrFiles = parsePrFilesPages(prFilesRaw).flat();
         const prFiles = JSON.stringify(parsedPrFiles);
         const prFileSet = new Set(parsedPrFiles.map((file) => file.filename));
         await writeContextFile(wtPath, 'pr-files.json', prFiles);

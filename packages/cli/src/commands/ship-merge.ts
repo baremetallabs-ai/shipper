@@ -1,5 +1,5 @@
 import type { WriteStream } from 'node:fs';
-import { executeMerge, gh } from '@dnsquared/shipper-core';
+import { executeMerge, gh, parseQueuedPrList } from '@dnsquared/shipper-core';
 import type { Logger, QueuedPR } from '@dnsquared/shipper-core';
 
 const MERGE_FAILURE_PREFIX = 'Merge failed for PR #';
@@ -26,14 +26,7 @@ export async function resolvePrForIssue(issueNumber: number, nwo: string): Promi
     throw new Error(`Failed to look up PRs for issue #${issueNumber}.`);
   }
 
-  let allPrs: QueuedPR[];
-  try {
-    allPrs = JSON.parse(output) as QueuedPR[];
-  } catch {
-    throw new Error(
-      `Failed to parse GitHub CLI output while looking up PR for issue #${issueNumber}.`
-    );
-  }
+  const allPrs = parseQueuedPrList(output);
 
   const prs = allPrs.filter(
     (pr) =>

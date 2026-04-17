@@ -6,6 +6,7 @@ import {
   BLOCKED_LABEL,
   FAILED_LABEL,
   LOCKED_LABEL,
+  parseIssueTitleLabelsList,
 } from '@dnsquared/shipper-core';
 
 const VALID_SHORT_NAMES = [
@@ -14,11 +15,7 @@ const VALID_SHORT_NAMES = [
   'failed',
 ];
 
-interface Issue {
-  number: number;
-  title: string;
-  labels: { name: string }[];
-}
+type Issue = ReturnType<typeof parseIssueTitleLabelsList>[number];
 
 interface ControlIssue {
   issue: Issue;
@@ -34,9 +31,9 @@ export async function issueListCommand(options: { status?: string }): Promise<vo
     }
   }
 
-  let issues: Issue[];
+  let output = '';
   try {
-    const { stdout: output } = await gh([
+    const { stdout } = await gh([
       'issue',
       'list',
       '--state',
@@ -48,10 +45,11 @@ export async function issueListCommand(options: { status?: string }): Promise<vo
       '--json',
       'number,title,labels',
     ]);
-    issues = JSON.parse(output) as Issue[];
+    output = stdout;
   } catch {
     throw new Error('Error: Failed to fetch issues.');
   }
+  const issues = parseIssueTitleLabelsList(output);
 
   // Group issues by their most-advanced status label
   const groups = new Map<string, Issue[]>();

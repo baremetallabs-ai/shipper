@@ -13,6 +13,7 @@ import {
   READY_LABEL,
   gh,
   logger,
+  parseIssueNumberLabels,
   resolveRef,
   tryResolvePrForIssue,
   withIssueLock,
@@ -25,15 +26,6 @@ import { implementCommand } from './implement.js';
 import { prOpenCommand } from './pr-open.js';
 import { prReviewCommand } from './pr-review.js';
 import { prRemediateCommand } from './pr-remediate.js';
-
-interface IssueLabel {
-  name: string;
-}
-
-interface IssueData {
-  number: number;
-  labels: IssueLabel[];
-}
 
 async function resolvePrForIssue(repo: string, issueNumber: number): Promise<string> {
   const pr = await tryResolvePrForIssue(repo, issueNumber);
@@ -70,7 +62,7 @@ export async function nextCommand(
     '--json',
     'number,labels',
   ]);
-  const issueData = JSON.parse(stdout.trim()) as IssueData;
+  const issueData = parseIssueNumberLabels(stdout.trim());
   const issueNumber = issueData.number;
   const allLabels = issueData.labels
     .map((l) => l.name)

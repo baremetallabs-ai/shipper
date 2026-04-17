@@ -293,7 +293,7 @@ describe('getBranchForPR', () => {
     });
 
     await expect(getBranchForPR(repo, '123')).rejects.toThrow(
-      'GitHub CLI returned an invalid headRefName payload.'
+      'gh returned an invalid PrHeadRefNameView payload: expected string at headRefName'
     );
   });
 
@@ -308,6 +308,8 @@ describe('getBranchForPR', () => {
       cb(null, '', '');
     });
 
-    await expect(getBranchForPR(repo, '123')).rejects.toThrow(SyntaxError);
+    await expect(getBranchForPR(repo, '123')).rejects.toThrow(
+      'gh returned an invalid PrHeadRefNameView payload: not valid JSON'
+    );
   });
 });
