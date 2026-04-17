@@ -43,7 +43,11 @@ function formatZodIssue(issue: z.ZodIssue): string {
   return lowercaseFirst(issue.message);
 }
 
-export function parseGhJson<T>(json: string, schema: z.ZodType<T>, shapeName: string): T {
+export function parseGhJson<TOutput, TInput = unknown>(
+  json: string,
+  schema: z.ZodType<TOutput, z.ZodTypeDef, TInput>,
+  shapeName: string
+): TOutput {
   let parsed: unknown;
   try {
     parsed = JSON.parse(json);
@@ -55,7 +59,7 @@ export function parseGhJson<T>(json: string, schema: z.ZodType<T>, shapeName: st
     );
   }
 
-  const result = schema.safeParse(parsed);
+  const result: z.SafeParseReturnType<TInput, TOutput> = schema.safeParse(parsed);
   if (result.success) {
     return result.data;
   }
