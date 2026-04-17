@@ -3,17 +3,10 @@ import {
   generateBranchName,
   getRepoRoot,
   getSettings,
-  handleAgentCrash,
   logger,
-  processResult,
   resolveBaseBranch,
-  retryOnInvalidOutput,
-  runPrompt,
-  scrubOutputDir,
-  toErrorMessage,
-  withIssueLock,
-  withStageHooks,
-  withWorktree,
+  runStageScaffold,
+  simpleInvoker,
 } from '@dnsquared/shipper-core';
 import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
 
@@ -33,63 +26,23 @@ export async function planCommand(
     issue = String(selected.number);
   }
 
-  await withIssueLock(repo, issue, async () => {
-    const repoRoot = await getRepoRoot();
-    const branch = await generateBranchName(repo, issue);
-    const settings = getSettings();
-    const baseBranch = await resolveBaseBranch(repo, settings.defaultBaseBranch);
-
-    await withStageHooks('plan', { issueNumber: issue, branchName: branch }, async () => {
-      await withWorktree(
-        { repoRoot, branch, createBranch: true, baseBranch, issueNumber: issue, stage: 'plan' },
-        async (wtPath) => {
-          await scrubOutputDir(wtPath);
-          const exitCode = await runPrompt('plan', {
-            repo,
-            issueRef: issue,
-            cwd: wtPath,
-            mode,
-            agent,
-            model,
-          });
-          if (exitCode !== 0) {
-            const detail = `Agent exited with code ${exitCode}`;
-            logger.error(detail);
-            await handleAgentCrash(
-              repo,
-              issue,
-              'plan',
-              detail,
-              `The \`plan\` agent run exited with code ${exitCode}.`
-            );
-            process.exitCode = 1;
-            return;
-          }
-          try {
-            const result = await retryOnInvalidOutput({
-              cwd: wtPath,
-              stage: 'plan',
-              retry: (userInput) =>
-                runPrompt('plan', {
-                  repo,
-                  issueRef: issue,
-                  cwd: wtPath,
-                  mode,
-                  agent,
-                  model,
-                  userInput,
-                }),
-            });
-            await processResult({ repo, issueNumber: issue, stage: 'plan', cwd: wtPath, result });
-          } catch (error) {
-            const detail = toErrorMessage(error);
-            logger.error(detail);
-            await handleAgentCrash(repo, issue, 'plan', detail);
-            process.exitCode = 1;
-            return;
-          }
-        }
-      );
-    });
+  await runStageScaffold({
+    repo,
+    issueNumber: issue,
+    stage: 'plan',
+    resultStage: 'plan',
+    createBranch: true,
+    initialFailure: 'crash',
+    resolveLocked: async () => {
+      const repoRoot = await getRepoRoot();
+      const branch = await generateBranchName(repo, issue);
+      const settings = getSettings();
+      const baseBranch = await resolveBaseBranch(repo, settings.defaultBaseBranch);
+      return { repoRoot, branch, baseBranch };
+    },
+    invoker: simpleInvoker({
+      promptName: 'plan',
+      baseRunPromptOpts: { repo, issueRef: issue, mode, agent, model },
+    }),
   });
 }

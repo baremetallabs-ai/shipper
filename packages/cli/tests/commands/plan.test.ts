@@ -1,109 +1,110 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { toError, toErrorMessage } from '../../../core/src/lib/errors.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { RunPromptOpts } from '../../../core/src/lib/prompt-runner.js';
+import type { StageScaffoldOpts } from '../../../core/src/lib/stage-scaffold.js';
 
 const autoSelectIssueMock = vi.fn();
 const generateBranchNameMock = vi.fn(() => Promise.resolve('shipper/123-branch'));
 const getRepoRootMock = vi.fn(() => Promise.resolve('/tmp/fake-repo'));
 const getSettingsMock = vi.fn(() => ({ defaultBaseBranch: 'main' }));
-const handleAgentCrashMock = vi.fn(() => Promise.resolve());
-const validatedResult = {
-  verdict: 'accept' as const,
-  comment: '.shipper/output/comment-123.md',
-};
-const processResultMock = vi.fn(() => Promise.resolve(validatedResult));
-const retryOnInvalidOutputMock = vi.fn<
-  (opts: {
-    cwd: string;
-    stage: string;
-    retry: (message: string) => Promise<number>;
-  }) => Promise<typeof validatedResult>
->(() => Promise.resolve(validatedResult));
 const resolveBaseBranchMock = vi.fn(() => Promise.resolve('main'));
-const runPromptMock = vi.fn(() => Promise.resolve(0));
-const scrubOutputDirMock = vi.fn(() => Promise.resolve());
-const loggerMock = {
-  log: (message: string) => {
-    console.log(`[shipper] ${message}`);
-  },
-  warn: (message: string) => {
-    console.warn(`[shipper] ${message}`);
-  },
-  error: (message: string) => {
-    console.error(`[shipper] ${message}`);
-  },
-};
-const withIssueLockMock = vi.fn((_repo: unknown, _issue: unknown, fn: () => Promise<unknown>) =>
-  fn()
+const runPromptMock = vi.fn<(name: string, opts: RunPromptOpts) => Promise<number>>(() =>
+  Promise.resolve(0)
 );
-const withStageHooksMock = vi.fn((_stage: unknown, _env: unknown, fn: () => Promise<unknown>) =>
-  fn()
+const runStageScaffoldMock = vi.fn<(opts: StageScaffoldOpts) => Promise<void>>(() =>
+  Promise.resolve()
 );
-const withWorktreeMock = vi.fn((_opts: unknown, fn: (wtPath: string) => Promise<unknown>) =>
-  fn('/tmp/fake-wt')
-);
+const loggerErrorMock = vi.fn<(message: string) => void>();
 
-vi.mock('@dnsquared/shipper-core', () => ({
-  logger: loggerMock,
-  toError,
-  toErrorMessage,
-  autoSelectIssue: autoSelectIssueMock,
-  generateBranchName: generateBranchNameMock,
-  getRepoRoot: getRepoRootMock,
-  getSettings: getSettingsMock,
-  handleAgentCrash: handleAgentCrashMock,
-  processResult: processResultMock,
-  retryOnInvalidOutput: retryOnInvalidOutputMock,
-  resolveBaseBranch: resolveBaseBranchMock,
-  runPrompt: runPromptMock,
-  scrubOutputDir: scrubOutputDirMock,
-  withIssueLock: withIssueLockMock,
-  withStageHooks: withStageHooksMock,
-  withWorktree: withWorktreeMock,
-}));
+vi.mock('../../../core/src/lib/prompt-runner.js', () => {
+  return {
+    runPrompt: (name: string, opts: RunPromptOpts) => runPromptMock(name, opts),
+  };
+});
+
+vi.mock('@dnsquared/shipper-core', async () => {
+  const stageScaffold = await vi.importActual<
+    typeof import('../../../core/src/lib/stage-scaffold.js')
+  >('../../../core/src/lib/stage-scaffold.js');
+  return {
+    autoSelectIssue: autoSelectIssueMock,
+    generateBranchName: generateBranchNameMock,
+    getRepoRoot: getRepoRootMock,
+    getSettings: getSettingsMock,
+    logger: {
+      error: (...args: [string]) => {
+        loggerErrorMock(...args);
+      },
+    },
+    resolveBaseBranch: resolveBaseBranchMock,
+    runStageScaffold: (opts: StageScaffoldOpts) => runStageScaffoldMock(opts),
+    simpleInvoker: stageScaffold.simpleInvoker,
+  };
+});
 
 describe('planCommand', () => {
-  let exitSpy: ReturnType<typeof vi.spyOn>;
-  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
-
   beforeEach(() => {
     vi.clearAllMocks();
     process.exitCode = undefined;
-    exitSpy = vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
-      throw new Error(`exit:${code}`);
-    });
-    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
-  afterEach(() => {
-    process.exitCode = undefined;
-    exitSpy.mockRestore();
-    consoleErrorSpy.mockRestore();
-  });
-
-  it('runs the planning stage inside a worktree and processes results there', async () => {
+  it('passes the planning scaffold config and preserves in-lock resolution order', async () => {
     const { planCommand } = await import('../../src/commands/plan.js');
 
     await expect(planCommand('owner/repo', '123')).resolves.toBeUndefined();
 
+    const scaffoldArgs = runStageScaffoldMock.mock.calls[0]?.[0];
+    expect(scaffoldArgs).toBeDefined();
+    if (!scaffoldArgs) {
+      throw new Error('Expected scaffold arguments');
+    }
+
+    expect(scaffoldArgs.repo).toBe('owner/repo');
+    expect(scaffoldArgs.issueNumber).toBe('123');
+    expect(scaffoldArgs.stage).toBe('plan');
+    expect(scaffoldArgs.resultStage).toBe('plan');
+    expect(scaffoldArgs.createBranch).toBe(true);
+    expect(scaffoldArgs.initialFailure).toBe('crash');
+
+    await expect(scaffoldArgs.resolveLocked()).resolves.toEqual({
+      repoRoot: '/tmp/fake-repo',
+      branch: 'shipper/123-branch',
+      baseBranch: 'main',
+    });
+
+    expect(getRepoRootMock).toHaveBeenCalledTimes(1);
     expect(generateBranchNameMock).toHaveBeenCalledWith('owner/repo', '123');
     expect(resolveBaseBranchMock).toHaveBeenCalledWith('owner/repo', 'main');
-    expect(withStageHooksMock).toHaveBeenCalledWith(
-      'plan',
-      { issueNumber: '123', branchName: 'shipper/123-branch' },
-      expect.any(Function)
+    expect(getRepoRootMock.mock.invocationCallOrder[0]).toBeLessThan(
+      generateBranchNameMock.mock.invocationCallOrder[0]
     );
-    expect(withWorktreeMock).toHaveBeenCalledWith(
-      {
-        repoRoot: '/tmp/fake-repo',
-        branch: 'shipper/123-branch',
-        createBranch: true,
-        baseBranch: 'main',
-        issueNumber: '123',
-        stage: 'plan',
-      },
-      expect.any(Function)
+    expect(generateBranchNameMock.mock.invocationCallOrder[0]).toBeLessThan(
+      getSettingsMock.mock.invocationCallOrder[0]
     );
-    expect(scrubOutputDirMock).toHaveBeenCalledWith('/tmp/fake-wt');
+    expect(getSettingsMock.mock.invocationCallOrder[0]).toBeLessThan(
+      resolveBaseBranchMock.mock.invocationCallOrder[0]
+    );
+  });
+
+  it('builds prompt invocations that preserve planning payload parity', async () => {
+    const { planCommand } = await import('../../src/commands/plan.js');
+
+    await planCommand('owner/repo', '123');
+
+    const scaffoldArgs = runStageScaffoldMock.mock.calls[0]?.[0];
+    expect(scaffoldArgs).toBeDefined();
+    if (!scaffoldArgs) {
+      throw new Error('Expected scaffold arguments');
+    }
+
+    const invoker = scaffoldArgs.invoker({
+      wtPath: '/tmp/fake-wt',
+      repoRoot: '/tmp/fake-repo',
+      branch: 'shipper/123-branch',
+      baseBranch: 'main',
+    });
+
+    expect(invoker.setup).toBeUndefined();
+    await expect(invoker.initial()).resolves.toBe(0);
     expect(runPromptMock).toHaveBeenCalledWith('plan', {
       repo: 'owner/repo',
       issueRef: '123',
@@ -112,25 +113,9 @@ describe('planCommand', () => {
       agent: undefined,
       model: undefined,
     });
-    const retryCall = retryOnInvalidOutputMock.mock.calls[0]?.[0] as
-      | { cwd: string; stage: string; retry: (message: string) => Promise<number> }
-      | undefined;
-    expect(retryCall?.cwd).toBe('/tmp/fake-wt');
-    expect(retryCall?.stage).toBe('plan');
-    expect(retryCall?.retry).toEqual(expect.any(Function));
-    expect(processResultMock).toHaveBeenCalledWith({
-      repo: 'owner/repo',
-      issueNumber: '123',
-      stage: 'plan',
-      cwd: '/tmp/fake-wt',
-      result: validatedResult,
-    });
-    expect(handleAgentCrashMock).not.toHaveBeenCalled();
-    expect(process.exitCode).toBeUndefined();
-    expect(exitSpy).not.toHaveBeenCalled();
 
     runPromptMock.mockResolvedValueOnce(9);
-    await expect(retryCall?.retry('Fix result')).resolves.toBe(9);
+    await expect(invoker.retry('Fix result')).resolves.toBe(9);
     expect(runPromptMock).toHaveBeenLastCalledWith('plan', {
       repo: 'owner/repo',
       issueRef: '123',
@@ -142,49 +127,16 @@ describe('planCommand', () => {
     });
   });
 
-  it('reports non-zero prompt exits and skips output validation', async () => {
-    runPromptMock.mockResolvedValueOnce(9);
+  it('preserves auto-selection behavior when no issue is provided', async () => {
+    autoSelectIssueMock.mockResolvedValueOnce({ number: 321, title: 'Selected issue' });
     const { planCommand } = await import('../../src/commands/plan.js');
 
-    await expect(planCommand('owner/repo', '123')).resolves.toBeUndefined();
+    await expect(planCommand('owner/repo')).resolves.toBeUndefined();
 
-    expect(retryOnInvalidOutputMock).not.toHaveBeenCalled();
-    expect(processResultMock).not.toHaveBeenCalled();
-    expect(handleAgentCrashMock).toHaveBeenCalledWith(
-      'owner/repo',
-      '123',
-      'plan',
-      'Agent exited with code 9',
-      'The `plan` agent run exited with code 9.'
+    expect(autoSelectIssueMock).toHaveBeenCalledWith('owner/repo', 'shipper:designed');
+    expect(loggerErrorMock).toHaveBeenCalledWith('Auto-selected #321: Selected issue');
+    expect(runStageScaffoldMock).toHaveBeenCalledWith(
+      expect.objectContaining({ issueNumber: '321' })
     );
-    expect(consoleErrorSpy).toHaveBeenCalledWith('[shipper] Agent exited with code 9');
-    expect(process.exitCode).toBe(1);
-  });
-
-  it('reports protocol crashes during result processing and exits with code 1', async () => {
-    processResultMock.mockRejectedValueOnce(new Error('Missing result.json'));
-    const { planCommand } = await import('../../src/commands/plan.js');
-
-    await expect(planCommand('owner/repo', '123')).resolves.toBeUndefined();
-
-    expect(retryOnInvalidOutputMock).toHaveBeenCalledTimes(1);
-    expect(handleAgentCrashMock).toHaveBeenCalledWith(
-      'owner/repo',
-      '123',
-      'plan',
-      'Missing result.json'
-    );
-    expect(consoleErrorSpy).toHaveBeenCalledWith('[shipper] Missing result.json');
-    expect(process.exitCode).toBe(1);
-  });
-
-  it('fails hard when worktree creation fails', async () => {
-    withWorktreeMock.mockRejectedValueOnce(new Error('worktree add failed'));
-    const { planCommand } = await import('../../src/commands/plan.js');
-
-    await expect(planCommand('owner/repo', '123')).rejects.toThrow('worktree add failed');
-
-    expect(runPromptMock).not.toHaveBeenCalled();
-    expect(processResultMock).not.toHaveBeenCalled();
   });
 });
