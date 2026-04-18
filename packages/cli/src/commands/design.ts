@@ -18,7 +18,7 @@ export async function runDesignStage(
   agent?: AgentName,
   model?: string
 ): Promise<StageRunResult> {
-  return (await runStageScaffold({
+  return await runStageScaffold({
     repo,
     issueNumber: issue,
     stage: 'design',
@@ -36,7 +36,7 @@ export async function runDesignStage(
       promptName: 'design',
       baseRunPromptOpts: { repo, issueRef: issue, mode, agent, model },
     }),
-  })) as unknown as StageRunResult;
+  });
 }
 
 export async function designCommand(

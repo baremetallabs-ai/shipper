@@ -112,9 +112,19 @@ export function printAutoSummary(results: AutoResult[]): void {
   }
 }
 
-function resolveWorkerPath(): string {
-  const extension = import.meta.url.endsWith('.ts') ? '.ts' : '.js';
-  return fileURLToPath(new URL(`../ship-worker${extension}`, import.meta.url));
+export function resolveWorkerPath(
+  entrypoint = process.argv[1],
+  moduleUrl = import.meta.url
+): string {
+  if (entrypoint) {
+    const entrypointPath = path.resolve(entrypoint);
+    const extension = path.extname(entrypointPath) === '.ts' ? '.ts' : '.js';
+    return path.join(path.dirname(entrypointPath), `ship-worker${extension}`);
+  }
+
+  const modulePath = fileURLToPath(moduleUrl);
+  const extension = path.extname(modulePath) === '.ts' ? '.ts' : '.js';
+  return path.resolve(path.dirname(modulePath), `../ship-worker${extension}`);
 }
 
 function isWorkerResultMessage(message: unknown): message is WorkerResultMessage {
@@ -134,7 +144,14 @@ function shipOneIssueAsync(
   model?: string
 ): AsyncIssueRun {
   const child = fork(resolveWorkerPath(), [], {
-    stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+  });
+
+  child.stdout?.on('data', (chunk: Buffer | string) => {
+    process.stdout.write(chunk);
+  });
+  child.stderr?.on('data', (chunk: Buffer | string) => {
+    process.stderr.write(chunk);
   });
 
   const result = new Promise<ShipIssueResult>((resolve) => {

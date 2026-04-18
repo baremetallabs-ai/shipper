@@ -95,6 +95,7 @@ vi.mock('@dnsquared/shipper-core', () => ({
   FAILED_LABEL: 'shipper:failed',
   gh: ghMock,
   withIssueLock: withIssueLockMock,
+  withLogCapture: async (_stream: unknown, fn: () => Promise<ShipIssueResult>) => await fn(),
   resolveMode: resolveModeMock,
   aggregateSessionUsage: aggregateSessionUsageMock,
   totalTokens: totalTokensMock,

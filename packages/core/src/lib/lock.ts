@@ -133,14 +133,15 @@ export async function renewIssueLock(
   }
 }
 
-const issueLockContext = new AsyncLocalStorage<{ issueNumber: string }>();
+const issueLockContext = new AsyncLocalStorage<{ repo: string; issueNumber: string }>();
 
 export async function withIssueLock<T>(
   repo: string,
   issueNumber: string,
   fn: () => Promise<T>
 ): Promise<T> {
-  if (issueLockContext.getStore()?.issueNumber === issueNumber) {
+  const activeLock = issueLockContext.getStore();
+  if (activeLock?.repo === repo && activeLock.issueNumber === issueNumber) {
     return await fn();
   }
 
@@ -183,7 +184,7 @@ export async function withIssueLock<T>(
   process.on('exit', onExit);
 
   try {
-    return await issueLockContext.run({ issueNumber }, fn);
+    return await issueLockContext.run({ repo, issueNumber }, fn);
   } finally {
     stopHeartbeat();
     process.removeListener('SIGINT', onSignal);

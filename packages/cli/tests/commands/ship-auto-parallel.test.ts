@@ -76,6 +76,8 @@ class MockForkChild extends EventEmitter {
   kill = vi.fn<(signal?: string) => void>();
   exitCode: number | null = null;
   signalCode: string | null = null;
+  stdout = new EventEmitter();
+  stderr = new EventEmitter();
 }
 
 async function flushMicrotasks(): Promise<void> {
@@ -110,7 +112,7 @@ describe('shipAutoParallel', () => {
     const firstForkOptions = forkMock.mock.calls[0]?.[2] as { env?: Record<string, string> };
     expect(firstForkOptions).toEqual(
       expect.objectContaining({
-        stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+        stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
       })
     );
     expect(firstForkOptions.env).toBeUndefined();
@@ -173,5 +175,22 @@ describe('shipAutoParallel', () => {
 
     expect(releaseIssueLockMock).not.toHaveBeenCalled();
     expect(loggerLogMock).toHaveBeenCalledWith('[#2] ✓ pass');
+  });
+
+  it('resolves the worker beside the bundled entrypoint', async () => {
+    const { resolveWorkerPath } = await import('../../src/commands/ship-auto.js');
+
+    expect(
+      resolveWorkerPath(
+        '/repo/packages/cli/dist/index.js',
+        'file:///repo/packages/cli/dist/index.js'
+      )
+    ).toBe('/repo/packages/cli/dist/ship-worker.js');
+    expect(
+      resolveWorkerPath(
+        '/repo/packages/cli/src/index.ts',
+        'file:///repo/packages/cli/src/commands/ship-auto.ts'
+      )
+    ).toBe('/repo/packages/cli/src/ship-worker.ts');
   });
 });

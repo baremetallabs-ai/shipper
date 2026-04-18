@@ -171,26 +171,24 @@ function mockSpawnResult(
     error?: Error;
     logError?: Error;
     stdoutChunks?: string[];
+    stderrChunks?: string[];
   } = {}
 ): void {
-  const { code = 0, error, logError, stdoutChunks = [] } = opts;
+  const { code = 0, error, logError, stdoutChunks = [], stderrChunks = [] } = opts;
   spawnMock.mockImplementationOnce(() => {
-    let pipedStream: EventEmitter | undefined;
     const stdout = Object.assign(new EventEmitter(), {
       pipe(destination: EventEmitter) {
-        pipedStream = destination;
         return destination;
       },
       resume() {
         return undefined;
       },
       unpipe(destination?: EventEmitter) {
-        if (pipedStream === destination || destination === undefined) {
-          pipedStream = undefined;
-        }
+        void destination;
         return this;
       },
     }) as PromptStdout;
+    const stderr = new EventEmitter();
     const child = new EventEmitter() as PromptChild & {
       stdin?: PromptStdin;
       stderr?: EventEmitter;
@@ -201,6 +199,7 @@ function mockSpawnResult(
       write: vi.fn(),
     }) as PromptStdin;
     child.stdout = stdout;
+    child.stderr = stderr;
     globalThis.queueMicrotask(() => {
       if (error) {
         child.emit('error', error);
@@ -209,14 +208,23 @@ function mockSpawnResult(
       for (const chunk of stdoutChunks) {
         child.stdout?.emit('data', chunk);
       }
+      for (const chunk of stderrChunks) {
+        child.stderr?.emit('data', chunk);
+      }
       child.stdout?.emit('end');
       if (logError) {
-        pipedStream?.emit('error', logError);
+        const logStream = createWriteStreamMock.mock.results.at(-1)?.value as
+          | EventEmitter
+          | undefined;
+        logStream?.emit('error', logError);
       }
       child.emit('close', code);
       globalThis.queueMicrotask(() => {
         if (!logError) {
-          pipedStream?.emit('finish');
+          const logStream = createWriteStreamMock.mock.results.at(-1)?.value as
+            | EventEmitter
+            | undefined;
+          logStream?.emit('finish');
         }
       });
     });
@@ -225,6 +233,7 @@ function mockSpawnResult(
 }
 
 const { TRUNCATION_THRESHOLD_BYTES } = await import('../../src/lib/output-protocol/protocol-io.js');
+const { withLogCapture } = await import('../../src/lib/logger.js');
 const { buildPromptCommand, runPrompt } = await import('../../src/lib/prompt-runner.js');
 
 function makePrompt(
@@ -267,29 +276,26 @@ function makeTimeoutChild(): PromptChild & {
   kill: ReturnType<typeof vi.fn>;
   finishLog: () => void;
 } {
-  let pipedStream: EventEmitter | undefined;
   const stdout = Object.assign(new EventEmitter(), {
     pipe(destination: EventEmitter) {
-      pipedStream = destination;
       return destination;
     },
     resume() {
       return undefined;
     },
     unpipe(destination?: EventEmitter) {
-      if (pipedStream === destination || destination === undefined) {
-        pipedStream = undefined;
-      }
+      void destination;
       return this;
     },
   }) as PromptStdout;
+  const stderr = new EventEmitter();
 
   return Object.assign(new EventEmitter(), {
     stdout,
+    stderr,
     kill: vi.fn(),
     finishLog() {
       stdout.emit('end');
-      pipedStream?.emit('finish');
     },
   });
 }
@@ -972,7 +978,7 @@ describe('runPrompt', () => {
     expect(spawnMock.mock.calls[0]?.[2]).toMatchObject({
       cwd: undefined,
       env: process.env,
-      stdio: ['inherit', 'pipe', 'inherit'],
+      stdio: ['inherit', 'pipe', 'pipe'],
     });
     const writeMetaCall = writeSessionMetaMock.mock.calls[0];
     expect(writeMetaCall?.[0]).toContain('/home/user/.shipper/sessions/owner-repo/308-implement-');
@@ -1014,7 +1020,7 @@ describe('runPrompt', () => {
     expect(spawnMock.mock.calls[0]?.[2]).toMatchObject({
       cwd: undefined,
       env: process.env,
-      stdio: ['inherit', 'pipe', 'inherit'],
+      stdio: ['inherit', 'pipe', 'pipe'],
     });
     expect(spawnedArgs()).toContain('--verbose');
     expect(spawnedArgs()).toContain('--output-format');
@@ -1100,7 +1106,7 @@ describe('runPrompt', () => {
     // The createWriteStream should receive the override path, not the session path
     expect(createWriteStreamMock).toHaveBeenCalledWith(overridePath);
     expect(spawnMock.mock.calls[0]?.[2]).toMatchObject({
-      stdio: ['inherit', 'pipe', 'inherit'],
+      stdio: ['inherit', 'pipe', 'pipe'],
     });
 
     // Session metadata should still be written under ~/.shipper/sessions/...
@@ -1134,7 +1140,7 @@ describe('runPrompt', () => {
     // Even when the caller supplies a log file, usage should be parsed and persisted.
     expect(createWriteStreamMock).toHaveBeenCalledWith(overridePath);
     expect(spawnMock.mock.calls[0]?.[2]).toMatchObject({
-      stdio: ['inherit', 'pipe', 'inherit'],
+      stdio: ['inherit', 'pipe', 'pipe'],
     });
     expect(spawnedArgs()).toContain('--json');
     expect(parseAgentUsageMock).toHaveBeenCalledWith('codex', overridePath);
@@ -1176,7 +1182,24 @@ describe('runPrompt', () => {
     );
   });
 
-  it('does not echo headless stdout back to the terminal while capturing session logs', async () => {
+  it('tees child stdout and stderr into the active ship log capture stream', async () => {
+    resolveModeMock.mockReturnValue('headless');
+    readFileMock.mockResolvedValueOnce(makePrompt('claude', ['-p']));
+    mockSpawnResult({
+      stdoutChunks: ['stage stdout\n'],
+      stderrChunks: ['stage stderr\n'],
+    });
+    const captureStream = makeLogStream();
+
+    await withLogCapture(captureStream, async () => {
+      await expect(runPrompt('test', { mode: 'headless', repo: 'owner/repo' })).resolves.toBe(0);
+    });
+
+    expect(captureStream.chunks).toContain('stage stdout\n');
+    expect(captureStream.chunks).toContain('stage stderr\n');
+  });
+
+  it('echoes headless stdout back to the terminal while capturing session logs', async () => {
     resolveModeMock.mockReturnValue('headless');
     readFileMock.mockResolvedValueOnce(makePrompt('claude'));
     const stdoutWriteMock = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
@@ -1184,9 +1207,9 @@ describe('runPrompt', () => {
 
     await expect(runPrompt('test', { mode: 'headless', repo: 'owner/repo' })).resolves.toBe(0);
 
-    expect(stdoutWriteMock).not.toHaveBeenCalledWith('headless output\n');
+    expect(stdoutWriteMock).toHaveBeenCalledWith('headless output\n');
     expect(spawnMock.mock.calls[0]?.[2]).toMatchObject({
-      stdio: ['inherit', 'pipe', 'inherit'],
+      stdio: ['inherit', 'pipe', 'pipe'],
     });
 
     stdoutWriteMock.mockRestore();
@@ -1376,7 +1399,7 @@ describe('runPrompt', () => {
       expect.stringContaining('/home/user/.shipper/sessions/owner-repo/540-implement-')
     );
     expect(spawnedOptions()).toMatchObject({
-      stdio: ['inherit', 'pipe', 'inherit'],
+      stdio: ['inherit', 'pipe', 'pipe'],
     });
     expect(parseAgentUsageMock).toHaveBeenCalledWith(
       'copilot',

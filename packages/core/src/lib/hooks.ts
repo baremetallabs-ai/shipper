@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { access, constants, stat } from 'node:fs/promises';
 import { performance } from 'node:perf_hooks';
 import path from 'node:path';
-import { createLogger, logger } from './logger.js';
+import { createLogger, getLogCaptureStream, logger } from './logger.js';
 
 const HOOKS_DIR = path.join('.shipper', 'hooks');
 const WORKTREE_HOOK_META = {
@@ -40,14 +40,27 @@ function spawnAsync(
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const stderrChunks: string[] = [];
+    const captureStream = getLogCaptureStream();
     const child = spawn(command, args, {
-      stdio: ['inherit', 'inherit', 'pipe'],
+      stdio: captureStream ? ['inherit', 'pipe', 'pipe'] : ['inherit', 'inherit', 'pipe'],
       env: { ...process.env, ...options.env },
       cwd: options.cwd,
       shell: options.shell,
     });
+    const childStderr = child.stderr;
 
-    child.stderr.on('data', (chunk: Buffer | string) => {
+    if (!childStderr) {
+      reject(new Error(`Failed to capture stderr for ${command}`));
+      return;
+    }
+
+    child.stdout?.on('data', (chunk: Buffer | string) => {
+      process.stdout.write(chunk);
+      captureStream?.write(chunk);
+    });
+    childStderr.on('data', (chunk: Buffer | string) => {
+      process.stderr.write(chunk);
+      captureStream?.write(chunk);
       stderrChunks.push(chunk.toString());
     });
 
