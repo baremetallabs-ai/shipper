@@ -38,7 +38,8 @@ import {
   withWorktree,
   writeContextFile,
 } from '@dnsquared/shipper-core';
-import type { AgentName, CommandMode, PrReviewWait, StageRunResult } from '@dnsquared/shipper-core';
+import type { AgentName, CommandMode, PrReviewWait } from '@dnsquared/shipper-core';
+import type { StageRunResult } from './stage-result.js';
 
 const ZERO_CHECKS_GRACE_MS = 30_000;
 const CI_WAIT_TIMEOUT_MINUTES = 30;

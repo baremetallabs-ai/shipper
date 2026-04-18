@@ -1,6 +1,7 @@
-import { spawn } from 'node:child_process';
+import { fork } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { createWriteStream, mkdirSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { logger, releaseIssueLock } from '@dnsquared/shipper-core';
@@ -13,13 +14,10 @@ import {
 } from './ship-candidates.js';
 import type { UnblockAttempt } from './ship-candidates.js';
 import {
-  AUTO_CHILD_RUN_ENV_VAR,
-  closeLogStream,
   formatLogDisplayPath,
   formatLogTimestamp,
   resolveIssueTotalTokens,
   shipOneIssue,
-  summarizeChildStderr,
 } from './ship-execute.js';
 import type { ParkHooks, ParkRequest, ReadyCheck, ShipIssueResult } from './ship-execute.js';
 import { isRetriableMergeFailure } from './ship-merge.js';
@@ -38,6 +36,19 @@ export interface AutoResult {
 interface AsyncIssueRun {
   child: ChildProcess;
   result: Promise<ShipIssueResult>;
+}
+
+interface WorkerRunMessage {
+  type: 'run';
+  repo: string;
+  issue: string;
+  agent?: AgentName;
+  model?: string;
+  logFile?: string;
+}
+
+interface WorkerResultMessage extends ShipIssueResult {
+  type: 'result';
 }
 
 interface ActiveIssueRun {
@@ -101,79 +112,30 @@ export function printAutoSummary(results: AutoResult[]): void {
   }
 }
 
+function resolveWorkerPath(): string {
+  const extension = import.meta.url.endsWith('.ts') ? '.ts' : '.js';
+  return fileURLToPath(new URL(`../ship-worker${extension}`, import.meta.url));
+}
+
+function isWorkerResultMessage(message: unknown): message is WorkerResultMessage {
+  return (
+    typeof message === 'object' &&
+    message !== null &&
+    Reflect.get(message, 'type') === 'result' &&
+    typeof Reflect.get(message, 'success') === 'boolean'
+  );
+}
+
 function shipOneIssueAsync(
   issue: string,
+  repo: string,
   logFile?: string,
   agent?: AgentName,
   model?: string
 ): AsyncIssueRun {
-  const cliEntrypoint = process.argv[1];
-  if (!cliEntrypoint) {
-    throw new Error('Missing CLI entrypoint path.');
-  }
-
-  const stderr: string[] = [];
-  const logStream = logFile ? createWriteStream(logFile) : undefined;
-  let logStreamError: string | undefined;
-  let logStreamClosed = false;
-  const shipArgs = [cliEntrypoint, 'ship', issue, '--merge'];
-  if (agent) {
-    shipArgs.push('--agent', agent);
-  }
-  if (model) {
-    shipArgs.push('--model', model);
-  }
-  const child = spawn(process.execPath, shipArgs, {
-    stdio: logFile ? ['ignore', 'pipe', 'pipe'] : ['ignore', 'ignore', 'pipe'],
-    env: {
-      ...process.env,
-      [AUTO_CHILD_RUN_ENV_VAR]: '1',
-    },
+  const child = fork(resolveWorkerPath(), [], {
+    stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
   });
-
-  const closeChildLogStream = (destroy = false): Promise<void> => {
-    if (!logStream || logStreamClosed || logStream.destroyed || logStreamError) {
-      return Promise.resolve();
-    }
-    logStreamClosed = true;
-
-    if (!destroy) {
-      return closeLogStream(logStream).catch(() => undefined);
-    }
-
-    return new Promise<void>((resolve) => {
-      let settled = false;
-      const finish = () => {
-        if (settled) return;
-        settled = true;
-        resolve();
-      };
-
-      logStream.once('close', finish);
-      logStream.once('error', finish);
-      logStream.destroy();
-    });
-  };
-
-  if (logStream) {
-    logStream.on('error', (error) => {
-      if (logStreamError) return;
-      logStreamError = `failed to write log file "${logFile}": ${error.message}`;
-      child.stdout?.unpipe(logStream);
-      child.stderr?.unpipe(logStream);
-      if (child.exitCode === null && child.signalCode === null) {
-        child.kill();
-      }
-    });
-    child.stdout?.pipe(logStream, { end: false });
-    child.stderr?.pipe(logStream, { end: false });
-  }
-
-  if (child.stderr) {
-    child.stderr.on('data', (chunk: Buffer | string) => {
-      stderr.push(chunk.toString());
-    });
-  }
 
   const result = new Promise<ShipIssueResult>((resolve) => {
     let settled = false;
@@ -184,42 +146,43 @@ function shipOneIssueAsync(
       resolve(value);
     };
 
-    child.on('error', (error) => {
-      void closeChildLogStream(true).finally(() => {
-        resolveResult({ success: false, error: error.message });
+    child.on('message', (message) => {
+      if (!isWorkerResultMessage(message)) {
+        resolveResult({ success: false, error: 'worker returned an invalid IPC payload' });
+        return;
+      }
+      resolveResult({
+        success: message.success,
+        ...(message.error !== undefined ? { error: message.error } : {}),
+        ...(message.retriable !== undefined ? { retriable: message.retriable } : {}),
+        ...(message.totalTokens !== undefined ? { totalTokens: message.totalTokens } : {}),
       });
+    });
+
+    child.on('error', (error) => {
+      resolveResult({ success: false, error: error.message });
     });
 
     child.on('close', (code, signal) => {
-      void closeChildLogStream().finally(() => {
-        if (code === 0) {
-          if (logStreamError) {
-            resolveResult({ success: false, error: logStreamError });
-            return;
-          }
-          resolveResult({ success: true });
-          return;
-        }
-
-        if (logStreamError) {
-          resolveResult({ success: false, error: logStreamError });
-          return;
-        }
-
-        const stderrOutput = stderr.join('').trim();
-        if (stderrOutput) {
-          resolveResult({ success: false, error: summarizeChildStderr(stderrOutput) });
-          return;
-        }
-
-        if (signal) {
-          resolveResult({ success: false, error: `child exited from signal ${signal}` });
-          return;
-        }
-
-        resolveResult({ success: false, error: `child exited with code ${code ?? 'unknown'}` });
-      });
+      if (settled) {
+        return;
+      }
+      if (signal) {
+        resolveResult({ success: false, error: `child exited from signal ${signal}` });
+        return;
+      }
+      resolveResult({ success: false, error: `child exited with code ${code ?? 'unknown'}` });
     });
+
+    const message: WorkerRunMessage = {
+      type: 'run',
+      repo,
+      issue,
+      ...(agent !== undefined ? { agent } : {}),
+      ...(model !== undefined ? { model } : {}),
+      ...(logFile !== undefined ? { logFile } : {}),
+    };
+    child.send(message);
   });
 
   return { child, result };
@@ -284,16 +247,15 @@ function startSequentialIssueRun(
   model?: string
 ): SequentialIssueRun {
   const parkObserver = createParkObserver(shouldPark);
-  const completion = shipOneIssue(
+  const completion = shipOneIssue({
     repo,
-    String(issue.number),
-    true,
-    undefined,
+    issue: String(issue.number),
+    merge: true,
     agent,
     model,
-    parkObserver.hooks,
-    logFile
-  ).finally(() => {
+    parkHooks: parkObserver.hooks,
+    logFile,
+  }).finally(() => {
     parkObserver.close();
   });
 
@@ -337,13 +299,20 @@ async function pollReadyParked(parked: readonly ParkedIssue[]): Promise<ParkedIs
   return null;
 }
 
-async function waitForReadyParked(parked: readonly ParkedIssue[]): Promise<ParkedIssue> {
+async function waitForReadyParked(
+  parked: readonly ParkedIssue[],
+  shouldStop: () => boolean,
+  shutdownPromise: Promise<void>
+): Promise<ParkedIssue | null> {
   for (;;) {
+    if (shouldStop()) {
+      return null;
+    }
     const ready = await pollReadyParked(parked);
     if (ready) {
       return ready;
     }
-    await wait(PARKED_POLL_INTERVAL_MS);
+    await Promise.race([wait(PARKED_POLL_INTERVAL_MS), shutdownPromise]);
   }
 }
 
@@ -409,94 +378,139 @@ export async function shipAutoSequential(
   const homeDir = homedir();
   const logsDir = path.join(homeDir, '.shipper', 'logs');
   const logFiles = new Map<number, string>();
+  let shuttingDown = false;
+  const isShuttingDown = (): boolean => shuttingDown;
+  let resolveShutdown!: () => void;
+  const shutdownPromise = new Promise<void>((resolve) => {
+    resolveShutdown = resolve;
+  });
 
-  mkdirSync(logsDir, { recursive: true, mode: 0o700 });
-
-  const shouldParkCurrentIssue = async (): Promise<boolean> => {
-    if (parked.length > 0) {
-      return true;
+  const onSignal = () => {
+    if (shuttingDown) {
+      return;
     }
-    return (await selectNextCandidate(repo, skippedIssues)) !== null;
+    shuttingDown = true;
+    resolveShutdown();
   };
 
-  for (;;) {
-    // Inner loop: process all available candidates
+  mkdirSync(logsDir, { recursive: true, mode: 0o700 });
+  process.on('SIGINT', onSignal);
+  process.on('SIGTERM', onSignal);
+
+  try {
+    const shouldParkCurrentIssue = async (): Promise<boolean> => {
+      if (isShuttingDown()) {
+        return false;
+      }
+      if (parked.length > 0) {
+        return true;
+      }
+      return (await selectNextCandidate(repo, skippedIssues)) !== null;
+    };
+
     for (;;) {
-      const readyParked = await pollReadyParked(parked);
-      if (readyParked) {
+      if (isShuttingDown()) {
+        break;
+      }
+
+      // Inner loop: process all available candidates
+      for (;;) {
+        if (isShuttingDown()) {
+          break;
+        }
+
+        const readyParked = await pollReadyParked(parked);
+        if (readyParked) {
+          await resumeParkedIssue(parked, readyParked, results, skippedIssues);
+          continue;
+        }
+
+        const candidate = await selectNextCandidate(repo, skippedIssues);
+        if (!candidate) {
+          break;
+        }
+
+        logger.log(`\nAuto: advancing issue #${candidate.number} — ${candidate.title}`);
+        const logFile = path.join(logsDir, `ship-${candidate.number}-${formatLogTimestamp()}.log`);
+        logFiles.set(candidate.number, logFile);
+        const run = startSequentialIssueRun(
+          repo,
+          candidate,
+          shouldParkCurrentIssue,
+          logFile,
+          agent,
+          model
+        );
+        const outcome = await waitForCompletionOrPark(run);
+        if (outcome.type === 'parked') {
+          parked.push(outcome.parked);
+        } else {
+          recordAutoResult(results, skippedIssues, candidate, outcome.result);
+        }
+      }
+
+      if (isShuttingDown()) {
+        break;
+      }
+
+      // Unblock pass
+      const blocked = await selectBlockedIssues(repo);
+      if (blocked.length === 0) {
+        if (parked.length === 0) {
+          break;
+        }
+
+        const readyParked = await waitForReadyParked(parked, isShuttingDown, shutdownPromise);
+        if (!readyParked) {
+          break;
+        }
         await resumeParkedIssue(parked, readyParked, results, skippedIssues);
         continue;
       }
 
-      const candidate = await selectNextCandidate(repo, skippedIssues);
-      if (!candidate) {
-        break;
+      let progress = false;
+      for (const issue of blocked) {
+        if (isShuttingDown()) {
+          break;
+        }
+        logger.log(`\nAuto: attempting unblock of #${issue.number} — ${issue.title}`);
+        const unblockLogFile = path.join(
+          logsDir,
+          `unblock-${issue.number}-${formatLogTimestamp()}.log`
+        );
+        const unblocked = await attemptUnblock(
+          repo,
+          String(issue.number),
+          agent,
+          model,
+          unblockLogFile
+        );
+        allUnblockAttempts.push({
+          issue: issue.number,
+          title: issue.title,
+          outcome: unblocked ? 'unblocked' : 'still blocked',
+          logFile: unblockLogFile,
+        });
+        if (unblocked) progress = true;
       }
 
-      logger.log(`\nAuto: advancing issue #${candidate.number} — ${candidate.title}`);
-      const logFile = path.join(logsDir, `ship-${candidate.number}-${formatLogTimestamp()}.log`);
-      logFiles.set(candidate.number, logFile);
-      const run = startSequentialIssueRun(
-        repo,
-        candidate,
-        shouldParkCurrentIssue,
-        logFile,
-        agent,
-        model
-      );
-      const outcome = await waitForCompletionOrPark(run);
-      if (outcome.type === 'parked') {
-        parked.push(outcome.parked);
-      } else {
-        recordAutoResult(results, skippedIssues, candidate, outcome.result);
+      if (!progress) {
+        if (parked.length === 0) {
+          break;
+        }
+
+        const readyParked = await waitForReadyParked(parked, isShuttingDown, shutdownPromise);
+        if (!readyParked) {
+          break;
+        }
+        await resumeParkedIssue(parked, readyParked, results, skippedIssues);
+        continue;
       }
+      // Loop back — newly unblocked issues are now eligible candidates
     }
-
-    // Unblock pass
-    const blocked = await selectBlockedIssues(repo);
-    if (blocked.length === 0) {
-      if (parked.length === 0) {
-        break;
-      }
-
-      const readyParked = await waitForReadyParked(parked);
-      await resumeParkedIssue(parked, readyParked, results, skippedIssues);
-      continue;
-    }
-
-    let progress = false;
-    for (const issue of blocked) {
-      logger.log(`\nAuto: attempting unblock of #${issue.number} — ${issue.title}`);
-      const unblockLogFile = path.join(
-        logsDir,
-        `unblock-${issue.number}-${formatLogTimestamp()}.log`
-      );
-      const unblocked = await attemptUnblock(
-        repo,
-        String(issue.number),
-        agent,
-        model,
-        unblockLogFile
-      );
-      allUnblockAttempts.push({
-        issue: issue.number,
-        title: issue.title,
-        outcome: unblocked ? 'unblocked' : 'still blocked',
-        logFile: unblockLogFile,
-      });
-      if (unblocked) progress = true;
-    }
-
-    if (!progress) {
-      if (parked.length === 0) {
-        break;
-      }
-
-      const readyParked = await waitForReadyParked(parked);
-      await resumeParkedIssue(parked, readyParked, results, skippedIssues);
-      continue;
-    }
-    // Loop back — newly unblocked issues are now eligible candidates
+  } finally {
+    process.removeListener('SIGINT', onSignal);
+    process.removeListener('SIGTERM', onSignal);
   }
 
   printAutoSummary(results);
@@ -511,7 +525,7 @@ export async function shipAutoSequential(
       logger.log(`  #${result.issue}   ${formatLogDisplayPath(logFile, homeDir)}`);
     }
   }
-  if (results.some((result) => result.outcome === 'fail')) {
+  if (results.some((result) => result.outcome === 'fail') || isShuttingDown()) {
     process.exitCode = 1;
   }
 }
@@ -587,7 +601,7 @@ export async function shipAutoParallel(
         logger.log(
           `\n[#${candidate.number}] Auto: advancing issue #${candidate.number} — ${candidate.title}`
         );
-        const run = shipOneIssueAsync(String(candidate.number), logFile, agent, model);
+        const run = shipOneIssueAsync(String(candidate.number), repo, logFile, agent, model);
         issueStartTimes.set(candidate.number, new Date());
         logFiles.set(candidate.number, logFile);
         activeRuns.set(candidate.number, {

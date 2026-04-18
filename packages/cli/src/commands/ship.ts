@@ -39,16 +39,15 @@ export async function shipCommand(
   const logsDir = path.join(homeDir, '.shipper', 'logs');
   mkdirSync(logsDir, { recursive: true, mode: 0o700 });
   const logFile = path.join(logsDir, `ship-${issue.replace(/^#/, '')}-${formatLogTimestamp()}.log`);
-  const result = await shipOneIssue(
+  const result = await shipOneIssue({
     repo,
     issue,
-    options.merge,
-    options.mode,
-    options.agent,
-    options.model,
-    undefined,
-    logFile
-  );
+    merge: options.merge,
+    mode: options.mode,
+    agent: options.agent,
+    model: options.model,
+    logFile,
+  });
   logger.log(`\nLog file: ${formatLogDisplayPath(logFile, homeDir)}`);
   if (!result.success) {
     process.exitCode = 1;

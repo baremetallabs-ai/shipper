@@ -52,7 +52,7 @@ shipper:implemented → shipper:pr-open → shipper:pr-reviewed → shipper:read
 - **shipper:priority-high** — Processed first in `ship --auto`
 - **shipper:priority-low** — Processed last in `ship --auto`
 
-Use `shipper next <issue>` to advance through stages, or run individual stage commands directly (e.g., `shipper groom <issue>`, `shipper design <issue>`).
+Use `shipper next <issue>` to advance one stage at a time through the shared in-process dispatcher, or run `shipper ship <issue>` to carry the issue through the remaining stages end-to-end. Individual stage commands also remain available (for example, `shipper groom <issue>` or `shipper design <issue>`).
 
 ## Customizing Prompts
 

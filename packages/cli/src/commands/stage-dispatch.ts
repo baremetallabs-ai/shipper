@@ -10,7 +10,7 @@ import {
   logger,
   tryResolvePrForIssue,
 } from '@dnsquared/shipper-core';
-import type { AgentName, CommandMode, StageRunResult } from '@dnsquared/shipper-core';
+import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
 import { runDesignStage } from './design.js';
 import { runGroomStage } from './groom.js';
 import { runImplementStage } from './implement.js';
@@ -18,6 +18,7 @@ import { runPlanStage } from './plan.js';
 import { runPrOpenStage } from './pr-open.js';
 import { runPrRemediateStage } from './pr-remediate.js';
 import { runPrReviewStage } from './pr-review.js';
+import type { StageRunResult } from './stage-result.js';
 
 export interface StageDispatchOptions {
   mode?: CommandMode;

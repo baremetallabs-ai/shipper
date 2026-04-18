@@ -1,5 +1,3 @@
-import { spawn } from 'node:child_process';
-import type { StdioOptions } from 'node:child_process';
 import type { WriteStream } from 'node:fs';
 import { createWriteStream } from 'node:fs';
 import { homedir } from 'node:os';
@@ -25,11 +23,11 @@ import {
   type QueuedPR,
 } from '@dnsquared/shipper-core';
 import type { AgentName, CommandMode, Logger } from '@dnsquared/shipper-core';
-import { buildReadyCheck, SKIP_PR_REMEDIATE_WAIT_ENV_VAR } from './pr-remediate.js';
+import { buildReadyCheck } from './pr-remediate.js';
 import { isRetriableMergeFailure, mergePr, resolvePrForIssue } from './ship-merge.js';
+import { runStageForLabel } from './stage-dispatch.js';
 
 const MAX_TRANSITIONS = 15;
-export const AUTO_CHILD_RUN_ENV_VAR = 'SHIPPER_AUTO_CHILD_RUN';
 
 export const STAGE_NAME: Record<string, string> = { ...STAGE_NAME_MAP };
 
@@ -42,6 +40,19 @@ const STAGE_MODE_KEY: Record<string, string> = {
 interface StageResult {
   stage: string;
   status: 'pass' | 'fail';
+}
+
+export interface ShipOneIssueOptions {
+  repo: string;
+  issue: string;
+  merge: boolean;
+  mode?: CommandMode;
+  agent?: AgentName;
+  model?: string;
+  parkHooks?: ParkHooks;
+  logFile?: string;
+  skipInteractiveStages?: boolean;
+  collectTokens?: boolean;
 }
 
 export interface ShipIssueResult {
@@ -67,17 +78,6 @@ function getStageModeKey(stageName: string): string {
   return STAGE_MODE_KEY[stageName] ?? stageName;
 }
 
-function buildIssueCommandEnv(
-  issueStr: string,
-  skipPrRemediateWaitOnce: boolean
-): typeof process.env {
-  return {
-    ...process.env,
-    SHIPPER_LOCK_HELD: issueStr,
-    ...(skipPrRemediateWaitOnce ? { [SKIP_PR_REMEDIATE_WAIT_ENV_VAR]: '1' } : {}),
-  };
-}
-
 export function formatLogTimestamp(date = new Date()): string {
   const pad = (value: number) => String(value).padStart(2, '0');
   return [
@@ -93,29 +93,6 @@ export function formatLogTimestamp(date = new Date()): string {
 
 export function formatLogDisplayPath(logFile: string, homeDir = homedir()): string {
   return logFile.startsWith(homeDir) ? `~${logFile.slice(homeDir.length)}` : logFile;
-}
-
-export function summarizeChildStderr(stderrOutput: string): string {
-  const nonLifecycleLines = stderrOutput
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line !== '' && !line.startsWith('[shipper] '));
-
-  if (nonLifecycleLines.length > 0) {
-    return nonLifecycleLines.join('\n');
-  }
-
-  return stderrOutput.trim();
-}
-
-function writeStdoutBoth(logStream: WriteStream | undefined, chunk: string | Buffer): void {
-  process.stdout.write(chunk);
-  logStream?.write(chunk);
-}
-
-function writeStderrBoth(logStream: WriteStream | undefined, chunk: string | Buffer): void {
-  process.stderr.write(chunk);
-  logStream?.write(chunk);
 }
 
 export function closeLogStream(logStream: WriteStream | undefined): Promise<void> {
@@ -142,36 +119,6 @@ export function closeLogStream(logStream: WriteStream | undefined): Promise<void
     logStream.on('close', resolveClose);
     logStream.on('error', rejectClose);
     logStream.end();
-  });
-}
-
-function spawnTee(
-  command: string,
-  args: string[],
-  opts: { env?: typeof process.env; logStream?: WriteStream; interactive?: boolean }
-): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const stdio: StdioOptions = opts.logStream
-      ? opts.interactive
-        ? 'inherit'
-        : ['inherit', 'pipe', 'pipe']
-      : 'inherit';
-    const child = spawn(command, args, {
-      stdio,
-      env: opts.env,
-    });
-
-    child.stdout?.on('data', (chunk: Buffer | string) => {
-      writeStdoutBoth(opts.logStream, chunk);
-    });
-    child.stderr?.on('data', (chunk: Buffer | string) => {
-      writeStderrBoth(opts.logStream, chunk);
-    });
-
-    child.on('error', reject);
-    child.on('close', (code) => {
-      resolve(code ?? 1);
-    });
   });
 }
 
@@ -227,19 +174,21 @@ function printSummary(results: StageResult[], issueLogger: Logger): void {
   }
 }
 
-export async function shipOneIssue(
-  repo: string,
-  issue: string,
-  merge: boolean,
-  mode?: CommandMode,
-  agent?: AgentName,
-  model?: string,
-  parkHooks?: ParkHooks,
-  logFile?: string
-): Promise<ShipIssueResult> {
+export async function shipOneIssue(options: ShipOneIssueOptions): Promise<ShipIssueResult> {
+  const {
+    repo,
+    issue,
+    merge,
+    mode,
+    agent,
+    model,
+    parkHooks,
+    logFile,
+    skipInteractiveStages = false,
+    collectTokens = true,
+  } = options;
   const issueStr = issue.replace(/^#/, '');
   const issueStartTime = new Date();
-  const isAutoChildRun = process.env[AUTO_CHILD_RUN_ENV_VAR] === '1';
   const logStream = logFile ? createWriteStream(logFile) : undefined;
   const issueLogger = createLogger({ stream: logStream });
   let logStreamError: string | undefined;
@@ -295,10 +244,6 @@ export async function shipOneIssue(
       if (label !== READY_LABEL) {
         let transitions = 0;
         let skipPrRemediateWaitOnce = false;
-        const cliEntrypoint = process.argv[1];
-        if (!cliEntrypoint) {
-          throw new Error('Missing CLI entrypoint path.');
-        }
 
         for (;;) {
           const stageName = STAGE_NAME[label];
@@ -340,7 +285,7 @@ export async function shipOneIssue(
           }
 
           const stageMode = resolveMode(getStageModeKey(stageName), mode);
-          if (isAutoChildRun && stageMode === 'interactive') {
+          if (skipInteractiveStages && stageMode === 'interactive') {
             issueLogger.log(
               `Skipping issue #${issueStr}: stage "${stageName}" requires interactive mode.`
             );
@@ -348,24 +293,11 @@ export async function shipOneIssue(
           }
 
           issueLogger.log(`Running stage: ${stageName}`);
-
-          const nextArgs = [cliEntrypoint, 'next', issueStr];
-          if (stageMode !== 'default') {
-            nextArgs.push('--mode', stageMode);
-          }
-          if (agent) {
-            nextArgs.push('--agent', agent);
-          }
-          if (model) {
-            nextArgs.push('--model', model);
-          }
-          const status = await spawnTee(process.execPath, nextArgs, {
-            env: buildIssueCommandEnv(
-              issueStr,
-              label === PR_REVIEWED_LABEL && skipPrRemediateWaitOnce
-            ),
-            logStream,
-            interactive: stageMode === 'interactive',
+          const stageResult = await runStageForLabel(repo, issueStr, label, {
+            mode: stageMode,
+            agent,
+            model,
+            skipInitialPrRemediateWait: label === PR_REVIEWED_LABEL && skipPrRemediateWaitOnce,
           });
           skipPrRemediateWaitOnce = false;
 
@@ -373,10 +305,13 @@ export async function shipOneIssue(
             return failCurrentStage(stageName, logStreamError);
           }
 
-          if (status !== 0) {
+          if (!stageResult.success) {
             results.push({ stage: stageName, status: 'fail' });
             printSummary(results, issueLogger);
-            return { success: false, error: `stage "${stageName}" failed` };
+            return {
+              success: false,
+              error: stageResult.error ?? `stage "${stageName}" failed`,
+            };
           }
 
           results.push({ stage: stageName, status: 'pass' });
@@ -401,7 +336,11 @@ export async function shipOneIssue(
             return { success: false, error: `unexpected label after stage "${stageName}"` };
           }
 
-          if (label === NEW_LABEL && previousLabel !== NEW_LABEL && (parkHooks || isAutoChildRun)) {
+          if (
+            label === NEW_LABEL &&
+            previousLabel !== NEW_LABEL &&
+            (parkHooks || skipInteractiveStages)
+          ) {
             const msg = `Issue #${issueStr} was reset to ${NEW_LABEL} by stage "${stageName}" - stopping to avoid interactive groom stage.`;
             issueLogger.error(msg);
             printSummary(results, issueLogger);
@@ -482,7 +421,7 @@ export async function shipOneIssue(
       printSummary(results, issueLogger);
       return { success: true };
     });
-    if (isAutoChildRun) {
+    if (!collectTokens) {
       return result;
     }
     return await attachIssueTotalTokens(repo, issueStr, issueStartTime, result);

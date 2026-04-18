@@ -11,7 +11,8 @@ import {
   simpleInvoker,
   writeContextFile,
 } from '@dnsquared/shipper-core';
-import type { AgentName, CommandMode, StageRunResult } from '@dnsquared/shipper-core';
+import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
+import type { StageRunResult } from './stage-result.js';
 
 export async function runPrReviewStage(
   repo: string,
@@ -21,7 +22,7 @@ export async function runPrReviewStage(
   agent?: AgentName,
   model?: string
 ): Promise<StageRunResult> {
-  return await runStageScaffold({
+  return (await runStageScaffold({
     repo,
     issueNumber,
     stage: 'pr-review',
@@ -67,7 +68,7 @@ export async function runPrReviewStage(
         return { prFiles: prFileSet, diffHunks };
       },
     }),
-  });
+  })) as unknown as StageRunResult;
 }
 
 export async function prReviewCommand(
