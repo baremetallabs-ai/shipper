@@ -19,6 +19,8 @@ jobs:
           registry-url: https://npm.pkg.github.com
           scope: '@dnsquared'
       - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
 
       - run: npm run lint
       - run: npm run format:check

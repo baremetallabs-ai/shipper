@@ -1,25 +1,12 @@
-import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
+import { shipperCoreTextAssetsPlugin } from '../../vitest.shipper-core-text-assets.js';
 
 const packageRoot = fileURLToPath(new URL('.', import.meta.url));
-const textAssetPattern = /\.(md|sh)$/;
 
 export default defineConfig({
-  plugins: [
-    {
-      name: 'shipper-core-text-assets',
-      async load(id) {
-        if (!textAssetPattern.test(id)) {
-          return null;
-        }
-
-        const source = await readFile(id, 'utf8');
-        return `export default ${JSON.stringify(source)};`;
-      },
-    },
-  ],
+  plugins: [shipperCoreTextAssetsPlugin()],
   resolve: {
     alias: {
       '@dnsquared/shipper-core': path.resolve(packageRoot, '../core/src/index.ts'),

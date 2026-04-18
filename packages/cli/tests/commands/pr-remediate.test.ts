@@ -1,17 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { CheckClassification, LabelTransition, PRChecksLine } from '@dnsquared/shipper-core';
+import type {
+  CheckClassification,
+  LabelTransition,
+  PRChecksLine,
+  ResultJson,
+} from '@dnsquared/shipper-core';
 
 type MockPrReviewWait =
   | { mode: 'timer'; durationMinutes: number }
   | { mode: 'checks'; minDurationMinutes?: number; maxDurationMinutes?: number };
-type TestResultJson = {
-  verdict: 'accept' | 'reject' | 'fail';
-  comment: string;
-  pr_spec?: string;
-  review_payload?: string;
-  replies?: string;
-};
-
 const {
   autoSelectPrForStageMock,
   classifyChecksMock,
@@ -62,7 +59,7 @@ const {
   handleAgentCrashMock: vi.fn(() => Promise.resolve()),
   postCommentMock: vi.fn(() => Promise.resolve()),
   postRepliesMock: vi.fn(() => Promise.resolve()),
-  processResultMock: vi.fn<(opts: unknown) => Promise<TestResultJson>>(),
+  processResultMock: vi.fn<(opts: unknown) => Promise<ResultJson>>(),
   pushWithRetryMock: vi.fn(() => Promise.resolve(0)),
   rerunFailedChecksMock: vi.fn<(repo: string, failedChecks: PRChecksLine[]) => Promise<void>>(),
   resolveRefMock: vi.fn(),
@@ -75,7 +72,7 @@ const {
       cwd: string;
       stage: string;
       retry: (message: string) => Promise<number>;
-    }) => Promise<TestResultJson>
+    }) => Promise<ResultJson>
   >(() => Promise.resolve({ verdict: 'accept', comment: '.shipper/output/comment-10.md' })),
   runPromptMock: vi.fn(),
   scrubOutputDirMock: vi.fn(() => Promise.resolve()),
@@ -85,7 +82,7 @@ const {
   truncateLargeInputMock: vi.fn((_: string, text: string, filename: string) =>
     Promise.resolve(`truncated:${filename}:${text}`)
   ),
-  validateStageOutputMock: vi.fn<(cwd: string, stage: string) => Promise<TestResultJson>>(),
+  validateStageOutputMock: vi.fn<(cwd: string, stage: string) => Promise<ResultJson>>(),
   withIssueLockMock: vi.fn((_repo: unknown, _issue: unknown, fn: () => Promise<unknown>) => fn()),
   withStageHooksMock: vi.fn((_stage: unknown, _env: unknown, fn: () => Promise<unknown>) => fn()),
   withWorktreeMock: vi.fn((_opts: unknown, fn: (wtPath: string) => Promise<unknown>) =>
@@ -196,7 +193,7 @@ describe('prRemediateCommand', () => {
       comment: '.shipper/output/comment-10.md',
     });
     processResultMock.mockImplementation((opts) => {
-      const result = (opts as { result: TestResultJson }).result;
+      const result = (opts as { result: ResultJson }).result;
       return Promise.resolve(result);
     });
     postRepliesMock.mockResolvedValue(undefined);
@@ -1200,7 +1197,7 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
     'delegates %s verdicts to processResult and never pushes',
     async (verdict) => {
       fetchChecksMock.mockResolvedValue(PASS_CHECKS);
-      const result: TestResultJson = {
+      const result: ResultJson = {
         verdict,
         comment: '.shipper/output/comment-10.md',
       };
