@@ -11,35 +11,17 @@ import {
   simpleInvoker,
   writeContextFile,
 } from '@dnsquared/shipper-core';
-import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
+import type { AgentName, CommandMode, StageRunResult } from '@dnsquared/shipper-core';
 
-export async function prReviewCommand(
+export async function runPrReviewStage(
   repo: string,
-  pr?: string,
+  issueNumber: string,
+  pr: string,
   mode?: CommandMode,
   agent?: AgentName,
   model?: string
-): Promise<void> {
-  let issueNumber: string;
-
-  if (!pr) {
-    const selected = await autoSelectPrForStage(
-      repo,
-      'shipper:pr-open',
-      "No PRs ready for review. Run 'shipper pr open' first."
-    );
-    logger.error(
-      `Auto-selected PR #${selected.pr} (issue #${selected.issue.number}: ${selected.issue.title})`
-    );
-    pr = selected.pr;
-    issueNumber = String(selected.issue.number);
-  } else {
-    const resolved = await resolveRef(repo, pr, 'both');
-    pr = resolved.prNumber;
-    issueNumber = resolved.issueNumber;
-  }
-
-  await runStageScaffold({
+): Promise<StageRunResult> {
+  return await runStageScaffold({
     repo,
     issueNumber,
     stage: 'pr-review',
@@ -86,4 +68,33 @@ export async function prReviewCommand(
       },
     }),
   });
+}
+
+export async function prReviewCommand(
+  repo: string,
+  pr?: string,
+  mode?: CommandMode,
+  agent?: AgentName,
+  model?: string
+): Promise<void> {
+  let issueNumber: string;
+
+  if (!pr) {
+    const selected = await autoSelectPrForStage(
+      repo,
+      'shipper:pr-open',
+      "No PRs ready for review. Run 'shipper pr open' first."
+    );
+    logger.error(
+      `Auto-selected PR #${selected.pr} (issue #${selected.issue.number}: ${selected.issue.title})`
+    );
+    pr = selected.pr;
+    issueNumber = String(selected.issue.number);
+  } else {
+    const resolved = await resolveRef(repo, pr, 'both');
+    pr = resolved.prNumber;
+    issueNumber = resolved.issueNumber;
+  }
+
+  process.exitCode = (await runPrReviewStage(repo, issueNumber, pr, mode, agent, model)).exitCode;
 }

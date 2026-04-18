@@ -11,6 +11,7 @@ import {
 } from './output-protocol/index.js';
 import type { DiffFileHunks } from './output-protocol/diff-parse.js';
 import { runPrompt, type RunPromptOpts } from './prompt-runner.js';
+import type { ResultJson } from './result-schema.js';
 import { formatConflictContext, withGitTransport, withWorktree } from './worktree.js';
 
 export type ScaffoldStage = 'design' | 'plan' | 'implement' | 'pr-open' | 'pr-review';
@@ -44,6 +45,13 @@ export interface StageScaffoldOpts {
   prNumber?: { value: string | undefined };
   resolveLocked: () => Promise<{ repoRoot: string; branch: string; baseBranch?: string }>;
   invoker: StageInvokerFactory;
+}
+
+export interface StageRunResult {
+  success: boolean;
+  exitCode: number;
+  error?: string;
+  verdict?: ResultJson['verdict'];
 }
 
 type SimplePromptName = 'design' | 'plan' | 'pr_review';
@@ -133,14 +141,14 @@ export function transportInvoker(args: {
   };
 }
 
-export async function runStageScaffold(opts: StageScaffoldOpts): Promise<void> {
-  await withIssueLock(opts.repo, opts.issueNumber, async () => {
+export async function runStageScaffold(opts: StageScaffoldOpts): Promise<StageRunResult> {
+  return await withIssueLock(opts.repo, opts.issueNumber, async () => {
     const { repoRoot, branch, baseBranch } = await opts.resolveLocked();
-    await withStageHooks(
+    return await withStageHooks(
       opts.stage,
       { issueNumber: opts.issueNumber, branchName: branch },
       async () => {
-        await withWorktree(
+        return await withWorktree(
           {
             repoRoot,
             branch,
@@ -156,8 +164,8 @@ export async function runStageScaffold(opts: StageScaffoldOpts): Promise<void> {
 
             const initialCode = await invocation.initial();
             if (initialCode !== 0) {
+              const detail = `Agent exited with code ${initialCode}`;
               if (opts.initialFailure === 'crash') {
-                const detail = `Agent exited with code ${initialCode}`;
                 logger.error(detail);
                 await handleAgentCrash(
                   opts.repo,
@@ -166,11 +174,13 @@ export async function runStageScaffold(opts: StageScaffoldOpts): Promise<void> {
                   detail,
                   `The \`${opts.resultStage}\` agent run exited with code ${initialCode}.`
                 );
-                process.exitCode = 1;
-              } else {
-                process.exitCode = initialCode;
+                return { success: false, exitCode: 1, error: detail } satisfies StageRunResult;
               }
-              return;
+              return {
+                success: false,
+                exitCode: initialCode,
+                error: detail,
+              } satisfies StageRunResult;
             }
 
             try {
@@ -188,11 +198,19 @@ export async function runStageScaffold(opts: StageScaffoldOpts): Promise<void> {
                 result,
                 ...(opts.prNumber !== undefined ? { prNumber: opts.prNumber.value } : {}),
               });
+              return result.verdict === 'accept'
+                ? ({ success: true, exitCode: 0, verdict: result.verdict } satisfies StageRunResult)
+                : ({
+                    success: false,
+                    exitCode: 1,
+                    error: `Stage returned verdict "${result.verdict}".`,
+                    verdict: result.verdict,
+                  } satisfies StageRunResult);
             } catch (error) {
               const detail = toErrorMessage(error);
               logger.error(detail);
               await handleAgentCrash(opts.repo, opts.issueNumber, opts.resultStage, detail);
-              process.exitCode = 1;
+              return { success: false, exitCode: 1, error: detail } satisfies StageRunResult;
             }
           }
         );

@@ -168,13 +168,11 @@ function getWriteContextFileCalls(): WriteContextFileCall[] {
 
 describe('prRemediateCommand', () => {
   let exitSpy: ReturnType<typeof vi.spyOn>;
-  const originalSkipPrRemediateWait = process.env.SHIPPER_SKIP_PR_REMEDIATE_WAIT;
   let revParseCounter = 0;
 
   beforeEach(() => {
     vi.clearAllMocks();
     process.exitCode = undefined;
-    delete process.env.SHIPPER_SKIP_PR_REMEDIATE_WAIT;
     resolveRefMock.mockResolvedValue({ prNumber: '42', issueNumber: '10' });
     runPromptMock.mockResolvedValue(0);
     syncWorktreeMock.mockResolvedValue(undefined);
@@ -244,11 +242,6 @@ describe('prRemediateCommand', () => {
 
   afterEach(() => {
     process.exitCode = undefined;
-    if (originalSkipPrRemediateWait === undefined) {
-      delete process.env.SHIPPER_SKIP_PR_REMEDIATE_WAIT;
-    } else {
-      process.env.SHIPPER_SKIP_PR_REMEDIATE_WAIT = originalSkipPrRemediateWait;
-    }
     vi.useRealTimers();
     exitSpy.mockRestore();
   });
@@ -448,6 +441,28 @@ describe('prRemediateCommand', () => {
 
     await expect(readyCheck()).resolves.toBe(false);
     await expect(readyCheck()).resolves.toBe(true);
+  });
+
+  it('supports skipping the initial review wait through an explicit helper option', async () => {
+    getSettingsMock.mockReturnValue({
+      prReviewWait: { mode: 'timer', durationMinutes: 15 },
+    });
+    fetchChecksMock.mockResolvedValue(PASS_CHECKS);
+
+    const { runPrRemediateStage } = await import('../../src/commands/pr-remediate.js');
+
+    await expect(runPrRemediateStage(repo, '10', '42', { skipInitialWait: true })).resolves.toEqual(
+      {
+        success: true,
+        exitCode: 0,
+        verdict: 'accept',
+      }
+    );
+    expect(
+      ghMock.mock.calls.some(
+        ([args]) => args[0] === 'pr' && args[1] === 'view' && args.includes('createdAt')
+      )
+    ).toBe(false);
   });
 
   it('accepts on the first pass, posts artifacts in order, and transitions to ready on green CI', async () => {

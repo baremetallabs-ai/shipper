@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { StageScaffoldOpts } from '@dnsquared/shipper-core';
+import type { StageRunResult, StageScaffoldOpts } from '@dnsquared/shipper-core';
 
 const autoSelectPrForStageMock = vi.fn();
 const getBranchForPRMock = vi.fn(() => Promise.resolve('shipper/10-feature'));
@@ -13,8 +13,8 @@ const parsePrFilesPagesMock = vi.fn<(raw: string) => Array<Array<{ filename: str
   [{ filename: 'src/file.ts' }],
 ]);
 const resolveRefMock = vi.fn(() => Promise.resolve({ prNumber: '42', issueNumber: '10' }));
-const runStageScaffoldMock = vi.fn<(opts: StageScaffoldOpts) => Promise<void>>(() =>
-  Promise.resolve()
+const runStageScaffoldMock = vi.fn<(opts: StageScaffoldOpts) => Promise<StageRunResult>>(() =>
+  Promise.resolve({ success: true, exitCode: 0, verdict: 'accept' })
 );
 const simpleInvokerFactoryMock = vi.fn();
 const simpleInvokerMock = vi.fn(() => simpleInvokerFactoryMock);
@@ -81,6 +81,7 @@ describe('prReviewCommand', () => {
     const { prReviewCommand } = await import('../../src/commands/pr-review.js');
 
     await expect(prReviewCommand(repo, '42')).resolves.toBeUndefined();
+    expect(process.exitCode).toBe(0);
 
     expect(resolveRefMock).toHaveBeenCalledWith(repo, '42', 'both');
     expect(resolveRefMock.mock.invocationCallOrder[0]).toBeLessThan(
@@ -213,5 +214,18 @@ describe('prReviewCommand', () => {
     expect(runStageScaffoldMock).toHaveBeenCalledWith(
       expect.objectContaining({ issueNumber: '321', prNumber: { value: '84' } })
     );
+  });
+
+  it('maps stage helper failures onto process.exitCode at the CLI boundary', async () => {
+    runStageScaffoldMock.mockResolvedValueOnce({
+      success: false,
+      exitCode: 21,
+      error: 'agent exited',
+    });
+    const { prReviewCommand } = await import('../../src/commands/pr-review.js');
+
+    await expect(prReviewCommand(repo, '42')).resolves.toBeUndefined();
+
+    expect(process.exitCode).toBe(21);
   });
 });

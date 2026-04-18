@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { RunPromptOpts } from '../../src/lib/prompt-runner.js';
 import type { StageInvocation, StageScaffoldOpts } from '../../src/lib/stage-scaffold.js';
@@ -133,7 +133,6 @@ describe('runStageScaffold', () => {
   beforeEach(() => {
     events.length = 0;
     vi.clearAllMocks();
-    process.exitCode = undefined;
     scrubOutputDirMock.mockImplementation(() => {
       events.push('scrubOutputDir');
       return Promise.resolve();
@@ -146,10 +145,6 @@ describe('runStageScaffold', () => {
       events.push('processResult');
       return Promise.resolve(acceptedResult);
     });
-  });
-
-  afterEach(() => {
-    process.exitCode = undefined;
   });
 
   it('runs the shared scaffold in order and forwards setup and PR metadata when present', async () => {
@@ -195,7 +190,11 @@ describe('runStageScaffold', () => {
         }),
     };
 
-    await runStageScaffold(opts);
+    await expect(runStageScaffold(opts)).resolves.toEqual({
+      success: true,
+      exitCode: 0,
+      verdict: 'accept',
+    });
 
     expect(events).toEqual([
       'withIssueLock',
@@ -244,23 +243,29 @@ describe('runStageScaffold', () => {
   });
 
   it('logs and reports agent crashes for simple-stage non-zero initial exits', async () => {
-    await runStageScaffold({
-      repo: 'owner/repo',
-      issueNumber: '123',
-      stage: 'design',
-      resultStage: 'design',
-      createBranch: true,
-      initialFailure: 'crash',
-      resolveLocked: () =>
-        Promise.resolve({
-          repoRoot: '/tmp/fake-repo',
-          branch: 'shipper/123-branch',
-          baseBranch: 'main',
-        }),
-      invoker: () =>
-        buildInvocation({
-          initial: () => Promise.resolve(23),
-        }),
+    await expect(
+      runStageScaffold({
+        repo: 'owner/repo',
+        issueNumber: '123',
+        stage: 'design',
+        resultStage: 'design',
+        createBranch: true,
+        initialFailure: 'crash',
+        resolveLocked: () =>
+          Promise.resolve({
+            repoRoot: '/tmp/fake-repo',
+            branch: 'shipper/123-branch',
+            baseBranch: 'main',
+          }),
+        invoker: () =>
+          buildInvocation({
+            initial: () => Promise.resolve(23),
+          }),
+      })
+    ).resolves.toEqual({
+      success: false,
+      exitCode: 1,
+      error: 'Agent exited with code 23',
     });
 
     expect(retryOnInvalidOutputMock).not.toHaveBeenCalled();
@@ -273,34 +278,38 @@ describe('runStageScaffold', () => {
       'Agent exited with code 23',
       'The `design` agent run exited with code 23.'
     );
-    expect(process.exitCode).toBe(1);
   });
 
   it('propagates transport initial exit codes without invoking crash handling', async () => {
-    await runStageScaffold({
-      repo: 'owner/repo',
-      issueNumber: '123',
-      stage: 'implement',
-      resultStage: 'implement',
-      createBranch: true,
-      initialFailure: 'propagate',
-      resolveLocked: () =>
-        Promise.resolve({
-          repoRoot: '/tmp/fake-repo',
-          branch: 'shipper/123-branch',
-          baseBranch: 'main',
-        }),
-      invoker: () =>
-        buildInvocation({
-          initial: () => Promise.resolve(7),
-        }),
+    await expect(
+      runStageScaffold({
+        repo: 'owner/repo',
+        issueNumber: '123',
+        stage: 'implement',
+        resultStage: 'implement',
+        createBranch: true,
+        initialFailure: 'propagate',
+        resolveLocked: () =>
+          Promise.resolve({
+            repoRoot: '/tmp/fake-repo',
+            branch: 'shipper/123-branch',
+            baseBranch: 'main',
+          }),
+        invoker: () =>
+          buildInvocation({
+            initial: () => Promise.resolve(7),
+          }),
+      })
+    ).resolves.toEqual({
+      success: false,
+      exitCode: 7,
+      error: 'Agent exited with code 7',
     });
 
     expect(loggerErrorMock).not.toHaveBeenCalled();
     expect(handleAgentCrashMock).not.toHaveBeenCalled();
     expect(retryOnInvalidOutputMock).not.toHaveBeenCalled();
     expect(processResultMock).not.toHaveBeenCalled();
-    expect(process.exitCode).toBe(7);
   });
 
   it('logs and reports retry or process-result failures', async () => {
@@ -309,20 +318,26 @@ describe('runStageScaffold', () => {
       return Promise.reject(new Error('Missing result.json'));
     });
 
-    await runStageScaffold({
-      repo: 'owner/repo',
-      issueNumber: '123',
-      stage: 'plan',
-      resultStage: 'plan',
-      createBranch: true,
-      initialFailure: 'crash',
-      resolveLocked: () =>
-        Promise.resolve({
-          repoRoot: '/tmp/fake-repo',
-          branch: 'shipper/123-branch',
-          baseBranch: 'main',
-        }),
-      invoker: () => buildInvocation(),
+    await expect(
+      runStageScaffold({
+        repo: 'owner/repo',
+        issueNumber: '123',
+        stage: 'plan',
+        resultStage: 'plan',
+        createBranch: true,
+        initialFailure: 'crash',
+        resolveLocked: () =>
+          Promise.resolve({
+            repoRoot: '/tmp/fake-repo',
+            branch: 'shipper/123-branch',
+            baseBranch: 'main',
+          }),
+        invoker: () => buildInvocation(),
+      })
+    ).resolves.toEqual({
+      success: false,
+      exitCode: 1,
+      error: 'Missing result.json',
     });
 
     expect(toErrorMessageMock).toHaveBeenCalled();
@@ -333,23 +348,28 @@ describe('runStageScaffold', () => {
       'plan',
       'Missing result.json'
     );
-    expect(process.exitCode).toBe(1);
   });
 
   it('omits optional baseBranch and prNumber when they are not provided', async () => {
-    await runStageScaffold({
-      repo: 'owner/repo',
-      issueNumber: '123',
-      stage: 'plan',
-      resultStage: 'plan',
-      createBranch: true,
-      initialFailure: 'crash',
-      resolveLocked: () =>
-        Promise.resolve({
-          repoRoot: '/tmp/fake-repo',
-          branch: 'shipper/123-branch',
-        }),
-      invoker: () => buildInvocation(),
+    await expect(
+      runStageScaffold({
+        repo: 'owner/repo',
+        issueNumber: '123',
+        stage: 'plan',
+        resultStage: 'plan',
+        createBranch: true,
+        initialFailure: 'crash',
+        resolveLocked: () =>
+          Promise.resolve({
+            repoRoot: '/tmp/fake-repo',
+            branch: 'shipper/123-branch',
+          }),
+        invoker: () => buildInvocation(),
+      })
+    ).resolves.toEqual({
+      success: true,
+      exitCode: 0,
+      verdict: 'accept',
     });
 
     expect(withWorktreeMock).toHaveBeenCalledWith(
