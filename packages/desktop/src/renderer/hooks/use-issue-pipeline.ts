@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 
-import { NEW_LABEL } from '../../../../core/src/lib/labels.js';
-import { toErrorMessage } from '../../../../core/src/lib/errors.js';
-import type { ListIssueItem } from '@dnsquared/shipper-core';
+import { NEW_LABEL, toErrorMessage, type ListIssueItem } from '@dnsquared/shipper-core';
 
 import { syncWorkflowStageCacheForRepo } from '../lib/app-utils.js';
 import { getShipperApi } from '../lib/shipper-api.js';

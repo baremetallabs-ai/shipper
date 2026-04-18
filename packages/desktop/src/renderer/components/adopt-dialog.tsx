@@ -2,8 +2,7 @@ import { LoaderCircle } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { JSX } from 'react';
 
-import type { ListIssueItem } from '@dnsquared/shipper-core';
-import { toErrorMessage } from '../../../../core/src/lib/errors.js';
+import { toErrorMessage, type ListIssueItem } from '@dnsquared/shipper-core';
 
 import { Alert, AlertDescription, AlertTitle } from './ui/alert.js';
 import { Button } from './ui/button.js';

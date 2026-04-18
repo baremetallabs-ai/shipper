@@ -1,8 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { toError, toErrorMessage } from '../../../core/src/lib/errors.js';
-import { parseIssueTitleLabelsList, parseQueuedPrList } from '../../../core/src/lib/gh-schemas.js';
 
 const fsMockState = vi.hoisted(() => ({
   capturedLogs: new Map<string, string>(),
@@ -128,118 +126,127 @@ vi.mock('../../src/commands/unblock.js', () => ({
 import { shipCommand } from '../../src/commands/ship.js';
 import { printAutoSummary } from '../../src/commands/ship-auto.js';
 
-vi.mock('@dnsquared/shipper-core', () => ({
-  ...(() => {
-    const writeToStream = (
-      stream:
-        | { destroyed?: boolean; writableEnded?: boolean; write?: (chunk: string) => void }
-        | undefined,
-      line: string
-    ) => {
-      if (!stream || stream.destroyed || stream.writableEnded) {
-        return;
-      }
-      stream.write?.(`${line}\n`);
-    };
+vi.mock('@dnsquared/shipper-core', async () => {
+  const { parseIssueTitleLabelsList, parseQueuedPrList, toError, toErrorMessage } =
+    await vi.importActual<typeof import('@dnsquared/shipper-core')>('@dnsquared/shipper-core');
 
-    const createMockLogger = (stream?: {
-      destroyed?: boolean;
-      writableEnded?: boolean;
-      write?: (chunk: string) => void;
-    }) => ({
-      log: (message: string) => {
-        const line = `[shipper] ${message}`;
-        console.log(line);
-        writeToStream(stream, line);
-      },
-      warn: (message: string) => {
-        const line = `[shipper] ${message}`;
-        console.warn(line);
-        writeToStream(stream, line);
-      },
-      error: (message: string) => {
-        const line = `[shipper] ${message}`;
-        console.error(line);
-        writeToStream(stream, line);
-      },
-    });
+  return {
+    ...(() => {
+      const writeToStream = (
+        stream:
+          | { destroyed?: boolean; writableEnded?: boolean; write?: (chunk: string) => void }
+          | undefined,
+        line: string
+      ) => {
+        if (!stream || stream.destroyed || stream.writableEnded) {
+          return;
+        }
+        stream.write?.(`${line}\n`);
+      };
 
-    return {
-      logger: createMockLogger(),
-      createLogger: ({ stream }: { stream?: { write?: (chunk: string) => void } } = {}) =>
-        createMockLogger(stream),
-    };
-  })(),
-  toError,
-  toErrorMessage,
-  selectIssuesForStage: vi.fn<
-    (
-      _repo: string,
-      _label: string,
-      _staleLocked?: Set<number>,
-      _options?: { skipTimeline?: boolean }
-    ) => Promise<MockCandidate[]>
-  >(() => Promise.resolve([])),
-  clearStaleLockIfNeeded: vi.fn<
-    (repo: string, issueNumber: string, staleLocked: Set<number>) => Promise<void>
-  >(() => Promise.resolve()),
-  fetchIssueTimelines: vi.fn<
-    (repo: string, issueNumbers: number[]) => Promise<Map<number, { created_at?: string }[]>>
-  >(() => Promise.resolve(new Map())),
-  aggregateSessionUsage: vi.fn(),
-  gh: vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>(),
-  fetchChecks: vi.fn<(repo: string, pr: string) => Promise<MockCheck[]>>(() => Promise.resolve([])),
-  classifyChecks: vi.fn(() => ({ pending: [], failed: [], passed: [], total: 0 })),
-  sleepMs: (ms: number) => sleepMsMock(ms),
-  handleAgentCrash: (
-    repo: string,
-    issue: string,
-    stage: string,
-    detail: string,
-    summary?: string
-  ) => handleAgentCrashMock(repo, issue, stage, detail, summary),
-  executeMerge: (options: {
-    pr: { number: number; title: string; headRefName: string; baseRefName: string };
-    issueNumber: number;
-    nwo: string;
-    treatPendingChecksAsFailure: boolean;
-  }) => executeMergeMock(options),
-  STAGE_NAME_MAP: labelFixtures.stageNameMap,
-  STAGE_LABEL_NAMES: labelFixtures.stageLabelNames,
-  NEW_LABEL: 'shipper:new',
-  PR_REVIEWED_LABEL: 'shipper:pr-reviewed',
-  PRIORITY_LABEL_NAMES: ['shipper:priority-high', 'shipper:priority-low'],
-  READY_LABEL: 'shipper:ready',
-  BLOCKED_LABEL: 'shipper:blocked',
-  LOCKED_LABEL: 'shipper:locked',
-  FAILED_LABEL: 'shipper:failed',
-  getSettings: () => getSettingsMock(),
-  resolveMode: (step: string, override?: 'headless' | 'interactive' | 'default') =>
-    resolveModeMock(step, override),
-  processResult: (result?: { issueNumber?: string; stage?: string }) => processResultMock(result),
-  scrubOutputDir: vi.fn<(cwd: string) => Promise<void>>(() => Promise.resolve()),
-  sortIssuesByLabelTime: vi.fn(<T>(issues: T[]) => issues),
-  withStageHooks: vi.fn((_stage: string, _env: unknown, fn: () => Promise<unknown>) => fn()),
-  withIssueLock: vi.fn((_repo: string, issue: string, fn: () => Promise<unknown>) => {
-    lockState.lockedIssues.add(issue);
-    return fn().finally(() => {
-      lockState.lockedIssues.delete(issue);
-    });
-  }),
-  retryOnInvalidOutput: vi.fn<
-    (opts: { cwd: string; stage: string; retry: (msg: string) => Promise<number> }) => Promise<{
-      verdict: 'accept';
-      comment: string;
-    }>
-  >(() => Promise.resolve({ verdict: 'accept', comment: '.shipper/output/comment-7.md' })),
-  totalTokens: vi.fn((usage: { inputTokens: number; outputTokens: number }) => {
-    return usage.inputTokens + usage.outputTokens;
-  }),
-  releaseIssueLock: vi.fn<(repo: string, issue: string) => Promise<void>>(() => Promise.resolve()),
-  runPrompt: vi.fn<(name: string, opts: unknown) => Promise<number>>(() => Promise.resolve(0)),
-  parseIssueTitleLabelsList,
-  parseQueuedPrList,
-}));
+      const createMockLogger = (stream?: {
+        destroyed?: boolean;
+        writableEnded?: boolean;
+        write?: (chunk: string) => void;
+      }) => ({
+        log: (message: string) => {
+          const line = `[shipper] ${message}`;
+          console.log(line);
+          writeToStream(stream, line);
+        },
+        warn: (message: string) => {
+          const line = `[shipper] ${message}`;
+          console.warn(line);
+          writeToStream(stream, line);
+        },
+        error: (message: string) => {
+          const line = `[shipper] ${message}`;
+          console.error(line);
+          writeToStream(stream, line);
+        },
+      });
+
+      return {
+        logger: createMockLogger(),
+        createLogger: ({ stream }: { stream?: { write?: (chunk: string) => void } } = {}) =>
+          createMockLogger(stream),
+      };
+    })(),
+    toError,
+    toErrorMessage,
+    selectIssuesForStage: vi.fn<
+      (
+        _repo: string,
+        _label: string,
+        _staleLocked?: Set<number>,
+        _options?: { skipTimeline?: boolean }
+      ) => Promise<MockCandidate[]>
+    >(() => Promise.resolve([])),
+    clearStaleLockIfNeeded: vi.fn<
+      (repo: string, issueNumber: string, staleLocked: Set<number>) => Promise<void>
+    >(() => Promise.resolve()),
+    fetchIssueTimelines: vi.fn<
+      (repo: string, issueNumbers: number[]) => Promise<Map<number, { created_at?: string }[]>>
+    >(() => Promise.resolve(new Map())),
+    aggregateSessionUsage: vi.fn(),
+    gh: vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>(),
+    fetchChecks: vi.fn<(repo: string, pr: string) => Promise<MockCheck[]>>(() =>
+      Promise.resolve([])
+    ),
+    classifyChecks: vi.fn(() => ({ pending: [], failed: [], passed: [], total: 0 })),
+    sleepMs: (ms: number) => sleepMsMock(ms),
+    handleAgentCrash: (
+      repo: string,
+      issue: string,
+      stage: string,
+      detail: string,
+      summary?: string
+    ) => handleAgentCrashMock(repo, issue, stage, detail, summary),
+    executeMerge: (options: {
+      pr: { number: number; title: string; headRefName: string; baseRefName: string };
+      issueNumber: number;
+      nwo: string;
+      treatPendingChecksAsFailure: boolean;
+    }) => executeMergeMock(options),
+    STAGE_NAME_MAP: labelFixtures.stageNameMap,
+    STAGE_LABEL_NAMES: labelFixtures.stageLabelNames,
+    NEW_LABEL: 'shipper:new',
+    PR_REVIEWED_LABEL: 'shipper:pr-reviewed',
+    PRIORITY_LABEL_NAMES: ['shipper:priority-high', 'shipper:priority-low'],
+    READY_LABEL: 'shipper:ready',
+    BLOCKED_LABEL: 'shipper:blocked',
+    LOCKED_LABEL: 'shipper:locked',
+    FAILED_LABEL: 'shipper:failed',
+    getSettings: () => getSettingsMock(),
+    resolveMode: (step: string, override?: 'headless' | 'interactive' | 'default') =>
+      resolveModeMock(step, override),
+    processResult: (result?: { issueNumber?: string; stage?: string }) => processResultMock(result),
+    scrubOutputDir: vi.fn<(cwd: string) => Promise<void>>(() => Promise.resolve()),
+    sortIssuesByLabelTime: vi.fn(<T>(issues: T[]) => issues),
+    withStageHooks: vi.fn((_stage: string, _env: unknown, fn: () => Promise<unknown>) => fn()),
+    withIssueLock: vi.fn((_repo: string, issue: string, fn: () => Promise<unknown>) => {
+      lockState.lockedIssues.add(issue);
+      return fn().finally(() => {
+        lockState.lockedIssues.delete(issue);
+      });
+    }),
+    retryOnInvalidOutput: vi.fn<
+      (opts: { cwd: string; stage: string; retry: (msg: string) => Promise<number> }) => Promise<{
+        verdict: 'accept';
+        comment: string;
+      }>
+    >(() => Promise.resolve({ verdict: 'accept', comment: '.shipper/output/comment-7.md' })),
+    totalTokens: vi.fn((usage: { inputTokens: number; outputTokens: number }) => {
+      return usage.inputTokens + usage.outputTokens;
+    }),
+    releaseIssueLock: vi.fn<(repo: string, issue: string) => Promise<void>>(() =>
+      Promise.resolve()
+    ),
+    runPrompt: vi.fn<(name: string, opts: unknown) => Promise<number>>(() => Promise.resolve(0)),
+    parseIssueTitleLabelsList,
+    parseQueuedPrList,
+  };
+});
 
 vi.mock('node:fs', async () => {
   const actual = await vi.importActual<typeof import('node:fs')>('node:fs');

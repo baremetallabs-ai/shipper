@@ -1,10 +1,9 @@
 import { defineConfig } from 'tsup';
 
 export default defineConfig({
-  entry: ['src/index.ts'],
+  entry: ['src/index.ts', 'src/internal.ts', 'src/lib/**/*.ts', 'src/templates/readme.js'],
   format: ['esm'],
   dts: true,
-  splitting: false,
   sourcemap: true,
   clean: true,
   loader: {

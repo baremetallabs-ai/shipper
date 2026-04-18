@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import type { RefObject, SetStateAction } from 'react';
 
-import { BLOCKED_LABEL, LOCKED_LABEL } from '../../../../core/src/lib/labels.js';
-import { toErrorMessage } from '../../../../core/src/lib/errors.js';
+import { BLOCKED_LABEL, LOCKED_LABEL, toErrorMessage } from '@dnsquared/shipper-core';
 
 import {
   getActiveShipIssueNumbers,

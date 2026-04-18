@@ -1,4 +1,3 @@
-import type { WorkflowStage } from '@dnsquared/shipper-core';
 import {
   DESIGNED_LABEL,
   GROOMED_LABEL,
@@ -8,7 +7,8 @@ import {
   PR_OPEN_LABEL,
   PR_REVIEWED_LABEL,
   READY_LABEL,
-} from '../../../../core/src/lib/labels.js';
+  type WorkflowStage,
+} from '@dnsquared/shipper-core';
 
 export const repoPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 

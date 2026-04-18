@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { parseIssueTitleLabelsList } from '../../../core/src/lib/gh-schemas.js';
 
 const {
   mockGh,
@@ -37,27 +36,32 @@ const {
   lockedLabel: 'shipper:locked',
 }));
 
-vi.mock('@dnsquared/shipper-core', () => ({
-  logger: {
-    error: (message: string) => {
-      console.error(`[shipper] ${message}`);
+vi.mock('@dnsquared/shipper-core', async () => {
+  const { parseIssueTitleLabelsList } =
+    await vi.importActual<typeof import('@dnsquared/shipper-core')>('@dnsquared/shipper-core');
+
+  return {
+    logger: {
+      error: (message: string) => {
+        console.error(`[shipper] ${message}`);
+      },
+      log: (message: string) => {
+        console.log(`[shipper] ${message}`);
+      },
+      warn: (message: string) => {
+        console.warn(`[shipper] ${message}`);
+      },
     },
-    log: (message: string) => {
-      console.log(`[shipper] ${message}`);
-    },
-    warn: (message: string) => {
-      console.warn(`[shipper] ${message}`);
-    },
-  },
-  gh: (args: string[]) => mockGh(args),
-  parseIssueTitleLabelsList,
-  STAGE_LABEL_NAMES: stageLabels,
-  DISPLAY_NAME_MAP: displayNameMap,
-  CONTROL_LABEL_NAMES: controlLabelNames,
-  BLOCKED_LABEL: blockedLabel,
-  FAILED_LABEL: failedLabel,
-  LOCKED_LABEL: lockedLabel,
-}));
+    gh: (args: string[]) => mockGh(args),
+    parseIssueTitleLabelsList,
+    STAGE_LABEL_NAMES: stageLabels,
+    DISPLAY_NAME_MAP: displayNameMap,
+    CONTROL_LABEL_NAMES: controlLabelNames,
+    BLOCKED_LABEL: blockedLabel,
+    FAILED_LABEL: failedLabel,
+    LOCKED_LABEL: lockedLabel,
+  };
+});
 
 import { issueListCommand } from '../../src/commands/issue-list.js';
 

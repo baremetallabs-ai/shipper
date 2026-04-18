@@ -1,58 +1,78 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { toError, toErrorMessage } from '../../../core/src/lib/errors.js';
-import { parseIssueStateTitle, parsePrStateMergedTitle } from '../../../core/src/lib/gh-schemas.js';
 
-const fetchIssueMock = vi.fn();
-const ghMock = vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>();
-const handleAgentCrashMock = vi.fn(() => Promise.resolve());
-const validatedResult = {
-  verdict: 'accept' as const,
-  comment: '.shipper/output/comment-250.md',
-};
-const processResultMock = vi.fn(() => Promise.resolve(validatedResult));
-const retryOnInvalidOutputMock = vi.fn<
-  (opts: {
-    cwd: string;
-    stage: string;
-    retry: (message: string) => Promise<number>;
-  }) => Promise<typeof validatedResult>
->(() => Promise.resolve(validatedResult));
-const runPromptMock = vi.fn(() => Promise.resolve(0));
-const scrubOutputDirMock = vi.fn(() => Promise.resolve());
-const setupProtocolDirsMock = vi.fn(() => Promise.resolve());
-const loggerMock = {
-  log: (message: string) => {
-    console.log(`[shipper] ${message}`);
-  },
-  warn: (message: string) => {
-    console.warn(`[shipper] ${message}`);
-  },
-  error: (message: string) => {
-    console.error(`[shipper] ${message}`);
-  },
-};
-const withIssueLockMock = vi.fn((_repo: unknown, _issue: unknown, fn: () => Promise<unknown>) =>
-  fn()
-);
-const writeContextFileMock = vi.fn(() => Promise.resolve());
+const {
+  fetchIssueMock,
+  ghMock,
+  handleAgentCrashMock,
+  loggerMock,
+  processResultMock,
+  retryOnInvalidOutputMock,
+  runPromptMock,
+  scrubOutputDirMock,
+  setupProtocolDirsMock,
+  validatedResult,
+  withIssueLockMock,
+  writeContextFileMock,
+} = vi.hoisted(() => {
+  const validatedResult = {
+    verdict: 'accept' as const,
+    comment: '.shipper/output/comment-250.md',
+  };
 
-vi.mock('@dnsquared/shipper-core', () => ({
-  logger: loggerMock,
-  toError,
-  toErrorMessage,
-  parseIssueStateTitle,
-  parsePrStateMergedTitle,
-  fetchIssue: fetchIssueMock,
-  gh: ghMock,
-  handleAgentCrash: handleAgentCrashMock,
-  processResult: processResultMock,
-  retryOnInvalidOutput: retryOnInvalidOutputMock,
-  runPrompt: runPromptMock,
-  scrubOutputDir: scrubOutputDirMock,
-  setupProtocolDirs: setupProtocolDirsMock,
-  withIssueLock: withIssueLockMock,
-  writeContextFile: writeContextFileMock,
-}));
+  return {
+    fetchIssueMock: vi.fn(),
+    ghMock: vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>(),
+    handleAgentCrashMock: vi.fn(() => Promise.resolve()),
+    loggerMock: {
+      log: (message: string) => {
+        console.log(`[shipper] ${message}`);
+      },
+      warn: (message: string) => {
+        console.warn(`[shipper] ${message}`);
+      },
+      error: (message: string) => {
+        console.error(`[shipper] ${message}`);
+      },
+    },
+    processResultMock: vi.fn(() => Promise.resolve(validatedResult)),
+    retryOnInvalidOutputMock: vi.fn<
+      (opts: {
+        cwd: string;
+        stage: string;
+        retry: (message: string) => Promise<number>;
+      }) => Promise<typeof validatedResult>
+    >(() => Promise.resolve(validatedResult)),
+    runPromptMock: vi.fn(() => Promise.resolve(0)),
+    scrubOutputDirMock: vi.fn(() => Promise.resolve()),
+    setupProtocolDirsMock: vi.fn(() => Promise.resolve()),
+    validatedResult,
+    withIssueLockMock: vi.fn((_repo: unknown, _issue: unknown, fn: () => Promise<unknown>) => fn()),
+    writeContextFileMock: vi.fn(() => Promise.resolve()),
+  };
+});
+
+vi.mock('@dnsquared/shipper-core', async () => {
+  const { parseIssueStateTitle, parsePrStateMergedTitle, toError, toErrorMessage } =
+    await vi.importActual<typeof import('@dnsquared/shipper-core')>('@dnsquared/shipper-core');
+
+  return {
+    logger: loggerMock,
+    toError,
+    toErrorMessage,
+    parseIssueStateTitle,
+    parsePrStateMergedTitle,
+    fetchIssue: fetchIssueMock,
+    gh: ghMock,
+    handleAgentCrash: handleAgentCrashMock,
+    processResult: processResultMock,
+    retryOnInvalidOutput: retryOnInvalidOutputMock,
+    runPrompt: runPromptMock,
+    scrubOutputDir: scrubOutputDirMock,
+    setupProtocolDirs: setupProtocolDirsMock,
+    withIssueLock: withIssueLockMock,
+    writeContextFile: writeContextFileMock,
+  };
+});
 
 describe('prepareUnblockContext', () => {
   beforeEach(() => {

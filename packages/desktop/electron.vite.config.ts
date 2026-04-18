@@ -35,6 +35,11 @@ export default defineConfig({
   },
   renderer: {
     root: 'src/renderer',
+    resolve: {
+      alias: {
+        '@dnsquared/shipper-core': resolve(__dirname, '../core/src/browser.ts'),
+      },
+    },
     build: {
       outDir: resolve(__dirname, 'out/renderer'),
       rollupOptions: {

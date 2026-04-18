@@ -60,6 +60,9 @@ npx vitest run packages/cli/tests/lib/branch.test.ts   # Run a single test file
 - **Type imports:** `import type { Foo } from ...` enforced by `consistent-type-imports` rule
 - **No floating promises:** all promises must be `await`ed or explicitly `void`ed
 - **Unused variables:** prefix with `_` to satisfy lint
-- **Core barrel export:** new public APIs in `packages/core/src/lib/` must be re-exported from `packages/core/src/index.ts`
+- **Core public API:** `packages/core/src/index.ts` is the curated public surface for workspace consumers
+- **Core internal barrel:** `packages/core/src/internal.ts` is the source-only barrel for non-public helpers inside `packages/core`
+- **Default to internal:** new helpers belong in the internal surface unless an external consumer justifies promoting them into `packages/core/src/index.ts`
+- **No deep imports into core:** any `packages/core/src/**` relative import or `@dnsquared/shipper-core/*` subpath import from outside `packages/core` is prohibited and enforced by ESLint
 - **Vitest globals:** `describe`, `it`, `expect`, `vi` etc. are available globally in tests (no imports needed)
 - **Build order:** core must build before cli (`npm run build` handles this automatically)

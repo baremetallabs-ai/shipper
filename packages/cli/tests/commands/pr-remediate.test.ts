@@ -1,68 +1,97 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type {
-  CheckClassification,
-  LabelTransition,
-  PRChecksLine,
-  ResultJson,
-} from '@dnsquared/shipper-core';
-import { toError, toErrorMessage } from '../../../core/src/lib/errors.js';
-import { isPlainObject } from '../../../core/src/lib/type-guards.js';
-import { parsePrBaseRefNameView, parsePrCreatedAtView } from '../../../core/src/lib/gh-schemas.js';
+import type { CheckClassification, LabelTransition, PRChecksLine } from '@dnsquared/shipper-core';
 
 type MockPrReviewWait =
   | { mode: 'timer'; durationMinutes: number }
   | { mode: 'checks'; minDurationMinutes?: number; maxDurationMinutes?: number };
+type TestResultJson = {
+  verdict: 'accept' | 'reject' | 'fail';
+  comment: string;
+  pr_spec?: string;
+  review_payload?: string;
+  replies?: string;
+};
 
-const getSettingsMock = vi.fn<() => { prReviewWait: MockPrReviewWait }>();
-const fetchChecksMock = vi.fn<(repo: string, pr: string) => Promise<PRChecksLine[]>>();
-const classifyChecksMock = vi.fn<(checks: PRChecksLine[]) => CheckClassification>();
-const enrichFailedChecksMock =
-  vi.fn<(repo: string, failedChecks: PRChecksLine[]) => Promise<Map<string, string>>>();
-const resolveRefMock = vi.fn();
-const autoSelectPrForStageMock = vi.fn();
-const formatConflictContextMock = vi.fn(() => 'formatted conflict context');
-const truncateLargeInputMock = vi.fn((_: string, text: string, filename: string) =>
-  Promise.resolve(`truncated:${filename}:${text}`)
-);
-const runPromptMock = vi.fn();
-const getGitRevParseMock = vi.fn<(cwd: string, ref: string) => Promise<string>>();
-const getCommitsAheadCountMock = vi.fn<(wtPath: string, baseBranch: string) => Promise<number>>();
-const rerunFailedChecksMock =
-  vi.fn<(repo: string, failedChecks: PRChecksLine[]) => Promise<void>>();
-const syncWorktreeMock = vi.fn(() => Promise.resolve());
-const pushWithRetryMock = vi.fn(() => Promise.resolve(0));
-const withStageHooksMock = vi.fn((_stage: unknown, _env: unknown, fn: () => Promise<unknown>) =>
-  fn()
-);
-const withIssueLockMock = vi.fn((_repo: unknown, _issue: unknown, fn: () => Promise<unknown>) =>
-  fn()
-);
-const withWorktreeMock = vi.fn((_opts: unknown, fn: (wtPath: string) => Promise<unknown>) =>
-  fn('/tmp/fake-wt')
-);
-const getBranchForPRMock = vi.fn(() => Promise.resolve('shipper/10-feature'));
-const getRepoRootMock = vi.fn(() => Promise.resolve('/tmp/fake-repo'));
-const ghMock = vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>();
-const sleepMsMock = vi.fn<(ms: number) => Promise<void>>(() => Promise.resolve());
-const setupProtocolDirsMock = vi.fn(() => Promise.resolve());
-const writeContextFileMock = vi.fn(() => Promise.resolve());
-const scrubOutputDirMock = vi.fn(() => Promise.resolve());
-const validateStageOutputMock = vi.fn<(cwd: string, stage: string) => Promise<ResultJson>>();
-const retryOnInvalidOutputMock = vi.fn<
-  (opts: {
-    cwd: string;
-    stage: string;
-    retry: (message: string) => Promise<number>;
-  }) => Promise<ResultJson>
->(() => Promise.resolve({ verdict: 'accept', comment: '.shipper/output/comment-10.md' }));
-const processResultMock = vi.fn<(opts: unknown) => Promise<ResultJson>>();
-const postRepliesMock = vi.fn(() => Promise.resolve());
-const postCommentMock = vi.fn(() => Promise.resolve());
-const executeTransitionMock = vi.fn(() => Promise.resolve());
-const handleAgentCrashMock = vi.fn(() => Promise.resolve());
-const resolveTransitionMock = vi.fn<() => LabelTransition>(() => ({
-  add: ['shipper:ready'],
-  remove: ['shipper:pr-reviewed'],
+const {
+  autoSelectPrForStageMock,
+  classifyChecksMock,
+  enrichFailedChecksMock,
+  executeTransitionMock,
+  fetchChecksMock,
+  formatConflictContextMock,
+  getBranchForPRMock,
+  getCommitsAheadCountMock,
+  getGitRevParseMock,
+  getRepoRootMock,
+  getSettingsMock,
+  ghMock,
+  handleAgentCrashMock,
+  postCommentMock,
+  postRepliesMock,
+  processResultMock,
+  pushWithRetryMock,
+  rerunFailedChecksMock,
+  resolveRefMock,
+  resolveTransitionMock,
+  retryOnInvalidOutputMock,
+  runPromptMock,
+  scrubOutputDirMock,
+  setupProtocolDirsMock,
+  sleepMsMock,
+  syncWorktreeMock,
+  truncateLargeInputMock,
+  validateStageOutputMock,
+  withIssueLockMock,
+  withStageHooksMock,
+  withWorktreeMock,
+  writeContextFileMock,
+} = vi.hoisted(() => ({
+  autoSelectPrForStageMock: vi.fn(),
+  classifyChecksMock: vi.fn<(checks: PRChecksLine[]) => CheckClassification>(),
+  enrichFailedChecksMock:
+    vi.fn<(repo: string, failedChecks: PRChecksLine[]) => Promise<Map<string, string>>>(),
+  executeTransitionMock: vi.fn(() => Promise.resolve()),
+  fetchChecksMock: vi.fn<(repo: string, pr: string) => Promise<PRChecksLine[]>>(),
+  formatConflictContextMock: vi.fn(() => 'formatted conflict context'),
+  getBranchForPRMock: vi.fn(() => Promise.resolve('shipper/10-feature')),
+  getCommitsAheadCountMock: vi.fn<(wtPath: string, baseBranch: string) => Promise<number>>(),
+  getGitRevParseMock: vi.fn<(cwd: string, ref: string) => Promise<string>>(),
+  getRepoRootMock: vi.fn(() => Promise.resolve('/tmp/fake-repo')),
+  getSettingsMock: vi.fn<() => { prReviewWait: MockPrReviewWait }>(),
+  ghMock: vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>(),
+  handleAgentCrashMock: vi.fn(() => Promise.resolve()),
+  postCommentMock: vi.fn(() => Promise.resolve()),
+  postRepliesMock: vi.fn(() => Promise.resolve()),
+  processResultMock: vi.fn<(opts: unknown) => Promise<TestResultJson>>(),
+  pushWithRetryMock: vi.fn(() => Promise.resolve(0)),
+  rerunFailedChecksMock: vi.fn<(repo: string, failedChecks: PRChecksLine[]) => Promise<void>>(),
+  resolveRefMock: vi.fn(),
+  resolveTransitionMock: vi.fn<() => LabelTransition>(() => ({
+    add: ['shipper:ready'],
+    remove: ['shipper:pr-reviewed'],
+  })),
+  retryOnInvalidOutputMock: vi.fn<
+    (opts: {
+      cwd: string;
+      stage: string;
+      retry: (message: string) => Promise<number>;
+    }) => Promise<TestResultJson>
+  >(() => Promise.resolve({ verdict: 'accept', comment: '.shipper/output/comment-10.md' })),
+  runPromptMock: vi.fn(),
+  scrubOutputDirMock: vi.fn(() => Promise.resolve()),
+  setupProtocolDirsMock: vi.fn(() => Promise.resolve()),
+  sleepMsMock: vi.fn<(ms: number) => Promise<void>>(() => Promise.resolve()),
+  syncWorktreeMock: vi.fn(() => Promise.resolve()),
+  truncateLargeInputMock: vi.fn((_: string, text: string, filename: string) =>
+    Promise.resolve(`truncated:${filename}:${text}`)
+  ),
+  validateStageOutputMock: vi.fn<(cwd: string, stage: string) => Promise<TestResultJson>>(),
+  withIssueLockMock: vi.fn((_repo: unknown, _issue: unknown, fn: () => Promise<unknown>) => fn()),
+  withStageHooksMock: vi.fn((_stage: unknown, _env: unknown, fn: () => Promise<unknown>) => fn()),
+  withWorktreeMock: vi.fn((_opts: unknown, fn: (wtPath: string) => Promise<unknown>) =>
+    fn('/tmp/fake-wt')
+  ),
+  writeContextFileMock: vi.fn(() => Promise.resolve()),
 }));
 
 const repo = 'owner/repo';
@@ -71,56 +100,61 @@ const PASS_CHECKS = [{ name: 'build', state: 'COMPLETED', bucket: 'pass' }];
 const FAIL_CHECKS = [{ name: 'build', state: 'COMPLETED', bucket: 'fail' }];
 type WriteContextFileCall = [string, string, string];
 
-vi.mock('@dnsquared/shipper-core', () => ({
-  logger: {
-    log: (message: string) => {
-      console.log(`[shipper] ${message}`);
+vi.mock('@dnsquared/shipper-core', async () => {
+  const { isPlainObject, parsePrBaseRefNameView, parsePrCreatedAtView, toError, toErrorMessage } =
+    await vi.importActual<typeof import('@dnsquared/shipper-core')>('@dnsquared/shipper-core');
+
+  return {
+    logger: {
+      log: (message: string) => {
+        console.log(`[shipper] ${message}`);
+      },
+      warn: (message: string) => {
+        console.warn(`[shipper] ${message}`);
+      },
+      error: (message: string) => {
+        console.error(`[shipper] ${message}`);
+      },
     },
-    warn: (message: string) => {
-      console.warn(`[shipper] ${message}`);
-    },
-    error: (message: string) => {
-      console.error(`[shipper] ${message}`);
-    },
-  },
-  toError,
-  toErrorMessage,
-  isPlainObject,
-  parsePrBaseRefNameView,
-  parsePrCreatedAtView,
-  resolveRef: resolveRefMock,
-  autoSelectPrForStage: autoSelectPrForStageMock,
-  formatConflictContext: formatConflictContextMock,
-  truncateLargeInput: truncateLargeInputMock,
-  runPrompt: runPromptMock,
-  getGitRevParse: getGitRevParseMock,
-  getCommitsAheadCount: getCommitsAheadCountMock,
-  rerunFailedChecks: rerunFailedChecksMock,
-  syncWorktree: syncWorktreeMock,
-  pushWithRetry: pushWithRetryMock,
-  withStageHooks: withStageHooksMock,
-  withIssueLock: withIssueLockMock,
-  withWorktree: withWorktreeMock,
-  getBranchForPR: getBranchForPRMock,
-  getRepoRoot: getRepoRootMock,
-  gh: ghMock,
-  sleepMs: sleepMsMock,
-  getSettings: getSettingsMock,
-  fetchChecks: fetchChecksMock,
-  classifyChecks: classifyChecksMock,
-  enrichFailedChecks: enrichFailedChecksMock,
-  setupProtocolDirs: setupProtocolDirsMock,
-  writeContextFile: writeContextFileMock,
-  scrubOutputDir: scrubOutputDirMock,
-  validateStageOutput: validateStageOutputMock,
-  retryOnInvalidOutput: retryOnInvalidOutputMock,
-  processResult: processResultMock,
-  postReplies: postRepliesMock,
-  postComment: postCommentMock,
-  executeTransition: executeTransitionMock,
-  handleAgentCrash: handleAgentCrashMock,
-  resolveTransition: resolveTransitionMock,
-}));
+    toError,
+    toErrorMessage,
+    isPlainObject,
+    parsePrBaseRefNameView,
+    parsePrCreatedAtView,
+    resolveRef: resolveRefMock,
+    autoSelectPrForStage: autoSelectPrForStageMock,
+    formatConflictContext: formatConflictContextMock,
+    truncateLargeInput: truncateLargeInputMock,
+    runPrompt: runPromptMock,
+    getGitRevParse: getGitRevParseMock,
+    getCommitsAheadCount: getCommitsAheadCountMock,
+    rerunFailedChecks: rerunFailedChecksMock,
+    syncWorktree: syncWorktreeMock,
+    pushWithRetry: pushWithRetryMock,
+    withStageHooks: withStageHooksMock,
+    withIssueLock: withIssueLockMock,
+    withWorktree: withWorktreeMock,
+    getBranchForPR: getBranchForPRMock,
+    getRepoRoot: getRepoRootMock,
+    gh: ghMock,
+    sleepMs: sleepMsMock,
+    getSettings: getSettingsMock,
+    fetchChecks: fetchChecksMock,
+    classifyChecks: classifyChecksMock,
+    enrichFailedChecks: enrichFailedChecksMock,
+    setupProtocolDirs: setupProtocolDirsMock,
+    writeContextFile: writeContextFileMock,
+    scrubOutputDir: scrubOutputDirMock,
+    validateStageOutput: validateStageOutputMock,
+    retryOnInvalidOutput: retryOnInvalidOutputMock,
+    processResult: processResultMock,
+    postReplies: postRepliesMock,
+    postComment: postCommentMock,
+    executeTransition: executeTransitionMock,
+    handleAgentCrash: handleAgentCrashMock,
+    resolveTransition: resolveTransitionMock,
+  };
+});
 
 function classifyChecksImpl(checks: PRChecksLine[]): CheckClassification {
   return {
@@ -162,7 +196,7 @@ describe('prRemediateCommand', () => {
       comment: '.shipper/output/comment-10.md',
     });
     processResultMock.mockImplementation((opts) => {
-      const result = (opts as { result: ResultJson }).result;
+      const result = (opts as { result: TestResultJson }).result;
       return Promise.resolve(result);
     });
     postRepliesMock.mockResolvedValue(undefined);
@@ -1166,7 +1200,7 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
     'delegates %s verdicts to processResult and never pushes',
     async (verdict) => {
       fetchChecksMock.mockResolvedValue(PASS_CHECKS);
-      const result: ResultJson = {
+      const result: TestResultJson = {
         verdict,
         comment: '.shipper/output/comment-10.md',
       };

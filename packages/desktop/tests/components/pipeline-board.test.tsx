@@ -4,8 +4,7 @@ import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { ListIssueItem } from '@dnsquared/shipper-core';
-import { IMPLEMENTED_LABEL, NEW_LABEL } from '../../../core/src/lib/labels.js';
+import { IMPLEMENTED_LABEL, NEW_LABEL, type ListIssueItem } from '@dnsquared/shipper-core';
 import { PipelineBoard } from '../../src/renderer/components/pipeline-board.js';
 import { PIPELINE_COLUMNS } from '../../src/renderer/lib/constants.js';
 import type { ActiveShippingCommand, ResetSelection } from '../../src/renderer/types.js';

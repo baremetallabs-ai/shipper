@@ -6,8 +6,9 @@ import {
   DISPLAY_NAME_MAP,
   getPriorityTier,
   LOCKED_LABEL,
-} from '../../../../core/src/lib/labels.js';
-import type { ListIssueItem, WorkflowStage } from '@dnsquared/shipper-core';
+  type ListIssueItem,
+  type WorkflowStage,
+} from '@dnsquared/shipper-core';
 
 import {
   COLUMN_RESET_STAGE,

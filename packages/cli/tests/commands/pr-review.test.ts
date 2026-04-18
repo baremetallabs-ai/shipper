@@ -1,7 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { RunPromptOpts } from '../../../core/src/lib/prompt-runner.js';
-import type { StageScaffoldOpts } from '../../../core/src/lib/stage-scaffold.js';
-import { parsePrFilesPages } from '../../../core/src/lib/gh-schemas.js';
+import type { StageScaffoldOpts } from '@dnsquared/shipper-core';
 
 const autoSelectPrForStageMock = vi.fn();
 const getBranchForPRMock = vi.fn(() => Promise.resolve('shipper/10-feature'));
@@ -11,13 +9,15 @@ const parseDiffHunksMock =
   vi.fn<
     (diff: string) => Map<string, { left: Array<[number, number]>; right: Array<[number, number]> }>
   >();
+const parsePrFilesPagesMock = vi.fn<(raw: string) => Array<Array<{ filename: string }>>>(() => [
+  [{ filename: 'src/file.ts' }],
+]);
 const resolveRefMock = vi.fn(() => Promise.resolve({ prNumber: '42', issueNumber: '10' }));
-const runPromptMock = vi.fn<(name: string, opts: RunPromptOpts) => Promise<number>>(() =>
-  Promise.resolve(0)
-);
 const runStageScaffoldMock = vi.fn<(opts: StageScaffoldOpts) => Promise<void>>(() =>
   Promise.resolve()
 );
+const simpleInvokerFactoryMock = vi.fn();
+const simpleInvokerMock = vi.fn(() => simpleInvokerFactoryMock);
 const writeContextFileMock = vi.fn<
   (wtPath: string, filename: string, content: string) => Promise<void>
 >(() => Promise.resolve());
@@ -43,34 +43,23 @@ const parsedDiffHunks = new Map([
   ],
 ]);
 
-vi.mock('../../../core/src/lib/prompt-runner.js', () => {
-  return {
-    runPrompt: (name: string, opts: RunPromptOpts) => runPromptMock(name, opts),
-  };
-});
-
-vi.mock('@dnsquared/shipper-core', async () => {
-  const stageScaffold = await vi.importActual<
-    typeof import('../../../core/src/lib/stage-scaffold.js')
-  >('../../../core/src/lib/stage-scaffold.js');
-  return {
-    autoSelectPrForStage: autoSelectPrForStageMock,
-    getBranchForPR: getBranchForPRMock,
-    getRepoRoot: getRepoRootMock,
-    gh: (...args: [string[]]) => ghMock(...args),
-    logger: {
-      error: (...args: [string]) => {
-        loggerErrorMock(...args);
-      },
+vi.mock('@dnsquared/shipper-core', () => ({
+  autoSelectPrForStage: autoSelectPrForStageMock,
+  getBranchForPR: getBranchForPRMock,
+  getRepoRoot: getRepoRootMock,
+  gh: (...args: [string[]]) => ghMock(...args),
+  logger: {
+    error: (...args: [string]) => {
+      loggerErrorMock(...args);
     },
-    parseDiffHunks: (...args: [string]) => parseDiffHunksMock(...args),
-    parsePrFilesPages,
-    resolveRef: resolveRefMock,
-    runStageScaffold: (opts: StageScaffoldOpts) => runStageScaffoldMock(opts),
-    simpleInvoker: stageScaffold.simpleInvoker,
-    writeContextFile: (...args: [string, string, string]) => writeContextFileMock(...args),
-  };
-});
+  },
+  parseDiffHunks: (...args: [string]) => parseDiffHunksMock(...args),
+  parsePrFilesPages: (...args: [string]) => parsePrFilesPagesMock(...args),
+  resolveRef: resolveRefMock,
+  runStageScaffold: (opts: StageScaffoldOpts) => runStageScaffoldMock(opts),
+  simpleInvoker: (...args: unknown[]) => simpleInvokerMock(...args),
+  writeContextFile: (...args: [string, string, string]) => writeContextFileMock(...args),
+}));
 
 describe('prReviewCommand', () => {
   beforeEach(() => {
@@ -85,9 +74,10 @@ describe('prReviewCommand', () => {
         stderr: '',
       });
     parseDiffHunksMock.mockReturnValue(parsedDiffHunks);
+    parsePrFilesPagesMock.mockReturnValue([[{ filename: 'src/file.ts' }]]);
   });
 
-  it('passes the pr-review scaffold config and preserves pre-lock ref resolution', async () => {
+  it('passes the pr-review scaffold config and simple invoker wiring', async () => {
     const { prReviewCommand } = await import('../../src/commands/pr-review.js');
 
     await expect(prReviewCommand(repo, '42')).resolves.toBeUndefined();
@@ -95,6 +85,19 @@ describe('prReviewCommand', () => {
     expect(resolveRefMock).toHaveBeenCalledWith(repo, '42', 'both');
     expect(resolveRefMock.mock.invocationCallOrder[0]).toBeLessThan(
       runStageScaffoldMock.mock.invocationCallOrder[0]
+    );
+    expect(simpleInvokerMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        promptName: 'pr_review',
+        baseRunPromptOpts: {
+          repo,
+          issueRef: '10',
+          prRef: '42',
+          mode: undefined,
+          agent: undefined,
+          model: undefined,
+        },
+      })
     );
 
     const scaffoldArgs = runStageScaffoldMock.mock.calls[0]?.[0];
@@ -110,6 +113,7 @@ describe('prReviewCommand', () => {
     expect(scaffoldArgs.createBranch).toBe(false);
     expect(scaffoldArgs.initialFailure).toBe('crash');
     expect(scaffoldArgs.prNumber).toEqual({ value: '42' });
+    expect(scaffoldArgs.invoker).toBe(simpleInvokerFactoryMock);
 
     await expect(scaffoldArgs.resolveLocked()).resolves.toEqual({
       repoRoot: '/tmp/fake-repo',
@@ -118,28 +122,29 @@ describe('prReviewCommand', () => {
     expect(getBranchForPRMock).toHaveBeenCalledWith(repo, '42');
   });
 
-  it('builds setup and prompt invocations that preserve review context parity', async () => {
+  it('writes review context files via the setup callback passed to simpleInvoker', async () => {
     const { prReviewCommand } = await import('../../src/commands/pr-review.js');
 
     await prReviewCommand(repo, '42');
 
-    const scaffoldArgs = runStageScaffoldMock.mock.calls[0]?.[0];
-    expect(scaffoldArgs).toBeDefined();
-    if (!scaffoldArgs) {
-      throw new Error('Expected scaffold arguments');
-    }
+    const simpleInvokerArgs = simpleInvokerMock.mock.calls[0]?.[0] as
+      | {
+          setup?: (wtPath: string) => Promise<
+            | {
+                prFiles?: Set<string>;
+                diffHunks?: Map<
+                  string,
+                  { left: Array<[number, number]>; right: Array<[number, number]> }
+                >;
+              }
+            | undefined
+          >;
+        }
+      | undefined;
+    expect(simpleInvokerArgs?.setup).toBeDefined();
 
-    const invoker = scaffoldArgs.invoker({
-      wtPath: '/tmp/fake-wt',
-      repoRoot: '/tmp/fake-repo',
-      branch: 'shipper/10-feature',
-      baseBranch: undefined,
-    });
+    const setupResult = await simpleInvokerArgs?.setup?.('/tmp/fake-wt');
 
-    await expect(invoker.setup?.()).resolves.toEqual({
-      prFiles: new Set(['src/file.ts']),
-      diffHunks: parsedDiffHunks,
-    });
     expect(ghMock).toHaveBeenNthCalledWith(1, ['pr', 'diff', '42', '-R', repo]);
     expect(ghMock).toHaveBeenNthCalledWith(2, [
       'api',
@@ -175,29 +180,10 @@ describe('prReviewCommand', () => {
       '{"headRefOid":"abc123","author":{"login":"author"},"title":"PR","headRefName":"branch"}'
     );
     expect(parseDiffHunksMock).toHaveBeenCalledWith(diffFixture);
-
-    await expect(invoker.initial()).resolves.toBe(0);
-    expect(runPromptMock).toHaveBeenCalledWith('pr_review', {
-      repo,
-      issueRef: '10',
-      prRef: '42',
-      cwd: '/tmp/fake-wt',
-      mode: undefined,
-      agent: undefined,
-      model: undefined,
-    });
-
-    runPromptMock.mockResolvedValueOnce(0);
-    await expect(invoker.retry('Fix result')).resolves.toBe(0);
-    expect(runPromptMock).toHaveBeenLastCalledWith('pr_review', {
-      repo,
-      issueRef: '10',
-      prRef: '42',
-      cwd: '/tmp/fake-wt',
-      mode: undefined,
-      agent: undefined,
-      model: undefined,
-      userInput: 'Fix result',
+    expect(parsePrFilesPagesMock).toHaveBeenCalledWith('[[{"filename":"src/file.ts"}]]');
+    expect(setupResult).toEqual({
+      prFiles: new Set(['src/file.ts']),
+      diffHunks: parsedDiffHunks,
     });
   });
 
@@ -218,11 +204,14 @@ describe('prReviewCommand', () => {
     expect(loggerErrorMock).toHaveBeenCalledWith(
       'Auto-selected PR #84 (issue #321: Selected issue)'
     );
+    const simpleInvokerArgs = simpleInvokerMock.mock.calls[0]?.[0] as
+      | { baseRunPromptOpts: { issueRef: string; prRef: string } }
+      | undefined;
+    expect(simpleInvokerArgs?.baseRunPromptOpts).toEqual(
+      expect.objectContaining({ issueRef: '321', prRef: '84' })
+    );
     expect(runStageScaffoldMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        issueNumber: '321',
-        prNumber: { value: '84' },
-      })
+      expect.objectContaining({ issueNumber: '321', prNumber: { value: '84' } })
     );
   });
 });

@@ -4,14 +4,15 @@ import React from 'react';
 import { createEvent, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { ListIssueItem, WorkflowStage } from '@dnsquared/shipper-core';
 import {
   BLOCKED_LABEL,
   LOCKED_LABEL,
   PLANNED_LABEL,
   PR_OPEN_LABEL,
   PRIORITY_HIGH_LABEL,
-} from '../../../core/src/lib/labels.js';
+  type ListIssueItem,
+  type WorkflowStage,
+} from '@dnsquared/shipper-core';
 import {
   IssueCard,
   getResetTargets,

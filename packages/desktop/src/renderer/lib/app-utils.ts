@@ -1,4 +1,3 @@
-import type { ListIssueItem } from '@dnsquared/shipper-core';
 import {
   BLOCKED_LABEL,
   DISPLAY_NAME_MAP,
@@ -6,7 +5,8 @@ import {
   getPriorityTier,
   LOCKED_LABEL,
   STAGE_LABEL_NAMES,
-} from '../../../../core/src/lib/labels.js';
+  type ListIssueItem,
+} from '@dnsquared/shipper-core';
 
 import { AUTO_SHIP_PRIORITY_LABELS, MAX_AUTO_SHIP_CONSECUTIVE_FAILURES } from './constants.js';
 import type {

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ComponentRef, Dispatch, RefObject, SetStateAction } from 'react';
 
-import { toErrorMessage } from '../../../../core/src/lib/errors.js';
+import { toErrorMessage } from '@dnsquared/shipper-core';
 
 import { getShipperApi } from '../lib/shipper-api.js';
 import type { TerminalSession } from '../types.js';

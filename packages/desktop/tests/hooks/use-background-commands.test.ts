@@ -3,7 +3,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BLOCKED_LABEL, PLANNED_LABEL } from '../../../core/src/lib/labels.js';
+import { BLOCKED_LABEL, PLANNED_LABEL } from '@dnsquared/shipper-core';
 import type { IssuePipelineBridge, IssueListResult } from '../../src/renderer/types.js';
 import { useBackgroundCommands } from '../../src/renderer/hooks/use-background-commands.js';
 import { createMockShipperApi, flushHookEffects } from './test-utils.js';

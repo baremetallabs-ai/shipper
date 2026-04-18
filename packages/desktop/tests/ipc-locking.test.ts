@@ -2,8 +2,6 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { toError, toErrorMessage } from '../../core/src/lib/errors.js';
-import { isPlainObject } from '../../core/src/lib/type-guards.js';
 
 type IpcHandler = (event: unknown, payload: unknown) => unknown;
 let mockUserDataPath = '';
@@ -57,7 +55,9 @@ const state = vi.hoisted(() => ({
   browserWindowEventHandlers: new Map<string, (...args: unknown[]) => void>(),
 }));
 
-vi.mock('@dnsquared/shipper-core', () => {
+vi.mock('@dnsquared/shipper-core', async () => {
+  const { isPlainObject, toError, toErrorMessage } =
+    await vi.importActual<typeof import('@dnsquared/shipper-core')>('@dnsquared/shipper-core');
   const stages = ['new', 'groomed', 'designed', 'planned', 'implemented'] as const;
 
   function normalizeStage(input: string): string {
