@@ -1,29 +1,30 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import {
-  parseIssueNumberLabels,
-  parseIssueNumberLabelsList,
-} from '../../../core/src/lib/gh-schemas.js';
 
 const { mockGh } = vi.hoisted(() => ({
   mockGh: vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>(),
 }));
 
-vi.mock('@dnsquared/shipper-core', () => ({
-  logger: {
-    error: (message: string) => {
-      console.error(`[shipper] ${message}`);
+vi.mock('@dnsquared/shipper-core', async () => {
+  const { parseIssueNumberLabels, parseIssueNumberLabelsList } =
+    await vi.importActual<typeof import('@dnsquared/shipper-core')>('@dnsquared/shipper-core');
+
+  return {
+    logger: {
+      error: (message: string) => {
+        console.error(`[shipper] ${message}`);
+      },
+      log: (message: string) => {
+        console.log(`[shipper] ${message}`);
+      },
+      warn: (message: string) => {
+        console.warn(`[shipper] ${message}`);
+      },
     },
-    log: (message: string) => {
-      console.log(`[shipper] ${message}`);
-    },
-    warn: (message: string) => {
-      console.warn(`[shipper] ${message}`);
-    },
-  },
-  gh: (args: string[]) => mockGh(args),
-  parseIssueNumberLabels,
-  parseIssueNumberLabelsList,
-}));
+    gh: (args: string[]) => mockGh(args),
+    parseIssueNumberLabels,
+    parseIssueNumberLabelsList,
+  };
+});
 
 import { adoptCommand, adoptAllCommand } from '../../src/commands/adopt.js';
 

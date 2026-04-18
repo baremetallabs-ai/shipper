@@ -1,7 +1,5 @@
 import path from 'node:path';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { toError, toErrorMessage } from '../../../core/src/lib/errors.js';
-import { isPlainObject } from '../../../core/src/lib/type-guards.js';
 
 const { mockGh, mockExecFileAsync, mockRunPrereqChecks } = vi.hoisted(() => ({
   mockGh: vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>(),
@@ -98,38 +96,43 @@ vi.mock('node:child_process', async () => {
   return { ...actual, execFile };
 });
 
-vi.mock('@dnsquared/shipper-core', () => ({
-  logger: {
-    log: (message: string) => {
-      console.log(`[shipper] ${message}`);
+vi.mock('@dnsquared/shipper-core', async () => {
+  const { isPlainObject, toError, toErrorMessage } =
+    await vi.importActual<typeof import('@dnsquared/shipper-core')>('@dnsquared/shipper-core');
+
+  return {
+    logger: {
+      log: (message: string) => {
+        console.log(`[shipper] ${message}`);
+      },
+      warn: (message: string) => {
+        console.warn(`[shipper] ${message}`);
+      },
+      error: (message: string) => {
+        console.error(`[shipper] ${message}`);
+      },
     },
-    warn: (message: string) => {
-      console.warn(`[shipper] ${message}`);
+    toError,
+    toErrorMessage,
+    isPlainObject,
+    gh: (args: string[]) => mockGh(args),
+    scripts: {},
+    LABELS: canonicalLabels,
+    DEFAULTS: {
+      prReviewWait: { mode: 'checks', maxDurationMinutes: 30 },
+      lockTimeoutMinutes: 30,
+      commands: { default: { agent: 'claude' } },
     },
-    error: (message: string) => {
-      console.error(`[shipper] ${message}`);
-    },
-  },
-  toError,
-  toErrorMessage,
-  isPlainObject,
-  gh: (args: string[]) => mockGh(args),
-  scripts: {},
-  LABELS: canonicalLabels,
-  DEFAULTS: {
-    prReviewWait: { mode: 'checks', maxDurationMinutes: 30 },
-    lockTimeoutMinutes: 30,
-    commands: { default: { agent: 'claude' } },
-  },
-  SETTING_DESCRIPTIONS: {},
-  CLI_VERSION: '1.2.3',
-  readmeTemplate: '# Test README content',
-  runPrereqChecks: (checks: unknown[]) => mockRunPrereqChecks(checks),
-  checkGitRepo: vi.fn(),
-  checkGhInstalled: vi.fn(),
-  checkGhAuth: vi.fn(),
-  checkGitHubRemote: vi.fn(),
-}));
+    SETTING_DESCRIPTIONS: {},
+    CLI_VERSION: '1.2.3',
+    readmeTemplate: '# Test README content',
+    runPrereqChecks: (checks: unknown[]) => mockRunPrereqChecks(checks),
+    checkGitRepo: vi.fn(),
+    checkGhInstalled: vi.fn(),
+    checkGhAuth: vi.fn(),
+    checkGitHubRemote: vi.fn(),
+  };
+});
 
 const questionMock = vi.fn();
 const closeMock = vi.fn();
@@ -152,13 +155,17 @@ const expectedLabels = canonicalLabels;
 type JsonObject = Record<string, unknown>;
 type WriteFileCall = [target: string | number, data: string | Buffer];
 
+function isJsonObject(value: unknown): value is JsonObject {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function findWriteCall(targetPath: string): WriteFileCall | undefined {
   return writeFileSyncMock.mock.calls.find(([target]) => target === targetPath);
 }
 
 function parseJsonObject(value: string | Buffer): JsonObject {
   const parsed: unknown = JSON.parse(value.toString());
-  if (!isPlainObject(parsed)) {
+  if (!isJsonObject(parsed)) {
     throw new Error('Expected JSON object');
   }
   return parsed;
@@ -174,7 +181,7 @@ function parseWrittenSettings(): JsonObject {
 }
 
 function getCommands(settings: JsonObject): JsonObject {
-  if (!isPlainObject(settings.commands)) {
+  if (!isJsonObject(settings.commands)) {
     throw new Error('Expected commands object');
   }
   return settings.commands;
@@ -182,7 +189,7 @@ function getCommands(settings: JsonObject): JsonObject {
 
 function getCommandConfig(settings: JsonObject, key: string): JsonObject {
   const commands = getCommands(settings);
-  if (!isPlainObject(commands[key])) {
+  if (!isJsonObject(commands[key])) {
     throw new Error(`Expected commands.${key} object`);
   }
   return commands[key];

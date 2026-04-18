@@ -1,37 +1,41 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { parseIssueLabelsState } from '../../../core/src/lib/gh-schemas.js';
 
 const { mockGh } = vi.hoisted(() => ({
   mockGh: vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>(),
 }));
 
-vi.mock('@dnsquared/shipper-core', () => ({
-  logger: {
-    error: (message: string) => {
-      console.error(`[shipper] ${message}`);
+vi.mock('@dnsquared/shipper-core', async () => {
+  const { parseIssueLabelsState } =
+    await vi.importActual<typeof import('@dnsquared/shipper-core')>('@dnsquared/shipper-core');
+
+  return {
+    logger: {
+      error: (message: string) => {
+        console.error(`[shipper] ${message}`);
+      },
+      log: (message: string) => {
+        console.log(`[shipper] ${message}`);
+      },
+      warn: (message: string) => {
+        console.warn(`[shipper] ${message}`);
+      },
     },
-    log: (message: string) => {
-      console.log(`[shipper] ${message}`);
-    },
-    warn: (message: string) => {
-      console.warn(`[shipper] ${message}`);
-    },
-  },
-  gh: (args: string[]) => mockGh(args),
-  parseIssueLabelsState,
-  PRIORITY_HIGH_LABEL: 'shipper:priority-high',
-  PRIORITY_LOW_LABEL: 'shipper:priority-low',
-  STAGE_LABEL_NAMES: [
-    'shipper:new',
-    'shipper:groomed',
-    'shipper:designed',
-    'shipper:planned',
-    'shipper:implemented',
-    'shipper:pr-open',
-    'shipper:pr-reviewed',
-    'shipper:ready',
-  ],
-}));
+    gh: (args: string[]) => mockGh(args),
+    parseIssueLabelsState,
+    PRIORITY_HIGH_LABEL: 'shipper:priority-high',
+    PRIORITY_LOW_LABEL: 'shipper:priority-low',
+    STAGE_LABEL_NAMES: [
+      'shipper:new',
+      'shipper:groomed',
+      'shipper:designed',
+      'shipper:planned',
+      'shipper:implemented',
+      'shipper:pr-open',
+      'shipper:pr-reviewed',
+      'shipper:ready',
+    ],
+  };
+});
 
 import { priorityCommand } from '../../src/commands/priority.js';
 

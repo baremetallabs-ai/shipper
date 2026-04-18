@@ -1,11 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { GhPayloadError } from '../../../core/src/lib/gh-json.js';
-import {
-  parseMergeQueueSearch,
-  parsePrMergeStateView,
-  parsePrViewForMerge,
-} from '../../../core/src/lib/gh-schemas.js';
-import { toError, toErrorMessage } from '../../../core/src/lib/errors.js';
 
 const tryResolvePrForIssueMock =
   vi.fn<(repo: string, issueNumber: number) => Promise<string | undefined>>();
@@ -62,71 +55,82 @@ const postMergeMock = vi.fn<
 >();
 const sleepMsMock = vi.fn<(ms: number) => Promise<void>>(() => Promise.resolve());
 
-vi.mock('@dnsquared/shipper-core', () => ({
-  logger: {
-    log: (message: string) => {
-      console.log(`[shipper] ${message}`);
+vi.mock('@dnsquared/shipper-core', async () => {
+  const {
+    GhPayloadError,
+    parseMergeQueueSearch,
+    parsePrMergeStateView,
+    parsePrViewForMerge,
+    toError,
+    toErrorMessage,
+  } = await vi.importActual<typeof import('@dnsquared/shipper-core')>('@dnsquared/shipper-core');
+
+  return {
+    logger: {
+      log: (message: string) => {
+        console.log(`[shipper] ${message}`);
+      },
+      warn: (message: string) => {
+        console.warn(`[shipper] ${message}`);
+      },
+      error: (message: string) => {
+        console.error(`[shipper] ${message}`);
+      },
     },
-    warn: (message: string) => {
-      console.warn(`[shipper] ${message}`);
-    },
-    error: (message: string) => {
-      console.error(`[shipper] ${message}`);
-    },
-  },
-  GhPayloadError,
-  parseMergeQueueSearch,
-  parsePrMergeStateView,
-  parsePrViewForMerge,
-  toError,
-  toErrorMessage,
-  getSettings: () => getSettingsMock(),
-  gh: (args: string[]) => ghMock(args),
-  tryResolvePrForIssue: (repo: string, issueNumber: number) =>
-    tryResolvePrForIssueMock(repo, issueNumber),
-  getRepoNwo: () => 'owner/repo',
-  executeMerge: (options: {
-    pr: {
-      number: number;
-      title: string;
-      headRefName: string;
-      baseRefName: string;
-      labeledAt: string;
-    };
-    issueNumber: number;
-    nwo: string;
-    treatPendingChecksAsFailure: boolean;
-  }) => executeMergeMock(options),
-  getLinkedIssueNumber: (
-    prNumber: number,
-    nwo: string,
-    logger?: {
-      log(message: string): void;
-      warn(message: string): void;
-      error(message: string): void;
-    }
-  ) => getLinkedIssueNumberMock(prNumber, nwo, logger),
-  postMerge: (
-    pr: {
-      number: number;
-      title: string;
-      headRefName: string;
-      baseRefName: string;
-      labeledAt: string;
-    },
-    issueNumber: number,
-    nwo: string,
-    dryRun: boolean,
-    logger?: {
-      log(message: string): void;
-      warn(message: string): void;
-      error(message: string): void;
-    }
-  ) => postMergeMock(pr, issueNumber, nwo, dryRun, logger),
-  fetchChecks: vi.fn(() => Promise.resolve([])),
-  classifyChecks: vi.fn(() => ({ pending: [], failed: [], passed: [], total: 0 })),
-  sleepMs: (ms: number) => sleepMsMock(ms),
-}));
+    GhPayloadError,
+    parseMergeQueueSearch,
+    parsePrMergeStateView,
+    parsePrViewForMerge,
+    toError,
+    toErrorMessage,
+    getSettings: () => getSettingsMock(),
+    gh: (args: string[]) => ghMock(args),
+    tryResolvePrForIssue: (repo: string, issueNumber: number) =>
+      tryResolvePrForIssueMock(repo, issueNumber),
+    getRepoNwo: () => 'owner/repo',
+    executeMerge: (options: {
+      pr: {
+        number: number;
+        title: string;
+        headRefName: string;
+        baseRefName: string;
+        labeledAt: string;
+      };
+      issueNumber: number;
+      nwo: string;
+      treatPendingChecksAsFailure: boolean;
+    }) => executeMergeMock(options),
+    getLinkedIssueNumber: (
+      prNumber: number,
+      nwo: string,
+      logger?: {
+        log(message: string): void;
+        warn(message: string): void;
+        error(message: string): void;
+      }
+    ) => getLinkedIssueNumberMock(prNumber, nwo, logger),
+    postMerge: (
+      pr: {
+        number: number;
+        title: string;
+        headRefName: string;
+        baseRefName: string;
+        labeledAt: string;
+      },
+      issueNumber: number,
+      nwo: string,
+      dryRun: boolean,
+      logger?: {
+        log(message: string): void;
+        warn(message: string): void;
+        error(message: string): void;
+      }
+    ) => postMergeMock(pr, issueNumber, nwo, dryRun, logger),
+    fetchChecks: vi.fn(() => Promise.resolve([])),
+    classifyChecks: vi.fn(() => ({ pending: [], failed: [], passed: [], total: 0 })),
+    sleepMs: (ms: number) => sleepMsMock(ms),
+  };
+});
 
 const logMock = vi.spyOn(console, 'log').mockImplementation(() => {});
 const warnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -246,6 +250,8 @@ describe('lookupPR', () => {
   });
 
   it('propagates shared validation errors for malformed payloads', async () => {
+    const { GhPayloadError } =
+      await vi.importActual<typeof import('@dnsquared/shipper-core')>('@dnsquared/shipper-core');
     ghMock.mockResolvedValueOnce({
       stdout: JSON.stringify({
         number: 42,

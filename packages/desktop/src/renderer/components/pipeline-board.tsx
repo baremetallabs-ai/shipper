@@ -1,7 +1,6 @@
 import type { DragEvent, JSX } from 'react';
 
-import { DISPLAY_NAME_MAP, READY_LABEL } from '../../../../core/src/lib/labels.js';
-import type { ListIssueItem } from '@dnsquared/shipper-core';
+import { DISPLAY_NAME_MAP, READY_LABEL, type ListIssueItem } from '@dnsquared/shipper-core';
 
 import { useDragDrop } from '../hooks/use-drag-drop.js';
 import { COLUMN_RESET_STAGE, PIPELINE_COLUMNS } from '../lib/constants.js';

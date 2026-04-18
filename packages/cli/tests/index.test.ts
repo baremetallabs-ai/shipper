@@ -1,5 +1,4 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { toError, toErrorMessage } from '../../core/src/lib/errors.js';
 
 const { mockLoggerError, mockLoggerLog, mockLoggerWarn } = vi.hoisted(() => ({
   mockLoggerError: vi.fn((message: string) => {
@@ -13,27 +12,32 @@ const { mockLoggerError, mockLoggerLog, mockLoggerWarn } = vi.hoisted(() => ({
   }),
 }));
 
-vi.mock('@dnsquared/shipper-core', () => ({
-  runPreflight: vi.fn(),
-  warnTrackedOutputFiles: vi.fn(),
-  loadSettings: vi.fn(),
-  toError,
-  toErrorMessage,
-  logger: {
-    error: (message: string) => {
-      mockLoggerError(message);
+vi.mock('@dnsquared/shipper-core', async () => {
+  const { toError, toErrorMessage } =
+    await vi.importActual<typeof import('@dnsquared/shipper-core')>('@dnsquared/shipper-core');
+
+  return {
+    runPreflight: vi.fn(),
+    warnTrackedOutputFiles: vi.fn(),
+    loadSettings: vi.fn(),
+    toError,
+    toErrorMessage,
+    logger: {
+      error: (message: string) => {
+        mockLoggerError(message);
+      },
+      log: (message: string) => {
+        mockLoggerLog(message);
+      },
+      warn: (message: string) => {
+        mockLoggerWarn(message);
+      },
     },
-    log: (message: string) => {
-      mockLoggerLog(message);
-    },
-    warn: (message: string) => {
-      mockLoggerWarn(message);
-    },
-  },
-  CLI_VERSION: '0.1.0-test',
-  checkVersionFreshness: vi.fn(),
-  getRepoNwo: vi.fn(() => Promise.resolve('owner/repo')),
-}));
+    CLI_VERSION: '0.1.0-test',
+    checkVersionFreshness: vi.fn(),
+    getRepoNwo: vi.fn(() => Promise.resolve('owner/repo')),
+  };
+});
 
 vi.mock('../src/commands/init.js', () => ({ initCommand: vi.fn() }));
 vi.mock('../src/commands/new.js', () => ({ newCommand: vi.fn() }));

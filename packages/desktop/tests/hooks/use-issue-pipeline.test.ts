@@ -3,7 +3,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { BLOCKED_LABEL, LOCKED_LABEL, PLANNED_LABEL } from '../../../core/src/lib/labels.js';
+import { BLOCKED_LABEL, LOCKED_LABEL, PLANNED_LABEL } from '@dnsquared/shipper-core';
 import { useIssuePipeline } from '../../src/renderer/hooks/use-issue-pipeline.js';
 import {
   advanceHookTimers,

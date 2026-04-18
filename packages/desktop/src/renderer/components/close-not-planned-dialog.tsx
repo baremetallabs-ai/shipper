@@ -2,7 +2,7 @@ import { LoaderCircle } from 'lucide-react';
 import { useState } from 'react';
 import type { JSX } from 'react';
 
-import { toErrorMessage } from '../../../../core/src/lib/errors.js';
+import { toErrorMessage } from '@dnsquared/shipper-core';
 import { Button } from './ui/button.js';
 import {
   Dialog,

@@ -1,7 +1,7 @@
 import { useMemo, useRef } from 'react';
 import type { JSX } from 'react';
 
-import { toErrorMessage } from '../../../core/src/lib/errors.js';
+import { toErrorMessage } from '@dnsquared/shipper-core';
 
 import { ActionQueueDrawer } from './components/action-queue-drawer.js';
 import { AdoptDialog } from './components/adopt-dialog.js';

@@ -1,6 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { toError, toErrorMessage } from '../../../core/src/lib/errors.js';
-import { parseIssueTitleLabelsList } from '../../../core/src/lib/gh-schemas.js';
 
 const osMockState = vi.hoisted(() => ({
   mockHomedir: vi.fn(() => '/mock-home'),
@@ -43,88 +41,93 @@ vi.mock('../../src/commands/unblock.js', () => ({
   prepareUnblockContext: vi.fn(() => Promise.resolve()),
 }));
 
-vi.mock('@dnsquared/shipper-core', () => ({
-  ...(() => {
-    const writeToStream = (
-      stream:
-        | { destroyed?: boolean; writableEnded?: boolean; write?: (chunk: string) => void }
-        | undefined,
-      line: string
-    ) => {
-      if (!stream || stream.destroyed || stream.writableEnded) {
-        return;
-      }
-      stream.write?.(`${line}\n`);
-    };
+vi.mock('@dnsquared/shipper-core', async () => {
+  const { parseIssueTitleLabelsList, toError, toErrorMessage } =
+    await vi.importActual<typeof import('@dnsquared/shipper-core')>('@dnsquared/shipper-core');
 
-    const createMockLogger = (stream?: {
-      destroyed?: boolean;
-      writableEnded?: boolean;
-      write?: (chunk: string) => void;
-    }) => ({
-      log: (message: string) => {
-        const line = `[shipper] ${message}`;
-        console.log(line);
-        writeToStream(stream, line);
-      },
-      warn: (message: string) => {
-        const line = `[shipper] ${message}`;
-        console.warn(line);
-        writeToStream(stream, line);
-      },
-      error: (message: string) => {
-        const line = `[shipper] ${message}`;
-        console.error(line);
-        writeToStream(stream, line);
-      },
-    });
+  return {
+    ...(() => {
+      const writeToStream = (
+        stream:
+          | { destroyed?: boolean; writableEnded?: boolean; write?: (chunk: string) => void }
+          | undefined,
+        line: string
+      ) => {
+        if (!stream || stream.destroyed || stream.writableEnded) {
+          return;
+        }
+        stream.write?.(`${line}\n`);
+      };
 
-    return {
-      logger: createMockLogger(),
-      createLogger: ({ stream }: { stream?: { write?: (chunk: string) => void } } = {}) =>
-        createMockLogger(stream),
-    };
-  })(),
-  toError,
-  toErrorMessage,
-  aggregateSessionUsage: vi.fn(),
-  classifyChecks: vi.fn(() => ({ pending: [], failed: [], passed: [], total: 0 })),
-  clearStaleLockIfNeeded: vi.fn(() => Promise.resolve()),
-  fetchChecks: vi.fn(() => Promise.resolve([])),
-  fetchIssueTimelines: vi.fn(() => Promise.resolve(new Map())),
-  getSettings: vi.fn(() => ({ prReviewWait: { mode: 'checks', maxDurationMinutes: 30 } })),
-  gh: vi.fn(),
-  handleAgentCrash: vi.fn(() => Promise.resolve()),
-  processResult: vi.fn(() =>
-    Promise.resolve({ verdict: 'accept' as const, comment: '.shipper/output/comment-7.md' })
-  ),
-  resolveMode: vi.fn(
-    (_step: string, override?: 'headless' | 'interactive' | 'default') => override ?? 'default'
-  ),
-  retryOnInvalidOutput: vi.fn(() =>
-    Promise.resolve({ verdict: 'accept' as const, comment: '.shipper/output/comment-7.md' })
-  ),
-  runPrompt: vi.fn(() => Promise.resolve(0)),
-  scrubOutputDir: vi.fn(() => Promise.resolve()),
-  selectIssuesForStage: vi.fn(() => Promise.resolve([])),
-  sleepMs: vi.fn(() => Promise.resolve()),
-  sortIssuesByLabelTime: vi.fn(<T>(issues: T[]) => issues),
-  totalTokens: vi.fn((usage: { inputTokens: number; outputTokens: number }) => {
-    return usage.inputTokens + usage.outputTokens;
-  }),
-  withIssueLock: vi.fn((_repo: string, _issue: string, fn: () => Promise<unknown>) => fn()),
-  withStageHooks: vi.fn((_stage: string, _env: unknown, fn: () => Promise<unknown>) => fn()),
-  STAGE_NAME_MAP: labelFixtures.stageNameMap,
-  STAGE_LABEL_NAMES: labelFixtures.stageLabelNames,
-  NEW_LABEL: 'shipper:new',
-  PR_REVIEWED_LABEL: 'shipper:pr-reviewed',
-  PRIORITY_LABEL_NAMES: ['shipper:priority-high', 'shipper:priority-low'],
-  READY_LABEL: 'shipper:ready',
-  BLOCKED_LABEL: 'shipper:blocked',
-  LOCKED_LABEL: 'shipper:locked',
-  FAILED_LABEL: 'shipper:failed',
-  parseIssueTitleLabelsList,
-}));
+      const createMockLogger = (stream?: {
+        destroyed?: boolean;
+        writableEnded?: boolean;
+        write?: (chunk: string) => void;
+      }) => ({
+        log: (message: string) => {
+          const line = `[shipper] ${message}`;
+          console.log(line);
+          writeToStream(stream, line);
+        },
+        warn: (message: string) => {
+          const line = `[shipper] ${message}`;
+          console.warn(line);
+          writeToStream(stream, line);
+        },
+        error: (message: string) => {
+          const line = `[shipper] ${message}`;
+          console.error(line);
+          writeToStream(stream, line);
+        },
+      });
+
+      return {
+        logger: createMockLogger(),
+        createLogger: ({ stream }: { stream?: { write?: (chunk: string) => void } } = {}) =>
+          createMockLogger(stream),
+      };
+    })(),
+    toError,
+    toErrorMessage,
+    aggregateSessionUsage: vi.fn(),
+    classifyChecks: vi.fn(() => ({ pending: [], failed: [], passed: [], total: 0 })),
+    clearStaleLockIfNeeded: vi.fn(() => Promise.resolve()),
+    fetchChecks: vi.fn(() => Promise.resolve([])),
+    fetchIssueTimelines: vi.fn(() => Promise.resolve(new Map())),
+    getSettings: vi.fn(() => ({ prReviewWait: { mode: 'checks', maxDurationMinutes: 30 } })),
+    gh: vi.fn(),
+    handleAgentCrash: vi.fn(() => Promise.resolve()),
+    processResult: vi.fn(() =>
+      Promise.resolve({ verdict: 'accept' as const, comment: '.shipper/output/comment-7.md' })
+    ),
+    resolveMode: vi.fn(
+      (_step: string, override?: 'headless' | 'interactive' | 'default') => override ?? 'default'
+    ),
+    retryOnInvalidOutput: vi.fn(() =>
+      Promise.resolve({ verdict: 'accept' as const, comment: '.shipper/output/comment-7.md' })
+    ),
+    runPrompt: vi.fn(() => Promise.resolve(0)),
+    scrubOutputDir: vi.fn(() => Promise.resolve()),
+    selectIssuesForStage: vi.fn(() => Promise.resolve([])),
+    sleepMs: vi.fn(() => Promise.resolve()),
+    sortIssuesByLabelTime: vi.fn(<T>(issues: T[]) => issues),
+    totalTokens: vi.fn((usage: { inputTokens: number; outputTokens: number }) => {
+      return usage.inputTokens + usage.outputTokens;
+    }),
+    withIssueLock: vi.fn((_repo: string, _issue: string, fn: () => Promise<unknown>) => fn()),
+    withStageHooks: vi.fn((_stage: string, _env: unknown, fn: () => Promise<unknown>) => fn()),
+    STAGE_NAME_MAP: labelFixtures.stageNameMap,
+    STAGE_LABEL_NAMES: labelFixtures.stageLabelNames,
+    NEW_LABEL: 'shipper:new',
+    PR_REVIEWED_LABEL: 'shipper:pr-reviewed',
+    PRIORITY_LABEL_NAMES: ['shipper:priority-high', 'shipper:priority-low'],
+    READY_LABEL: 'shipper:ready',
+    BLOCKED_LABEL: 'shipper:blocked',
+    LOCKED_LABEL: 'shipper:locked',
+    FAILED_LABEL: 'shipper:failed',
+    parseIssueTitleLabelsList,
+  };
+});
 
 vi.mock('node:os', async () => {
   const actual = await vi.importActual<typeof import('node:os')>('node:os');

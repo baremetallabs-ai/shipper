@@ -118,7 +118,8 @@ vi.mock('../../src/lib/worktree.js', () => ({
     withWorktreeMock(opts, fn),
 }));
 
-const { runStageScaffold } = await import('../../src/lib/stage-scaffold.js');
+const { runStageScaffold, simpleInvoker, transportInvoker } =
+  await import('../../src/lib/stage-scaffold.js');
 
 function buildInvocation(overrides: Partial<StageInvocation> = {}): StageInvocation {
   return {
@@ -368,5 +369,213 @@ describe('runStageScaffold', () => {
       cwd: '/tmp/fake-wt',
       result: acceptedResult,
     });
+  });
+});
+
+describe('simpleInvoker', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('passes setup through and forwards prompt args for initial and retry runs', async () => {
+    const setupMock = vi.fn(() =>
+      Promise.resolve({
+        prFiles: new Set(['src/file.ts']),
+      })
+    );
+    runPromptMock.mockResolvedValue(0);
+
+    const invocation = simpleInvoker({
+      promptName: 'design',
+      baseRunPromptOpts: {
+        repo: 'owner/repo',
+        issueRef: '123',
+        mode: 'headless',
+        agent: 'codex',
+        model: 'gpt-5',
+      },
+      setup: setupMock,
+    })({
+      wtPath: '/tmp/fake-wt',
+      repoRoot: '/tmp/fake-repo',
+      branch: 'shipper/123-branch',
+      baseBranch: undefined,
+    });
+
+    await expect(invocation.setup?.()).resolves.toEqual({
+      prFiles: new Set(['src/file.ts']),
+    });
+    await expect(invocation.initial()).resolves.toBe(0);
+    await expect(invocation.retry('Fix result')).resolves.toBe(0);
+
+    expect(setupMock).toHaveBeenCalledWith('/tmp/fake-wt');
+    expect(runPromptMock).toHaveBeenNthCalledWith(1, 'design', {
+      repo: 'owner/repo',
+      issueRef: '123',
+      cwd: '/tmp/fake-wt',
+      mode: 'headless',
+      agent: 'codex',
+      model: 'gpt-5',
+    });
+    expect(runPromptMock).toHaveBeenNthCalledWith(2, 'design', {
+      repo: 'owner/repo',
+      issueRef: '123',
+      cwd: '/tmp/fake-wt',
+      mode: 'headless',
+      agent: 'codex',
+      model: 'gpt-5',
+      userInput: 'Fix result',
+    });
+  });
+});
+
+describe('transportInvoker', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('requires baseBranch and forwards conflict context into prompt retries', async () => {
+    formatConflictContextMock.mockReturnValue('formatted conflict context');
+    truncateLargeInputMock.mockResolvedValue('truncated:conflict-context.txt');
+    runPromptMock.mockResolvedValue(0);
+    withGitTransportMock.mockImplementation((_opts, fn) =>
+      (
+        fn as (
+          conflictContext?: unknown,
+          pushError?: string,
+          installError?: string
+        ) => Promise<number>
+      )({
+        files: ['src/conflict.ts'],
+        conflicts: [
+          {
+            path: 'src/conflict.ts',
+            markers: ['<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> origin/main'],
+          },
+        ],
+      })
+    );
+
+    const invocation = transportInvoker({
+      promptName: 'implement',
+      pushMode: 'new-branch',
+      baseRunPromptOpts: {
+        repo: 'owner/repo',
+        issueRef: '239',
+        mode: 'interactive',
+        agent: 'claude',
+      },
+    })({
+      wtPath: '/tmp/fake-wt',
+      repoRoot: '/tmp/fake-repo',
+      branch: 'shipper/239-branch',
+      baseBranch: 'main',
+    });
+
+    await expect(invocation.initial()).resolves.toBe(0);
+
+    expect(withGitTransportMock).toHaveBeenCalledWith(
+      {
+        wtPath: '/tmp/fake-wt',
+        repoRoot: '/tmp/fake-repo',
+        baseBranch: 'main',
+        pushMode: 'new-branch',
+      },
+      expect.any(Function)
+    );
+    expect(formatConflictContextMock).toHaveBeenCalled();
+    expect(truncateLargeInputMock).toHaveBeenCalledWith(
+      '/tmp/fake-wt',
+      'formatted conflict context',
+      'conflict-context.txt'
+    );
+    expect(runPromptMock).toHaveBeenCalledWith('implement', {
+      repo: 'owner/repo',
+      issueRef: '239',
+      cwd: '/tmp/fake-wt',
+      mode: 'interactive',
+      agent: 'claude',
+      userInput: 'truncated:conflict-context.txt',
+    });
+  });
+
+  it('prefers transport diagnostics over user retry text and falls back when none exist', async () => {
+    truncateLargeInputMock.mockResolvedValueOnce('truncated:push-error.txt');
+    runPromptMock.mockResolvedValue(0);
+
+    const invocation = transportInvoker({
+      promptName: 'pr_open',
+      pushMode: 'force-with-lease',
+      baseRunPromptOpts: {
+        repo: 'owner/repo',
+        issueRef: '239',
+        baseBranch: 'release/2026',
+      },
+    })({
+      wtPath: '/tmp/fake-wt',
+      repoRoot: '/tmp/fake-repo',
+      branch: 'shipper/239-branch',
+      baseBranch: 'release/2026',
+    });
+
+    withGitTransportMock.mockImplementationOnce((_opts, fn) =>
+      (
+        fn as (
+          conflictContext?: unknown,
+          pushError?: string,
+          installError?: string
+        ) => Promise<number>
+      )(undefined, 'git push failed')
+    );
+    await expect(invocation.retry('Fix result')).resolves.toBe(0);
+
+    withGitTransportMock.mockImplementationOnce((_opts, fn) =>
+      (
+        fn as (
+          conflictContext?: unknown,
+          pushError?: string,
+          installError?: string
+        ) => Promise<number>
+      )()
+    );
+    await expect(invocation.retry('Manual retry')).resolves.toBe(0);
+
+    expect(truncateLargeInputMock).toHaveBeenCalledWith(
+      '/tmp/fake-wt',
+      'git push failed',
+      'push-error.txt'
+    );
+    expect(runPromptMock).toHaveBeenNthCalledWith(1, 'pr_open', {
+      repo: 'owner/repo',
+      issueRef: '239',
+      baseBranch: 'release/2026',
+      cwd: '/tmp/fake-wt',
+      userInput: 'truncated:push-error.txt',
+    });
+    expect(runPromptMock).toHaveBeenNthCalledWith(2, 'pr_open', {
+      repo: 'owner/repo',
+      issueRef: '239',
+      baseBranch: 'release/2026',
+      cwd: '/tmp/fake-wt',
+      userInput: 'Manual retry',
+    });
+  });
+
+  it('throws when baseBranch is omitted', () => {
+    expect(() =>
+      transportInvoker({
+        promptName: 'implement',
+        pushMode: 'new-branch',
+        baseRunPromptOpts: {
+          repo: 'owner/repo',
+          issueRef: '239',
+        },
+      })({
+        wtPath: '/tmp/fake-wt',
+        repoRoot: '/tmp/fake-repo',
+        branch: 'shipper/239-branch',
+        baseBranch: undefined,
+      })
+    ).toThrow('baseBranch is required for transport invocations');
   });
 });

@@ -1,6 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { parseIssueLabelsState } from '../../../core/src/lib/gh-schemas.js';
-import { isPlainObject } from '../../../core/src/lib/type-guards.js';
 
 type ErrnoError = Error & { code?: string };
 
@@ -60,9 +58,8 @@ vi.mock('../../src/lib/confirm.js', () => ({
 }));
 
 vi.mock('@dnsquared/shipper-core', async () => {
-  const { toErrorMessage } = await vi.importActual<
-    typeof import('../../../core/src/lib/errors.js')
-  >('../../../core/src/lib/errors.js');
+  const { isPlainObject, parseIssueLabelsState, toErrorMessage } =
+    await vi.importActual<typeof import('@dnsquared/shipper-core')>('@dnsquared/shipper-core');
 
   const logger = {
     log: (message: string) => {

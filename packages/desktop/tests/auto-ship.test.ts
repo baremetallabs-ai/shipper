@@ -11,8 +11,8 @@ import {
   PR_REVIEWED_LABEL,
   PRIORITY_HIGH_LABEL,
   PRIORITY_LOW_LABEL,
-} from '../../core/src/lib/labels.js';
-import type { ListIssueItem } from '../../core/src/lib/github.js';
+  type ListIssueItem,
+} from '@dnsquared/shipper-core';
 import {
   getActiveShipIssueNumbers,
   getBackgroundDetail,

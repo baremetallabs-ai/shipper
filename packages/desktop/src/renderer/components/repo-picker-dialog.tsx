@@ -2,7 +2,7 @@ import { LoaderCircle, PlusCircle } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { JSX } from 'react';
 
-import { toErrorMessage } from '../../../../core/src/lib/errors.js';
+import { toErrorMessage } from '@dnsquared/shipper-core';
 import { Alert, AlertDescription, AlertTitle } from './ui/alert.js';
 import {
   Command,
