@@ -155,17 +155,13 @@ const expectedLabels = canonicalLabels;
 type JsonObject = Record<string, unknown>;
 type WriteFileCall = [target: string | number, data: string | Buffer];
 
-function isJsonObject(value: unknown): value is JsonObject {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 function findWriteCall(targetPath: string): WriteFileCall | undefined {
   return writeFileSyncMock.mock.calls.find(([target]) => target === targetPath);
 }
 
 function parseJsonObject(value: string | Buffer): JsonObject {
   const parsed: unknown = JSON.parse(value.toString());
-  if (!isJsonObject(parsed)) {
+  if (!isPlainObject(parsed)) {
     throw new Error('Expected JSON object');
   }
   return parsed;
@@ -181,7 +177,7 @@ function parseWrittenSettings(): JsonObject {
 }
 
 function getCommands(settings: JsonObject): JsonObject {
-  if (!isJsonObject(settings.commands)) {
+  if (!isPlainObject(settings.commands)) {
     throw new Error('Expected commands object');
   }
   return settings.commands;
@@ -189,7 +185,7 @@ function getCommands(settings: JsonObject): JsonObject {
 
 function getCommandConfig(settings: JsonObject, key: string): JsonObject {
   const commands = getCommands(settings);
-  if (!isJsonObject(commands[key])) {
+  if (!isPlainObject(commands[key])) {
     throw new Error(`Expected commands.${key} object`);
   }
   return commands[key];
@@ -225,6 +221,7 @@ beforeEach(() => {
 });
 
 const { initCommand } = await import('../../src/commands/init.js');
+const { isPlainObject } = await import('@dnsquared/shipper-core');
 
 describe('initCommand README', () => {
   it('writes .shipper/README.md', async () => {

@@ -27,5 +27,15 @@ export {
   getPriorityTier,
   type LabelDefinition,
 } from './lib/labels.js';
-export type { ListIssueItem } from './lib/github.js';
-export type { WorkflowStage } from './lib/reset.js';
+
+export interface ListIssueItem {
+  number: number;
+  title: string;
+  labels: string[];
+  state: string;
+  author: string;
+  createdAt: string;
+  url: string;
+}
+
+export type WorkflowStage = 'new' | 'groomed' | 'designed' | 'planned' | 'implemented';

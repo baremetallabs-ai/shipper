@@ -125,6 +125,7 @@ export {
   parseStage,
   scanArtifacts,
 } from './lib/reset.js';
+export type { ResultJson } from './lib/result-schema.js';
 export { scripts } from './lib/scripts.js';
 export { aggregateSessionUsage } from './lib/session.js';
 export type { AgentName, CommandMode, PrReviewWait } from './lib/settings.js';
@@ -138,7 +139,7 @@ export {
 export { sleepMs } from './lib/sleep.js';
 export type { StageScaffoldOpts } from './lib/stage-scaffold.js';
 export { runStageScaffold, simpleInvoker, transportInvoker } from './lib/stage-scaffold.js';
-export type { LabelTransition } from './lib/stage-transitions.js';
+export type { LabelTransition, Verdict } from './lib/stage-transitions.js';
 export { resolveTransition } from './lib/stage-transitions.js';
 export { isPlainObject } from './lib/type-guards.js';
 export { totalTokens } from './lib/usage.js';

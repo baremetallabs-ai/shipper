@@ -1,13 +1,24 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
+    "baseUrl": ".",
     "composite": true,
     "jsx": "react-jsx",
     "lib": ["DOM", "DOM.Iterable", "ES2023"],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "noEmit": true,
+    "paths": {
+      "@dnsquared/shipper-core": ["../core/src/browser.ts"]
+    },
     "types": ["vite/client"]
   },
-  "include": ["src/preload/index.d.ts", "src/renderer/**/*"]
+  "include": [
+    "src/preload/index.d.ts",
+    "src/renderer/**/*",
+    "../core/src/browser.ts",
+    "../core/src/lib/errors.ts",
+    "../core/src/lib/labels.ts",
+    "../core/src/lib/type-guards.ts"
+  ]
 }

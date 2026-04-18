@@ -1,5 +1,6 @@
-// Source-only internal barrel for helpers that are intentionally not part of the
-// curated @dnsquared/shipper-core public API.
+// Internal barrel for helpers that are intentionally not part of the curated
+// @dnsquared/shipper-core public API. It is emitted for internal builds but not
+// exported from the package surface.
 export * from './lib/frontmatter.js';
 export * from './lib/result-schema.js';
 
