@@ -221,7 +221,7 @@ Purpose: advance an issue to the next workflow step based on its current label.
 Behavior:
 
 - Reads the current shipper label.
-- Runs the corresponding next-stage command.
+- Runs the corresponding next-stage command through the shared in-process stage dispatcher.
 - Works with both issue numbers and PR numbers.
 - `--agent <claude|codex>` overrides the agent used for the dispatched step.
 - `--model <model>` overrides the model used for the dispatched step.
@@ -236,10 +236,10 @@ Purpose: run the full workflow end-to-end.
 
 Behavior:
 
-- Repeatedly calls `next` until the issue reaches `shipper:ready`.
+- Runs the remaining stages through the same in-process stage dispatcher used by `shipper next`.
 - `--merge` auto-merges the PR after reaching `shipper:ready`.
 - `--auto` runs a continuous loop that auto-selects issues, ships them, and merges their PRs. It is mutually exclusive with an explicit issue number and implies `--merge`.
-- `--parallel <n>` sets the number of parallel slots in auto-ship mode and requires `--auto`.
+- `--parallel <n>` sets the number of parallel slots in auto-ship mode and requires `--auto`. Sequential auto runs stay in-process; parallel auto uses one worker process per active issue over a small IPC protocol.
 - `--agent <claude|codex>` overrides the agent used by dispatched steps.
 - `--model <model>` overrides the model used by dispatched steps.
 

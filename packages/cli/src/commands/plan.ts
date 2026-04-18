@@ -8,7 +8,8 @@ import {
   runStageScaffold,
   simpleInvoker,
 } from '@dnsquared/shipper-core';
-import type { AgentName, CommandMode, StageRunResult } from '@dnsquared/shipper-core';
+import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
+import type { StageRunResult } from './stage-result.js';
 
 export async function runPlanStage(
   repo: string,
@@ -17,7 +18,7 @@ export async function runPlanStage(
   agent?: AgentName,
   model?: string
 ): Promise<StageRunResult> {
-  return await runStageScaffold({
+  return (await runStageScaffold({
     repo,
     issueNumber: issue,
     stage: 'plan',
@@ -35,7 +36,7 @@ export async function runPlanStage(
       promptName: 'plan',
       baseRunPromptOpts: { repo, issueRef: issue, mode, agent, model },
     }),
-  });
+  })) as unknown as StageRunResult;
 }
 
 export async function planCommand(

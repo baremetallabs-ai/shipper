@@ -27,11 +27,6 @@ const labelFixtures = vi.hoisted(() => ({
   },
 }));
 
-vi.mock('../../src/commands/pr-remediate.js', () => ({
-  buildReadyCheck: vi.fn(),
-  SKIP_PR_REMEDIATE_WAIT_ENV_VAR: 'SHIPPER_SKIP_PR_REMEDIATE_WAIT',
-}));
-
 vi.mock('../../src/commands/merge.js', () => ({
   postMerge: vi.fn(() => Promise.resolve()),
   pollPrMerged: vi.fn(() => Promise.resolve(false)),

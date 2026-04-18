@@ -10,7 +10,8 @@ import {
   runStageScaffold,
   transportInvoker,
 } from '@dnsquared/shipper-core';
-import type { AgentName, CommandMode, StageRunResult } from '@dnsquared/shipper-core';
+import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
+import type { StageRunResult } from './stage-result.js';
 
 export async function runPrOpenStage(
   repo: string,
@@ -24,7 +25,7 @@ export async function runPrOpenStage(
   const settings = getSettings();
   const baseBranch = await resolveBaseBranch(repo, settings.defaultBaseBranch);
 
-  return await runStageScaffold({
+  return (await runStageScaffold({
     repo,
     issueNumber: issue,
     stage: 'pr-open',
@@ -42,7 +43,7 @@ export async function runPrOpenStage(
       pushMode: 'force-with-lease',
       baseRunPromptOpts: { repo, issueRef: issue, baseBranch, mode, agent, model },
     }),
-  });
+  })) as unknown as StageRunResult;
 }
 
 export async function prOpenCommand(

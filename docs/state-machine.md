@@ -88,7 +88,7 @@ Agents can roll back to an earlier stage if the work is insufficient:
 
 ## The `next` command
 
-Auto-advances an issue by reading its current label and dispatching to the corresponding command. Validates that exactly one workflow label is present, rejects issues marked `shipper:failed`, and refuses blocked issues except `shipper:new`, which can always be groomed.
+Auto-advances an issue by reading its current label and dispatching to the corresponding stage through the shared in-process dispatcher. `next` validates that exactly one workflow label is present, rejects issues marked `shipper:failed`, and refuses blocked issues except `shipper:new`, which can always be groomed.
 
 ## The `ship --auto` command
 
@@ -104,6 +104,8 @@ shipper:ready > shipper:pr-reviewed > shipper:pr-open > shipper:implemented
 Issues are ordered by priority first: `shipper:priority-high`, then normal priority, then `shipper:priority-low`. Within the same priority tier, auto-ship prefers the most-complete stage using the ordering above. Within the same stage and priority tier, issues are processed FIFO by label-application timestamp queried via the GitHub timeline API.
 
 After exhausting available issues, auto-ship attempts to unblock `shipper:blocked` issues. If any are unblocked, it loops back to process the newly available issues.
+
+Sequential auto-ship and single-issue `shipper ship <issue>` runs execute stages in-process through the same dispatcher that powers `shipper next`. Parallel auto-ship keeps one OS process per active issue for fault isolation and communicates with each worker through a small fork/IPC protocol.
 
 A review cycle cap (`MAX_REVIEW_CYCLES = 3`) prevents infinite tight `pr-reviewed <-> pr-remediate` loops.
 
@@ -139,13 +141,16 @@ All workflow commands wrap their execution in `withIssueLock()`.
 
 ## Key files
 
-| File                                      | Role                                            |
-| ----------------------------------------- | ----------------------------------------------- |
-| `packages/core/src/lib/labels.ts`         | Label definitions (names, colors, descriptions) |
-| `packages/cli/src/commands/next.ts`       | State machine dispatch                          |
-| `packages/cli/src/commands/ship.ts`       | Auto-ship priority ordering and stage names     |
-| `packages/cli/src/commands/reset.ts`      | Stage categorization and cleanup for reset      |
-| `packages/cli/src/commands/issue-list.ts` | Label display and grouping                      |
-| `packages/core/src/lib/lock.ts`           | Lock acquire, release, heartbeat, and staleness |
-| `packages/core/src/lib/github.ts`         | Issue selection and label timeline queries      |
-| `packages/core/src/lib/prerequisites.ts`  | Label existence validation                      |
+| File                                          | Role                                            |
+| --------------------------------------------- | ----------------------------------------------- |
+| `packages/core/src/lib/labels.ts`             | Label definitions (names, colors, descriptions) |
+| `packages/cli/src/commands/stage-dispatch.ts` | Shared in-process stage dispatch                |
+| `packages/cli/src/commands/next.ts`           | `next` validation and lock-wrapped dispatch     |
+| `packages/cli/src/commands/ship-execute.ts`   | Single-issue ship loop and stage progression    |
+| `packages/cli/src/commands/ship-auto.ts`      | Sequential and parallel auto-ship orchestration |
+| `packages/cli/src/ship-worker.ts`             | Parallel worker IPC entry                       |
+| `packages/cli/src/commands/reset.ts`          | Stage categorization and cleanup for reset      |
+| `packages/cli/src/commands/issue-list.ts`     | Label display and grouping                      |
+| `packages/core/src/lib/lock.ts`               | Lock acquire, release, heartbeat, and staleness |
+| `packages/core/src/lib/github.ts`             | Issue selection and label timeline queries      |
+| `packages/core/src/lib/prerequisites.ts`      | Label existence validation                      |

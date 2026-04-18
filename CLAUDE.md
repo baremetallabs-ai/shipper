@@ -45,6 +45,8 @@ npx vitest run packages/cli/tests/lib/branch.test.ts   # Run a single test file
 
 **Ephemeral worktrees:** Implementation and PR commands use temporary git worktrees stored in `~/.shipper/worktrees/`. `withWorktree()` in `packages/core/src/lib/worktree.ts` handles create -> callback -> cleanup with signal handler support.
 
+**Ship orchestration:** `packages/cli/src/commands/stage-dispatch.ts` is the shared in-process stage entry used by `shipper next` and sequential `shipper ship`. Parallel auto-ship keeps fault isolation by forking `packages/cli/src/ship-worker.ts` and exchanging one run message plus one result message over IPC.
+
 **GitHub integration:** All GitHub interaction goes through the `gh` CLI. See `packages/core/src/lib/github.ts`. Any structured `gh --json` payload must be parsed through `packages/core/src/lib/gh-schemas.ts` or `packages/core/src/lib/gh-json.ts`; do not use `JSON.parse(...) as T` for `gh` output.
 
 **Workflow state machine via labels:** `shipper:new` -> `shipper:groomed` -> `shipper:designed` -> `shipper:planned` -> `shipper:implemented` -> `shipper:pr-open` -> `shipper:pr-reviewed` -> `shipper:ready`. Control labels: `shipper:blocked` and `shipper:locked`. The `next` command auto-advances based on the current workflow label.

@@ -8,7 +8,8 @@ import {
   runStageScaffold,
   transportInvoker,
 } from '@dnsquared/shipper-core';
-import type { AgentName, CommandMode, StageRunResult } from '@dnsquared/shipper-core';
+import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
+import type { StageRunResult } from './stage-result.js';
 
 export async function runImplementStage(
   repo: string,
@@ -17,7 +18,7 @@ export async function runImplementStage(
   agent?: AgentName,
   model?: string
 ): Promise<StageRunResult> {
-  return await runStageScaffold({
+  return (await runStageScaffold({
     repo,
     issueNumber: issue,
     stage: 'implement',
@@ -36,7 +37,7 @@ export async function runImplementStage(
       pushMode: 'new-branch',
       baseRunPromptOpts: { repo, issueRef: issue, mode, agent, model },
     }),
-  });
+  })) as unknown as StageRunResult;
 }
 
 export async function implementCommand(
