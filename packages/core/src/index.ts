@@ -82,7 +82,7 @@ export {
   withIssueLock,
 } from './lib/lock.js';
 export type { Logger } from './lib/logger.js';
-export { createLogger, logger } from './lib/logger.js';
+export { createLogger, getLogCaptureStream, logger, withLogCapture } from './lib/logger.js';
 export type { QueuedPR } from './lib/merge-execution.js';
 export { executeMerge, getLinkedIssueNumber, postMerge } from './lib/merge-execution.js';
 export { parseDiffHunks } from './lib/output-protocol/index.js';

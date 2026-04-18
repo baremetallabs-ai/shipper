@@ -123,4 +123,26 @@ describe('ship-worker', () => {
     );
     expect(processExitMock).toHaveBeenCalledWith(1);
   });
+
+  it('still exits when sending the IPC result fails', async () => {
+    processSendMock.mockImplementationOnce((_message, callback) => {
+      callback?.(new Error('ipc failure'));
+      return false;
+    });
+
+    await import('../src/ship-worker.js');
+    if (!messageHandler) {
+      throw new Error('Expected worker message handler to be registered');
+    }
+
+    messageHandler({
+      type: 'run',
+      repo: 'owner/repo',
+      issue: '42',
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(processExitMock).toHaveBeenCalledWith(0);
+  });
 });

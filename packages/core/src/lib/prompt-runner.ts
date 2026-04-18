@@ -20,7 +20,7 @@ import {
   type AgentName,
   type CommandMode,
 } from './settings.js';
-import { logger } from './logger.js';
+import { getLogCaptureStream, logger } from './logger.js';
 import { formatUsageLine, parseAgentUsage, type TokenUsage } from './usage.js';
 
 export interface RunPromptOpts {
@@ -127,16 +127,17 @@ function spawnAsync(
 ): Promise<number> {
   return new Promise((resolve, reject) => {
     const hasInitialInput = opts.initialInput !== undefined;
+    const captureStream = getLogCaptureStream();
     const stdio:
       | 'inherit'
-      | ['inherit', 'pipe', 'inherit']
+      | ['inherit', 'pipe', 'pipe']
       | ['pipe', 'inherit', 'inherit']
-      | ['pipe', 'pipe', 'inherit'] = hasInitialInput
-      ? opts.logFile
-        ? ['pipe', 'pipe', 'inherit']
+      | ['pipe', 'pipe', 'pipe'] = hasInitialInput
+      ? opts.logFile || captureStream
+        ? ['pipe', 'pipe', 'pipe']
         : ['pipe', 'inherit', 'inherit']
-      : opts.logFile
-        ? ['inherit', 'pipe', 'inherit']
+      : opts.logFile || captureStream
+        ? ['inherit', 'pipe', 'pipe']
         : 'inherit';
     const child: ChildProcess = spawn(command, args, {
       stdio,
@@ -144,6 +145,7 @@ function spawnAsync(
       cwd: opts.cwd,
     });
     let logCompletion: Promise<void> | undefined;
+    let outputLogStream: ReturnType<typeof createWriteStream> | undefined;
     const childStdin = child.stdin;
     let stdinCleanup: (() => void) | undefined;
 
@@ -161,39 +163,57 @@ function spawnAsync(
       };
     }
 
-    if (opts.logFile) {
+    if (opts.logFile || captureStream) {
       const stdout = child.stdout;
+      const stderr = child.stderr;
       if (!stdout) {
         reject(new Error(`Failed to capture stdout for ${command}`));
         return;
       }
+      if ((opts.logFile || captureStream) && !stderr) {
+        reject(new Error(`Failed to capture stderr for ${command}`));
+        return;
+      }
 
       try {
-        const logStream = createWriteStream(opts.logFile);
-        logCompletion = new Promise((logResolve, logReject) => {
-          let settled = false;
+        if (opts.logFile) {
+          outputLogStream = createWriteStream(opts.logFile);
+          logCompletion = new Promise((logResolve, logReject) => {
+            let settled = false;
 
-          const resolveLog = (): void => {
-            if (settled) return;
-            settled = true;
-            logResolve();
-          };
+            const resolveLog = (): void => {
+              if (settled) return;
+              settled = true;
+              logResolve();
+            };
 
-          const rejectLog = (err: unknown): void => {
-            if (settled) return;
-            settled = true;
-            stdout.unpipe(logStream);
-            stdout.resume();
-            logReject(toError(err));
-          };
+            const rejectLog = (err: unknown): void => {
+              if (settled) return;
+              settled = true;
+              logReject(toError(err));
+            };
 
-          logStream.on('finish', resolveLog);
-          logStream.on('error', rejectLog);
-          stdout.on('error', rejectLog);
+            outputLogStream?.on('finish', resolveLog);
+            outputLogStream?.on('error', rejectLog);
+          });
+        }
+
+        stdout.on('data', (chunk: Buffer | string) => {
+          process.stdout.write(chunk);
+          outputLogStream?.write(chunk);
+          captureStream?.write(chunk);
         });
-        stdout.pipe(logStream);
+        stdout.on('error', (err) => {
+          logger.warn(`Warning: Session log capture failed: ${toErrorMessage(err)}`);
+        });
+        stderr?.on('data', (chunk: Buffer | string) => {
+          process.stderr.write(chunk);
+          captureStream?.write(chunk);
+        });
+        stderr?.on('error', (err) => {
+          logger.warn(`Warning: Session log capture failed: ${toErrorMessage(err)}`);
+        });
       } catch (err) {
-        stdout.resume();
         logger.warn(`Warning: Session log capture failed: ${toErrorMessage(err)}`);
       }
     }
@@ -227,6 +247,7 @@ function spawnAsync(
       clearTimeout(graceTimer);
       stdinCleanup?.();
       if (logCompletion) {
+        outputLogStream?.end();
         try {
           await logCompletion;
         } catch (err) {

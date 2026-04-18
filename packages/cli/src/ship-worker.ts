@@ -36,20 +36,21 @@ function isWorkerRunMessage(message: unknown): message is WorkerRunMessage {
 }
 
 async function sendResult(message: WorkerResultMessage, exitCode: number): Promise<void> {
-  if (typeof process.send !== 'function') {
+  try {
+    if (typeof process.send === 'function') {
+      await new Promise<void>((resolve, reject) => {
+        process.send?.(message, (error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+    }
+  } finally {
     process.exit(exitCode);
   }
-
-  await new Promise<void>((resolve, reject) => {
-    process.send?.(message, (error) => {
-      if (error) {
-        reject(error);
-        return;
-      }
-      resolve();
-    });
-  });
-  process.exit(exitCode);
 }
 
 let handled = false;
@@ -98,5 +99,8 @@ process.on('message', (message) => {
       const detail = error instanceof Error ? error.message : String(error);
       await sendResult({ type: 'result', success: false, error: detail }, 1);
     }
-  })();
+  })().catch(async (error: unknown) => {
+    const detail = error instanceof Error ? error.message : String(error);
+    await sendResult({ type: 'result', success: false, error: detail }, 1);
+  });
 });

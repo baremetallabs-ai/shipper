@@ -169,6 +169,26 @@ describe('withIssueLock', () => {
     expect(result).toBe('ok');
   });
 
+  it('does not passthrough a nested lock for a different repo with the same issue number', async () => {
+    queueExecFileResult('shipper:groomed\n');
+    queueExecFileResult('');
+    queueExecFileResult('shipper:groomed\n');
+    queueExecFileResult('');
+    queueExecFileResult('');
+    queueExecFileResult('');
+
+    await expect(
+      withIssueLock(repo, '42', async () => await withIssueLock('other/repo', '42', () => 'ok'))
+    ).resolves.toBe('ok');
+
+    expect(execFileMock).toHaveBeenCalledWith(
+      'gh',
+      ['issue', 'edit', '42', '-R', 'other/repo', '--add-label', 'shipper:locked'],
+      expect.objectContaining({ encoding: 'utf-8' }),
+      expect.any(Function)
+    );
+  });
+
   it('releases the lock when the callback rejects', async () => {
     queueExecFileResult('shipper:groomed\n');
     queueExecFileResult('');

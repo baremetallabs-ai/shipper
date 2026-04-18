@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type { Writable } from 'node:stream';
 
 export interface Logger {
@@ -29,6 +30,12 @@ export function formatDuration(ms: number): string {
 
 type LoggerChannel = 'log' | 'warn' | 'error';
 
+interface LogCaptureContext {
+  stream?: Writable;
+}
+
+const logCaptureContext = new AsyncLocalStorage<LogCaptureContext>();
+
 function prefixMessage(message: string): string {
   return message.replace(/^(\n*)/, '$1[shipper] ');
 }
@@ -46,11 +53,17 @@ function writeLine(channel: LoggerChannel, message: string, stream?: Writable): 
       break;
   }
 
-  if (!stream || !stream.writable || stream.writableEnded || stream.destroyed) {
+  const targetStream = stream ?? logCaptureContext.getStore()?.stream;
+  if (
+    !targetStream ||
+    !targetStream.writable ||
+    targetStream.writableEnded ||
+    targetStream.destroyed
+  ) {
     return;
   }
 
-  stream.write(`${message}\n`);
+  targetStream.write(`${message}\n`);
 }
 
 function formatIssueSegment(issue: string): string {
@@ -93,6 +106,21 @@ export function createLogger(options?: { stream?: Writable }): Logger {
       writeLine('error', prefixMessage(message), options?.stream);
     },
   };
+}
+
+export function getLogCaptureStream(): Writable | undefined {
+  return logCaptureContext.getStore()?.stream;
+}
+
+export async function withLogCapture<T>(
+  stream: Writable | undefined,
+  fn: () => Promise<T>
+): Promise<T> {
+  if (!stream) {
+    return await fn();
+  }
+
+  return await logCaptureContext.run({ stream }, fn);
 }
 
 export const logger = createLogger();

@@ -18,7 +18,7 @@ export async function runImplementStage(
   agent?: AgentName,
   model?: string
 ): Promise<StageRunResult> {
-  return (await runStageScaffold({
+  return await runStageScaffold({
     repo,
     issueNumber: issue,
     stage: 'implement',
@@ -37,7 +37,7 @@ export async function runImplementStage(
       pushMode: 'new-branch',
       baseRunPromptOpts: { repo, issueRef: issue, mode, agent, model },
     }),
-  })) as unknown as StageRunResult;
+  });
 }
 
 export async function implementCommand(

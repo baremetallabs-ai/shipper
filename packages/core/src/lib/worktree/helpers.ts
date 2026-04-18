@@ -1,4 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
+import { getLogCaptureStream } from '../logger.js';
 
 export const MAX_REBASE_ATTEMPTS = 3;
 export const MAX_PUSH_ATTEMPTS = 3;
@@ -66,11 +67,21 @@ export function toError(error: unknown): Error {
 
 export function spawnAsync(command: string, args: string[], opts: CommandOpts = {}): Promise<void> {
   return new Promise((resolve, reject) => {
+    const captureStream = getLogCaptureStream();
     const child = spawn(command, args, {
       cwd: opts.cwd,
       env: { ...process.env, ...opts.env },
       shell: opts.shell,
-      stdio: 'inherit',
+      stdio: captureStream ? ['inherit', 'pipe', 'pipe'] : 'inherit',
+    });
+
+    child.stdout?.on('data', (chunk: Buffer | string) => {
+      process.stdout.write(chunk);
+      captureStream?.write(chunk);
+    });
+    child.stderr?.on('data', (chunk: Buffer | string) => {
+      process.stderr.write(chunk);
+      captureStream?.write(chunk);
     });
 
     child.on('error', reject);
