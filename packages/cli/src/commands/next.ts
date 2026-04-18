@@ -1,41 +1,17 @@
 import {
   BLOCKED_LABEL,
   CONTROL_LABEL_NAMES,
-  DESIGNED_LABEL,
   FAILED_LABEL,
-  GROOMED_LABEL,
-  IMPLEMENTED_LABEL,
   NEW_LABEL,
-  PLANNED_LABEL,
   PRIORITY_LABEL_NAMES,
-  PR_OPEN_LABEL,
-  PR_REVIEWED_LABEL,
-  READY_LABEL,
   gh,
   logger,
   parseIssueNumberLabels,
   resolveRef,
-  tryResolvePrForIssue,
   withIssueLock,
 } from '@dnsquared/shipper-core';
 import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
-import { groomCommand } from './groom.js';
-import { designCommand } from './design.js';
-import { planCommand } from './plan.js';
-import { implementCommand } from './implement.js';
-import { prOpenCommand } from './pr-open.js';
-import { prReviewCommand } from './pr-review.js';
-import { prRemediateCommand } from './pr-remediate.js';
-
-async function resolvePrForIssue(repo: string, issueNumber: number): Promise<string> {
-  const pr = await tryResolvePrForIssue(repo, issueNumber);
-  if (!pr) {
-    throw new Error(
-      `No open PR found for issue #${issueNumber}. Run \`shipper pr open ${issueNumber}\` first.`
-    );
-  }
-  return pr;
-}
+import { runStageForLabel } from './stage-dispatch.js';
 
 export async function nextCommand(
   repo: string,
@@ -107,45 +83,10 @@ export async function nextCommand(
   const issueStr = String(issueNumber);
 
   // Dispatch (wrapped in lock so inner commands become passthroughs)
-  await withIssueLock(repo, issueStr, async () => {
-    switch (label) {
-      case NEW_LABEL:
-        logger.log(`Running: shipper groom ${issueStr}`);
-        await groomCommand(repo, issueStr, { auto: false, mode, agent, model });
-        break;
-      case GROOMED_LABEL:
-        logger.log(`Running: shipper design ${issueStr}`);
-        await designCommand(repo, issueStr, mode, agent, model);
-        break;
-      case DESIGNED_LABEL:
-        logger.log(`Running: shipper plan ${issueStr}`);
-        await planCommand(repo, issueStr, mode, agent, model);
-        break;
-      case PLANNED_LABEL:
-        logger.log(`Running: shipper implement ${issueStr}`);
-        await implementCommand(repo, issueStr, mode, agent, model);
-        break;
-      case IMPLEMENTED_LABEL:
-        logger.log(`Running: shipper pr open ${issueStr}`);
-        await prOpenCommand(repo, issueStr, mode, agent, model);
-        break;
-      case PR_OPEN_LABEL: {
-        const prNum = await resolvePrForIssue(repo, issueNumber);
-        logger.log(`Running: shipper pr review ${prNum}`);
-        await prReviewCommand(repo, prNum, mode, agent, model);
-        break;
-      }
-      case PR_REVIEWED_LABEL: {
-        const prNum = await resolvePrForIssue(repo, issueNumber);
-        logger.log(`Running: shipper pr remediate ${prNum}`);
-        await prRemediateCommand(repo, prNum, mode, agent, model);
-        break;
-      }
-      case READY_LABEL:
-        logger.log(`Issue #${issueNumber} is ready — no remaining workflow steps.`);
-        break;
-      default:
-        throw new Error(`Unrecognized shipper label "${label}" on issue #${issueNumber}.`);
-    }
-  });
+  const result = await withIssueLock(
+    repo,
+    issueStr,
+    async () => await runStageForLabel(repo, issueStr, label, { mode, agent, model })
+  );
+  process.exitCode = result.exitCode;
 }

@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { execFile } from 'node:child_process';
 import { toErrorMessage } from './errors.js';
 import { gh } from './gh.js';
@@ -132,17 +133,18 @@ export async function renewIssueLock(
   }
 }
 
+const issueLockContext = new AsyncLocalStorage<{ issueNumber: string }>();
+
 export async function withIssueLock<T>(
   repo: string,
   issueNumber: string,
   fn: () => Promise<T>
 ): Promise<T> {
-  if (process.env.SHIPPER_LOCK_HELD === issueNumber) {
+  if (issueLockContext.getStore()?.issueNumber === issueNumber) {
     return await fn();
   }
 
   await acquireIssueLock(repo, issueNumber);
-  process.env.SHIPPER_LOCK_HELD = issueNumber;
 
   const heartbeatMs = (getSettings().lockTimeoutMinutes / 3) * 60_000;
   const heartbeatCancelled = { value: false };
@@ -158,12 +160,10 @@ export async function withIssueLock<T>(
 
   const cleanup = async () => {
     await releaseIssueLock(repo, issueNumber);
-    delete process.env.SHIPPER_LOCK_HELD;
   };
 
   const cleanupWithoutAwait = () => {
     releaseIssueLockWithoutAwait(repo, issueNumber);
-    delete process.env.SHIPPER_LOCK_HELD;
   };
 
   const onSignal = () => {
@@ -183,7 +183,7 @@ export async function withIssueLock<T>(
   process.on('exit', onExit);
 
   try {
-    return await fn();
+    return await issueLockContext.run({ issueNumber }, fn);
   } finally {
     stopHeartbeat();
     process.removeListener('SIGINT', onSignal);

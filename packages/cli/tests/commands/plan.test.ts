@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { StageScaffoldOpts } from '@dnsquared/shipper-core';
+import type { StageRunResult, StageScaffoldOpts } from '@dnsquared/shipper-core';
 
 const autoSelectIssueMock = vi.fn();
 const generateBranchNameMock = vi.fn(() => Promise.resolve('shipper/123-branch'));
 const getRepoRootMock = vi.fn(() => Promise.resolve('/tmp/fake-repo'));
 const getSettingsMock = vi.fn(() => ({ defaultBaseBranch: 'main' }));
 const resolveBaseBranchMock = vi.fn(() => Promise.resolve('main'));
-const runStageScaffoldMock = vi.fn<(opts: StageScaffoldOpts) => Promise<void>>(() =>
-  Promise.resolve()
+const runStageScaffoldMock = vi.fn<(opts: StageScaffoldOpts) => Promise<StageRunResult>>(() =>
+  Promise.resolve({ success: true, exitCode: 0, verdict: 'accept' })
 );
 const simpleInvokerFactoryMock = vi.fn();
 const simpleInvokerMock = vi.fn(() => simpleInvokerFactoryMock);
@@ -38,6 +38,7 @@ describe('planCommand', () => {
     const { planCommand } = await import('../../src/commands/plan.js');
 
     await expect(planCommand('owner/repo', '123')).resolves.toBeUndefined();
+    expect(process.exitCode).toBe(0);
 
     expect(simpleInvokerMock).toHaveBeenCalledWith({
       promptName: 'plan',
@@ -99,5 +100,18 @@ describe('planCommand', () => {
     expect(runStageScaffoldMock).toHaveBeenCalledWith(
       expect.objectContaining({ issueNumber: '321' })
     );
+  });
+
+  it('maps stage helper failures onto process.exitCode at the CLI boundary', async () => {
+    runStageScaffoldMock.mockResolvedValueOnce({
+      success: false,
+      exitCode: 11,
+      error: 'agent exited',
+    });
+    const { planCommand } = await import('../../src/commands/plan.js');
+
+    await expect(planCommand('owner/repo', '123')).resolves.toBeUndefined();
+
+    expect(process.exitCode).toBe(11);
   });
 });

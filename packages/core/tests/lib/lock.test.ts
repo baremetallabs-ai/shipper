@@ -1,5 +1,5 @@
 import { promisify } from 'node:util';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { toError } from '../../src/lib/errors.js';
 
 const execFileMock = vi.fn();
@@ -61,11 +61,6 @@ beforeEach(() => {
   execFileMock.mockReset();
   mockGetSettings.mockClear();
   stderrMock.mockClear();
-  delete process.env.SHIPPER_LOCK_HELD;
-});
-
-afterEach(() => {
-  delete process.env.SHIPPER_LOCK_HELD;
 });
 
 describe('isLockStale', () => {
@@ -148,12 +143,17 @@ describe('releaseIssueLock', () => {
 });
 
 describe('withIssueLock', () => {
-  it('passes through when SHIPPER_LOCK_HELD already matches', async () => {
-    process.env.SHIPPER_LOCK_HELD = '42';
+  it('passes through nested calls for the same issue', async () => {
+    queueExecFileResult('shipper:groomed\n');
+    queueExecFileResult('');
+    queueExecFileResult('');
+
     const fn = vi.fn(() => Promise.resolve('result'));
 
-    await expect(withIssueLock(repo, '42', fn)).resolves.toBe('result');
-    expect(execFileMock).not.toHaveBeenCalled();
+    await expect(
+      withIssueLock(repo, '42', async () => await withIssueLock(repo, '42', fn))
+    ).resolves.toBe('result');
+    expect(execFileMock).toHaveBeenCalledTimes(3);
   });
 
   it('acquires and releases around an async callback', async () => {
@@ -161,15 +161,12 @@ describe('withIssueLock', () => {
     queueExecFileResult('');
     queueExecFileResult('');
 
-    let envDuringFn: string | undefined;
-    const result = await withIssueLock(repo, '42', () => {
-      envDuringFn = process.env.SHIPPER_LOCK_HELD;
-      return Promise.resolve('ok');
+    const result = await withIssueLock(repo, '42', async () => {
+      await expect(withIssueLock(repo, '42', () => Promise.resolve('ok'))).resolves.toBe('ok');
+      return 'ok';
     });
 
     expect(result).toBe('ok');
-    expect(envDuringFn).toBe('42');
-    expect(process.env.SHIPPER_LOCK_HELD).toBeUndefined();
   });
 
   it('releases the lock when the callback rejects', async () => {
@@ -342,14 +339,18 @@ describe('withIssueLock', () => {
     }
   });
 
-  it('does not start heartbeat when SHIPPER_LOCK_HELD is set', async () => {
+  it('does not start an additional heartbeat for nested calls', async () => {
     const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
     try {
-      process.env.SHIPPER_LOCK_HELD = '42';
+      queueExecFileResult('shipper:groomed\n');
+      queueExecFileResult('');
+      queueExecFileResult('');
 
-      await withIssueLock(repo, '42', () => Promise.resolve('result'));
+      await withIssueLock(repo, '42', async () => {
+        await withIssueLock(repo, '42', () => Promise.resolve('result'));
+      });
 
-      expect(setIntervalSpy).not.toHaveBeenCalled();
+      expect(setIntervalSpy).toHaveBeenCalledTimes(1);
     } finally {
       setIntervalSpy.mockRestore();
     }

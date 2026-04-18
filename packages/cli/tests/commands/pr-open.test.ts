@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { StageScaffoldOpts } from '@dnsquared/shipper-core';
+import type { StageRunResult, StageScaffoldOpts } from '@dnsquared/shipper-core';
 
 const autoSelectIssueMock = vi.fn();
 const findBranchForIssueMock = vi.fn(() => Promise.resolve('shipper/239-branch'));
@@ -7,8 +7,8 @@ const getRepoRootMock = vi.fn(() => Promise.resolve('/tmp/fake-repo'));
 const getSettingsMock = vi.fn(() => ({ defaultBaseBranch: 'main' }));
 const resolveBaseBranchMock = vi.fn(() => Promise.resolve('release/2026'));
 const resolveRefMock = vi.fn(() => Promise.resolve({ issueNumber: '239' }));
-const runStageScaffoldMock = vi.fn<(opts: StageScaffoldOpts) => Promise<void>>(() =>
-  Promise.resolve()
+const runStageScaffoldMock = vi.fn<(opts: StageScaffoldOpts) => Promise<StageRunResult>>(() =>
+  Promise.resolve({ success: true, exitCode: 0, verdict: 'accept' })
 );
 const transportInvokerFactoryMock = vi.fn();
 const transportInvokerMock = vi.fn(() => transportInvokerFactoryMock);
@@ -42,6 +42,7 @@ describe('prOpenCommand', () => {
     const { prOpenCommand } = await import('../../src/commands/pr-open.js');
 
     await expect(prOpenCommand('owner/repo', '239')).resolves.toBeUndefined();
+    expect(process.exitCode).toBe(0);
 
     expect(resolveRefMock).toHaveBeenCalledWith('owner/repo', '239', 'issue');
     expect(tryResolvePrForIssueMock).toHaveBeenCalledWith('owner/repo', 239);
@@ -123,5 +124,18 @@ describe('prOpenCommand', () => {
     expect(runStageScaffoldMock).toHaveBeenCalledWith(
       expect.objectContaining({ issueNumber: '321' })
     );
+  });
+
+  it('maps stage helper failures onto process.exitCode at the CLI boundary', async () => {
+    runStageScaffoldMock.mockResolvedValueOnce({
+      success: false,
+      exitCode: 19,
+      error: 'agent exited',
+    });
+    const { prOpenCommand } = await import('../../src/commands/pr-open.js');
+
+    await expect(prOpenCommand('owner/repo', '239')).resolves.toBeUndefined();
+
+    expect(process.exitCode).toBe(19);
   });
 });

@@ -38,13 +38,19 @@ import {
   withWorktree,
   writeContextFile,
 } from '@dnsquared/shipper-core';
-import type { AgentName, CommandMode, PrReviewWait } from '@dnsquared/shipper-core';
+import type { AgentName, CommandMode, PrReviewWait, StageRunResult } from '@dnsquared/shipper-core';
 
 const ZERO_CHECKS_GRACE_MS = 30_000;
 const CI_WAIT_TIMEOUT_MINUTES = 30;
 const MAX_REMEDIATION_PASSES = 5;
 const MAX_CONSECUTIVE_FETCH_FAILURES = 3;
-export const SKIP_PR_REMEDIATE_WAIT_ENV_VAR = 'SHIPPER_SKIP_PR_REMEDIATE_WAIT';
+
+export interface PrRemediateStageOptions {
+  mode?: CommandMode;
+  agent?: AgentName;
+  model?: string;
+  skipInitialWait?: boolean;
+}
 
 class PollingInterruptedError extends Error {
   constructor() {
@@ -299,36 +305,15 @@ export async function buildReadyCheck(
   };
 }
 
-export async function prRemediateCommand(
+export async function runPrRemediateStage(
   repo: string,
-  pr?: string,
-  mode?: CommandMode,
-  agent?: AgentName,
-  model?: string
-): Promise<void> {
-  let issueNumber: string;
-
-  if (!pr) {
-    const selected = await autoSelectPrForStage(
-      repo,
-      'shipper:pr-reviewed',
-      "No PRs ready for remediation. Run 'shipper pr review' first."
-    );
-    logger.error(
-      `Auto-selected PR #${selected.pr} (issue #${selected.issue.number}: ${selected.issue.title})`
-    );
-    pr = selected.pr;
-    issueNumber = String(selected.issue.number);
-  } else {
-    const resolved = await resolveRef(repo, pr, 'both');
-    pr = resolved.prNumber;
-    issueNumber = resolved.issueNumber;
-  }
-
-  const prRef = pr;
-  if (!prRef) {
-    throw new Error('Error: No PR selected for remediation.');
-  }
+  issueNumber: string,
+  prRef: string,
+  options: PrRemediateStageOptions = {}
+): Promise<StageRunResult> {
+  const { mode, agent, model, skipInitialWait = false } = options;
+  let failureError: string | undefined;
+  let verdict: StageRunResult['verdict'];
 
   const run = async () => {
     const branch = await getBranchForPR(repo, prRef);
@@ -346,7 +331,7 @@ export async function prRemediateCommand(
     return await withStageHooks('pr-remediate', { issueNumber, branchName: branch }, async () => {
       const { prReviewWait } = getSettings();
 
-      if (process.env[SKIP_PR_REMEDIATE_WAIT_ENV_VAR] !== '1') {
+      if (!skipInitialWait) {
         if (prReviewWait.mode === 'timer') {
           if (prReviewWait.durationMinutes > 0) {
             const { stdout } = await gh(['pr', 'view', prRef, '-R', repo, '--json', 'createdAt']);
@@ -358,7 +343,7 @@ export async function prRemediateCommand(
             if (remainingMs > 0) {
               const remainingMin = Math.ceil(remainingMs / 60_000);
               logger.log(
-                `PR #${pr} is ${Math.floor(elapsedMs / 60_000)} minutes old. ` +
+                `PR #${prRef} is ${Math.floor(elapsedMs / 60_000)} minutes old. ` +
                   `Waiting ${remainingMin} more minute(s) for reviewers (prReviewWait.durationMinutes: ${prReviewWait.durationMinutes})...`
               );
               await sleepMs(remainingMs);
@@ -435,6 +420,7 @@ export async function prRemediateCommand(
               );
             } catch (error) {
               const detail = toErrorMessage(error);
+              failureError = detail;
               await handleAgentCrash(repo, issueNumber, 'pr_remediate', detail);
               return 1;
             }
@@ -444,6 +430,7 @@ export async function prRemediateCommand(
               commitsAhead = await getCommitsAheadCount(wtPath, baseBranch);
             } catch (error) {
               const detail = toErrorMessage(error);
+              failureError = detail;
               await handleAgentCrash(repo, issueNumber, 'pr_remediate', detail);
               return 1;
             }
@@ -454,6 +441,7 @@ export async function prRemediateCommand(
 This typically means the branch's commits were already on the base branch through another merge path, so the rebase dropped them all.
 
 Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
+              failureError = detail;
               await handleAgentCrash(repo, issueNumber, 'pr_remediate', detail);
               await executeTransition(
                 repo,
@@ -478,6 +466,7 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
             if (exitCode !== 0) {
               const detail = `Agent exited with code ${exitCode}`;
               logger.error(detail);
+              failureError = detail;
               await handleAgentCrash(
                 repo,
                 issueNumber,
@@ -508,6 +497,7 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
             } catch (error) {
               const detail = toErrorMessage(error);
               logger.error(detail);
+              failureError = detail;
               await handleAgentCrash(repo, issueNumber, 'pr_remediate', detail);
               return 1;
             }
@@ -522,10 +512,13 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
                   result,
                   prNumber: prRef,
                 });
-                return 0;
+                verdict = result.verdict;
+                failureError = `Stage returned verdict "${result.verdict}".`;
+                return 1;
               } catch (error) {
                 const detail = toErrorMessage(error);
                 logger.error(detail);
+                failureError = detail;
                 await handleAgentCrash(repo, issueNumber, 'pr_remediate', detail);
                 return 1;
               }
@@ -568,6 +561,7 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
               }
             } catch (error) {
               const detail = toErrorMessage(error);
+              failureError = detail;
               const postingResult = await readLatestPostingResult();
               try {
                 await postReplies(repo, prRef, wtPath, postingResult.replies);
@@ -634,6 +628,7 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
             const { failed, pending } = classifyChecks(checks);
 
             if (checks.length > 0 && failed.length === 0 && pending.length === 0) {
+              verdict = 'accept';
               await executeTransition(
                 repo,
                 issueNumber,
@@ -649,21 +644,67 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
             );
           }
 
-          logger.error(`Remediation exhausted ${MAX_REMEDIATION_PASSES} passes without green CI.`);
-          return 0;
+          failureError = `Remediation exhausted ${MAX_REMEDIATION_PASSES} passes without green CI.`;
+          logger.error(failureError);
+          return 1;
         }
       );
     });
   };
 
   try {
-    const code = await withIssueLock(repo, issueNumber, run);
-    process.exitCode = code;
+    const exitCode = await withIssueLock(repo, issueNumber, run);
+    return exitCode === 0
+      ? {
+          success: true,
+          exitCode,
+          ...(verdict !== undefined ? { verdict } : {}),
+        }
+      : {
+          success: false,
+          exitCode,
+          error: failureError ?? `Agent exited with code ${exitCode}`,
+          ...(verdict !== undefined ? { verdict } : {}),
+        };
   } catch (err) {
     if (err instanceof PollingInterruptedError) {
-      process.exitCode = 130;
-      return;
+      return { success: false, exitCode: 130, error: err.message };
     }
     throw err;
   }
+}
+
+export async function prRemediateCommand(
+  repo: string,
+  pr?: string,
+  mode?: CommandMode,
+  agent?: AgentName,
+  model?: string
+): Promise<void> {
+  let issueNumber: string;
+
+  if (!pr) {
+    const selected = await autoSelectPrForStage(
+      repo,
+      'shipper:pr-reviewed',
+      "No PRs ready for remediation. Run 'shipper pr review' first."
+    );
+    logger.error(
+      `Auto-selected PR #${selected.pr} (issue #${selected.issue.number}: ${selected.issue.title})`
+    );
+    pr = selected.pr;
+    issueNumber = String(selected.issue.number);
+  } else {
+    const resolved = await resolveRef(repo, pr, 'both');
+    pr = resolved.prNumber;
+    issueNumber = resolved.issueNumber;
+  }
+
+  if (!pr) {
+    throw new Error('Error: No PR selected for remediation.');
+  }
+
+  process.exitCode = (
+    await runPrRemediateStage(repo, issueNumber, pr, { mode, agent, model })
+  ).exitCode;
 }

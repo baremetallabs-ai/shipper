@@ -12,7 +12,7 @@ import {
   withStageHooks,
   withWorktree,
 } from '@dnsquared/shipper-core';
-import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
+import type { AgentName, CommandMode, StageRunResult } from '@dnsquared/shipper-core';
 import { printAutoSummary, type AutoResult } from './ship-auto.js';
 
 export interface GroomOptions {
@@ -22,13 +22,13 @@ export interface GroomOptions {
   model?: string;
 }
 
-async function groomOneIssue(
+export async function runGroomStage(
   repo: string,
   issueStr: string,
   mode?: CommandMode,
   agent?: AgentName,
   model?: string
-): Promise<{ success: boolean; error?: string }> {
+): Promise<StageRunResult> {
   const code = await withIssueLock(repo, issueStr, async () => {
     const repoRoot = await getRepoRoot();
     const branch = await generateBranchName(repo, issueStr);
@@ -54,8 +54,12 @@ async function groomOneIssue(
     );
   });
   return code === 0
-    ? { success: true }
-    : { success: false, error: 'agent exited with non-zero status' };
+    ? { success: true, exitCode: 0 }
+    : {
+        success: false,
+        exitCode: code,
+        error: `Agent exited with code ${code}`,
+      };
 }
 
 export async function groomCommand(
@@ -82,7 +86,7 @@ export async function groomCommand(
       if (!candidate) break;
 
       logger.log(`\nAuto: grooming issue #${candidate.number} — ${candidate.title}`);
-      const result = await groomOneIssue(
+      const result = await runGroomStage(
         repo,
         String(candidate.number),
         options.mode,
@@ -114,8 +118,7 @@ export async function groomCommand(
     issue = String(selected.number);
   }
 
-  process.exitCode = (await groomOneIssue(repo, issue, options.mode, options.agent, options.model))
-    .success
-    ? 0
-    : 1;
+  process.exitCode = (
+    await runGroomStage(repo, issue, options.mode, options.agent, options.model)
+  ).exitCode;
 }

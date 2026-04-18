@@ -137,7 +137,7 @@ export {
   resolveMode,
 } from './lib/settings.js';
 export { sleepMs } from './lib/sleep.js';
-export type { StageScaffoldOpts } from './lib/stage-scaffold.js';
+export type { StageRunResult, StageScaffoldOpts } from './lib/stage-scaffold.js';
 export { runStageScaffold, simpleInvoker, transportInvoker } from './lib/stage-scaffold.js';
 export type { LabelTransition, Verdict } from './lib/stage-transitions.js';
 export { resolveTransition } from './lib/stage-transitions.js';
