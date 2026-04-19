@@ -38,27 +38,85 @@ export interface FakeTransportOverrides {
  * Test-only hook for swapping external transport seams while keeping core logic real.
  */
 export function __installFakeTransports(overrides: FakeTransportOverrides = {}): () => void {
-  const restoreGh = __setGhImpl(overrides.gh);
-  const restoreRunPrompt = __setRunPromptImpl(overrides.runPrompt);
-  const restoreWithWorktree = __setWithWorktreeImpl(overrides.withWorktree);
-  const restoreSyncWorktree = __setSyncWorktreeImpl(overrides.syncWorktree);
-  const restorePushWithRetry = __setPushWithRetryImpl(overrides.pushWithRetry);
-  const restoreGetRepoRoot = __setGetRepoRootImpl(overrides.getRepoRoot);
-  const restoreGetBranchForPR = __setGetBranchForPRImpl(overrides.getBranchForPR);
-  const restoreGetGitRevParse = __setGetGitRevParseImpl(overrides.getGitRevParse);
-  const restoreGetCommitsAheadCount = __setGetCommitsAheadCountImpl(overrides.getCommitsAheadCount);
-  const restoreSleepMs = __setSleepMsImpl(overrides.sleepMs);
+  const restoreFns: Array<() => void> = [];
+  const hasOwn = (key: keyof FakeTransportOverrides): boolean =>
+    Object.prototype.hasOwnProperty.call(overrides, key);
+
+  if (hasOwn('gh')) {
+    const restoreGh = __setGhImpl(overrides.gh);
+    restoreFns.push(() => {
+      __setGhImpl(restoreGh);
+    });
+  }
+
+  if (hasOwn('runPrompt')) {
+    const restoreRunPrompt = __setRunPromptImpl(overrides.runPrompt);
+    restoreFns.push(() => {
+      __setRunPromptImpl(restoreRunPrompt);
+    });
+  }
+
+  if (hasOwn('withWorktree')) {
+    const restoreWithWorktree = __setWithWorktreeImpl(overrides.withWorktree);
+    restoreFns.push(() => {
+      __setWithWorktreeImpl(restoreWithWorktree);
+    });
+  }
+
+  if (hasOwn('syncWorktree')) {
+    const restoreSyncWorktree = __setSyncWorktreeImpl(overrides.syncWorktree);
+    restoreFns.push(() => {
+      __setSyncWorktreeImpl(restoreSyncWorktree);
+    });
+  }
+
+  if (hasOwn('pushWithRetry')) {
+    const restorePushWithRetry = __setPushWithRetryImpl(overrides.pushWithRetry);
+    restoreFns.push(() => {
+      __setPushWithRetryImpl(restorePushWithRetry);
+    });
+  }
+
+  if (hasOwn('getRepoRoot')) {
+    const restoreGetRepoRoot = __setGetRepoRootImpl(overrides.getRepoRoot);
+    restoreFns.push(() => {
+      __setGetRepoRootImpl(restoreGetRepoRoot);
+    });
+  }
+
+  if (hasOwn('getBranchForPR')) {
+    const restoreGetBranchForPR = __setGetBranchForPRImpl(overrides.getBranchForPR);
+    restoreFns.push(() => {
+      __setGetBranchForPRImpl(restoreGetBranchForPR);
+    });
+  }
+
+  if (hasOwn('getGitRevParse')) {
+    const restoreGetGitRevParse = __setGetGitRevParseImpl(overrides.getGitRevParse);
+    restoreFns.push(() => {
+      __setGetGitRevParseImpl(restoreGetGitRevParse);
+    });
+  }
+
+  if (hasOwn('getCommitsAheadCount')) {
+    const restoreGetCommitsAheadCount = __setGetCommitsAheadCountImpl(
+      overrides.getCommitsAheadCount
+    );
+    restoreFns.push(() => {
+      __setGetCommitsAheadCountImpl(restoreGetCommitsAheadCount);
+    });
+  }
+
+  if (hasOwn('sleepMs')) {
+    const restoreSleepMs = __setSleepMsImpl(overrides.sleepMs);
+    restoreFns.push(() => {
+      __setSleepMsImpl(restoreSleepMs);
+    });
+  }
 
   return () => {
-    __setGhImpl(restoreGh);
-    __setRunPromptImpl(restoreRunPrompt);
-    __setWithWorktreeImpl(restoreWithWorktree);
-    __setSyncWorktreeImpl(restoreSyncWorktree);
-    __setPushWithRetryImpl(restorePushWithRetry);
-    __setGetRepoRootImpl(restoreGetRepoRoot);
-    __setGetBranchForPRImpl(restoreGetBranchForPR);
-    __setGetGitRevParseImpl(restoreGetGitRevParse);
-    __setGetCommitsAheadCountImpl(restoreGetCommitsAheadCount);
-    __setSleepMsImpl(restoreSleepMs);
+    for (let index = restoreFns.length - 1; index >= 0; index -= 1) {
+      restoreFns[index]?.();
+    }
   };
 }

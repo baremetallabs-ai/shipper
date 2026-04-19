@@ -227,10 +227,18 @@ function toResponse(stdout = '', stderr = ''): GhResponse {
   return { stdout, stderr };
 }
 
-async function maybeReadBodyFile(args: string[]): Promise<string> {
+function resolvePathWithCwd(filePath: string, options?: { cwd?: string }): string {
+  if (path.isAbsolute(filePath)) {
+    return filePath;
+  }
+
+  return path.resolve(options?.cwd ?? process.cwd(), filePath);
+}
+
+async function maybeReadBodyFile(args: string[], options?: { cwd?: string }): Promise<string> {
   const bodyFile = getFlagValue(args, '--body-file');
   if (bodyFile) {
-    return await readFile(bodyFile, 'utf-8');
+    return await readFile(resolvePathWithCwd(bodyFile, options), 'utf-8');
   }
 
   return getFlagValue(args, '--body') ?? '';
@@ -338,7 +346,7 @@ export function createFakeCore(): CreateFakeCore {
     state.labelTransitions.push({ target, number, add: [...add], remove: [...remove] });
   };
 
-  const defaultGh = async (args: string[]): Promise<GhResponse> => {
+  const defaultGh = async (args: string[], options?: { cwd?: string }): Promise<GhResponse> => {
     if (args[0] === 'issue' && args[1] === 'view') {
       const issueNumber = args[2];
       if (!issueNumber) {
@@ -400,7 +408,7 @@ export function createFakeCore(): CreateFakeCore {
         throw new Error('Missing issue number');
       }
       const issue = ensureIssue(issueNumber);
-      const body = await maybeReadBodyFile(args);
+      const body = await maybeReadBodyFile(args, options);
       issue.comments.push(body);
       state.postedComments.push({ target: 'issue', number: issueNumber, body });
       return toResponse();
@@ -484,7 +492,7 @@ export function createFakeCore(): CreateFakeCore {
       const head = getFlagValue(args, '--head');
       const base = getFlagValue(args, '--base');
       const title = getFlagValue(args, '--title');
-      const body = await maybeReadBodyFile(args);
+      const body = await maybeReadBodyFile(args, options);
       if (!repo || !head || !base || !title) {
         throw new Error(`Unsupported pr create args: ${args.join(' ')}`);
       }
@@ -586,7 +594,9 @@ export function createFakeCore(): CreateFakeCore {
 
       if (tail[0] === 'pulls' && tail[2] === 'reviews' && tail[1] !== undefined) {
         const inputPath = getFlagValue(args, '--input');
-        const body = inputPath ? await readFile(inputPath, 'utf-8') : '';
+        const body = inputPath
+          ? await readFile(resolvePathWithCwd(inputPath, options), 'utf-8')
+          : '';
         state.submittedReviews.push({ pr: tail[1], body });
         return toResponse();
       }
@@ -610,7 +620,7 @@ export function createFakeCore(): CreateFakeCore {
               return result;
             }
           }
-          return await defaultGh(args);
+          return await defaultGh(args, options);
         },
         runPrompt: async (name, opts) => await runPromptHandler(name, opts),
         withWorktree: async (_opts, fn) => await fn(wtPath),
@@ -628,9 +638,9 @@ export function createFakeCore(): CreateFakeCore {
         },
         getRepoRoot: () => Promise.resolve(repoRoot),
         getBranchForPR: (_repo, prRef) => Promise.resolve(ensurePr(prRef).headRefName),
-        getGitRevParse: (_cwd, ref) => {
+        getGitRevParse: (cwd, ref) => {
           if (gitRevParseHandler) {
-            return Promise.resolve(gitRevParseHandler(wtPath, ref));
+            return Promise.resolve(gitRevParseHandler(cwd, ref));
           }
           const queued = revParseQueue.shift();
           if (queued !== undefined) {
@@ -638,9 +648,9 @@ export function createFakeCore(): CreateFakeCore {
           }
           return Promise.resolve(ref === 'HEAD' ? 'head-sha' : `sha-for-${ref}`);
         },
-        getCommitsAheadCount: (_wtPath, baseBranch) => {
+        getCommitsAheadCount: (worktreePath, baseBranch) => {
           if (commitsAheadHandler) {
-            return Promise.resolve(commitsAheadHandler(wtPath, baseBranch));
+            return Promise.resolve(commitsAheadHandler(worktreePath, baseBranch));
           }
           const queued = commitsAheadQueue.shift();
           return Promise.resolve(queued ?? 1);
