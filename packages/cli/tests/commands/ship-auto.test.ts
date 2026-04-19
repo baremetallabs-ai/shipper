@@ -1,67 +1,52 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const spawnMock = vi.fn();
-const forkMock = vi.fn();
+import { createFakeCore } from '../_harness/fake-core.js';
 
-vi.mock('node:child_process', () => ({
-  spawn: spawnMock,
-  fork: forkMock,
-  spawnSync: vi.fn(),
+const {
+  spawnMock,
+  forkMock,
+  mkdirSyncMock,
+  selectNextCandidateMock,
+  selectBlockedIssuesMock,
+  attemptUnblockMock,
+  printUnblockSummaryMock,
+  shipOneIssueMock,
+} = vi.hoisted(() => ({
+  spawnMock: vi.fn(),
+  forkMock: vi.fn(),
+  mkdirSyncMock: vi.fn(),
+  selectNextCandidateMock: vi.fn(),
+  selectBlockedIssuesMock: vi.fn(),
+  attemptUnblockMock: vi.fn(),
+  printUnblockSummaryMock: vi.fn(),
+  shipOneIssueMock: vi.fn(),
 }));
 
-vi.mock('node:os', () => ({
-  homedir: () => '/mock-home',
-}));
+vi.mock('node:child_process', async () => {
+  const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+  return {
+    ...actual,
+    spawn: spawnMock,
+    fork: forkMock,
+    spawnSync: vi.fn(),
+  };
+});
 
-vi.mock('node:fs', () => ({
-  mkdirSync: vi.fn(),
-}));
+vi.mock('node:os', async () => {
+  const actual = await vi.importActual<typeof import('node:os')>('node:os');
+  return {
+    ...actual,
+    homedir: () => '/mock-home',
+  };
+});
 
-const loggerLogMock = vi.fn<(message: string) => void>();
-const selectNextCandidateMock =
-  vi.fn<
-    (
-      repo: string,
-      skippedIssues: Set<number>,
-      activeIssues?: ReadonlySet<number>
-    ) => Promise<{ number: number; title: string } | null>
-  >();
-const selectBlockedIssuesMock =
-  vi.fn<(repo: string) => Promise<Array<{ number: number; title: string }>>>();
-const attemptUnblockMock =
-  vi.fn<
-    (
-      repo: string,
-      issue: string,
-      agent?: string,
-      model?: string,
-      logFile?: string
-    ) => Promise<boolean>
-  >();
-const printUnblockSummaryMock = vi.fn<(attempts: unknown[], homeDir: string) => void>();
-const shipOneIssueMock =
-  vi.fn<
-    (options: {
-      repo: string;
-      issue: string;
-      merge: boolean;
-      logFile?: string;
-      agent?: string;
-      model?: string;
-      collectTokens?: boolean;
-      skipInteractiveStages?: boolean;
-      parkHooks?: unknown;
-    }) => Promise<{ success: boolean }>
-  >();
-
-vi.mock('@dnsquared/shipper-core', () => ({
-  logger: {
-    log: loggerLogMock,
-    warn: vi.fn(),
-    error: vi.fn(),
-  },
-  releaseIssueLock: vi.fn(),
-}));
+vi.mock('node:fs', async () => {
+  const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+  return {
+    ...actual,
+    mkdirSync: mkdirSyncMock,
+  };
+});
 
 vi.mock('../../src/commands/ship-candidates.js', () => ({
   selectNextCandidate: selectNextCandidateMock,
@@ -78,20 +63,34 @@ vi.mock('../../src/commands/ship-execute.js', () => ({
   resolveIssueTotalTokens: vi.fn(),
 }));
 
+type FakeCore = ReturnType<typeof createFakeCore>;
+
 async function flushMicrotasks(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
 }
 
 describe('shipAutoSequential', () => {
+  let fake: FakeCore;
+
   beforeEach(() => {
+    fake = createFakeCore();
+    fake.install();
     vi.clearAllMocks();
     vi.useFakeTimers();
+    vi.spyOn(console, 'log').mockImplementation(() => {});
     process.exitCode = undefined;
     selectBlockedIssuesMock.mockResolvedValue([]);
     selectNextCandidateMock.mockResolvedValue(null);
     attemptUnblockMock.mockResolvedValue(false);
     shipOneIssueMock.mockResolvedValue({ success: true });
+  });
+
+  afterEach(async () => {
+    process.exitCode = undefined;
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    await fake.dispose();
   });
 
   it('parks one issue, runs the next issue, and resumes when ready without spawning', async () => {

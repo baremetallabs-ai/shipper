@@ -567,7 +567,7 @@ export async function shipAutoParallel(
 
   mkdirSync(logsDir, { recursive: true, mode: 0o700 });
 
-  const onSignal = (signal: ShipSignal) => {
+  const handleSignal = (signal: ShipSignal) => {
     if (isShuttingDown()) return;
     shuttingDown = true;
 
@@ -599,8 +599,15 @@ export async function shipAutoParallel(
     })();
   };
 
-  process.on('SIGINT', onSignal);
-  process.on('SIGTERM', onSignal);
+  const onSigint = () => {
+    handleSignal('SIGINT');
+  };
+  const onSigterm = () => {
+    handleSignal('SIGTERM');
+  };
+
+  process.on('SIGINT', onSigint);
+  process.on('SIGTERM', onSigterm);
 
   try {
     for (;;) {
@@ -697,8 +704,8 @@ export async function shipAutoParallel(
       }
     }
   } finally {
-    process.removeListener('SIGINT', onSignal);
-    process.removeListener('SIGTERM', onSignal);
+    process.removeListener('SIGINT', onSigint);
+    process.removeListener('SIGTERM', onSigterm);
   }
 
   printAutoSummary(results);

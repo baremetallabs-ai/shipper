@@ -84,6 +84,14 @@ export async function aggregateSessionUsage(
   issue: string,
   since: Date
 ): Promise<TokenUsage | undefined> {
+  return await aggregateSessionUsageImpl(repo, issue, since);
+}
+
+async function aggregateSessionUsageDefault(
+  repo: string,
+  issue: string,
+  since: Date
+): Promise<TokenUsage | undefined> {
   const sessionDir = getSessionDir(toRepoSlug(repo));
   let entries: string[];
   try {
@@ -139,6 +147,16 @@ export async function aggregateSessionUsage(
   }
 
   return total;
+}
+
+let aggregateSessionUsageImpl: typeof aggregateSessionUsageDefault = aggregateSessionUsageDefault;
+
+export function __setAggregateSessionUsageImpl(
+  next?: typeof aggregateSessionUsageDefault
+): typeof aggregateSessionUsageDefault {
+  const previous = aggregateSessionUsageImpl;
+  aggregateSessionUsageImpl = next ?? aggregateSessionUsageDefault;
+  return previous;
 }
 
 function parseRepoFromRemote(remote: string): string | undefined {

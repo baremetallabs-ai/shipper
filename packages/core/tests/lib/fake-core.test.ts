@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { __installFakeTransports } from '../../src/index.js';
 import { gh } from '../../src/lib/gh.js';
+import { aggregateSessionUsage } from '../../src/lib/session.js';
 import { createFakeCore } from '../_harness/fake-core.js';
 import { postReplies, processResult } from '../../src/lib/output-protocol/protocol-actions.js';
 import { validateStageOutput } from '../../src/lib/output-protocol/protocol-validation.js';
@@ -157,5 +158,39 @@ describe('fakeCore harness', () => {
     }
 
     await expect(getCommitsAheadCount('/tmp/not-a-repo', 'main')).resolves.toBe(1);
+  });
+
+  it('installs and restores aggregateSessionUsage overrides cleanly', async () => {
+    const since = new Date('2026-01-01T00:00:00Z');
+    const outerUsage = {
+      inputTokens: 1,
+      outputTokens: 2,
+      cacheReadTokens: 3,
+      cacheWriteTokens: 4,
+    };
+    const innerUsage = {
+      inputTokens: 5,
+      outputTokens: 6,
+      cacheReadTokens: 7,
+      cacheWriteTokens: 8,
+    };
+    const restoreOuter = __installFakeTransports({
+      aggregateSessionUsage: () => outerUsage,
+    });
+
+    expect(await aggregateSessionUsage('owner/repo', '10', since)).toEqual(outerUsage);
+
+    const restoreInner = __installFakeTransports({
+      aggregateSessionUsage: () => innerUsage,
+    });
+
+    try {
+      await expect(aggregateSessionUsage('owner/repo', '10', since)).resolves.toEqual(innerUsage);
+    } finally {
+      restoreInner();
+    }
+
+    await expect(aggregateSessionUsage('owner/repo', '10', since)).resolves.toEqual(outerUsage);
+    restoreOuter();
   });
 });

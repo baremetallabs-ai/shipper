@@ -1,56 +1,51 @@
 import { EventEmitter } from 'node:events';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const forkMock = vi.fn();
+import { createFakeCore } from '../_harness/fake-core.js';
 
-vi.mock('node:child_process', () => ({
-  fork: forkMock,
-  spawn: vi.fn(),
-  spawnSync: vi.fn(),
+const {
+  forkMock,
+  mkdirSyncMock,
+  selectNextCandidateMock,
+  selectBlockedIssuesMock,
+  attemptUnblockMock,
+  printUnblockSummaryMock,
+  resolveIssueTotalTokensMock,
+} = vi.hoisted(() => ({
+  forkMock: vi.fn(),
+  mkdirSyncMock: vi.fn(),
+  selectNextCandidateMock: vi.fn(),
+  selectBlockedIssuesMock: vi.fn(),
+  attemptUnblockMock: vi.fn(),
+  printUnblockSummaryMock: vi.fn(),
+  resolveIssueTotalTokensMock: vi.fn(),
 }));
 
-vi.mock('node:os', () => ({
-  homedir: () => '/mock-home',
-}));
+vi.mock('node:child_process', async () => {
+  const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+  return {
+    ...actual,
+    fork: forkMock,
+    spawn: vi.fn(),
+    spawnSync: vi.fn(),
+  };
+});
 
-vi.mock('node:fs', () => ({
-  mkdirSync: vi.fn(),
-}));
+vi.mock('node:os', async () => {
+  const actual = await vi.importActual<typeof import('node:os')>('node:os');
+  return {
+    ...actual,
+    homedir: () => '/mock-home',
+  };
+});
 
-const loggerLogMock = vi.fn<(message: string) => void>();
-const selectNextCandidateMock =
-  vi.fn<
-    (
-      repo: string,
-      skippedIssues: Set<number>,
-      activeIssues?: ReadonlySet<number>
-    ) => Promise<{ number: number; title: string } | null>
-  >();
-const selectBlockedIssuesMock =
-  vi.fn<(repo: string) => Promise<Array<{ number: number; title: string }>>>();
-const attemptUnblockMock =
-  vi.fn<
-    (
-      repo: string,
-      issue: string,
-      agent?: string,
-      model?: string,
-      logFile?: string
-    ) => Promise<boolean>
-  >();
-const printUnblockSummaryMock = vi.fn<(attempts: unknown[], homeDir: string) => void>();
-const resolveIssueTotalTokensMock =
-  vi.fn<(repo: string, issue: string) => Promise<number | undefined>>();
-const releaseIssueLockMock = vi.fn<(repo: string, issue: string) => Promise<void>>();
-
-vi.mock('@dnsquared/shipper-core', () => ({
-  logger: {
-    log: loggerLogMock,
-    warn: vi.fn(),
-    error: vi.fn(),
-  },
-  releaseIssueLock: releaseIssueLockMock,
-}));
+vi.mock('node:fs', async () => {
+  const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+  return {
+    ...actual,
+    mkdirSync: mkdirSyncMock,
+  };
+});
 
 vi.mock('../../src/commands/ship-candidates.js', () => ({
   selectNextCandidate: selectNextCandidateMock,
@@ -71,6 +66,8 @@ vi.mock('../../src/commands/ship-merge.js', () => ({
   isRetriableMergeFailure: () => false,
 }));
 
+// fakeCore cannot cross process boundaries, so this narrow fork seam models only the
+// documented parent↔child IPC contract without mocking the core package wholesale.
 class MockForkChild extends EventEmitter {
   send = vi.fn();
   kill = vi.fn<(signal?: string) => void>();
@@ -80,14 +77,23 @@ class MockForkChild extends EventEmitter {
   stderr = new EventEmitter();
 }
 
+type FakeCore = ReturnType<typeof createFakeCore>;
+
 async function flushMicrotasks(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
 }
 
 describe('shipAutoParallel', () => {
+  let fake: FakeCore;
+  let logSpy: ReturnType<typeof vi.spyOn>;
+
   beforeEach(() => {
+    fake = createFakeCore();
+    fake.install();
     vi.clearAllMocks();
+    vi.useFakeTimers();
+    logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     process.exitCode = undefined;
     selectBlockedIssuesMock.mockResolvedValue([]);
     selectNextCandidateMock
@@ -96,6 +102,13 @@ describe('shipAutoParallel', () => {
       .mockResolvedValue(null);
     attemptUnblockMock.mockResolvedValue(false);
     resolveIssueTotalTokensMock.mockResolvedValue(undefined);
+  });
+
+  afterEach(async () => {
+    process.exitCode = undefined;
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    await fake.dispose();
   });
 
   it('forks one worker per active issue and exchanges only IPC messages', async () => {
@@ -145,8 +158,8 @@ describe('shipAutoParallel', () => {
 
     await runPromise;
 
-    expect(loggerLogMock).toHaveBeenCalledWith('[#1] ✗ fail');
-    expect(loggerLogMock).toHaveBeenCalledWith('[#2] ✓ pass');
+    expect(logSpy).toHaveBeenCalledWith('[shipper] [#1] ✗ fail');
+    expect(logSpy).toHaveBeenCalledWith('[shipper] [#2] ✓ pass');
     expect(process.exitCode).toBe(1);
   });
 
@@ -173,8 +186,56 @@ describe('shipAutoParallel', () => {
 
     await runPromise;
 
-    expect(releaseIssueLockMock).not.toHaveBeenCalled();
-    expect(loggerLogMock).toHaveBeenCalledWith('[#2] ✓ pass');
+    expect(fake.state.labelTransitions).toEqual([]);
+    expect(logSpy).toHaveBeenCalledWith('[shipper] [#2] ✓ pass');
+  });
+
+  it('kills active workers, releases locks, and exits non-zero on SIGINT', async () => {
+    const childOne = new MockForkChild();
+    const childTwo = new MockForkChild();
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+    fake.setIssue('1', { labels: ['shipper:locked'] });
+    fake.setIssue('2', { labels: ['shipper:locked'] });
+
+    childOne.kill.mockImplementation((signal?: string) => {
+      if (signal === 'SIGKILL') {
+        void Promise.resolve().then(() => {
+          childOne.signalCode = 'SIGKILL';
+          childOne.emit('close', null, 'SIGKILL');
+        });
+      }
+    });
+    childTwo.kill.mockImplementation((signal?: string) => {
+      if (signal === 'SIGKILL') {
+        void Promise.resolve().then(() => {
+          childTwo.signalCode = 'SIGKILL';
+          childTwo.emit('close', null, 'SIGKILL');
+        });
+      }
+    });
+    forkMock.mockReturnValueOnce(childOne).mockReturnValueOnce(childTwo);
+
+    const { shipAutoParallel } = await import('../../src/commands/ship-auto.js');
+    const runPromise = shipAutoParallel('owner/repo', 2);
+
+    await flushMicrotasks();
+    process.emit('SIGINT');
+    await flushMicrotasks();
+    await vi.advanceTimersByTimeAsync(3000);
+    await flushMicrotasks();
+    await runPromise;
+
+    expect(childOne.kill).toHaveBeenCalledWith('SIGINT');
+    expect(childTwo.kill).toHaveBeenCalledWith('SIGINT');
+    expect(childOne.kill).toHaveBeenCalledWith('SIGKILL');
+    expect(childTwo.kill).toHaveBeenCalledWith('SIGKILL');
+    expect(fake.state.labelTransitions).toEqual(
+      expect.arrayContaining([
+        { target: 'issue', number: '1', add: [], remove: ['shipper:locked'] },
+        { target: 'issue', number: '2', add: [], remove: ['shipper:locked'] },
+      ])
+    );
+    expect(exitSpy).toHaveBeenCalledWith(1);
   });
 
   it('resolves the worker beside the bundled entrypoint', async () => {

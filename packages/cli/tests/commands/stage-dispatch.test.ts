@@ -1,9 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StageRunResult } from '@dnsquared/shipper-core';
 
-const tryResolvePrForIssueMock =
-  vi.fn<(repo: string, issueNumber: number) => Promise<string | undefined>>();
-const loggerLogMock = vi.fn<(message: string) => void>();
+import { createFakeCore } from '../_harness/fake-core.js';
+
 const runGroomStageMock =
   vi.fn<
     (
@@ -77,21 +76,6 @@ const runPrRemediateStageMock =
 
 const successResult: StageRunResult = { success: true, exitCode: 0, verdict: 'accept' };
 
-vi.mock('@dnsquared/shipper-core', () => ({
-  DESIGNED_LABEL: 'shipper:designed',
-  GROOMED_LABEL: 'shipper:groomed',
-  IMPLEMENTED_LABEL: 'shipper:implemented',
-  NEW_LABEL: 'shipper:new',
-  PLANNED_LABEL: 'shipper:planned',
-  PR_OPEN_LABEL: 'shipper:pr-open',
-  PR_REVIEWED_LABEL: 'shipper:pr-reviewed',
-  READY_LABEL: 'shipper:ready',
-  logger: {
-    log: loggerLogMock,
-  },
-  tryResolvePrForIssue: tryResolvePrForIssueMock,
-}));
-
 vi.mock('../../src/commands/groom.js', () => ({
   runGroomStage: runGroomStageMock,
 }));
@@ -120,8 +104,41 @@ vi.mock('../../src/commands/pr-remediate.js', () => ({
   runPrRemediateStage: runPrRemediateStageMock,
 }));
 
+type FakeCore = ReturnType<typeof createFakeCore>;
+
 describe('runStageForLabel', () => {
+  let fake: FakeCore;
+
+  const stubPrList = (issueNumber: string, prNumber?: string): void => {
+    fake.stubGh((args) => {
+      if (
+        args[0] !== 'pr' ||
+        args[1] !== 'list' ||
+        getArgValue(args, '-R') !== 'owner/repo' ||
+        getArgValue(args, '--state') !== 'open' ||
+        getArgValue(args, '--json') !== 'number,headRefName' ||
+        getArgValue(args, '--limit') !== '100'
+      ) {
+        return undefined;
+      }
+
+      const stdout = prNumber
+        ? JSON.stringify([
+            {
+              number: Number(prNumber),
+              headRefName: `shipper/${issueNumber}`,
+            },
+          ])
+        : '[]';
+      return { stdout, stderr: '' };
+    });
+  };
+
   beforeEach(() => {
+    fake = createFakeCore();
+    fake.install();
+    fake.setIssue('159', { labels: ['shipper:pr-open'] });
+    fake.setPr('200', { headRefName: 'shipper/159' });
     vi.clearAllMocks();
     runGroomStageMock.mockResolvedValue(successResult);
     runDesignStageMock.mockResolvedValue(successResult);
@@ -130,7 +147,11 @@ describe('runStageForLabel', () => {
     runPrOpenStageMock.mockResolvedValue(successResult);
     runPrReviewStageMock.mockResolvedValue(successResult);
     runPrRemediateStageMock.mockResolvedValue(successResult);
-    tryResolvePrForIssueMock.mockResolvedValue('200');
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await fake.dispose();
   });
 
   it('dispatches the issue stages directly by label', async () => {
@@ -168,6 +189,7 @@ describe('runStageForLabel', () => {
   });
 
   it('resolves the linked PR before review dispatch', async () => {
+    stubPrList('159', '200');
     const { runStageForLabel } = await import('../../src/commands/stage-dispatch.js');
 
     await expect(
@@ -178,7 +200,6 @@ describe('runStageForLabel', () => {
       })
     ).resolves.toEqual(successResult);
 
-    expect(tryResolvePrForIssueMock).toHaveBeenCalledWith('owner/repo', 159);
     expect(runPrReviewStageMock).toHaveBeenCalledWith(
       'owner/repo',
       '159',
@@ -190,6 +211,7 @@ describe('runStageForLabel', () => {
   });
 
   it('forwards the remediate skip-wait option through the dispatcher', async () => {
+    stubPrList('159', '200');
     const { runStageForLabel } = await import('../../src/commands/stage-dispatch.js');
 
     await expect(
@@ -210,6 +232,7 @@ describe('runStageForLabel', () => {
   });
 
   it('treats ready as a no-op success', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const { runStageForLabel } = await import('../../src/commands/stage-dispatch.js');
 
     await expect(runStageForLabel('owner/repo', '159', 'shipper:ready')).resolves.toEqual({
@@ -217,13 +240,13 @@ describe('runStageForLabel', () => {
       exitCode: 0,
     });
     expect(runPrRemediateStageMock).not.toHaveBeenCalled();
-    expect(loggerLogMock).toHaveBeenCalledWith(
-      'Issue #159 is ready — no remaining workflow steps.'
+    expect(logSpy).toHaveBeenCalledWith(
+      '[shipper] Issue #159 is ready — no remaining workflow steps.'
     );
   });
 
   it('throws when the linked PR is missing for PR stages', async () => {
-    tryResolvePrForIssueMock.mockResolvedValueOnce(undefined);
+    stubPrList('159');
     const { runStageForLabel } = await import('../../src/commands/stage-dispatch.js');
 
     await expect(runStageForLabel('owner/repo', '159', 'shipper:pr-open')).rejects.toThrow(
@@ -232,3 +255,8 @@ describe('runStageForLabel', () => {
     expect(runPrReviewStageMock).not.toHaveBeenCalled();
   });
 });
+
+function getArgValue(args: string[], flag: string): string | undefined {
+  const index = args.indexOf(flag);
+  return index === -1 ? undefined : args[index + 1];
+}
