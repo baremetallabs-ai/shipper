@@ -10,6 +10,10 @@ import {
   type RunPromptOpts,
 } from '@dnsquared/shipper-core';
 
+type AggregateSessionUsageResult = Awaited<
+  ReturnType<(typeof import('@dnsquared/shipper-core'))['aggregateSessionUsage']>
+>;
+
 type GhResponse = { stdout: string; stderr: string };
 type GhHandler = (
   args: string[],
@@ -166,6 +170,13 @@ interface CreateFakeCore {
     ) => Promise<number> | number
   ): void;
   scriptSleep(handler: (ms: number) => Promise<void> | void): void;
+  scriptAggregateSessionUsage(
+    handler: (
+      repo: string,
+      issue: string,
+      since: Date
+    ) => Promise<AggregateSessionUsageResult> | AggregateSessionUsageResult
+  ): void;
   stubGh(handler: GhHandler): void;
   writeStageOutput(options: WriteStageOutputOptions): Promise<ResultJson>;
 }
@@ -294,6 +305,13 @@ export function createFakeCore(): CreateFakeCore {
       ) => Promise<number> | number)
     | undefined;
   let sleepHandler: ((ms: number) => Promise<void> | void) | undefined;
+  let aggregateSessionUsageHandler:
+    | ((
+        repo: string,
+        issue: string,
+        since: Date
+      ) => Promise<AggregateSessionUsageResult> | AggregateSessionUsageResult)
+    | undefined;
 
   const ensureIssue = (number: string): FakeIssueRecord => {
     const existing = state.issues.get(number);
@@ -659,6 +677,8 @@ export function createFakeCore(): CreateFakeCore {
           state.sleepCalls.push(ms);
           await sleepHandler?.(ms);
         },
+        aggregateSessionUsage: async (repo, issue, since) =>
+          await aggregateSessionUsageHandler?.(repo, issue, since),
       });
     },
     async dispose(): Promise<void> {
@@ -715,6 +735,9 @@ export function createFakeCore(): CreateFakeCore {
     },
     scriptSleep(handler): void {
       sleepHandler = handler;
+    },
+    scriptAggregateSessionUsage(handler): void {
+      aggregateSessionUsageHandler = handler;
     },
     stubGh(handler): void {
       ghStubs.push(handler);

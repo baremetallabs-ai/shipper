@@ -4,6 +4,8 @@ import type { gh } from './gh.js';
 import { __setGhImpl } from './gh.js';
 import type { runPrompt } from './prompt-runner.js';
 import { __setRunPromptImpl } from './prompt-runner.js';
+import type { aggregateSessionUsage } from './session.js';
+import { __setAggregateSessionUsageImpl } from './session.js';
 import type { sleepMs } from './sleep.js';
 import { __setSleepMsImpl } from './sleep.js';
 import type {
@@ -32,6 +34,7 @@ export interface FakeTransportOverrides {
   getGitRevParse?: typeof getGitRevParse;
   getCommitsAheadCount?: typeof getCommitsAheadCount;
   sleepMs?: typeof sleepMs;
+  aggregateSessionUsage?: typeof aggregateSessionUsage;
 }
 
 /**
@@ -111,6 +114,15 @@ export function __installFakeTransports(overrides: FakeTransportOverrides = {}):
     const restoreSleepMs = __setSleepMsImpl(overrides.sleepMs);
     restoreFns.push(() => {
       __setSleepMsImpl(restoreSleepMs);
+    });
+  }
+
+  if (hasOwn('aggregateSessionUsage')) {
+    const restoreAggregateSessionUsage = __setAggregateSessionUsageImpl(
+      overrides.aggregateSessionUsage
+    );
+    restoreFns.push(() => {
+      __setAggregateSessionUsageImpl(restoreAggregateSessionUsage);
     });
   }
 
