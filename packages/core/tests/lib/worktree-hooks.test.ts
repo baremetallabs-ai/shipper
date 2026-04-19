@@ -121,13 +121,15 @@ const defaultOpts = {
 const expectedWtPath = path.join(WORKTREES_DIR, 'my-repo--wt--shipper-42-add-feature');
 const expectedNpmCachePath = path.join(expectedWtPath, '.shipper', 'tmp', '.npm-cache');
 const expectedXdgCachePath = path.join(expectedWtPath, '.shipper', 'tmp', '.cache');
+const expectedTurboCachePath = path.join(expectedWtPath, '.shipper', 'tmp', '.turbo-cache');
 
 let originalNpmConfigCache: string | undefined;
 let originalXdgCacheHome: string | undefined;
 let originalUvCacheDir: string | undefined;
+let originalTurboCacheDir: string | undefined;
 
 function restoreEnvVar(
-  key: 'NPM_CONFIG_CACHE' | 'XDG_CACHE_HOME' | 'UV_CACHE_DIR',
+  key: 'NPM_CONFIG_CACHE' | 'XDG_CACHE_HOME' | 'UV_CACHE_DIR' | 'TURBO_CACHE_DIR',
   value: string | undefined
 ): void {
   if (value === undefined) {
@@ -141,6 +143,7 @@ beforeEach(() => {
   originalNpmConfigCache = process.env.NPM_CONFIG_CACHE;
   originalXdgCacheHome = process.env.XDG_CACHE_HOME;
   originalUvCacheDir = process.env.UV_CACHE_DIR;
+  originalTurboCacheDir = process.env.TURBO_CACHE_DIR;
 
   execFileMock.mockReset();
   spawnMock.mockReset();
@@ -180,6 +183,7 @@ afterEach(() => {
   restoreEnvVar('NPM_CONFIG_CACHE', originalNpmConfigCache);
   restoreEnvVar('XDG_CACHE_HOME', originalXdgCacheHome);
   restoreEnvVar('UV_CACHE_DIR', originalUvCacheDir);
+  restoreEnvVar('TURBO_CACHE_DIR', originalTurboCacheDir);
 });
 
 describe('createWorktree', () => {
@@ -453,10 +457,35 @@ describe('withWorktree', () => {
     expect(process.env.XDG_CACHE_HOME).toBe('/original-xdg-cache');
   });
 
+  it('sets TURBO_CACHE_DIR to a worktree-local path inside the callback', async () => {
+    process.env.TURBO_CACHE_DIR = '/original-turbo-cache';
+
+    await withWorktree(defaultOpts, (wtPath) => {
+      expect(process.env.TURBO_CACHE_DIR).toBe(
+        path.join(wtPath, '.shipper', 'tmp', '.turbo-cache')
+      );
+      return Promise.resolve();
+    });
+
+    expect(process.env.TURBO_CACHE_DIR).toBe('/original-turbo-cache');
+  });
+
+  it('lets worktreeEnv override the built-in TURBO_CACHE_DIR default', async () => {
+    getSettingsMock.mockReturnValue({
+      worktreeEnv: { TURBO_CACHE_DIR: '/custom-turbo-cache' },
+    });
+
+    await withWorktree(defaultOpts, () => {
+      expect(process.env.TURBO_CACHE_DIR).toBe('/custom-turbo-cache');
+      return Promise.resolve();
+    });
+  });
+
   it('applies worktreeEnv values as-is and restores them after cleanup', async () => {
     process.env.NPM_CONFIG_CACHE = '/original-cache';
     process.env.XDG_CACHE_HOME = '/original-xdg-cache';
     process.env.UV_CACHE_DIR = '/original-uv-cache';
+    process.env.TURBO_CACHE_DIR = '/original-turbo-cache';
     getSettingsMock.mockReturnValue({
       worktreeEnv: { UV_CACHE_DIR: '.uv-cache' },
     });
@@ -464,6 +493,7 @@ describe('withWorktree', () => {
     await withWorktree(defaultOpts, () => {
       expect(process.env.NPM_CONFIG_CACHE).toBe(expectedNpmCachePath);
       expect(process.env.XDG_CACHE_HOME).toBe(expectedXdgCachePath);
+      expect(process.env.TURBO_CACHE_DIR).toBe(expectedTurboCachePath);
       expect(process.env.UV_CACHE_DIR).toBe('.uv-cache');
       return Promise.resolve();
     });
@@ -471,6 +501,7 @@ describe('withWorktree', () => {
     expect(process.env.NPM_CONFIG_CACHE).toBe('/original-cache');
     expect(process.env.XDG_CACHE_HOME).toBe('/original-xdg-cache');
     expect(process.env.UV_CACHE_DIR).toBe('/original-uv-cache');
+    expect(process.env.TURBO_CACHE_DIR).toBe('/original-turbo-cache');
   });
 
   it('lets worktreeEnv override the built-in NPM_CONFIG_CACHE default', async () => {

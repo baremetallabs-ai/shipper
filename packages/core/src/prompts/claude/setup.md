@@ -152,7 +152,7 @@ The canonical settings schema is:
 ### Sandbox cache errors (EPERM)
 
 If you see `EPERM` errors for `~/.npm/_cacache/` or another user-level cache directory, the agent is trying to write outside the sandboxed worktree.
-Shipper automatically sets `NPM_CONFIG_CACHE` to `.shipper/tmp/.npm-cache` and `XDG_CACHE_HOME` to `.shipper/tmp/.cache` inside every worktree, so npm and tools that respect XDG (like `gh`) work without sandbox escapes.
+Shipper automatically sets `NPM_CONFIG_CACHE` to `.shipper/tmp/.npm-cache`, `XDG_CACHE_HOME` to `.shipper/tmp/.cache`, and `TURBO_CACHE_DIR` to `.shipper/tmp/.turbo-cache` inside every worktree, so npm, turbo, and tools that respect XDG (like `gh`) work without sandbox escapes.
 For other package managers, set a worktree-local cache path in `.shipper/settings.json` under `.shipper/tmp/` so the cache is also gitignored, for example:
 
 ```json
