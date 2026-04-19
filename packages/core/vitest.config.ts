@@ -1,6 +1,17 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
+import { shipperCoreTextAssetsPlugin } from '../../vitest.shipper-core-text-assets.js';
+
+const packageRoot = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
+  plugins: [shipperCoreTextAssetsPlugin()],
+  resolve: {
+    alias: {
+      '@dnsquared/shipper-core': path.resolve(packageRoot, 'src/index.ts'),
+    },
+  },
   test: {
     globals: true,
     environment: 'node',

@@ -6,13 +6,21 @@ import { promisify } from 'node:util';
 import { runAdvisoryHook, runWorktreeHook } from './hooks.js';
 import { createLogger } from './logger.js';
 import { getSettings } from './settings.js';
-import { execAsync, formatCommandFailure, spawnAsync } from './worktree/helpers.js';
+import {
+  execAsync,
+  formatCommandFailure,
+  getCommitsAheadCount as getCommitsAheadCountDefault,
+  getGitRevParse as getGitRevParseDefault,
+  spawnAsync,
+  type ConflictContext,
+  type WorktreeGitOpts,
+} from './worktree/helpers.js';
+import { formatConflictContext } from './worktree/conflicts.js';
+import { pushWithRetry as pushWithRetryDefault, pushWorktree } from './worktree/push.js';
+import { syncWorktree as syncWorktreeDefault, withGitTransport } from './worktree/transport.js';
 
-export type { ConflictContext, WorktreeGitOpts } from './worktree/helpers.js';
-export { getCommitsAheadCount, getGitRevParse } from './worktree/helpers.js';
-export { formatConflictContext } from './worktree/conflicts.js';
-export { pushWithRetry, pushWorktree } from './worktree/push.js';
-export { syncWorktree, withGitTransport } from './worktree/transport.js';
+export type { ConflictContext, WorktreeGitOpts };
+export { formatConflictContext, pushWorktree, withGitTransport };
 
 const WORKTREES_DIR = path.join(homedir(), '.shipper', 'worktrees');
 const execFileAsync = promisify(execFile);
@@ -136,7 +144,7 @@ export async function removeWorktree(repoRoot: string, wtPath: string): Promise<
   }
 }
 
-export async function withWorktree<T>(
+async function withWorktreeDefault<T>(
   opts: CreateWorktreeOpts,
   fn: (wtPath: string) => Promise<T>
 ): Promise<T> {
@@ -210,4 +218,79 @@ export async function withWorktree<T>(
     process.removeListener('SIGTERM', cleanupWithoutAwait);
     await cleanup();
   }
+}
+
+let withWorktreeImpl: typeof withWorktreeDefault = withWorktreeDefault;
+let syncWorktreeImpl: typeof syncWorktreeDefault = syncWorktreeDefault;
+let pushWithRetryImpl: typeof pushWithRetryDefault = pushWithRetryDefault;
+let getGitRevParseImpl: typeof getGitRevParseDefault = getGitRevParseDefault;
+let getCommitsAheadCountImpl: typeof getCommitsAheadCountDefault = getCommitsAheadCountDefault;
+
+export async function withWorktree<T>(
+  opts: CreateWorktreeOpts,
+  fn: (wtPath: string) => Promise<T>
+): Promise<T> {
+  return await withWorktreeImpl(opts, fn);
+}
+
+export async function syncWorktree(...args: Parameters<typeof syncWorktreeDefault>): Promise<void> {
+  await syncWorktreeImpl(...args);
+}
+
+export async function pushWithRetry(
+  ...args: Parameters<typeof pushWithRetryDefault>
+): Promise<number> {
+  return await pushWithRetryImpl(...args);
+}
+
+export async function getGitRevParse(
+  ...args: Parameters<typeof getGitRevParseDefault>
+): Promise<string> {
+  return await getGitRevParseImpl(...args);
+}
+
+export async function getCommitsAheadCount(
+  ...args: Parameters<typeof getCommitsAheadCountDefault>
+): Promise<number> {
+  return await getCommitsAheadCountImpl(...args);
+}
+
+export function __setWithWorktreeImpl(
+  next?: typeof withWorktreeDefault
+): typeof withWorktreeDefault {
+  const previous = withWorktreeImpl;
+  withWorktreeImpl = next ?? withWorktreeDefault;
+  return previous;
+}
+
+export function __setSyncWorktreeImpl(
+  next?: typeof syncWorktreeDefault
+): typeof syncWorktreeDefault {
+  const previous = syncWorktreeImpl;
+  syncWorktreeImpl = next ?? syncWorktreeDefault;
+  return previous;
+}
+
+export function __setPushWithRetryImpl(
+  next?: typeof pushWithRetryDefault
+): typeof pushWithRetryDefault {
+  const previous = pushWithRetryImpl;
+  pushWithRetryImpl = next ?? pushWithRetryDefault;
+  return previous;
+}
+
+export function __setGetGitRevParseImpl(
+  next?: typeof getGitRevParseDefault
+): typeof getGitRevParseDefault {
+  const previous = getGitRevParseImpl;
+  getGitRevParseImpl = next ?? getGitRevParseDefault;
+  return previous;
+}
+
+export function __setGetCommitsAheadCountImpl(
+  next?: typeof getCommitsAheadCountDefault
+): typeof getCommitsAheadCountDefault {
+  const previous = getCommitsAheadCountImpl;
+  getCommitsAheadCountImpl = next ?? getCommitsAheadCountDefault;
+  return previous;
 }

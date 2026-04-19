@@ -481,6 +481,10 @@ export async function buildPromptCommand(
 }
 
 export async function runPrompt(name: string, opts: RunPromptOpts): Promise<number> {
+  return await runPromptImpl(name, opts);
+}
+
+async function runPromptDefault(name: string, opts: RunPromptOpts): Promise<number> {
   const effectiveMode = resolveMode(name, opts.mode);
 
   let resolved: Awaited<ReturnType<typeof resolvePromptCommand>>;
@@ -574,6 +578,14 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
     logger.error(`Error: Failed to spawn ${agent}: ${toErrorMessage(err)}`);
     return 1;
   }
+}
+
+let runPromptImpl: typeof runPromptDefault = runPromptDefault;
+
+export function __setRunPromptImpl(next?: typeof runPromptDefault): typeof runPromptDefault {
+  const previous = runPromptImpl;
+  runPromptImpl = next ?? runPromptDefault;
+  return previous;
 }
 
 function normalizeCodexHeadlessArgs(args: string[]): void {

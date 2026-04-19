@@ -54,6 +54,13 @@ export async function gh(
   args: string[],
   options?: { cwd?: string }
 ): Promise<{ stdout: string; stderr: string }> {
+  return await ghImpl(args, options);
+}
+
+async function ghDefault(
+  args: string[],
+  options?: { cwd?: string }
+): Promise<{ stdout: string; stderr: string }> {
   let firstError: unknown;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -84,4 +91,12 @@ export async function gh(
   }
 
   throw firstError;
+}
+
+let ghImpl: typeof ghDefault = ghDefault;
+
+export function __setGhImpl(next?: typeof ghDefault): typeof ghDefault {
+  const previous = ghImpl;
+  ghImpl = next ?? ghDefault;
+  return previous;
 }
