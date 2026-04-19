@@ -8,6 +8,10 @@ import { logger } from './logger.js';
 const execFileAsync = promisify(execFile);
 
 export async function getRepoRoot(): Promise<string> {
+  return await getRepoRootImpl();
+}
+
+async function getRepoRootDefault(): Promise<string> {
   const { stdout } = await execFileAsync('git', ['rev-parse', '--show-toplevel'], {
     encoding: 'utf-8',
   });
@@ -156,6 +160,27 @@ export async function findBranchForIssue(issueRef: string): Promise<string> {
 }
 
 export async function getBranchForPR(repo: string, prRef: string): Promise<string> {
+  return await getBranchForPRImpl(repo, prRef);
+}
+
+async function getBranchForPRDefault(repo: string, prRef: string): Promise<string> {
   const { stdout } = await gh(['pr', 'view', prRef, '-R', repo, '--json', 'headRefName']);
   return parsePrHeadRefNameView(stdout).headRefName;
+}
+
+let getRepoRootImpl: typeof getRepoRootDefault = getRepoRootDefault;
+let getBranchForPRImpl: typeof getBranchForPRDefault = getBranchForPRDefault;
+
+export function __setGetRepoRootImpl(next?: typeof getRepoRootDefault): typeof getRepoRootDefault {
+  const previous = getRepoRootImpl;
+  getRepoRootImpl = next ?? getRepoRootDefault;
+  return previous;
+}
+
+export function __setGetBranchForPRImpl(
+  next?: typeof getBranchForPRDefault
+): typeof getBranchForPRDefault {
+  const previous = getBranchForPRImpl;
+  getBranchForPRImpl = next ?? getBranchForPRDefault;
+  return previous;
 }
