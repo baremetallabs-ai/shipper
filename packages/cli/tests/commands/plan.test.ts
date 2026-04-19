@@ -1,117 +1,155 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { StageRunResult, StageScaffoldOpts } from '@dnsquared/shipper-core';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { RunPromptOpts } from '@dnsquared/shipper-core';
 
-const autoSelectIssueMock = vi.fn();
-const generateBranchNameMock = vi.fn(() => Promise.resolve('shipper/123-branch'));
-const getRepoRootMock = vi.fn(() => Promise.resolve('/tmp/fake-repo'));
-const getSettingsMock = vi.fn(() => ({ defaultBaseBranch: 'main' }));
-const resolveBaseBranchMock = vi.fn(() => Promise.resolve('main'));
-const runStageScaffoldMock = vi.fn<(opts: StageScaffoldOpts) => Promise<StageRunResult>>(() =>
-  Promise.resolve({ success: true, exitCode: 0, verdict: 'accept' })
-);
-const simpleInvokerFactoryMock = vi.fn();
-const simpleInvokerMock = vi.fn(() => simpleInvokerFactoryMock);
-const loggerErrorMock = vi.fn<(message: string) => void>();
+import { createFakeCore } from '../_harness/fake-core.js';
 
-vi.mock('@dnsquared/shipper-core', () => ({
-  autoSelectIssue: autoSelectIssueMock,
-  generateBranchName: generateBranchNameMock,
-  getRepoRoot: getRepoRootMock,
-  getSettings: getSettingsMock,
-  logger: {
-    error: (...args: [string]) => {
-      loggerErrorMock(...args);
+type FakeCore = ReturnType<typeof createFakeCore>;
+
+const repo = 'owner/repo';
+
+function buildIssueList(
+  issueNumber: string,
+  title: string,
+  labels: string[]
+): Array<{ number: number; title: string; labels: Array<{ name: string }> }> {
+  return [
+    {
+      number: Number(issueNumber),
+      title,
+      labels: labels.map((name) => ({ name })),
     },
-  },
-  resolveBaseBranch: resolveBaseBranchMock,
-  runStageScaffold: (opts: StageScaffoldOpts) => runStageScaffoldMock(opts),
-  simpleInvoker: (...args: unknown[]) => simpleInvokerMock(...args),
-}));
+  ];
+}
 
 describe('planCommand', () => {
+  let fake: FakeCore;
+  let promptCalls: Array<{ name: string; opts: RunPromptOpts }>;
+
+  const stubDefaultBranch = (branch = 'main'): void => {
+    fake.stubGh((args) => {
+      if (args[0] === 'repo' && args[1] === 'view' && args[2] === repo) {
+        return { stdout: `${branch}\n`, stderr: '' };
+      }
+      return undefined;
+    });
+  };
+
+  const stubAutoSelectIssue = (issueNumber: string, title: string): void => {
+    fake.stubGh((args) => {
+      if (args[0] !== 'issue' || args[1] !== 'list' || !args.includes('-R')) {
+        return undefined;
+      }
+
+      const labels = args.flatMap((arg, index) =>
+        arg === '--label' && args[index + 1] ? [String(args[index + 1])] : []
+      );
+      if (!labels.includes('shipper:designed')) {
+        return undefined;
+      }
+
+      if (labels.includes('shipper:locked')) {
+        return { stdout: '[]', stderr: '' };
+      }
+
+      return {
+        stdout: JSON.stringify(buildIssueList(issueNumber, title, ['shipper:designed'])),
+        stderr: '',
+      };
+    });
+  };
+
   beforeEach(() => {
-    vi.clearAllMocks();
+    fake = createFakeCore();
+    fake.install();
+    promptCalls = [];
     process.exitCode = undefined;
+    stubDefaultBranch();
   });
 
-  it('passes the planning scaffold config and simple invoker wiring', async () => {
+  afterEach(async () => {
+    process.exitCode = undefined;
+    vi.restoreAllMocks();
+    await fake.dispose();
+  });
+
+  it('runs the real planning stage and advances the issue to planned', async () => {
+    fake.setIssue('123', { labels: ['shipper:designed'], title: 'Planning issue' });
+    fake.scriptRunPrompt(async (name, opts) => {
+      promptCalls.push({ name, opts });
+      await fake.writeStageOutput({
+        result: { verdict: 'accept', comment: '.shipper/output/comment-123.md' },
+        commentBody: 'Plan accepted.',
+      });
+      return 0;
+    });
+
     const { planCommand } = await import('../../src/commands/plan.js');
 
-    await expect(planCommand('owner/repo', '123')).resolves.toBeUndefined();
+    await expect(planCommand(repo, '123')).resolves.toBeUndefined();
+
     expect(process.exitCode).toBe(0);
-
-    expect(simpleInvokerMock).toHaveBeenCalledWith({
-      promptName: 'plan',
-      baseRunPromptOpts: {
-        repo: 'owner/repo',
-        issueRef: '123',
-        mode: undefined,
-        agent: undefined,
-        model: undefined,
+    expect(promptCalls).toEqual([
+      {
+        name: 'plan',
+        opts: {
+          repo,
+          issueRef: '123',
+          cwd: fake.wtPath(),
+          mode: undefined,
+          agent: undefined,
+          model: undefined,
+        },
       },
-    });
-
-    const scaffoldArgs = runStageScaffoldMock.mock.calls[0]?.[0];
-    expect(scaffoldArgs).toBeDefined();
-    if (!scaffoldArgs) {
-      throw new Error('Expected scaffold arguments');
-    }
-
-    expect(scaffoldArgs.repo).toBe('owner/repo');
-    expect(scaffoldArgs.issueNumber).toBe('123');
-    expect(scaffoldArgs.stage).toBe('plan');
-    expect(scaffoldArgs.resultStage).toBe('plan');
-    expect(scaffoldArgs.createBranch).toBe(true);
-    expect(scaffoldArgs.initialFailure).toBe('crash');
-    expect(scaffoldArgs.invoker).toBe(simpleInvokerFactoryMock);
-
-    await expect(scaffoldArgs.resolveLocked()).resolves.toEqual({
-      repoRoot: '/tmp/fake-repo',
-      branch: 'shipper/123-branch',
-      baseBranch: 'main',
-    });
-
-    expect(getRepoRootMock).toHaveBeenCalledTimes(1);
-    expect(generateBranchNameMock).toHaveBeenCalledWith('owner/repo', '123');
-    expect(resolveBaseBranchMock).toHaveBeenCalledWith('owner/repo', 'main');
-    expect(getRepoRootMock.mock.invocationCallOrder[0]).toBeLessThan(
-      generateBranchNameMock.mock.invocationCallOrder[0]
+    ]);
+    expect(fake.state.postedComments).toEqual([
+      { target: 'issue', number: '123', body: 'Plan accepted.' },
+    ]);
+    expect(fake.state.labelTransitions).toEqual(
+      expect.arrayContaining([
+        { target: 'issue', number: '123', add: ['shipper:locked'], remove: [] },
+        {
+          target: 'issue',
+          number: '123',
+          add: ['shipper:planned'],
+          remove: ['shipper:designed'],
+        },
+        { target: 'issue', number: '123', add: [], remove: ['shipper:locked'] },
+      ])
     );
-    expect(generateBranchNameMock.mock.invocationCallOrder[0]).toBeLessThan(
-      getSettingsMock.mock.invocationCallOrder[0]
-    );
-    expect(getSettingsMock.mock.invocationCallOrder[0]).toBeLessThan(
-      resolveBaseBranchMock.mock.invocationCallOrder[0]
-    );
+    expect(fake.state.issues.get('123')?.labels).toEqual(new Set(['shipper:planned']));
   });
 
-  it('preserves auto-selection behavior when no issue is provided', async () => {
-    autoSelectIssueMock.mockResolvedValueOnce({ number: 321, title: 'Selected issue' });
+  it('auto-selects a designed issue when none is provided', async () => {
+    fake.setIssue('321', { labels: ['shipper:designed'], title: 'Selected issue' });
+    stubAutoSelectIssue('321', 'Selected issue');
+    fake.scriptRunPrompt(async (name, opts) => {
+      promptCalls.push({ name, opts });
+      await fake.writeStageOutput({
+        result: { verdict: 'accept', comment: '.shipper/output/comment-321.md' },
+        commentBody: 'Plan accepted.',
+      });
+      return 0;
+    });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
     const { planCommand } = await import('../../src/commands/plan.js');
 
-    await expect(planCommand('owner/repo')).resolves.toBeUndefined();
+    await expect(planCommand(repo)).resolves.toBeUndefined();
 
-    expect(autoSelectIssueMock).toHaveBeenCalledWith('owner/repo', 'shipper:designed');
-    expect(loggerErrorMock).toHaveBeenCalledWith('Auto-selected #321: Selected issue');
-    const simpleInvokerArgs = simpleInvokerMock.mock.calls[0]?.[0] as
-      | { baseRunPromptOpts: { issueRef: string } }
-      | undefined;
-    expect(simpleInvokerArgs?.baseRunPromptOpts.issueRef).toBe('321');
-    expect(runStageScaffoldMock).toHaveBeenCalledWith(
-      expect.objectContaining({ issueNumber: '321' })
-    );
+    expect(promptCalls[0]?.opts.issueRef).toBe('321');
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Auto-selected #321'));
   });
 
-  it('maps stage helper failures onto process.exitCode at the CLI boundary', async () => {
-    runStageScaffoldMock.mockResolvedValueOnce({
-      success: false,
-      exitCode: 11,
-      error: 'agent exited',
-    });
+  it('reports a crashed agent run at the CLI boundary', async () => {
+    fake.setIssue('123', { labels: ['shipper:designed'], title: 'Planning issue' });
+    fake.scriptRunPrompt(() => 11);
+
     const { planCommand } = await import('../../src/commands/plan.js');
 
-    await expect(planCommand('owner/repo', '123')).resolves.toBeUndefined();
+    await expect(planCommand(repo, '123')).resolves.toBeUndefined();
 
-    expect(process.exitCode).toBe(11);
+    expect(process.exitCode).toBe(1);
+    expect(fake.state.postedComments.at(-1)?.body).toContain('The `plan` agent run exited');
+    expect(fake.state.issues.get('123')?.labels).toEqual(new Set(['shipper:designed']));
   });
 });
