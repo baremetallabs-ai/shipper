@@ -1,8 +1,10 @@
 import path from 'node:path';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as core from '@dnsquared/shipper-core';
 
-const { mockGh, mockExecFileAsync, mockRunPrereqChecks } = vi.hoisted(() => ({
-  mockGh: vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>(),
+import { createFakeCore } from '../_harness/fake-core.js';
+
+const { mockExecFileAsync } = vi.hoisted(() => ({
   mockExecFileAsync:
     vi.fn<
       (
@@ -11,49 +13,6 @@ const { mockGh, mockExecFileAsync, mockRunPrereqChecks } = vi.hoisted(() => ({
         opts?: Record<string, unknown>
       ) => Promise<{ stdout: string; stderr: string }>
     >(),
-  mockRunPrereqChecks: vi.fn<(checks: unknown[]) => boolean>(),
-}));
-
-const { canonicalLabels } = vi.hoisted(() => ({
-  canonicalLabels: [
-    { name: 'shipper:new', color: 'C2E0C6', description: 'New issue from shipper' },
-    { name: 'shipper:groomed', color: 'BFD4F2', description: 'Product-groomed' },
-    { name: 'shipper:designed', color: 'D4C5F9', description: 'Design-reviewed' },
-    { name: 'shipper:planned', color: 'FEF2C0', description: 'Implementation planned' },
-    { name: 'shipper:implemented', color: 'FBCA04', description: 'Implementation complete' },
-    { name: 'shipper:pr-open', color: 'F9D0C4', description: 'PR opened' },
-    {
-      name: 'shipper:pr-reviewed',
-      color: 'E6B8AF',
-      description: 'PR reviewed, pending remediation',
-    },
-    { name: 'shipper:ready', color: '0E8A16', description: 'Ready for final review and merge' },
-    {
-      name: 'shipper:blocked',
-      color: 'E11D48',
-      description: 'Blocked by a dependency — run shipper unblock',
-    },
-    {
-      name: 'shipper:locked',
-      color: 'D93F0B',
-      description: 'Locked by an active shipper instance',
-    },
-    {
-      name: 'shipper:failed',
-      color: '6A0DAD',
-      description: 'Failed after exhausting transition cap — requires manual intervention',
-    },
-    {
-      name: 'shipper:priority-high',
-      color: 'D93F0B',
-      description: 'High-priority issue',
-    },
-    {
-      name: 'shipper:priority-low',
-      color: '0E8A16',
-      description: 'Low-priority issue',
-    },
-  ],
 }));
 
 const mkdirSyncMock =
@@ -96,52 +55,14 @@ vi.mock('node:child_process', async () => {
   return { ...actual, execFile };
 });
 
-vi.mock('@dnsquared/shipper-core', async () => {
-  const { isPlainObject, toError, toErrorMessage } =
-    await vi.importActual<typeof import('@dnsquared/shipper-core')>('@dnsquared/shipper-core');
-
-  return {
-    logger: {
-      log: (message: string) => {
-        console.log(`[shipper] ${message}`);
-      },
-      warn: (message: string) => {
-        console.warn(`[shipper] ${message}`);
-      },
-      error: (message: string) => {
-        console.error(`[shipper] ${message}`);
-      },
-    },
-    toError,
-    toErrorMessage,
-    isPlainObject,
-    gh: (args: string[]) => mockGh(args),
-    scripts: {},
-    LABELS: canonicalLabels,
-    DEFAULTS: {
-      prReviewWait: { mode: 'checks', maxDurationMinutes: 30 },
-      lockTimeoutMinutes: 30,
-      commands: { default: { agent: 'claude' } },
-    },
-    SETTING_DESCRIPTIONS: {},
-    CLI_VERSION: '1.2.3',
-    readmeTemplate: '# Test README content',
-    runPrereqChecks: (checks: unknown[]) => mockRunPrereqChecks(checks),
-    checkGitRepo: vi.fn(),
-    checkGhInstalled: vi.fn(),
-    checkGhAuth: vi.fn(),
-    checkGitHubRemote: vi.fn(),
-  };
-});
-
 const questionMock = vi.fn();
 const closeMock = vi.fn();
 vi.mock('node:readline/promises', () => ({
   createInterface: () => ({ question: questionMock, close: closeMock }),
 }));
 
-vi.spyOn(console, 'log').mockImplementation(() => {});
-vi.spyOn(console, 'error').mockImplementation(() => {});
+const mockGh = vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string } | undefined>>();
+const mockRunPrereqChecks = vi.fn<(checks: Array<() => Promise<unknown>>) => Promise<boolean>>();
 
 const settingsPath = path.resolve('.shipper', 'settings.json');
 const gitignorePath = path.resolve('.shipper', '.gitignore');
@@ -150,7 +71,9 @@ const inputDirPath = path.resolve('.shipper', 'input');
 const outputDirPath = path.resolve('.shipper', 'output');
 const inputGitkeepPath = path.resolve(inputDirPath, '.gitkeep');
 const outputGitkeepPath = path.resolve(outputDirPath, '.gitkeep');
-const expectedLabels = canonicalLabels;
+const expectedLabels = core.LABELS;
+
+type FakeCore = ReturnType<typeof createFakeCore>;
 
 type JsonObject = Record<string, unknown>;
 type WriteFileCall = [target: string | number, data: string | Buffer];
@@ -191,17 +114,29 @@ function getCommandConfig(settings: JsonObject, key: string): JsonObject {
   return commands[key];
 }
 
+let fake: FakeCore;
+
 beforeEach(() => {
+  fake = createFakeCore();
+  fake.install();
   mkdirSyncMock.mockReset();
   writeFileSyncMock.mockReset();
   readFileSyncMock.mockReset();
   existsSyncMock.mockReset();
   chmodSyncMock.mockReset();
   mockGh.mockReset();
-  mockGh.mockResolvedValue({ stdout: '', stderr: '' });
+  mockGh.mockImplementation((args: string[]) => {
+    if (args[0] === 'label' && args[1] === 'create') {
+      return Promise.resolve({ stdout: '', stderr: '' });
+    }
+    return Promise.resolve(undefined);
+  });
+  fake.stubGh((args) => mockGh(args));
   mockExecFileAsync.mockReset();
   mockRunPrereqChecks.mockReset();
-  mockRunPrereqChecks.mockReturnValue(true);
+  mockRunPrereqChecks.mockResolvedValue(true);
+  // runPrereqChecks is not part of the fake transport seam; tests override its aggregate result directly.
+  vi.spyOn(core, 'runPrereqChecks').mockImplementation((checks) => mockRunPrereqChecks(checks));
   process.exitCode = undefined;
   mockExecFileAsync.mockImplementation((cmd: string, args: string[]) => {
     if (cmd === 'git' && args[0] === 'branch' && args[1] === '--show-current') {
@@ -214,14 +149,20 @@ beforeEach(() => {
   });
   questionMock.mockReset();
   closeMock.mockReset();
-  (console.log as ReturnType<typeof vi.fn>).mockClear();
-  (console.error as ReturnType<typeof vi.fn>).mockClear();
+  vi.spyOn(console, 'log').mockImplementation(() => {});
+  vi.spyOn(console, 'error').mockImplementation(() => {});
   // Default: settings.json doesn't exist, root .gitignore doesn't exist
   existsSyncMock.mockReturnValue(false);
 });
 
+afterEach(async () => {
+  process.exitCode = undefined;
+  vi.restoreAllMocks();
+  await fake.dispose();
+});
+
 const { initCommand } = await import('../../src/commands/init.js');
-const { isPlainObject } = await import('@dnsquared/shipper-core');
+const { isPlainObject } = core;
 
 describe('initCommand README', () => {
   it('writes .shipper/README.md', async () => {
@@ -230,7 +171,7 @@ describe('initCommand README', () => {
       (call: unknown[]) => call[0] === path.resolve('.shipper', 'README.md')
     );
     expect(readmeCall).toBeDefined();
-    expect(readmeCall?.[1]).toBe('# Test README content');
+    expect(readmeCall?.[1]).toBe(core.readmeTemplate);
   });
 });
 
@@ -411,7 +352,7 @@ describe('initCommand settings', () => {
   it('writes cliVersion to settings.json', async () => {
     await initCommand({ agent: 'claude' });
     const written = parseWrittenSettings();
-    expect(written.cliVersion).toBe('1.2.3');
+    expect(written.cliVersion).toBe(core.CLI_VERSION);
   });
 
   it('throws on malformed existing settings.json', async () => {
@@ -586,7 +527,7 @@ describe('initCommand agent selection', () => {
 
 describe('initCommand commit and push', () => {
   it('stops immediately when prerequisite checks fail', async () => {
-    mockRunPrereqChecks.mockReturnValue(false);
+    mockRunPrereqChecks.mockResolvedValue(false);
 
     await initCommand({ agent: 'claude' });
 
