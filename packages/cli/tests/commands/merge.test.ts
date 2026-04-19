@@ -154,7 +154,7 @@ describe('mergeCommand', () => {
       if (args[0] === 'pr' && args[1] === 'comment' && args[2]) {
         prComments.push({
           pr: args[2],
-          body: args[args.indexOf('--body') + 1] ?? '',
+          body: args.includes('--body') ? (args[args.indexOf('--body') + 1] ?? '') : '',
         });
         return { stdout: '', stderr: '' };
       }

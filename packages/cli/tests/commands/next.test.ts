@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { StageRunResult } from './stage-result.js';
+import type { StageRunResult } from '../../src/commands/stage-result.js';
 
 import { createFakeCore } from '../_harness/fake-core.js';
 
