@@ -1,92 +1,64 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const {
-  mockGh,
-  stageLabels,
-  displayNameMap,
-  controlLabelNames,
-  blockedLabel,
-  failedLabel,
-  lockedLabel,
-} = vi.hoisted(() => ({
-  mockGh: vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>(),
-  stageLabels: [
-    'shipper:new',
-    'shipper:groomed',
-    'shipper:designed',
-    'shipper:planned',
-    'shipper:implemented',
-    'shipper:pr-open',
-    'shipper:pr-reviewed',
-    'shipper:ready',
-  ],
-  displayNameMap: {
-    'shipper:new': 'New',
-    'shipper:groomed': 'Groomed',
-    'shipper:designed': 'Designed',
-    'shipper:planned': 'Planned',
-    'shipper:implemented': 'Implemented',
-    'shipper:pr-open': 'PR Open',
-    'shipper:pr-reviewed': 'PR Reviewed',
-    'shipper:ready': 'Ready',
-  },
-  controlLabelNames: ['shipper:blocked', 'shipper:locked', 'shipper:failed'],
-  blockedLabel: 'shipper:blocked',
-  failedLabel: 'shipper:failed',
-  lockedLabel: 'shipper:locked',
-}));
-
-vi.mock('@dnsquared/shipper-core', async () => {
-  const { parseIssueTitleLabelsList } =
-    await vi.importActual<typeof import('@dnsquared/shipper-core')>('@dnsquared/shipper-core');
-
-  return {
-    logger: {
-      error: (message: string) => {
-        console.error(`[shipper] ${message}`);
-      },
-      log: (message: string) => {
-        console.log(`[shipper] ${message}`);
-      },
-      warn: (message: string) => {
-        console.warn(`[shipper] ${message}`);
-      },
-    },
-    gh: (args: string[]) => mockGh(args),
-    parseIssueTitleLabelsList,
-    STAGE_LABEL_NAMES: stageLabels,
-    DISPLAY_NAME_MAP: displayNameMap,
-    CONTROL_LABEL_NAMES: controlLabelNames,
-    BLOCKED_LABEL: blockedLabel,
-    FAILED_LABEL: failedLabel,
-    LOCKED_LABEL: lockedLabel,
-  };
-});
-
+import { createFakeCore } from '../_harness/fake-core.js';
 import { issueListCommand } from '../../src/commands/issue-list.js';
 
-const mockConsoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
-const mockConsoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+type FakeCore = ReturnType<typeof createFakeCore>;
 
-beforeEach(() => {
-  vi.clearAllMocks();
-});
-
-function mockGhIssueList(issues: { number: number; title: string; labels: { name: string }[] }[]) {
-  mockGh.mockResolvedValue({ stdout: JSON.stringify(issues), stderr: '' });
+interface IssueFixture {
+  number: number;
+  title: string;
+  labels: Array<{ name: string }>;
 }
 
-function loggedLines(): string[] {
-  return mockConsoleLog.mock.calls.map(([message]) => String(message));
+const blockedLabel = 'shipper:blocked';
+const failedLabel = 'shipper:failed';
+const lockedLabel = 'shipper:locked';
+
+function loggedLines(logSpy: ReturnType<typeof vi.spyOn>): string[] {
+  return logSpy.mock.calls.map(([message]) => String(message));
 }
 
 function prefixed(lines: string[]): string[] {
-  return lines.map((line) => `[shipper] ${line}`);
+  return lines.map((line) => line.replace(/^(\n*)/, '$1[shipper] '));
 }
 
 describe('issueListCommand', () => {
+  let fake: FakeCore;
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+
+  const stubIssueList = (issues: IssueFixture[]): void => {
+    fake.stubGh((args) => {
+      if (
+        args[0] === 'issue' &&
+        args[1] === 'list' &&
+        args.includes('--json') &&
+        args.includes('number,title,labels')
+      ) {
+        return {
+          stdout: JSON.stringify(issues),
+          stderr: '',
+        };
+      }
+      return undefined;
+    });
+  };
+
+  beforeEach(() => {
+    fake = createFakeCore();
+    fake.install();
+    logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await fake.dispose();
+  });
+
   it('groups issues by pipeline stage in order with counts', async () => {
-    mockGhIssueList([
+    stubIssueList([
       { number: 5, title: 'Feature A', labels: [{ name: 'shipper:new' }] },
       { number: 3, title: 'Feature B', labels: [{ name: 'shipper:new' }] },
       { number: 10, title: 'Feature C', labels: [{ name: 'shipper:planned' }] },
@@ -95,8 +67,7 @@ describe('issueListCommand', () => {
 
     await issueListCommand({});
 
-    const calls = loggedLines();
-    expect(calls).toEqual(
+    expect(loggedLines(logSpy)).toEqual(
       prefixed([
         '\nNew (2)',
         '  #3 Feature B',
@@ -109,8 +80,8 @@ describe('issueListCommand', () => {
     );
   });
 
-  it('assigns multi-status-label issue to the most-advanced stage', async () => {
-    mockGhIssueList([
+  it('assigns multi-status-label issues to the most advanced stage', async () => {
+    stubIssueList([
       {
         number: 42,
         title: 'Multi-label issue',
@@ -120,12 +91,11 @@ describe('issueListCommand', () => {
 
     await issueListCommand({});
 
-    const calls = loggedLines();
-    expect(calls).toEqual(prefixed(['\nPlanned (1)', '  #42 Multi-label issue']));
+    expect(loggedLines(logSpy)).toEqual(prefixed(['\nPlanned (1)', '  #42 Multi-label issue']));
   });
 
   it('shows blocked issues in a dedicated Blocked section with stage context', async () => {
-    mockGhIssueList([
+    stubIssueList([
       {
         number: 15,
         title: 'Blocked issue',
@@ -135,12 +105,13 @@ describe('issueListCommand', () => {
 
     await issueListCommand({});
 
-    const calls = loggedLines();
-    expect(calls).toEqual(prefixed(['\nBlocked (1)', '  #15 Blocked issue [designed]']));
+    expect(loggedLines(logSpy)).toEqual(
+      prefixed(['\nBlocked (1)', '  #15 Blocked issue [designed]'])
+    );
   });
 
   it('shows failed issues in a dedicated Failed section with stage context', async () => {
-    mockGhIssueList([
+    stubIssueList([
       {
         number: 16,
         title: 'Failed issue',
@@ -150,12 +121,11 @@ describe('issueListCommand', () => {
 
     await issueListCommand({});
 
-    const calls = loggedLines();
-    expect(calls).toEqual(prefixed(['\nFailed (1)', '  #16 Failed issue [planned]']));
+    expect(loggedLines(logSpy)).toEqual(prefixed(['\nFailed (1)', '  #16 Failed issue [planned]']));
   });
 
   it('shows blocked and failed sections after stage groups in that order', async () => {
-    mockGhIssueList([
+    stubIssueList([
       { number: 1, title: 'New issue', labels: [{ name: 'shipper:new' }] },
       {
         number: 2,
@@ -171,8 +141,7 @@ describe('issueListCommand', () => {
 
     await issueListCommand({});
 
-    const calls = loggedLines();
-    expect(calls).toEqual(
+    expect(loggedLines(logSpy)).toEqual(
       prefixed([
         '\nNew (1)',
         '  #1 New issue',
@@ -185,7 +154,7 @@ describe('issueListCommand', () => {
   });
 
   it('shows an issue with both blocked and failed only in Failed', async () => {
-    mockGhIssueList([
+    stubIssueList([
       {
         number: 17,
         title: 'Dual-control issue',
@@ -195,12 +164,13 @@ describe('issueListCommand', () => {
 
     await issueListCommand({});
 
-    const calls = loggedLines();
-    expect(calls).toEqual(prefixed(['\nFailed (1)', '  #17 Dual-control issue [planned]']));
+    expect(loggedLines(logSpy)).toEqual(
+      prefixed(['\nFailed (1)', '  #17 Dual-control issue [planned]'])
+    );
   });
 
-  it('shows [locked] suffix for locked issues', async () => {
-    mockGhIssueList([
+  it('shows a [locked] suffix for locked issues', async () => {
+    stubIssueList([
       {
         number: 20,
         title: 'Locked issue',
@@ -210,12 +180,11 @@ describe('issueListCommand', () => {
 
     await issueListCommand({});
 
-    const calls = loggedLines();
-    expect(calls).toContain('[shipper]   #20 Locked issue [locked]');
+    expect(loggedLines(logSpy)).toContain('[shipper]   #20 Locked issue [locked]');
   });
 
   it('shows both stage and locked suffixes for blocked locked issues', async () => {
-    mockGhIssueList([
+    stubIssueList([
       {
         number: 25,
         title: 'Both labels',
@@ -225,20 +194,21 @@ describe('issueListCommand', () => {
 
     await issueListCommand({});
 
-    const calls = loggedLines();
-    expect(calls).toEqual(prefixed(['\nBlocked (1)', '  #25 Both labels [new] [locked]']));
+    expect(loggedLines(logSpy)).toEqual(
+      prefixed(['\nBlocked (1)', '  #25 Both labels [new] [locked]'])
+    );
   });
 
-  it('prints friendly message when no issues exist', async () => {
-    mockGhIssueList([]);
+  it('prints a friendly message when no issues exist', async () => {
+    stubIssueList([]);
 
     await issueListCommand({});
 
-    expect(mockConsoleLog).toHaveBeenCalledWith('[shipper] No shipper-managed issues found.');
+    expect(logSpy).toHaveBeenCalledWith('[shipper] No shipper-managed issues found.');
   });
 
   it('filters to only blocked issues with --status blocked', async () => {
-    mockGhIssueList([
+    stubIssueList([
       {
         number: 2,
         title: 'Blocked issue',
@@ -254,12 +224,13 @@ describe('issueListCommand', () => {
 
     await issueListCommand({ status: 'blocked' });
 
-    const calls = loggedLines();
-    expect(calls).toEqual(prefixed(['\nBlocked (1)', '  #2 Blocked issue [designed]']));
+    expect(loggedLines(logSpy)).toEqual(
+      prefixed(['\nBlocked (1)', '  #2 Blocked issue [designed]'])
+    );
   });
 
   it('filters to only failed issues with --status failed', async () => {
-    mockGhIssueList([
+    stubIssueList([
       {
         number: 2,
         title: 'Blocked issue',
@@ -275,12 +246,11 @@ describe('issueListCommand', () => {
 
     await issueListCommand({ status: 'failed' });
 
-    const calls = loggedLines();
-    expect(calls).toEqual(prefixed(['\nFailed (1)', '  #3 Failed issue [planned]']));
+    expect(loggedLines(logSpy)).toEqual(prefixed(['\nFailed (1)', '  #3 Failed issue [planned]']));
   });
 
   it('filters to a single stage while still showing matching blocked and failed sections', async () => {
-    mockGhIssueList([
+    stubIssueList([
       { number: 1, title: 'Issue A', labels: [{ name: 'shipper:designed' }] },
       {
         number: 2,
@@ -301,8 +271,7 @@ describe('issueListCommand', () => {
 
     await issueListCommand({ status: 'designed' });
 
-    const calls = loggedLines();
-    expect(calls).toEqual(
+    expect(loggedLines(logSpy)).toEqual(
       prefixed([
         '\nDesigned (1)',
         '  #1 Issue A',
@@ -314,45 +283,44 @@ describe('issueListCommand', () => {
     );
   });
 
-  it('prints friendly message when --status filter matches no issues', async () => {
-    mockGhIssueList([{ number: 1, title: 'Issue A', labels: [{ name: 'shipper:new' }] }]);
+  it('prints a friendly message when the --status filter matches no issues', async () => {
+    stubIssueList([{ number: 1, title: 'Issue A', labels: [{ name: 'shipper:new' }] }]);
 
     await issueListCommand({ status: 'planned' });
 
-    expect(mockConsoleLog).toHaveBeenCalledWith('[shipper] No shipper-managed issues found.');
+    expect(logSpy).toHaveBeenCalledWith('[shipper] No shipper-managed issues found.');
   });
 
-  it('throws for invalid --status value', async () => {
+  it('throws for invalid --status values', async () => {
     await expect(issueListCommand({ status: 'foo' })).rejects.toThrow(
       "Error: Invalid status 'foo'. Valid values: new, groomed, designed, planned, implemented, pr-open, pr-reviewed, ready, blocked, failed"
     );
-    expect(mockConsoleError).not.toHaveBeenCalled();
+    expect(errorSpy).not.toHaveBeenCalled();
   });
 
   it('omits empty status groups from output', async () => {
-    mockGhIssueList([
+    stubIssueList([
       { number: 1, title: 'Issue A', labels: [{ name: 'shipper:new' }] },
       { number: 2, title: 'Issue B', labels: [{ name: 'shipper:ready' }] },
     ]);
 
     await issueListCommand({});
 
-    const calls = loggedLines();
-    // Only New and Ready headings should appear — no Groomed, Designed, etc.
-    expect(calls).toEqual(prefixed(['\nNew (1)', '  #1 Issue A', '\nReady (1)', '  #2 Issue B']));
+    expect(loggedLines(logSpy)).toEqual(
+      prefixed(['\nNew (1)', '  #1 Issue A', '\nReady (1)', '  #2 Issue B'])
+    );
   });
 
   it('omits empty Blocked and Failed sections from output', async () => {
-    mockGhIssueList([{ number: 1, title: 'Issue A', labels: [{ name: 'shipper:new' }] }]);
+    stubIssueList([{ number: 1, title: 'Issue A', labels: [{ name: 'shipper:new' }] }]);
 
     await issueListCommand({});
 
-    const calls = loggedLines();
-    expect(calls).toEqual(prefixed(['\nNew (1)', '  #1 Issue A']));
+    expect(loggedLines(logSpy)).toEqual(prefixed(['\nNew (1)', '  #1 Issue A']));
   });
 
   it('excludes blocked and failed issues from stage group counts', async () => {
-    mockGhIssueList([
+    stubIssueList([
       { number: 1, title: 'Normal designed issue', labels: [{ name: 'shipper:designed' }] },
       {
         number: 2,
@@ -368,8 +336,7 @@ describe('issueListCommand', () => {
 
     await issueListCommand({});
 
-    const calls = loggedLines();
-    expect(calls).toEqual(
+    expect(loggedLines(logSpy)).toEqual(
       prefixed([
         '\nDesigned (1)',
         '  #1 Normal designed issue',
@@ -381,8 +348,8 @@ describe('issueListCommand', () => {
     );
   });
 
-  it('sorts issues within each group by number ascending', async () => {
-    mockGhIssueList([
+  it('sorts issues within each stage group by issue number ascending', async () => {
+    stubIssueList([
       { number: 50, title: 'Z', labels: [{ name: 'shipper:new' }] },
       { number: 10, title: 'A', labels: [{ name: 'shipper:new' }] },
       { number: 30, title: 'M', labels: [{ name: 'shipper:new' }] },
@@ -390,12 +357,11 @@ describe('issueListCommand', () => {
 
     await issueListCommand({});
 
-    const calls = loggedLines();
-    expect(calls).toEqual(prefixed(['\nNew (3)', '  #10 A', '  #30 M', '  #50 Z']));
+    expect(loggedLines(logSpy)).toEqual(prefixed(['\nNew (3)', '  #10 A', '  #30 M', '  #50 Z']));
   });
 
   it('sorts blocked and failed sections by issue number ascending', async () => {
-    mockGhIssueList([
+    stubIssueList([
       {
         number: 30,
         title: 'Blocked Z',
@@ -420,8 +386,7 @@ describe('issueListCommand', () => {
 
     await issueListCommand({});
 
-    const calls = loggedLines();
-    expect(calls).toEqual(
+    expect(loggedLines(logSpy)).toEqual(
       prefixed([
         '\nBlocked (2)',
         '  #10 Blocked A [new]',
@@ -433,45 +398,36 @@ describe('issueListCommand', () => {
     );
   });
 
-  it('throws when gh call fails', async () => {
-    mockGh.mockRejectedValue(new Error('gh failed'));
+  it('throws when the gh issue list call fails', async () => {
+    fake.stubGh((args) => {
+      if (args[0] === 'issue' && args[1] === 'list') {
+        throw new Error('gh failed');
+      }
+      return undefined;
+    });
 
     await expect(issueListCommand({})).rejects.toThrow('Error: Failed to fetch issues.');
-    expect(mockConsoleError).not.toHaveBeenCalled();
+    expect(errorSpy).not.toHaveBeenCalled();
   });
 
   it('shows a stageless failed issue in Failed with no stage suffix', async () => {
-    mockGhIssueList([
-      {
-        number: 42,
-        title: 'Stageless failed',
-        labels: [{ name: failedLabel }],
-      },
-    ]);
+    stubIssueList([{ number: 42, title: 'Stageless failed', labels: [{ name: failedLabel }] }]);
 
     await issueListCommand({});
 
-    const calls = loggedLines();
-    expect(calls).toEqual(prefixed(['\nFailed (1)', '  #42 Stageless failed']));
+    expect(loggedLines(logSpy)).toEqual(prefixed(['\nFailed (1)', '  #42 Stageless failed']));
   });
 
   it('shows a stageless blocked issue in Blocked with no stage suffix', async () => {
-    mockGhIssueList([
-      {
-        number: 43,
-        title: 'Stageless blocked',
-        labels: [{ name: blockedLabel }],
-      },
-    ]);
+    stubIssueList([{ number: 43, title: 'Stageless blocked', labels: [{ name: blockedLabel }] }]);
 
     await issueListCommand({});
 
-    const calls = loggedLines();
-    expect(calls).toEqual(prefixed(['\nBlocked (1)', '  #43 Stageless blocked']));
+    expect(loggedLines(logSpy)).toEqual(prefixed(['\nBlocked (1)', '  #43 Stageless blocked']));
   });
 
   it('--status failed includes stageless failed issues', async () => {
-    mockGhIssueList([
+    stubIssueList([
       {
         number: 10,
         title: 'Staged failed',
@@ -486,14 +442,13 @@ describe('issueListCommand', () => {
 
     await issueListCommand({ status: 'failed' });
 
-    const calls = loggedLines();
-    expect(calls).toEqual(
+    expect(loggedLines(logSpy)).toEqual(
       prefixed(['\nFailed (2)', '  #10 Staged failed [designed]', '  #11 Stageless failed'])
     );
   });
 
   it('--status blocked includes stageless blocked issues', async () => {
-    mockGhIssueList([
+    stubIssueList([
       {
         number: 20,
         title: 'Staged blocked',
@@ -508,14 +463,13 @@ describe('issueListCommand', () => {
 
     await issueListCommand({ status: 'blocked' });
 
-    const calls = loggedLines();
-    expect(calls).toEqual(
+    expect(loggedLines(logSpy)).toEqual(
       prefixed(['\nBlocked (2)', '  #20 Staged blocked [planned]', '  #21 Stageless blocked'])
     );
   });
 
   it('shows stageless and staged control issues together correctly', async () => {
-    mockGhIssueList([
+    stubIssueList([
       { number: 1, title: 'Normal issue', labels: [{ name: 'shipper:new' }] },
       {
         number: 2,
@@ -541,8 +495,7 @@ describe('issueListCommand', () => {
 
     await issueListCommand({});
 
-    const calls = loggedLines();
-    expect(calls).toEqual(
+    expect(loggedLines(logSpy)).toEqual(
       prefixed([
         '\nNew (1)',
         '  #1 Normal issue',
