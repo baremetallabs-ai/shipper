@@ -26,6 +26,7 @@ interface FakeIssueRecord {
 
 interface FakePrRecord {
   number: string;
+  body: string;
   baseRefName: string;
   createdAt: string;
   headRefName: string;
@@ -84,6 +85,7 @@ interface FakeState {
   createdPrs: FakePrCreateRecord[];
   submittedReviews: FakeReviewSubmission[];
   labelTransitions: FakeLabelTransition[];
+  sleepCalls: number[];
 }
 
 interface SetIssueInit {
@@ -94,6 +96,7 @@ interface SetIssueInit {
 }
 
 interface SetPrInit {
+  body?: string;
   baseRefName?: string;
   createdAt?: string;
   headRefName?: string;
@@ -140,6 +143,10 @@ interface CreateFakeCore {
   queueChecks(prNumber: string, ...checks: PRChecksLine[][]): void;
   queueRevParse(...values: string[]): void;
   queueCommitsAhead(...values: number[]): void;
+  scriptGitRevParse(handler: (cwd: string, ref: string) => Promise<string> | string): void;
+  scriptCommitsAhead(
+    handler: (wtPath: string, baseBranch: string) => Promise<number> | number
+  ): void;
   scriptRunPrompt(handler: (name: string, opts: RunPromptOpts) => Promise<number> | number): void;
   scriptSyncWorktree(
     handler: (
@@ -158,6 +165,7 @@ interface CreateFakeCore {
       ) => Promise<number>
     ) => Promise<number> | number
   ): void;
+  scriptSleep(handler: (ms: number) => Promise<void> | void): void;
   stubGh(handler: GhHandler): void;
   writeStageOutput(options: WriteStageOutputOptions): Promise<ResultJson>;
 }
@@ -184,6 +192,7 @@ function createIssue(number: string, init: SetIssueInit = {}): FakeIssueRecord {
 function createPr(number: string, init: SetPrInit = {}): FakePrRecord {
   return {
     number,
+    body: init.body ?? '',
     baseRefName: init.baseRefName ?? 'main',
     createdAt: init.createdAt ?? new Date().toISOString(),
     headRefName: init.headRefName ?? `shipper/${number}-branch`,
@@ -243,6 +252,7 @@ export function createFakeCore(): CreateFakeCore {
     createdPrs: [],
     submittedReviews: [],
     labelTransitions: [],
+    sleepCalls: [],
   };
 
   const checksQueue = new Map<string, PRChecksLine[][]>();
@@ -254,6 +264,10 @@ export function createFakeCore(): CreateFakeCore {
   const viewerLogin = DEFAULT_VIEWER_LOGIN;
   let installFakeTransportsCleanup: (() => void) | undefined;
   let runPromptHandler: (name: string, opts: RunPromptOpts) => Promise<number> | number = () => 0;
+  let gitRevParseHandler: ((cwd: string, ref: string) => Promise<string> | string) | undefined;
+  let commitsAheadHandler:
+    | ((wtPath: string, baseBranch: string) => Promise<number> | number)
+    | undefined;
   let syncWorktreeHandler:
     | ((
         opts: unknown,
@@ -271,6 +285,7 @@ export function createFakeCore(): CreateFakeCore {
         ) => Promise<number>
       ) => Promise<number> | number)
     | undefined;
+  let sleepHandler: ((ms: number) => Promise<void> | void) | undefined;
 
   const ensureIssue = (number: string): FakeIssueRecord => {
     const existing = state.issues.get(number);
@@ -341,7 +356,17 @@ export function createFakeCore(): CreateFakeCore {
         return toResponse(issue.title);
       }
 
-      return toResponse(JSON.stringify({ title: issue.title, labels: [...issue.labels] }));
+      if (jsonFields === 'number') {
+        return toResponse(JSON.stringify({ number: Number(issueNumber) }));
+      }
+
+      return toResponse(
+        JSON.stringify({
+          number: Number(issueNumber),
+          title: issue.title,
+          labels: [...issue.labels],
+        })
+      );
     }
 
     if (args[0] === 'issue' && args[1] === 'edit') {
@@ -404,6 +429,8 @@ export function createFakeCore(): CreateFakeCore {
 
       const payload: Record<string, unknown> = {};
       for (const field of jsonFields.split(',')) {
+        if (field === 'number') payload.number = Number(pr.number);
+        if (field === 'body') payload.body = pr.body;
         if (field === 'baseRefName') payload.baseRefName = pr.baseRefName;
         if (field === 'createdAt') payload.createdAt = pr.createdAt;
         if (field === 'headRefName') payload.headRefName = pr.headRefName;
@@ -497,7 +524,12 @@ export function createFakeCore(): CreateFakeCore {
 
       const jobId = getFlagValue(args, '--job');
       if (jobId && args.includes('--log-failed')) {
-        const log = run?.failedLogsByJobId.get(Number(jobId)) ?? '';
+        const log =
+          run?.failedLogsByJobId.get(Number(jobId)) ??
+          [...runs.values()]
+            .find((candidate) => candidate.failedLogsByJobId.has(Number(jobId)))
+            ?.failedLogsByJobId.get(Number(jobId)) ??
+          '';
         return toResponse(log);
       }
     }
@@ -597,17 +629,26 @@ export function createFakeCore(): CreateFakeCore {
         getRepoRoot: () => Promise.resolve(repoRoot),
         getBranchForPR: (_repo, prRef) => Promise.resolve(ensurePr(prRef).headRefName),
         getGitRevParse: (_cwd, ref) => {
+          if (gitRevParseHandler) {
+            return Promise.resolve(gitRevParseHandler(wtPath, ref));
+          }
           const queued = revParseQueue.shift();
           if (queued !== undefined) {
             return Promise.resolve(queued);
           }
           return Promise.resolve(ref === 'HEAD' ? 'head-sha' : `sha-for-${ref}`);
         },
-        getCommitsAheadCount: () => {
+        getCommitsAheadCount: (_wtPath, baseBranch) => {
+          if (commitsAheadHandler) {
+            return Promise.resolve(commitsAheadHandler(wtPath, baseBranch));
+          }
           const queued = commitsAheadQueue.shift();
           return Promise.resolve(queued ?? 1);
         },
-        sleepMs: () => Promise.resolve(),
+        sleepMs: async (ms) => {
+          state.sleepCalls.push(ms);
+          await sleepHandler?.(ms);
+        },
       });
     },
     async dispose(): Promise<void> {
@@ -647,6 +688,12 @@ export function createFakeCore(): CreateFakeCore {
     queueCommitsAhead(...values: number[]): void {
       commitsAheadQueue.push(...values);
     },
+    scriptGitRevParse(handler): void {
+      gitRevParseHandler = handler;
+    },
+    scriptCommitsAhead(handler): void {
+      commitsAheadHandler = handler;
+    },
     scriptRunPrompt(handler): void {
       runPromptHandler = handler;
     },
@@ -655,6 +702,9 @@ export function createFakeCore(): CreateFakeCore {
     },
     scriptPushWithRetry(handler): void {
       pushWithRetryHandler = handler;
+    },
+    scriptSleep(handler): void {
+      sleepHandler = handler;
     },
     stubGh(handler): void {
       ghStubs.push(handler);
