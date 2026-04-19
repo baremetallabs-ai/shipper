@@ -98,7 +98,7 @@ describe('ship-candidates', () => {
         const labels = args.flatMap((arg, index) =>
           arg === '--label' && args[index + 1] ? [String(args[index + 1])] : []
         );
-        const search = args[args.indexOf('--search') + 1] ?? '';
+        const search = args.includes('--search') ? (args[args.indexOf('--search') + 1] ?? '') : '';
         const excludedLabels = [...search.matchAll(/-label:([^\s]+)/g)].map((match) => match[1]);
         const primaryLabel = labels.find((label) => label !== 'shipper:locked');
         const requireLocked = labels.includes('shipper:locked');
@@ -126,7 +126,7 @@ describe('ship-candidates', () => {
           throw new Error('missing issue number');
         }
 
-        const jq = args[args.indexOf('--jq') + 1] ?? '';
+        const jq = args.includes('--jq') ? (args[args.indexOf('--jq') + 1] ?? '') : '';
         if (jq.includes('.created_at')) {
           return {
             stdout: (lockTimestampsByIssue.get(issueNumber) ?? []).join('\n'),

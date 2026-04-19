@@ -54,13 +54,11 @@ describe('implementCommand', () => {
     repo: baseRunPromptOpts.repo,
     issueRef: baseRunPromptOpts.issueRef,
     cwd: wtPath,
-    ...(baseRunPromptOpts.mode === undefined ? {} : { mode: baseRunPromptOpts.mode }),
-    ...(baseRunPromptOpts.agent === undefined ? {} : { agent: baseRunPromptOpts.agent }),
-    ...(baseRunPromptOpts.model === undefined ? {} : { model: baseRunPromptOpts.model }),
-    ...(baseRunPromptOpts.baseBranch === undefined
-      ? {}
-      : { baseBranch: baseRunPromptOpts.baseBranch }),
-    ...(userInput === undefined ? {} : { userInput }),
+    ...('mode' in baseRunPromptOpts ? { mode: baseRunPromptOpts.mode } : {}),
+    ...('agent' in baseRunPromptOpts ? { agent: baseRunPromptOpts.agent } : {}),
+    ...('model' in baseRunPromptOpts ? { model: baseRunPromptOpts.model } : {}),
+    ...('baseBranch' in baseRunPromptOpts ? { baseBranch: baseRunPromptOpts.baseBranch } : {}),
+    userInput,
   });
 
   const createTransportInvoker = (args: TransportInvokerArgs): StageInvokerFactory => {

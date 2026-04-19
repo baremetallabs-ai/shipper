@@ -142,8 +142,16 @@ describe('resetCommand', () => {
           throw new Error('missing fake issue');
         }
 
-        const add = (args[args.indexOf('--add-label') + 1] ?? '').split(',').filter(Boolean);
-        const remove = (args[args.indexOf('--remove-label') + 1] ?? '').split(',').filter(Boolean);
+        const add = (
+          args.includes('--add-label') ? (args[args.indexOf('--add-label') + 1] ?? '') : ''
+        )
+          .split(',')
+          .filter(Boolean);
+        const remove = (
+          args.includes('--remove-label') ? (args[args.indexOf('--remove-label') + 1] ?? '') : ''
+        )
+          .split(',')
+          .filter(Boolean);
 
         for (const label of add) issue.labels.add(label);
         for (const label of remove) issue.labels.delete(label);
@@ -157,7 +165,7 @@ describe('resetCommand', () => {
       }
 
       if (args[0] === 'api' && typeof args[1] === 'string' && args[1].includes('/timeline')) {
-        const jq = args[args.indexOf('--jq') + 1] ?? '';
+        const jq = args.includes('--jq') ? (args[args.indexOf('--jq') + 1] ?? '') : '';
         const labelMatch = /shipper:[a-z-]+/.exec(jq);
         const label = labelMatch?.[0] ?? '';
         return { stdout: timelineByLabel[label] ?? '', stderr: '' };
@@ -169,7 +177,7 @@ describe('resetCommand', () => {
         args[1].includes(`/issues/${issueNumber}/comments`) &&
         !args.includes('DELETE')
       ) {
-        const jq = args[args.indexOf('--jq') + 1] ?? '';
+        const jq = args.includes('--jq') ? (args[args.indexOf('--jq') + 1] ?? '') : '';
         if (jq.includes('created_at')) {
           return {
             stdout: commentsWithDatesPayload(issueCommentsWithDates),
@@ -207,7 +215,7 @@ describe('resetCommand', () => {
       }
 
       if (args[0] === 'pr' && args[1] === 'list' && args.includes('--head')) {
-        const head = args[args.indexOf('--head') + 1] ?? '';
+        const head = args.includes('--head') ? (args[args.indexOf('--head') + 1] ?? '') : '';
         return {
           stdout: JSON.stringify(branchPrsByHead[head] ?? []),
           stderr: '',
