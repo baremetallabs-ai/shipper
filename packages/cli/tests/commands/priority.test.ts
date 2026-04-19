@@ -1,181 +1,170 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { mockGh } = vi.hoisted(() => ({
-  mockGh: vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>(),
-}));
+import { createFakeCore } from '../_harness/fake-core.js';
 
-vi.mock('@dnsquared/shipper-core', async () => {
-  const { parseIssueLabelsState } =
-    await vi.importActual<typeof import('@dnsquared/shipper-core')>('@dnsquared/shipper-core');
-
-  return {
-    logger: {
-      error: (message: string) => {
-        console.error(`[shipper] ${message}`);
-      },
-      log: (message: string) => {
-        console.log(`[shipper] ${message}`);
-      },
-      warn: (message: string) => {
-        console.warn(`[shipper] ${message}`);
-      },
-    },
-    gh: (args: string[]) => mockGh(args),
-    parseIssueLabelsState,
-    PRIORITY_HIGH_LABEL: 'shipper:priority-high',
-    PRIORITY_LOW_LABEL: 'shipper:priority-low',
-    STAGE_LABEL_NAMES: [
-      'shipper:new',
-      'shipper:groomed',
-      'shipper:designed',
-      'shipper:planned',
-      'shipper:implemented',
-      'shipper:pr-open',
-      'shipper:pr-reviewed',
-      'shipper:ready',
-    ],
-  };
-});
-
-import { priorityCommand } from '../../src/commands/priority.js';
+type FakeCore = ReturnType<typeof createFakeCore>;
 
 const repo = 'owner/repo';
-const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-
-function mockOpenIssue(labels: string[], state = 'OPEN'): void {
-  mockGh.mockImplementation((args: string[]) => {
-    if (args[0] === 'issue' && args[1] === 'view') {
-      return Promise.resolve({
-        stdout: JSON.stringify({
-          number: 42,
-          state,
-          labels: labels.map((name) => ({ name })),
-        }),
-        stderr: '',
-      });
-    }
-
-    if (args[0] === 'pr' && args[1] === 'view') {
-      throw new Error('not a PR');
-    }
-
-    return Promise.resolve({ stdout: '', stderr: '' });
-  });
-}
-
-beforeEach(() => {
-  vi.clearAllMocks();
-});
 
 describe('priorityCommand', () => {
+  let fake: FakeCore;
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+
+  const stubIssueView = (issueNumber: string, labels: string[], state = 'OPEN'): void => {
+    fake.stubGh((args) => {
+      if (
+        args[0] === 'issue' &&
+        args[1] === 'view' &&
+        args[2] === issueNumber &&
+        args.includes('--json') &&
+        args.includes('number,state,labels')
+      ) {
+        return {
+          stdout: JSON.stringify({
+            number: Number(issueNumber),
+            state,
+            labels: labels.map((name) => ({ name })),
+          }),
+          stderr: '',
+        };
+      }
+      return undefined;
+    });
+  };
+
+  const stubPrCheck = (issueNumber: string, isPr: boolean): void => {
+    fake.stubGh((args) => {
+      if (
+        args[0] === 'pr' &&
+        args[1] === 'view' &&
+        args[2] === issueNumber &&
+        args.includes('--json') &&
+        args.includes('number,url')
+      ) {
+        if (!isPr) {
+          throw new Error('not a PR');
+        }
+
+        return {
+          stdout: JSON.stringify({
+            number: Number(issueNumber),
+            url: `https://example.test/${issueNumber}`,
+          }),
+          stderr: '',
+        };
+      }
+      return undefined;
+    });
+  };
+
+  beforeEach(() => {
+    fake = createFakeCore();
+    fake.install();
+    process.exitCode = undefined;
+    logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(async () => {
+    process.exitCode = undefined;
+    vi.restoreAllMocks();
+    await fake.dispose();
+  });
+
   it('sets high priority and removes low priority', async () => {
-    mockOpenIssue(['shipper:planned', 'shipper:priority-low']);
+    fake.setIssue('42', { labels: ['shipper:planned', 'shipper:priority-low'] });
+    stubIssueView('42', ['shipper:planned', 'shipper:priority-low']);
+    stubPrCheck('42', false);
+
+    const { priorityCommand } = await import('../../src/commands/priority.js');
 
     await priorityCommand(repo, '42', 'high');
 
-    expect(mockGh).toHaveBeenCalledWith([
-      'issue',
-      'edit',
-      '42',
-      '-R',
-      repo,
-      '--add-label',
-      'shipper:priority-high',
-      '--remove-label',
-      'shipper:priority-low',
+    expect(fake.state.labelTransitions).toEqual([
+      {
+        target: 'issue',
+        number: '42',
+        add: ['shipper:priority-high'],
+        remove: ['shipper:priority-low'],
+      },
     ]);
     expect(logSpy).toHaveBeenCalledWith('[shipper] Issue #42 priority set to high.');
   });
 
   it('sets low priority and removes high priority', async () => {
-    mockOpenIssue(['shipper:planned', 'shipper:priority-high']);
+    fake.setIssue('42', { labels: ['shipper:planned', 'shipper:priority-high'] });
+    stubIssueView('42', ['shipper:planned', 'shipper:priority-high']);
+    stubPrCheck('42', false);
+
+    const { priorityCommand } = await import('../../src/commands/priority.js');
 
     await priorityCommand(repo, '42', 'low');
 
-    expect(mockGh).toHaveBeenCalledWith([
-      'issue',
-      'edit',
-      '42',
-      '-R',
-      repo,
-      '--add-label',
-      'shipper:priority-low',
-      '--remove-label',
-      'shipper:priority-high',
+    expect(fake.state.labelTransitions).toEqual([
+      {
+        target: 'issue',
+        number: '42',
+        add: ['shipper:priority-low'],
+        remove: ['shipper:priority-high'],
+      },
     ]);
     expect(logSpy).toHaveBeenCalledWith('[shipper] Issue #42 priority set to low.');
   });
 
   it('removes both priority labels when setting normal priority', async () => {
-    mockOpenIssue(['shipper:planned', 'shipper:priority-high']);
+    fake.setIssue('42', { labels: ['shipper:planned', 'shipper:priority-high'] });
+    stubIssueView('42', ['shipper:planned', 'shipper:priority-high']);
+    stubPrCheck('42', false);
+
+    const { priorityCommand } = await import('../../src/commands/priority.js');
 
     await priorityCommand(repo, '42', 'normal');
 
-    expect(mockGh).toHaveBeenCalledWith([
-      'issue',
-      'edit',
-      '42',
-      '-R',
-      repo,
-      '--remove-label',
-      'shipper:priority-high',
-      '--remove-label',
-      'shipper:priority-low',
+    expect(fake.state.labelTransitions).toEqual([
+      {
+        target: 'issue',
+        number: '42',
+        add: [],
+        remove: ['shipper:priority-high', 'shipper:priority-low'],
+      },
     ]);
     expect(logSpy).toHaveBeenCalledWith('[shipper] Issue #42 priority set to normal.');
   });
 
   it('prints a no-op message when the issue is already normal priority', async () => {
-    mockOpenIssue(['shipper:planned']);
+    fake.setIssue('42', { labels: ['shipper:planned'] });
+    stubIssueView('42', ['shipper:planned']);
+    stubPrCheck('42', false);
+
+    const { priorityCommand } = await import('../../src/commands/priority.js');
 
     await priorityCommand(repo, '42', 'normal');
 
     expect(logSpy).toHaveBeenCalledWith('[shipper] Issue #42 is already at normal priority.');
-    const editCalls = mockGh.mock.calls.filter(
-      ([args]) => args[0] === 'issue' && args[1] === 'edit'
-    );
-    expect(editCalls).toHaveLength(0);
+    expect(fake.state.labelTransitions).toEqual([]);
   });
 
   it('strips a leading # from the issue reference', async () => {
-    mockOpenIssue(['shipper:planned']);
+    fake.setIssue('42', { labels: ['shipper:planned'] });
+    stubIssueView('42', ['shipper:planned']);
+    stubPrCheck('42', false);
+
+    const { priorityCommand } = await import('../../src/commands/priority.js');
 
     await priorityCommand(repo, '#42', 'high');
 
-    expect(mockGh).toHaveBeenCalledWith([
-      'issue',
-      'view',
-      '42',
-      '-R',
-      repo,
-      '--json',
-      'number,state,labels',
-    ]);
+    expect(fake.state.issues.get('42')?.labels).toEqual(
+      new Set(['shipper:planned', 'shipper:priority-high'])
+    );
   });
 
   it('rejects pull requests', async () => {
-    mockGh.mockImplementation((args: string[]) => {
-      if (args[0] === 'issue' && args[1] === 'view') {
-        return Promise.resolve({
-          stdout: JSON.stringify({
-            number: 42,
-            state: 'OPEN',
-            labels: [{ name: 'shipper:planned' }],
-          }),
-          stderr: '',
-        });
-      }
+    fake.setIssue('42', { labels: ['shipper:planned'] });
+    stubIssueView('42', ['shipper:planned']);
+    stubPrCheck('42', true);
 
-      if (args[0] === 'pr' && args[1] === 'view') {
-        return Promise.resolve({
-          stdout: JSON.stringify({ number: 42, url: 'https://example.test/pr/42' }),
-          stderr: '',
-        });
-      }
-
-      return Promise.resolve({ stdout: '', stderr: '' });
-    });
+    const { priorityCommand } = await import('../../src/commands/priority.js');
 
     await expect(priorityCommand(repo, '42', 'high')).rejects.toThrow(
       'Error: #42 is a pull request, not an issue.'
@@ -184,7 +173,10 @@ describe('priorityCommand', () => {
   });
 
   it('rejects closed issues', async () => {
-    mockOpenIssue(['shipper:planned'], 'CLOSED');
+    stubIssueView('42', ['shipper:planned'], 'CLOSED');
+    stubPrCheck('42', false);
+
+    const { priorityCommand } = await import('../../src/commands/priority.js');
 
     await expect(priorityCommand(repo, '42', 'high')).rejects.toThrow(
       'Error: Issue #42 is not open.'
@@ -193,7 +185,10 @@ describe('priorityCommand', () => {
   });
 
   it('rejects open issues that are not in the shipper workflow', async () => {
-    mockOpenIssue(['bug']);
+    stubIssueView('42', ['bug']);
+    stubPrCheck('42', false);
+
+    const { priorityCommand } = await import('../../src/commands/priority.js');
 
     await expect(priorityCommand(repo, '42', 'high')).rejects.toThrow(
       'Error: Issue #42 is not in the shipper workflow.'
@@ -202,6 +197,8 @@ describe('priorityCommand', () => {
   });
 
   it('rejects invalid issue numbers', async () => {
+    const { priorityCommand } = await import('../../src/commands/priority.js');
+
     await expect(priorityCommand(repo, 'abc', 'high')).rejects.toThrow(
       'Error: Please provide a valid issue number.'
     );

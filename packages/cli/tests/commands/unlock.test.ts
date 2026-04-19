@@ -1,121 +1,149 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mockListIssues =
-  vi.fn<(repo: string, options: { label: string }) => Promise<Array<{ number: number }>>>();
-const mockIsLockStale = vi.fn<(repo: string, issue: string) => Promise<boolean>>();
-const mockReleaseIssueLock = vi.fn<(repo: string, issue: string) => Promise<void>>();
+import { createFakeCore } from '../_harness/fake-core.js';
+
+type FakeCore = ReturnType<typeof createFakeCore>;
+
 const repo = 'owner/repo';
 
-vi.mock('@dnsquared/shipper-core', () => ({
-  logger: {
-    error: (message: string) => {
-      console.error(`[shipper] ${message}`);
-    },
-    log: (message: string) => {
-      console.log(`[shipper] ${message}`);
-    },
-    warn: (message: string) => {
-      console.warn(`[shipper] ${message}`);
-    },
-  },
-  listIssues: (repo: string, options: { label: string }) => mockListIssues(repo, options),
-  isLockStale: (repo: string, issue: string) => mockIsLockStale(repo, issue),
-  releaseIssueLock: (repo: string, issue: string) => mockReleaseIssueLock(repo, issue),
-}));
-
-const mockConsoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-
-import { unlockCommand } from '../../src/commands/unlock.js';
-
-beforeEach(() => {
-  vi.clearAllMocks();
-  mockListIssues.mockResolvedValue([]);
-  mockIsLockStale.mockResolvedValue(false);
-  mockReleaseIssueLock.mockResolvedValue(undefined);
-});
-
 describe('unlockCommand', () => {
-  it('calls releaseIssueLock with the repo and issue number', async () => {
-    await unlockCommand(repo, '42', { stale: false });
-    expect(mockReleaseIssueLock).toHaveBeenCalledWith(repo, '42');
-    expect(mockListIssues).not.toHaveBeenCalled();
-    expect(mockIsLockStale).not.toHaveBeenCalled();
+  let fake: FakeCore;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+
+  const stubLockedIssueList = (issues: number[]): void => {
+    fake.stubGh((args) => {
+      if (
+        args[0] === 'issue' &&
+        args[1] === 'list' &&
+        args.includes('-R') &&
+        args.includes('--json') &&
+        args.includes('number,title,labels,state,author,createdAt,url') &&
+        args.includes('--label') &&
+        args.includes('shipper:locked')
+      ) {
+        return {
+          stdout: JSON.stringify(
+            issues.map((number) => ({
+              number,
+              title: `Issue ${number}`,
+              labels: [{ name: 'shipper:locked' }],
+              state: 'OPEN',
+              author: { login: 'dnsquared' },
+              createdAt: '2026-03-01T09:00:00Z',
+              url: `https://example.test/issues/${number}`,
+            }))
+          ),
+          stderr: '',
+        };
+      }
+      return undefined;
+    });
+  };
+
+  beforeEach(() => {
+    fake = createFakeCore();
+    fake.install();
+    process.exitCode = undefined;
+    errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
-  it('strips # prefix from issue number', async () => {
+  afterEach(async () => {
+    process.exitCode = undefined;
+    vi.restoreAllMocks();
+    await fake.dispose();
+  });
+
+  it('calls releaseIssueLock with the repo and issue number', async () => {
+    fake.setIssue('42', { labels: ['shipper:locked'] });
+
+    const { unlockCommand } = await import('../../src/commands/unlock.js');
+
+    await unlockCommand(repo, '42', { stale: false });
+
+    expect(fake.state.labelTransitions).toEqual([
+      { target: 'issue', number: '42', add: [], remove: ['shipper:locked'] },
+    ]);
+    expect(fake.state.issues.get('42')?.labels).toEqual(new Set());
+  });
+
+  it('strips # prefixes from issue numbers', async () => {
+    fake.setIssue('42', { labels: ['shipper:locked'] });
+
+    const { unlockCommand } = await import('../../src/commands/unlock.js');
+
     await unlockCommand(repo, '#42', { stale: false });
-    expect(mockReleaseIssueLock).toHaveBeenCalledWith(repo, '42');
-    expect(mockListIssues).not.toHaveBeenCalled();
-    expect(mockIsLockStale).not.toHaveBeenCalled();
+
+    expect(fake.state.issues.get('42')?.labels).toEqual(new Set());
   });
 
   it('throws a usage error when no issue and no --stale are provided', async () => {
+    const { unlockCommand } = await import('../../src/commands/unlock.js');
+
     await expect(unlockCommand(repo, undefined, { stale: false })).rejects.toThrow(
       'Error: Please provide an issue number or use --stale.'
     );
-    expect(mockConsoleError).toHaveBeenNthCalledWith(1, '[shipper] Usage: shipper unlock <issue>');
-    expect(mockConsoleError).toHaveBeenNthCalledWith(2, '[shipper]    or: shipper unlock --stale');
-    expect(mockListIssues).not.toHaveBeenCalled();
-    expect(mockIsLockStale).not.toHaveBeenCalled();
-    expect(mockReleaseIssueLock).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenNthCalledWith(1, '[shipper] Usage: shipper unlock <issue>');
+    expect(errorSpy).toHaveBeenNthCalledWith(2, '[shipper]    or: shipper unlock --stale');
+    expect(fake.state.labelTransitions).toEqual([]);
   });
 
   it('throws when an issue and --stale are both provided', async () => {
+    const { unlockCommand } = await import('../../src/commands/unlock.js');
+
     await expect(unlockCommand(repo, '42', { stale: true })).rejects.toThrow(
       'Error: --stale cannot be used with an issue number.'
     );
-    expect(mockConsoleError).toHaveBeenNthCalledWith(1, '[shipper] Usage: shipper unlock <issue>');
-    expect(mockConsoleError).toHaveBeenNthCalledWith(2, '[shipper]    or: shipper unlock --stale');
-    expect(mockListIssues).not.toHaveBeenCalled();
-    expect(mockIsLockStale).not.toHaveBeenCalled();
-    expect(mockReleaseIssueLock).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenNthCalledWith(1, '[shipper] Usage: shipper unlock <issue>');
+    expect(errorSpy).toHaveBeenNthCalledWith(2, '[shipper]    or: shipper unlock --stale');
+    expect(fake.state.labelTransitions).toEqual([]);
   });
 
   it('prints no-op output when no locked issues are found for --stale', async () => {
-    mockListIssues.mockResolvedValue([]);
+    stubLockedIssueList([]);
+
+    const { unlockCommand } = await import('../../src/commands/unlock.js');
 
     await expect(unlockCommand(repo, undefined, { stale: true })).resolves.toBeUndefined();
 
-    expect(mockListIssues).toHaveBeenCalledWith(repo, { label: 'shipper:locked' });
-    expect(mockIsLockStale).not.toHaveBeenCalled();
-    expect(mockReleaseIssueLock).not.toHaveBeenCalled();
-    expect(mockConsoleError).toHaveBeenCalledTimes(1);
-    expect(mockConsoleError).toHaveBeenCalledWith('[shipper] No stale locks found.');
+    expect(errorSpy).toHaveBeenCalledWith('[shipper] No stale locks found.');
+    expect(fake.state.labelTransitions).toEqual([]);
   });
 
-  it('releases only stale locks and prints ordered per-issue status plus summary', async () => {
-    mockListIssues.mockResolvedValue([{ number: 42 }, { number: 43 }]);
-    mockIsLockStale.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+  it('releases only stale locks and prints per-issue status plus summary', async () => {
+    const staleTimestamp = new Date(Date.now() - 31 * 60_000).toISOString();
+    const activeTimestamp = new Date().toISOString();
+    fake.setIssue('42', { labels: ['shipper:locked'], timeline: [staleTimestamp] });
+    fake.setIssue('43', { labels: ['shipper:locked'], timeline: [activeTimestamp] });
+    stubLockedIssueList([42, 43]);
+
+    const { unlockCommand } = await import('../../src/commands/unlock.js');
 
     await expect(unlockCommand(repo, undefined, { stale: true })).resolves.toBeUndefined();
 
-    expect(mockListIssues).toHaveBeenCalledWith(repo, { label: 'shipper:locked' });
-    expect(mockIsLockStale).toHaveBeenNthCalledWith(1, repo, '42');
-    expect(mockIsLockStale).toHaveBeenNthCalledWith(2, repo, '43');
-    expect(mockReleaseIssueLock).toHaveBeenCalledTimes(1);
-    expect(mockReleaseIssueLock).toHaveBeenCalledWith(repo, '42');
-    expect(mockConsoleError).toHaveBeenNthCalledWith(1, '[shipper] #42: stale — released');
-    expect(mockConsoleError).toHaveBeenNthCalledWith(2, '[shipper] #43: active — skipped');
-    expect(mockConsoleError).toHaveBeenNthCalledWith(
+    expect(fake.state.labelTransitions).toEqual([
+      { target: 'issue', number: '42', add: [], remove: ['shipper:locked'] },
+    ]);
+    expect(errorSpy).toHaveBeenNthCalledWith(1, '[shipper] #42: stale — released');
+    expect(errorSpy).toHaveBeenNthCalledWith(2, '[shipper] #43: active — skipped');
+    expect(errorSpy).toHaveBeenNthCalledWith(
       3,
       '[shipper] Released 1 stale lock(s) (1 active lock(s) skipped).'
     );
   });
 
   it('prints active lines and no stale summary when all locked issues are active', async () => {
-    mockListIssues.mockResolvedValue([{ number: 42 }, { number: 43 }]);
-    mockIsLockStale.mockResolvedValue(false);
+    const activeTimestamp = new Date().toISOString();
+    fake.setIssue('42', { labels: ['shipper:locked'], timeline: [activeTimestamp] });
+    fake.setIssue('43', { labels: ['shipper:locked'], timeline: [activeTimestamp] });
+    stubLockedIssueList([42, 43]);
+
+    const { unlockCommand } = await import('../../src/commands/unlock.js');
 
     await expect(unlockCommand(repo, undefined, { stale: true })).resolves.toBeUndefined();
 
-    expect(mockIsLockStale).toHaveBeenNthCalledWith(1, repo, '42');
-    expect(mockIsLockStale).toHaveBeenNthCalledWith(2, repo, '43');
-    expect(mockReleaseIssueLock).not.toHaveBeenCalled();
-    expect(mockConsoleError).toHaveBeenNthCalledWith(1, '[shipper] #42: active — skipped');
-    expect(mockConsoleError).toHaveBeenNthCalledWith(2, '[shipper] #43: active — skipped');
-    expect(mockConsoleError).toHaveBeenNthCalledWith(3, '[shipper] No stale locks found.');
-    expect(mockConsoleError).not.toHaveBeenCalledWith(
-      '[shipper] Released 0 stale lock(s) (2 active lock(s) skipped).'
-    );
+    expect(fake.state.labelTransitions).toEqual([]);
+    expect(errorSpy).toHaveBeenNthCalledWith(1, '[shipper] #42: active — skipped');
+    expect(errorSpy).toHaveBeenNthCalledWith(2, '[shipper] #43: active — skipped');
+    expect(errorSpy).toHaveBeenNthCalledWith(3, '[shipper] No stale locks found.');
   });
 });

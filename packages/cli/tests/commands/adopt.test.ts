@@ -1,242 +1,258 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { mockGh } = vi.hoisted(() => ({
-  mockGh: vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>(),
-}));
+import { createFakeCore } from '../_harness/fake-core.js';
 
-vi.mock('@dnsquared/shipper-core', async () => {
-  const { parseIssueNumberLabels, parseIssueNumberLabelsList } =
-    await vi.importActual<typeof import('@dnsquared/shipper-core')>('@dnsquared/shipper-core');
-
-  return {
-    logger: {
-      error: (message: string) => {
-        console.error(`[shipper] ${message}`);
-      },
-      log: (message: string) => {
-        console.log(`[shipper] ${message}`);
-      },
-      warn: (message: string) => {
-        console.warn(`[shipper] ${message}`);
-      },
-    },
-    gh: (args: string[]) => mockGh(args),
-    parseIssueNumberLabels,
-    parseIssueNumberLabelsList,
-  };
-});
-
-import { adoptCommand, adoptAllCommand } from '../../src/commands/adopt.js';
-
-const mockConsoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
-const mockConsoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-const mockConsoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-beforeEach(() => {
-  vi.clearAllMocks();
-  process.exitCode = undefined;
-});
+type FakeCore = ReturnType<typeof createFakeCore>;
 
 describe('adoptCommand', () => {
-  it('adopts a valid issue with no shipper labels', async () => {
-    mockGh.mockImplementation((args: string[]) => {
-      if (args[0] === 'issue' && args[1] === 'view') {
-        return Promise.resolve({ stdout: JSON.stringify({ number: 42, labels: [] }), stderr: '' });
+  let fake: FakeCore;
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+
+  const stubIssueView = (issueNumber: string, labels: string[]): void => {
+    fake.stubGh((args) => {
+      if (
+        args[0] === 'issue' &&
+        args[1] === 'view' &&
+        args[2] === issueNumber &&
+        args.includes('--json') &&
+        args.includes('number,labels')
+      ) {
+        return {
+          stdout: JSON.stringify({
+            number: Number(issueNumber),
+            labels: labels.map((name) => ({ name })),
+          }),
+          stderr: '',
+        };
       }
-      if (args[0] === 'pr' && args[1] === 'view') {
-        return Promise.reject(new Error('not a PR'));
-      }
-      return Promise.resolve({ stdout: '', stderr: '' });
+      return undefined;
     });
+  };
+
+  const stubPrCheck = (issueNumber: string, isPr: boolean): void => {
+    fake.stubGh((args) => {
+      if (
+        args[0] === 'pr' &&
+        args[1] === 'view' &&
+        args[2] === issueNumber &&
+        args.includes('--json') &&
+        args.includes('number,url')
+      ) {
+        if (!isPr) {
+          throw new Error('not a PR');
+        }
+
+        return {
+          stdout: JSON.stringify({
+            number: Number(issueNumber),
+            url: `https://example.test/${issueNumber}`,
+          }),
+          stderr: '',
+        };
+      }
+      return undefined;
+    });
+  };
+
+  const stubIssueList = (issues: Array<{ number: number; labels: string[] }>): void => {
+    fake.stubGh((args) => {
+      if (
+        args[0] === 'issue' &&
+        args[1] === 'list' &&
+        args.includes('--json') &&
+        args.includes('number,labels')
+      ) {
+        return {
+          stdout: JSON.stringify(
+            issues.map((issue) => ({
+              number: issue.number,
+              labels: issue.labels.map((name) => ({ name })),
+            }))
+          ),
+          stderr: '',
+        };
+      }
+      return undefined;
+    });
+  };
+
+  beforeEach(() => {
+    fake = createFakeCore();
+    fake.install();
+    process.exitCode = undefined;
+    logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(async () => {
+    process.exitCode = undefined;
+    vi.restoreAllMocks();
+    await fake.dispose();
+  });
+
+  it('adopts a valid issue with no shipper labels', async () => {
+    fake.setIssue('42', { labels: [] });
+    stubIssueView('42', []);
+    stubPrCheck('42', false);
+
+    const { adoptCommand } = await import('../../src/commands/adopt.js');
 
     await adoptCommand('42');
 
-    expect(mockGh).toHaveBeenCalledWith(['issue', 'edit', '42', '--add-label', 'shipper:new']);
-    expect(mockConsoleLog).toHaveBeenCalledWith(
-      '[shipper] Issue #42 adopted into shipper workflow.'
-    );
+    expect(fake.state.labelTransitions).toEqual([
+      { target: 'issue', number: '42', add: ['shipper:new'], remove: [] },
+    ]);
+    expect(logSpy).toHaveBeenCalledWith('[shipper] Issue #42 adopted into shipper workflow.');
   });
 
   it('warns and does not modify an issue that already has shipper labels', async () => {
-    mockGh.mockImplementation((args: string[]) => {
-      if (args[0] === 'issue' && args[1] === 'view') {
-        return Promise.resolve({
-          stdout: JSON.stringify({ number: 42, labels: [{ name: 'shipper:groomed' }] }),
-          stderr: '',
-        });
-      }
-      if (args[0] === 'pr' && args[1] === 'view') {
-        return Promise.reject(new Error('not a PR'));
-      }
-      return Promise.resolve({ stdout: '', stderr: '' });
-    });
+    fake.setIssue('42', { labels: ['shipper:groomed'] });
+    stubIssueView('42', ['shipper:groomed']);
+    stubPrCheck('42', false);
+
+    const { adoptCommand } = await import('../../src/commands/adopt.js');
 
     await adoptCommand('42');
 
-    expect(mockConsoleWarn).toHaveBeenCalledWith(
+    expect(warnSpy).toHaveBeenCalledWith(
       '[shipper] Warning: Issue #42 already has shipper label(s): shipper:groomed. No changes made.'
     );
-    // Should not call gh issue edit
-    const editCalls = mockGh.mock.calls.filter(
-      ([args]) => args[0] === 'issue' && args[1] === 'edit'
-    );
-    expect(editCalls).toHaveLength(0);
+    expect(fake.state.labelTransitions).toEqual([]);
   });
 
-  it('throws for non-existent issue', async () => {
-    mockGh.mockImplementation((args: string[]) => {
-      if (args[0] === 'issue' && args[1] === 'view') {
-        return Promise.reject(new Error('not found'));
+  it('throws for non-existent issues', async () => {
+    fake.stubGh((args) => {
+      if (args[0] === 'issue' && args[1] === 'view' && args[2] === '9999') {
+        throw new Error('not found');
       }
-      return Promise.resolve({ stdout: '', stderr: '' });
+      return undefined;
     });
+
+    const { adoptCommand } = await import('../../src/commands/adopt.js');
 
     await expect(adoptCommand('9999')).rejects.toThrow('Error: Issue #9999 not found.');
-    expect(mockConsoleError).not.toHaveBeenCalled();
+    expect(errorSpy).not.toHaveBeenCalled();
   });
 
-  it('throws when issue number is a pull request', async () => {
-    mockGh.mockImplementation((args: string[]) => {
-      if (args[0] === 'issue' && args[1] === 'view') {
-        return Promise.resolve({ stdout: JSON.stringify({ number: 42, labels: [] }), stderr: '' });
-      }
-      if (args[0] === 'pr' && args[1] === 'view') {
-        return Promise.resolve({ stdout: JSON.stringify({ number: 42 }), stderr: '' });
-      }
-      return Promise.resolve({ stdout: '', stderr: '' });
-    });
+  it('throws when the reference is a pull request', async () => {
+    fake.setIssue('42', { labels: [] });
+    stubIssueView('42', []);
+    stubPrCheck('42', true);
+
+    const { adoptCommand } = await import('../../src/commands/adopt.js');
 
     await expect(adoptCommand('42')).rejects.toThrow('Error: #42 is a pull request, not an issue.');
-    expect(mockConsoleError).not.toHaveBeenCalled();
+    expect(errorSpy).not.toHaveBeenCalled();
   });
 
-  it('strips # prefix from issue number', async () => {
-    mockGh.mockImplementation((args: string[]) => {
-      if (args[0] === 'issue' && args[1] === 'view') {
-        return Promise.resolve({ stdout: JSON.stringify({ number: 42, labels: [] }), stderr: '' });
-      }
-      if (args[0] === 'pr' && args[1] === 'view') {
-        return Promise.reject(new Error('not a PR'));
-      }
-      return Promise.resolve({ stdout: '', stderr: '' });
-    });
+  it('strips # prefixes from the issue reference', async () => {
+    fake.setIssue('42', { labels: [] });
+    stubIssueView('42', []);
+    stubPrCheck('42', false);
+
+    const { adoptCommand } = await import('../../src/commands/adopt.js');
 
     await adoptCommand('#42');
 
-    expect(mockGh).toHaveBeenCalledWith(['issue', 'view', '42', '--json', 'number,labels']);
+    expect(fake.state.issues.get('42')?.labels).toEqual(new Set(['shipper:new']));
   });
 
   it('throws for non-numeric input and still prints usage', async () => {
+    const { adoptCommand } = await import('../../src/commands/adopt.js');
+
     await expect(adoptCommand('abc')).rejects.toThrow(
       'Error: Please provide a valid issue number.'
     );
-    expect(mockConsoleError).toHaveBeenCalledWith('[shipper] Usage: shipper adopt <issue>');
+    expect(errorSpy).toHaveBeenCalledWith('[shipper] Usage: shipper adopt <issue>');
   });
-});
 
-describe('adoptAllCommand', () => {
-  it('adopts multiple eligible issues, skips labeled ones', async () => {
-    const issues = [
+  it('adopts multiple eligible issues and skips labeled ones', async () => {
+    fake.setIssue('10', { labels: [] });
+    fake.setIssue('11', { labels: ['shipper:groomed'] });
+    fake.setIssue('12', { labels: [] });
+    fake.setIssue('13', { labels: ['bug'] });
+    stubIssueList([
       { number: 10, labels: [] },
-      { number: 11, labels: [{ name: 'shipper:groomed' }] },
+      { number: 11, labels: ['shipper:groomed'] },
       { number: 12, labels: [] },
-      { number: 13, labels: [{ name: 'bug' }] },
-    ];
+      { number: 13, labels: ['bug'] },
+    ]);
 
-    mockGh.mockImplementation((args: string[]) => {
-      if (args[0] === 'issue' && args[1] === 'list') {
-        return Promise.resolve({ stdout: JSON.stringify(issues), stderr: '' });
-      }
-      return Promise.resolve({ stdout: '', stderr: '' });
-    });
+    const { adoptAllCommand } = await import('../../src/commands/adopt.js');
 
     await adoptAllCommand();
 
-    const editCalls = mockGh.mock.calls.filter(
-      ([args]) => args[0] === 'issue' && args[1] === 'edit'
-    );
-    expect(editCalls).toHaveLength(3);
-    expect(editCalls[0]?.[0]).toEqual(['issue', 'edit', '10', '--add-label', 'shipper:new']);
-    expect(editCalls[1]?.[0]).toEqual(['issue', 'edit', '12', '--add-label', 'shipper:new']);
-    expect(editCalls[2]?.[0]).toEqual(['issue', 'edit', '13', '--add-label', 'shipper:new']);
-    expect(mockConsoleLog).toHaveBeenCalledWith(
-      '[shipper] Adopted #10, #12, #13 into shipper workflow.'
-    );
+    expect(fake.state.labelTransitions).toEqual([
+      { target: 'issue', number: '10', add: ['shipper:new'], remove: [] },
+      { target: 'issue', number: '12', add: ['shipper:new'], remove: [] },
+      { target: 'issue', number: '13', add: ['shipper:new'], remove: [] },
+    ]);
+    expect(logSpy).toHaveBeenCalledWith('[shipper] Adopted #10, #12, #13 into shipper workflow.');
   });
 
-  it('prints message when no eligible issues found', async () => {
-    mockGh.mockImplementation((args: string[]) => {
-      if (args[0] === 'issue' && args[1] === 'list') {
-        return Promise.resolve({
-          stdout: JSON.stringify([{ number: 5, labels: [{ name: 'shipper:new' }] }]),
-          stderr: '',
-        });
-      }
-      return Promise.resolve({ stdout: '', stderr: '' });
-    });
+  it('prints a message when no eligible issues are found', async () => {
+    stubIssueList([{ number: 5, labels: ['shipper:new'] }]);
+
+    const { adoptAllCommand } = await import('../../src/commands/adopt.js');
 
     await adoptAllCommand();
 
-    expect(mockConsoleLog).toHaveBeenCalledWith('[shipper] No eligible issues found.');
-    const editCalls = mockGh.mock.calls.filter(
-      ([args]) => args[0] === 'issue' && args[1] === 'edit'
-    );
-    expect(editCalls).toHaveLength(0);
+    expect(logSpy).toHaveBeenCalledWith('[shipper] No eligible issues found.');
+    expect(fake.state.labelTransitions).toEqual([]);
   });
 
   it('throws when gh issue list fails', async () => {
-    mockGh.mockImplementation((args: string[]) => {
+    fake.stubGh((args) => {
       if (args[0] === 'issue' && args[1] === 'list') {
-        return Promise.reject(new Error('gh issue list failed'));
+        throw new Error('gh issue list failed');
       }
-      return Promise.resolve({ stdout: '', stderr: '' });
+      return undefined;
     });
 
+    const { adoptAllCommand } = await import('../../src/commands/adopt.js');
+
     await expect(adoptAllCommand()).rejects.toThrow('Error: Failed to fetch issues.');
-    expect(mockConsoleError).not.toHaveBeenCalled();
+    expect(errorSpy).not.toHaveBeenCalled();
   });
 
   it('continues labeling remaining issues when one fails and sets process.exitCode', async () => {
-    const issues = [
+    fake.setIssue('10', { labels: [] });
+    fake.setIssue('12', { labels: [] });
+    fake.setIssue('13', { labels: [] });
+    stubIssueList([
       { number: 10, labels: [] },
       { number: 12, labels: [] },
       { number: 13, labels: [] },
-    ];
-
-    mockGh.mockImplementation((args: string[]) => {
-      if (args[0] === 'issue' && args[1] === 'list') {
-        return Promise.resolve({ stdout: JSON.stringify(issues), stderr: '' });
-      }
+    ]);
+    fake.stubGh((args) => {
       if (args[0] === 'issue' && args[1] === 'edit' && args[2] === '12') {
-        return Promise.reject(new Error('API error'));
+        throw new Error('API error');
       }
-      return Promise.resolve({ stdout: '', stderr: '' });
+      return undefined;
     });
 
+    const { adoptAllCommand } = await import('../../src/commands/adopt.js');
+
     await expect(adoptAllCommand()).resolves.toBeUndefined();
-    expect(mockConsoleError).toHaveBeenCalledWith(
+
+    expect(errorSpy).toHaveBeenCalledWith(
       "[shipper] Error: Failed to add 'shipper:new' label to issue #12."
     );
-    expect(mockConsoleLog).toHaveBeenCalledWith(
-      '[shipper] Adopted #10, #13 into shipper workflow.'
-    );
+    expect(logSpy).toHaveBeenCalledWith('[shipper] Adopted #10, #13 into shipper workflow.');
     expect(process.exitCode).toBe(1);
   });
 
-  it('handles empty repo with no issues', async () => {
-    mockGh.mockImplementation((args: string[]) => {
-      if (args[0] === 'issue' && args[1] === 'list') {
-        return Promise.resolve({ stdout: JSON.stringify([]), stderr: '' });
-      }
-      return Promise.resolve({ stdout: '', stderr: '' });
-    });
+  it('handles empty repositories with no issues', async () => {
+    stubIssueList([]);
+
+    const { adoptAllCommand } = await import('../../src/commands/adopt.js');
 
     await adoptAllCommand();
 
-    expect(mockConsoleLog).toHaveBeenCalledWith('[shipper] No eligible issues found.');
-    const editCalls = mockGh.mock.calls.filter(
-      ([args]) => args[0] === 'issue' && args[1] === 'edit'
-    );
-    expect(editCalls).toHaveLength(0);
+    expect(logSpy).toHaveBeenCalledWith('[shipper] No eligible issues found.');
+    expect(fake.state.labelTransitions).toEqual([]);
   });
 });
