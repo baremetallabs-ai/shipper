@@ -66,6 +66,9 @@ describe('shipOneIssue', () => {
       }
 
       if (readCount === 0) {
+        // The lock probe inside acquireIssueLock consumes the first matching label read
+        // before shipOneIssue starts its stage loop, so the queued labels stay aligned
+        // with the subsequent getCurrentLabel calls under test.
         readCount += 1;
         return undefined;
       }

@@ -178,19 +178,22 @@ describe('fakeCore harness', () => {
       aggregateSessionUsage: () => outerUsage,
     });
 
-    expect(await aggregateSessionUsage('owner/repo', '10', since)).toEqual(outerUsage);
-
-    const restoreInner = __installFakeTransports({
-      aggregateSessionUsage: () => innerUsage,
-    });
-
     try {
-      await expect(aggregateSessionUsage('owner/repo', '10', since)).resolves.toEqual(innerUsage);
-    } finally {
-      restoreInner();
-    }
+      expect(await aggregateSessionUsage('owner/repo', '10', since)).toEqual(outerUsage);
 
-    await expect(aggregateSessionUsage('owner/repo', '10', since)).resolves.toEqual(outerUsage);
-    restoreOuter();
+      const restoreInner = __installFakeTransports({
+        aggregateSessionUsage: () => innerUsage,
+      });
+
+      try {
+        await expect(aggregateSessionUsage('owner/repo', '10', since)).resolves.toEqual(innerUsage);
+      } finally {
+        restoreInner();
+      }
+
+      await expect(aggregateSessionUsage('owner/repo', '10', since)).resolves.toEqual(outerUsage);
+    } finally {
+      restoreOuter();
+    }
   });
 });
