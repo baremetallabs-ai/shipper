@@ -1,50 +1,12 @@
 import path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as core from '@dnsquared/shipper-core';
 
-const {
-  existsSyncMock,
-  mkdirSyncMock,
-  writeFileSyncMock,
-  getSettingsMock,
-  claudePrompts,
-  codexPrompts,
-} = vi.hoisted(() => {
-  const claudeRegistry = {
-    'new.md': 'claude new',
-    'groom.md': 'claude groom',
-    'design.md': 'claude design',
-    'plan.md': 'claude plan',
-    'implement.md': 'claude implement',
-    'pr_open.md': 'claude pr open',
-    'pr_review.md': 'claude pr review',
-    'pr_remediate.md': 'claude pr remediate',
-    'unblock.md': 'claude unblock',
-    'setup.md': 'claude setup',
-  };
-
-  const codexRegistry = {
-    'new.md': 'codex new',
-    'groom.md': 'codex groom',
-    'design.md': 'codex design',
-    'plan.md': 'codex plan',
-    'implement.md': 'codex implement',
-    'pr_open.md': 'codex pr open',
-    'pr_review.md': 'codex pr review',
-    'pr_remediate.md': 'codex pr remediate',
-    'unblock.md': 'codex unblock',
-    'setup.md': 'codex setup',
-  };
-
-  return {
-    existsSyncMock: vi.fn<(path: string) => boolean>(),
-    mkdirSyncMock:
-      vi.fn<(path: string, options?: import('node:fs').MakeDirectoryOptions) => void>(),
-    writeFileSyncMock: vi.fn<(path: string, data: string) => void>(),
-    getSettingsMock: vi.fn<() => { commands: Record<string, { agent?: 'claude' | 'codex' }> }>(),
-    claudePrompts: claudeRegistry,
-    codexPrompts: codexRegistry,
-  };
-});
+const { existsSyncMock, mkdirSyncMock, writeFileSyncMock } = vi.hoisted(() => ({
+  existsSyncMock: vi.fn<(path: string) => boolean>(),
+  mkdirSyncMock: vi.fn<(path: string, options?: import('node:fs').MakeDirectoryOptions) => void>(),
+  writeFileSyncMock: vi.fn<(path: string, data: string) => void>(),
+}));
 
 vi.mock('node:fs', async () => {
   const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
@@ -60,25 +22,6 @@ vi.mock('node:fs', async () => {
   };
 });
 
-vi.mock('@dnsquared/shipper-core', () => ({
-  logger: {
-    error: (message: string) => {
-      console.error(`[shipper] ${message}`);
-    },
-    log: (message: string) => {
-      console.log(`[shipper] ${message}`);
-    },
-    warn: (message: string) => {
-      console.warn(`[shipper] ${message}`);
-    },
-  },
-  getSettings: () => getSettingsMock(),
-  agentPrompts: {
-    claude: claudePrompts,
-    codex: codexPrompts,
-  },
-}));
-
 const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
@@ -86,7 +29,8 @@ const { ejectCommand } = await import('../../src/commands/eject.js');
 
 beforeEach(() => {
   vi.clearAllMocks();
-  getSettingsMock.mockReturnValue({
+  // getSettings reads module-level settings state, which is not covered by fake transport seams.
+  vi.spyOn(core, 'getSettings').mockReturnValue({
     commands: { default: { agent: 'claude' } },
   });
   existsSyncMock.mockReturnValue(false);
@@ -100,7 +44,10 @@ describe('ejectCommand', () => {
     const targetPath = path.resolve('.shipper', 'prompts', 'claude', 'groom.md');
 
     expect(mkdirSyncMock).toHaveBeenCalledWith(targetDir, { recursive: true });
-    expect(writeFileSyncMock).toHaveBeenCalledWith(targetPath, 'claude groom');
+    expect(writeFileSyncMock).toHaveBeenCalledWith(
+      targetPath,
+      core.agentPrompts.claude['groom.md']
+    );
     expect(logSpy).toHaveBeenCalledWith(`[shipper] Wrote ${targetPath}`);
   });
 
@@ -109,12 +56,13 @@ describe('ejectCommand', () => {
 
     expect(writeFileSyncMock).toHaveBeenCalledWith(
       path.resolve('.shipper', 'prompts', 'claude', 'pr_open.md'),
-      'claude pr open'
+      core.agentPrompts.claude['pr_open.md']
     );
   });
 
   it('uses the default agent even when per-step overrides are present', () => {
-    getSettingsMock.mockReturnValue({
+    // getSettings reads module-level settings state, which is not covered by fake transport seams.
+    vi.spyOn(core, 'getSettings').mockReturnValue({
       commands: {
         default: { agent: 'claude' },
         implement: { agent: 'codex' },
@@ -125,7 +73,7 @@ describe('ejectCommand', () => {
 
     expect(writeFileSyncMock).toHaveBeenCalledWith(
       path.resolve('.shipper', 'prompts', 'claude', 'implement.md'),
-      'claude implement'
+      core.agentPrompts.claude['implement.md']
     );
   });
 
