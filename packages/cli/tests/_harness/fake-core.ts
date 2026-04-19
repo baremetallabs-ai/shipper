@@ -678,7 +678,7 @@ export function createFakeCore(): CreateFakeCore {
           await sleepHandler?.(ms);
         },
         aggregateSessionUsage: async (repo, issue, since) =>
-          await aggregateSessionUsageHandler?.(repo, issue, since),
+          aggregateSessionUsageHandler?.(repo, issue, since),
       });
     },
     async dispose(): Promise<void> {

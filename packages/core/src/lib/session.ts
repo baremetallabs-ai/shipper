@@ -84,7 +84,7 @@ export async function aggregateSessionUsage(
   issue: string,
   since: Date
 ): Promise<TokenUsage | undefined> {
-  return await aggregateSessionUsageImpl(repo, issue, since);
+  return aggregateSessionUsageImpl(repo, issue, since);
 }
 
 async function aggregateSessionUsageDefault(
