@@ -208,6 +208,27 @@ You are helping a developer turn a rough idea into a lightweight GitHub issue.`;
     }
   });
 
+  it('requires gh api repos sandbox access in the Claude setup prompt', () => {
+    const input = readFileSync(resolve(testDir, '../../src/prompts/claude/setup.md'), 'utf8');
+    const result = parseFrontmatter(input);
+    const settingsIndex = result.frontmatter.args.indexOf('--settings');
+    expect(settingsIndex).toBeGreaterThanOrEqual(0);
+
+    const settingsArg = result.frontmatter.args[settingsIndex + 1];
+    expect(settingsArg).toBeDefined();
+    if (settingsArg === undefined) {
+      throw new Error('Claude setup prompt is missing the settings payload');
+    }
+
+    const settings = JSON.parse(settingsArg) as {
+      permissions?: { allow?: string[] };
+      sandbox?: { excludedCommands?: string[] };
+    };
+
+    expect(settings.permissions?.allow).toContain('Bash(gh api repos/*)');
+    expect(settings.sandbox?.excludedCommands).toContain('gh api repos/*');
+  });
+
   it('requires append-user-input on the transport-aware prompts', () => {
     const promptPaths = [
       '../../src/prompts/codex/implement.md',

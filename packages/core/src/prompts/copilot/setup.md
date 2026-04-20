@@ -28,8 +28,55 @@ Create or update the project's agent configuration file so that coding agents kn
 - **If the file doesn't exist:** Create it with at minimum a "Commands" section listing every CI check command, and a brief project description based on what you can infer from the repo structure.
 - **If no CI configuration exists:** Skip CI check discovery. If creating a new file, omit the Commands section. If updating an existing file, leave any existing commands section unchanged.
 - **Do not hardcode commands in this prompt.** The agent must discover them from the actual CI configuration.
+- **Keep it in sync:** If a later task writes `.github/workflows/pr-checks.yml`, immediately revisit the `AGENTS.md` Commands section so it matches the selected checks instead of remaining empty.
 
-### 3. Settings health check
+### 3. Scaffold PR checks (if missing)
+
+Determine whether the repository already has PR-triggered GitHub Actions coverage, and scaffold it only when it is missing.
+
+- Inspect `.github/workflows/` if it exists and read every `*.yml` / `*.yaml` workflow file.
+- Treat a workflow as sufficient when its top-level `on:` block includes `pull_request`, a bare-list `pull_request` entry, or `pull_request_target`.
+- Use tolerant string or line-based inspection only. Do not add a YAML parser dependency.
+- If any workflow already covers pull requests, skip this scaffold step entirely and continue with the next task.
+- If `.github/workflows/` is missing, empty, or contains only non-PR workflows, continue with the scaffold flow below.
+
+Infer verification commands from the project using signals you already gathered during setup.
+
+- Reuse the repository signals from task 1 and task 2. The install step in the workflow must use the same configured `installCommand`; do not invent a second install path.
+- For Node projects, infer commands from `package.json` scripts named `lint`, `format:check` or `format-check`, `typecheck` or `type-check`, `test`, and `build`.
+- For Cargo projects, infer `cargo fmt --check`, `cargo clippy`, `cargo test`, and `cargo build`.
+- For Go projects, infer `go vet`, `go test ./...`, and `go build ./...`.
+- For Python projects, infer commands from detected tools such as `ruff`, `mypy`, and `pytest`.
+- Only offer commands you can justify from detected scripts, lockfiles, or tooling already discovered during setup.
+
+If no verification commands can be inferred:
+
+- Do not write `.github/workflows/pr-checks.yml`.
+- Clearly explain that Shipper recommends adding lint, format-check, type-check, test, and build scripts, plus a PR-checks workflow and branch protections, because coding agents need deterministic green/red signals and Shipper's review and merge gates rely on them.
+- Then continue to the branch-protection question in this task without writing any workflow file.
+
+If verification commands can be inferred:
+
+- Present the inferred command list to the user and let them choose which commands to include.
+- Describe the planned workflow in natural language only. Do not preview file contents.
+- Explain that `.github/workflows/pr-checks.yml` will run on `pull_request` against the repository's default branch, using one human-readable `ubuntu-latest` job per selected command.
+- Resolve the default branch with `gh api repos/{owner}/{repo} --jq .default_branch`.
+- Each job should use `actions/checkout@v4`, the matching ecosystem setup action, the configured `installCommand`, and then the single verification command.
+- Require explicit confirmation before writing anything.
+- When the user confirms, write `.github/workflows/pr-checks.yml` with `on: pull_request: branches: [<default branch>]`.
+- Keep the workflow simple: no matrix, no file-content preview, and no caching magic beyond what the setup action provides by default.
+- After writing the workflow, immediately update the `AGENTS.md` Commands section from task 2 so the selected checks become the source of truth for future setup runs.
+
+After the scaffold step resolves, regardless of outcome:
+
+- Always ask whether to configure branch protections on the default branch after scaffold success, user decline, or the no-infer path.
+- On yes, create a repository ruleset with `gh api repos/{owner}/{repo}/rulesets -X POST`.
+- Target `~DEFAULT_BRANCH`.
+- Use `required_status_checks` with the selected check names, and include `required_workflows` when this task just created `.github/workflows/pr-checks.yml`.
+- Do not use classic branch protection APIs.
+- If `gh api` returns `403`, surface that the user lacks permission to administer branch protections and continue without failing setup.
+
+### 4. Settings health check
 
 Read `.shipper/settings.json` and verify:
 
@@ -37,7 +84,7 @@ Read `.shipper/settings.json` and verify:
 - The `commands.default.agent` field matches the installed coding agent (`"claude"`, `"codex"`, or `"copilot"`).
 - Report any issues or suggestions.
 
-### 4. Hooks configuration
+### 5. Hooks configuration
 
 Explain Shipper's file-based hook system:
 
@@ -67,7 +114,7 @@ Explain Shipper's file-based hook system:
 - Inspect `.shipper/hooks/` and report any executable hooks that are already configured. If any exist, surface them clearly before asking whether the user wants to configure more.
 - Ask whether the user wants to configure any hooks. Explain how to create scripts only if they opt in. Do not proactively generate templates or example scripts.
 
-### 5. Verify labels
+### 6. Verify labels
 
 Run `gh label list` and confirm that the Shipper workflow labels exist:
 
@@ -75,7 +122,7 @@ Run `gh label list` and confirm that the Shipper workflow labels exist:
 
 If any are missing, suggest running `shipper init` to create them.
 
-### 6. Explain the workflow
+### 7. Explain the workflow
 
 Provide a brief overview of the Shipper workflow:
 
@@ -91,7 +138,7 @@ Provide a brief overview of the Shipper workflow:
 
 Or use **`shipper next`** to auto-advance, or **`shipper ship`** to run end-to-end.
 
-### 7. Suggest next steps
+### 8. Suggest next steps
 
 Based on the repository state, suggest what the user should do next (e.g., create their first issue, adopt existing issues, etc.).
 

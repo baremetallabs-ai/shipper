@@ -179,6 +179,41 @@ describe('setup_remediate prompts', () => {
   );
 });
 
+describe('setup prompts', () => {
+  it.each(['claude', 'codex', 'copilot'])(
+    'document PR-check scaffolding and ruleset protection for %s',
+    (agent) => {
+      const prompt = readFileSync(
+        new URL(`../../src/prompts/${agent}/setup.md`, import.meta.url),
+        'utf-8'
+      );
+
+      expect(prompt).toContain('### 2. Generate agent configuration file');
+      expect(prompt).toContain('### 3. Scaffold PR checks (if missing)');
+      expect(prompt).toContain('### 4. Settings health check');
+      expect(prompt.indexOf('### 3. Scaffold PR checks (if missing)')).toBeGreaterThan(
+        prompt.indexOf('### 2. Generate agent configuration file')
+      );
+      expect(prompt.indexOf('### 4. Settings health check')).toBeGreaterThan(
+        prompt.indexOf('### 3. Scaffold PR checks (if missing)')
+      );
+      expect(prompt).toContain('.github/workflows/pr-checks.yml');
+      expect(prompt).toContain('Present the inferred command list to the user');
+      expect(prompt).toContain('Describe the planned workflow in natural language only.');
+      expect(prompt).toContain('gh api repos/{owner}/{repo} --jq .default_branch');
+      expect(prompt).toContain('gh api repos/{owner}/{repo}/rulesets -X POST');
+      expect(prompt).toContain('required_status_checks');
+      expect(prompt).toContain('required_workflows');
+      expect(prompt).toContain('Do not add a YAML parser dependency.');
+      expect(prompt).toContain('pull_request_target');
+      expect(prompt).toContain(
+        'Shipper recommends adding lint, format-check, type-check, test, and build scripts'
+      );
+      expect(prompt).toContain('branch protections');
+    }
+  );
+});
+
 describe('implement prompts', () => {
   it.each(['claude', 'codex', 'copilot'])(
     'warn against force-adding .shipper files for %s',
