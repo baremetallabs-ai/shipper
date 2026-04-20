@@ -1,7 +1,6 @@
 export interface PromptFrontmatter {
   cmd: string;
   args: string[];
-  'append-user-input'?: boolean;
   'append-issue'?: boolean;
   'append-pr'?: boolean;
 }
@@ -65,7 +64,7 @@ export function parseFrontmatter(raw: string): ParsedPrompt {
 
     if (key === 'cmd') {
       frontmatter.cmd = value;
-    } else if (key === 'append-user-input' || key === 'append-issue' || key === 'append-pr') {
+    } else if (key === 'append-issue' || key === 'append-pr') {
       frontmatter[key] = value === 'true';
     }
   }

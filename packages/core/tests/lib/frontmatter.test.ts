@@ -29,7 +29,6 @@ cmd: claude
 args:
   - --model
   - opus
-append-user-input: true
 append-issue: true
 append-pr: false
 ---
@@ -37,7 +36,6 @@ append-pr: false
 Body text here.`;
 
     const result = parseFrontmatter(input);
-    expect(result.frontmatter['append-user-input']).toBe(true);
     expect(result.frontmatter['append-issue']).toBe(true);
     expect(result.frontmatter['append-pr']).toBe(false);
   });
@@ -170,7 +168,6 @@ cmd: claude
 args:
   - --model
   - opus
-append-user-input: true
 ---
 
 You are helping a developer turn a rough idea into a lightweight GitHub issue.`;
@@ -178,8 +175,22 @@ You are helping a developer turn a rough idea into a lightweight GitHub issue.`;
     const result = parseFrontmatter(input);
     expect(result.frontmatter.cmd).toBe('claude');
     expect(result.frontmatter.args).toEqual(['--model', 'opus']);
-    expect(result.frontmatter['append-user-input']).toBe(true);
     expect(result.frontmatter['append-issue']).toBeUndefined();
+  });
+
+  it('ignores deprecated append-user-input while preserving recognized keys', () => {
+    const input = `---
+cmd: claude
+append-user-input: true
+append-issue: true
+---
+
+Body text here.`;
+
+    const result = parseFrontmatter(input);
+    expect(result.frontmatter['append-user-input']).toBeUndefined();
+    expect(result.frontmatter['append-issue']).toBe(true);
+    expect(result.body).toBe('Body text here.');
   });
 
   it('parses every prompt that passes --settings as valid JSON', () => {
@@ -227,27 +238,6 @@ You are helping a developer turn a rough idea into a lightweight GitHub issue.`;
 
     expect(settings.permissions?.allow).toContain('Bash(gh api repos/*)');
     expect(settings.sandbox?.excludedCommands).toContain('gh api repos/*');
-  });
-
-  it('requires append-user-input on the transport-aware prompts', () => {
-    const promptPaths = [
-      '../../src/prompts/codex/implement.md',
-      '../../src/prompts/codex/pr_open.md',
-      '../../src/prompts/codex/pr_remediate.md',
-      '../../src/prompts/codex/setup_remediate.md',
-      '../../src/prompts/claude/implement.md',
-      '../../src/prompts/claude/pr_open.md',
-      '../../src/prompts/claude/pr_remediate.md',
-      '../../src/prompts/claude/setup_remediate.md',
-    ];
-
-    for (const promptPath of promptPaths) {
-      const input = readFileSync(resolve(testDir, promptPath), 'utf8');
-      const result = parseFrontmatter(input);
-      expect(result.frontmatter['append-user-input'], `${promptPath} must append user input`).toBe(
-        true
-      );
-    }
   });
 
   it('requires append-pr on the setup remediation prompts', () => {

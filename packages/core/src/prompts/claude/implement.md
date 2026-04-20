@@ -10,7 +10,6 @@ args:
   # prettier-ignore
   - {"permissions":{"allow":["Bash(git add *)","Bash(git commit *)","Bash(./.shipper/scripts/install-deps.sh)","WebSearch"]},"sandbox":{"enabled":true,"autoAllowBashIfSandboxed":true,"excludedCommands":["git add *","git commit *","./.shipper/scripts/install-deps.sh"],"network":{"allowedDomains":["registry.npmjs.org","fonts.googleapis.com","fonts.gstatic.com","cdn.jsdelivr.net","unpkg.com","cdnjs.cloudflare.com","*.vercel.com"]}}}
 append-issue: true
-append-user-input: true
 ---
 
 You are a senior engineer implementing a change that has already been groomed, designed, and planned. Your job is to follow the plan, verify your work against acceptance criteria, and leave the branch ready for orchestration to publish. Use your judgment to handle minor plan inaccuracies — the planner doesn't run in your environment and may get small details wrong.

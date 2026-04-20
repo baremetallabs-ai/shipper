@@ -484,9 +484,7 @@ describe('runPrompt', () => {
   });
 
   it('appends user input as a trailing argument for claude prompts', async () => {
-    readFileMock.mockResolvedValueOnce(
-      ['---', 'cmd: claude', 'append-user-input: true', '---', '', 'prompt body'].join('\n')
-    );
+    readFileMock.mockResolvedValueOnce(['---', 'cmd: claude', '---', '', 'prompt body'].join('\n'));
     mockSpawnResult();
 
     await expect(runPrompt('test', { userInput: 'resolve the merge conflict' })).resolves.toBe(0);
@@ -497,9 +495,7 @@ describe('runPrompt', () => {
 
   it('appends user input into the combined prompt body for codex prompts', async () => {
     resolveAgentMock.mockReturnValue('codex');
-    readFileMock.mockResolvedValueOnce(
-      ['---', 'cmd: codex', 'append-user-input: true', '---', '', 'prompt body'].join('\n')
-    );
+    readFileMock.mockResolvedValueOnce(['---', 'cmd: codex', '---', '', 'prompt body'].join('\n'));
     mockSpawnResult();
 
     await expect(runPrompt('test', { userInput: 'resolve the merge conflict' })).resolves.toBe(0);
@@ -511,7 +507,7 @@ describe('runPrompt', () => {
   it('appends user input into the combined prompt body for copilot prompts', async () => {
     resolveAgentMock.mockReturnValue('copilot');
     readFileMock.mockResolvedValueOnce(
-      ['---', 'cmd: copilot', 'append-user-input: true', '---', '', 'prompt body'].join('\n')
+      ['---', 'cmd: copilot', '---', '', 'prompt body'].join('\n')
     );
     mockSpawnResult();
 
@@ -526,16 +522,9 @@ describe('runPrompt', () => {
   it('keeps oversized issue and PR payloads under the budget by offloading them', async () => {
     const promptBody = 'p'.repeat(40_000);
     readFileMock.mockResolvedValueOnce(
-      [
-        '---',
-        'cmd: claude',
-        'append-issue: true',
-        'append-pr: true',
-        'append-user-input: true',
-        '---',
-        '',
-        promptBody,
-      ].join('\n')
+      ['---', 'cmd: claude', 'append-issue: true', 'append-pr: true', '---', '', promptBody].join(
+        '\n'
+      )
     );
     const issueContent = oversizedContent('i');
     const prContent = oversizedContent('r');
@@ -564,9 +553,7 @@ describe('runPrompt', () => {
 
   it('throws from buildPromptCommand when non-offloaded prompt inputs exceed the budget', async () => {
     const promptBody = 'p'.repeat(120_000);
-    readFileMock.mockResolvedValueOnce(
-      ['---', 'cmd: claude', 'append-user-input: true', '---', '', promptBody].join('\n')
-    );
+    readFileMock.mockResolvedValueOnce(['---', 'cmd: claude', '---', '', promptBody].join('\n'));
 
     await expect(
       buildPromptCommand('test', {
@@ -577,9 +564,7 @@ describe('runPrompt', () => {
 
   it('returns 1 and does not spawn when non-offloaded prompt inputs exceed the budget', async () => {
     const promptBody = 'p'.repeat(120_000);
-    readFileMock.mockResolvedValueOnce(
-      ['---', 'cmd: claude', 'append-user-input: true', '---', '', promptBody].join('\n')
-    );
+    readFileMock.mockResolvedValueOnce(['---', 'cmd: claude', '---', '', promptBody].join('\n'));
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     await expect(
@@ -600,16 +585,9 @@ describe('runPrompt', () => {
   it('still spawns when combined prompt inputs stay within the budget', async () => {
     const promptBody = 'p'.repeat(20_000);
     readFileMock.mockResolvedValueOnce(
-      [
-        '---',
-        'cmd: claude',
-        'append-issue: true',
-        'append-pr: true',
-        'append-user-input: true',
-        '---',
-        '',
-        promptBody,
-      ].join('\n')
+      ['---', 'cmd: claude', 'append-issue: true', 'append-pr: true', '---', '', promptBody].join(
+        '\n'
+      )
     );
     fetchIssueMock.mockResolvedValueOnce('i'.repeat(20_000));
     fetchPRMock.mockResolvedValueOnce('r'.repeat(20_000));
@@ -633,15 +611,7 @@ describe('runPrompt', () => {
 
   it('uses the worktree cwd for offloaded context files and agent spawn', async () => {
     readFileMock.mockResolvedValueOnce(
-      [
-        '---',
-        'cmd: claude',
-        'append-issue: true',
-        'append-user-input: true',
-        '---',
-        '',
-        'prompt body',
-      ].join('\n')
+      ['---', 'cmd: claude', 'append-issue: true', '---', '', 'prompt body'].join('\n')
     );
     const issueContent = oversizedContent('i');
     fetchIssueMock.mockResolvedValueOnce(issueContent);
@@ -933,16 +903,7 @@ describe('runPrompt', () => {
   it('returns interactive copilot prompt text as initialInput from buildPromptCommand', async () => {
     resolveAgentMock.mockReturnValue('copilot');
     readFileMock.mockResolvedValueOnce(
-      [
-        '---',
-        'cmd: copilot',
-        'args:',
-        '  - --autopilot',
-        'append-user-input: true',
-        '---',
-        '',
-        'prompt body',
-      ].join('\n')
+      ['---', 'cmd: copilot', 'args:', '  - --autopilot', '---', '', 'prompt body'].join('\n')
     );
 
     await expect(buildPromptCommand('test', { userInput: 'extra context' })).resolves.toEqual({
@@ -952,6 +913,78 @@ describe('runPrompt', () => {
       initialInput: 'prompt body\n\n---\n\nextra context',
     });
   });
+
+  it('appends user input for prompts that only declare append-issue', async () => {
+    readFileMock.mockResolvedValueOnce(
+      ['---', 'cmd: claude', 'append-issue: true', '---', '', 'prompt body'].join('\n')
+    );
+    fetchIssueMock.mockResolvedValueOnce('issue text');
+
+    const command = await buildPromptCommand('test', {
+      repo: 'owner/repo',
+      issueRef: '42',
+      userInput: 'correction',
+    });
+
+    expect(command.args.at(-1)).toBe('issue text\n\n---\n\ncorrection');
+  });
+
+  it('appends retry correction text for pr_review-shaped prompts without a frontmatter opt-in', async () => {
+    readFileMock.mockResolvedValueOnce(
+      [
+        '---',
+        'cmd: claude',
+        'append-issue: true',
+        'append-pr: true',
+        '---',
+        '',
+        'prompt body',
+      ].join('\n')
+    );
+    fetchIssueMock.mockResolvedValueOnce('issue text');
+    fetchPRMock.mockResolvedValueOnce('pr text');
+
+    const command = await buildPromptCommand('pr_review', {
+      repo: 'owner/repo',
+      issueRef: '42',
+      prRef: '5',
+      userInput: 'reviewer correction',
+    });
+
+    // This guards the retry path that previously dropped correction text unless the prompt opted in.
+    expect(command.args.at(-1)).toBe('issue text\n\n---\n\npr text\n\n---\n\nreviewer correction');
+  });
+
+  it.each([
+    ['omitted', undefined],
+    ['empty string', ''],
+  ])(
+    'preserves the prior issue/PR message when userInput is %s for pr_review-shaped prompts',
+    async (_label, userInput) => {
+      readFileMock.mockResolvedValueOnce(
+        [
+          '---',
+          'cmd: claude',
+          'append-issue: true',
+          'append-pr: true',
+          '---',
+          '',
+          'prompt body',
+        ].join('\n')
+      );
+      fetchIssueMock.mockResolvedValueOnce('issue text');
+      fetchPRMock.mockResolvedValueOnce('pr text');
+
+      const command = await buildPromptCommand('pr_review', {
+        repo: 'owner/repo',
+        issueRef: '42',
+        prRef: '5',
+        userInput,
+      });
+
+      expect(command.args.at(-1)).toBe('issue text\n\n---\n\npr text');
+    }
+  );
 
   it('captures headless stdout to a session log and writes metadata after exit', async () => {
     resolveModeMock.mockReturnValue('headless');

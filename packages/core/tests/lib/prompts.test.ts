@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const expectedRelevantDocumentationSection = `# Relevant Documentation (optional — include only if relevant docs are found)
@@ -160,7 +160,7 @@ describe('pr_remediate prompts', () => {
 
 describe('setup_remediate prompts', () => {
   it.each(['claude', 'codex', 'copilot'])(
-    'append PR text plus user input and keep transport in shipper for %s',
+    'append PR text and keep transport in shipper for %s',
     (agent) => {
       const prompt = readFileSync(
         new URL(`../../src/prompts/${agent}/setup_remediate.md`, import.meta.url),
@@ -169,7 +169,6 @@ describe('setup_remediate prompts', () => {
 
       expect(prompt).toContain('Shipper already created the branch and PR');
       expect(prompt).toContain('append-pr: true');
-      expect(prompt).toContain('append-user-input: true');
       expect(prompt).not.toContain('append-issue: true');
       expect(prompt).not.toContain('gh pr create');
       expect(prompt).not.toContain('gh pr checks');
@@ -177,6 +176,24 @@ describe('setup_remediate prompts', () => {
       expect(prompt).not.toContain('git checkout -b');
     }
   );
+});
+
+describe('bundled prompt frontmatter', () => {
+  it('does not contain the retired append-user-input key', () => {
+    for (const agent of ['claude', 'codex', 'copilot']) {
+      const promptDir = new URL(`../../src/prompts/${agent}/`, import.meta.url);
+      const promptFiles = readdirSync(promptDir, { withFileTypes: true })
+        .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
+        .map((entry) => entry.name);
+
+      for (const promptFile of promptFiles) {
+        const prompt = readFileSync(new URL(promptFile, promptDir), 'utf-8');
+        expect(prompt, `${agent}/${promptFile} still contains append-user-input`).not.toContain(
+          'append-user-input'
+        );
+      }
+    }
+  });
 });
 
 describe('setup prompts', () => {
