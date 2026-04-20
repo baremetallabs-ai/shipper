@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import {
+  getSettings,
   logger,
   offerSetupFinalize,
   readGitStatusSnapshot,
@@ -16,6 +17,11 @@ export async function setupCommand(
   options: { mode?: CommandMode; agent?: AgentName; model?: string } = {}
 ): Promise<void> {
   const effectiveMode = resolveMode('setup', options.mode);
+  const settings = getSettings();
+  const effectiveAgent =
+    options.agent ?? settings.commands.setup?.agent ?? settings.commands.default.agent;
+  const effectiveModel =
+    options.model ?? settings.commands.setup?.model ?? settings.commands.default.model;
   const userText = words.join(' ').trim();
 
   let userInput: string;
@@ -33,8 +39,8 @@ export async function setupCommand(
   const setupExitCode = await runPrompt('setup', {
     userInput,
     mode: effectiveMode,
-    agent: options.agent,
-    model: options.model,
+    agent: effectiveAgent,
+    model: effectiveModel,
   });
   process.exitCode = setupExitCode;
 
@@ -50,8 +56,8 @@ export async function setupCommand(
   const finalizeResult = await offerSetupFinalize({
     before,
     mode: effectiveMode,
-    agent: options.agent,
-    model: options.model,
+    agent: effectiveAgent,
+    model: effectiveModel,
     confirm,
   });
 

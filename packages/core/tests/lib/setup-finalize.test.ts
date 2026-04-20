@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { CheckClassification, PRChecksLine } from '../../src/index.js';
@@ -5,10 +6,12 @@ import type { GitStatusSnapshot } from '../../src/lib/setup-finalize.js';
 
 const {
   execAsyncMock,
+  readFileMock,
   mockFetchChecks,
   mockClassifyChecks,
   mockEnrichFailedChecks,
   mockGh,
+  mockResolveBaseBranch,
   mockRunPrompt,
   mockGetRepoRoot,
   mockGetRepoNwo,
@@ -23,6 +26,7 @@ const {
         opts?: { cwd?: string }
       ) => Promise<{ stdout: string; stderr: string; code: number }>
     >(),
+  readFileMock: vi.fn<(path: string) => Promise<Buffer>>(),
   mockFetchChecks: vi.fn<(repo: string, prRef: string) => Promise<PRChecksLine[]>>(),
   mockClassifyChecks: vi.fn<(checks: PRChecksLine[]) => CheckClassification>(),
   mockEnrichFailedChecks:
@@ -31,12 +35,21 @@ const {
     vi.fn<
       (args: string[], opts?: { cwd?: string }) => Promise<{ stdout: string; stderr: string }>
     >(),
+  mockResolveBaseBranch: vi.fn<(repo: string, configured?: string) => Promise<string>>(),
   mockRunPrompt: vi.fn<(name: string, opts: Record<string, unknown>) => Promise<number>>(),
   mockGetRepoRoot: vi.fn<() => Promise<string>>(),
   mockGetRepoNwo: vi.fn<() => Promise<string>>(),
   mockGetSettings: vi.fn<() => { defaultBaseBranch?: string }>(),
   mockSleepMs: vi.fn<(ms: number) => Promise<void>>(),
 }));
+
+vi.mock('node:fs/promises', async () => {
+  const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+  return {
+    ...actual,
+    readFile: (filePath: string) => readFileMock(filePath),
+  };
+});
 
 vi.mock('../../src/lib/worktree/helpers.js', async () => {
   const actual = await vi.importActual<typeof import('../../src/lib/worktree/helpers.js')>(
@@ -57,6 +70,11 @@ vi.mock('../../src/lib/checks.js', () => ({
 
 vi.mock('../../src/lib/gh.js', () => ({
   gh: (...args: Parameters<typeof mockGh>) => mockGh(...args),
+}));
+
+vi.mock('../../src/lib/github.js', () => ({
+  resolveBaseBranch: (...args: Parameters<typeof mockResolveBaseBranch>) =>
+    mockResolveBaseBranch(...args),
 }));
 
 vi.mock('../../src/lib/prompt-runner.js', () => ({
@@ -89,7 +107,12 @@ const { offerSetupFinalize, readGitStatusSnapshot } =
   await import('../../src/lib/setup-finalize.js');
 
 function makeSnapshot(
-  entries: Array<{ path: string; indexStatus?: string; worktreeStatus?: string }>
+  entries: Array<{
+    path: string;
+    indexStatus?: string;
+    worktreeStatus?: string;
+    contentSignature?: string;
+  }>
 ): GitStatusSnapshot {
   const normalized = entries.map((entry) => ({
     path: entry.path,
@@ -100,7 +123,22 @@ function makeSnapshot(
     repoRoot: '/repo',
     entries: normalized,
     byPath: new Map(normalized.map((entry) => [entry.path, entry])),
+    contentSignatureByPath: new Map(
+      entries
+        .filter(
+          (
+            entry
+          ): entry is typeof entry & {
+            contentSignature: string;
+          } => entry.contentSignature !== undefined
+        )
+        .map((entry) => [entry.path, entry.contentSignature])
+    ),
   };
+}
+
+function hashSignature(content: string): string {
+  return createHash('sha1').update(content).digest('hex');
 }
 
 function makeCheck(
@@ -116,8 +154,9 @@ function makeCheck(
   };
 }
 
-function mockGitStatusFlow(statuses: string[]): void {
+function mockGitStatusFlow(statuses: string[], options?: { currentBranch?: string }): void {
   const statusQueue = [...statuses];
+  const currentBranch = options?.currentBranch ?? 'main';
 
   execAsyncMock.mockImplementation((_command, args, opts) => {
     const joined = args.join(' ');
@@ -137,6 +176,9 @@ function mockGitStatusFlow(statuses: string[]): void {
     if (joined === 'ls-remote --exit-code --heads origin chore/shipper-setup') {
       return Promise.resolve({ stdout: '', stderr: '', code: 2 });
     }
+    if (joined === 'branch --show-current') {
+      return Promise.resolve({ stdout: `${currentBranch}\n`, stderr: '', code: 0 });
+    }
     if (joined === 'checkout -b chore/shipper-setup') {
       return Promise.resolve({ stdout: '', stderr: '', code: 0 });
     }
@@ -155,10 +197,11 @@ function mockGitStatusFlow(statuses: string[]): void {
 }
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   mockGetRepoRoot.mockResolvedValue('/repo');
   mockGetRepoNwo.mockResolvedValue('owner/repo');
-  mockGetSettings.mockReturnValue({});
+  mockGetSettings.mockReturnValue({ defaultBaseBranch: 'main' });
+  mockResolveBaseBranch.mockResolvedValue('main');
   mockSleepMs.mockResolvedValue();
   mockFetchChecks.mockResolvedValue([]);
   mockClassifyChecks.mockImplementation((checks) => ({
@@ -169,15 +212,12 @@ beforeEach(() => {
   }));
   mockEnrichFailedChecks.mockResolvedValue(new Map());
   mockRunPrompt.mockResolvedValue(0);
+  readFileMock.mockImplementation((filePath) =>
+    Promise.resolve(Buffer.from(`content:${filePath}`))
+  );
   mockGh.mockImplementation((args) => {
     const joined = args.join(' ');
     if (joined.startsWith('pr create ')) {
-      return Promise.resolve({ stdout: 'https://github.com/owner/repo/pull/7\n', stderr: '' });
-    }
-    if (joined === 'pr view chore/shipper-setup -R owner/repo --json number -q .number') {
-      return Promise.resolve({ stdout: '7\n', stderr: '' });
-    }
-    if (joined === 'pr view chore/shipper-setup -R owner/repo --json url -q .url') {
       return Promise.resolve({ stdout: 'https://github.com/owner/repo/pull/7\n', stderr: '' });
     }
     throw new Error(`Unexpected gh call: ${joined}`);
@@ -226,6 +266,27 @@ describe('offerSetupFinalize', () => {
     expect(result).toEqual({ status: 'no-changes' });
   });
 
+  it('treats same-status content edits as setup-introduced changes', async () => {
+    mockGitStatusFlow([' M tracked.ts\0']);
+    readFileMock.mockResolvedValueOnce(Buffer.from('after-content'));
+    const confirm = vi.fn().mockResolvedValue(false);
+
+    const result = await offerSetupFinalize({
+      before: makeSnapshot([
+        { path: 'tracked.ts', indexStatus: ' ', worktreeStatus: 'M', contentSignature: 'before' },
+      ]),
+      mode: 'default',
+      confirm,
+    });
+
+    expect(result).toEqual({ status: 'declined' });
+    expect(confirm).toHaveBeenCalledWith('Finalize these setup changes in a PR? [y/N] ');
+    expect(console.log).toHaveBeenCalledWith(
+      '[shipper] Changes introduced or updated during setup:'
+    );
+    expect(console.log).toHaveBeenCalledWith('[shipper]   - tracked.ts');
+  });
+
   it('shows the summary and leaves the working tree untouched when the user declines', async () => {
     mockGitStatusFlow(['?? after.ts\0']);
     const confirm = vi.fn().mockResolvedValue(false);
@@ -250,7 +311,9 @@ describe('offerSetupFinalize', () => {
     const confirm = vi.fn().mockResolvedValue(false);
 
     await offerSetupFinalize({
-      before: makeSnapshot([{ path: 'before.ts' }]),
+      before: makeSnapshot([
+        { path: 'before.ts', contentSignature: hashSignature('content:/repo/before.ts') },
+      ]),
       mode: 'default',
       confirm,
     });
@@ -273,6 +336,9 @@ describe('offerSetupFinalize', () => {
       if (joined === 'rev-parse --verify chore/shipper-setup') {
         return Promise.resolve({ stdout: 'abc123\n', stderr: '', code: 0 });
       }
+      if (joined === 'branch --show-current') {
+        return Promise.resolve({ stdout: 'main\n', stderr: '', code: 0 });
+      }
 
       throw new Error(`Unexpected git command: ${joined}`);
     });
@@ -284,6 +350,36 @@ describe('offerSetupFinalize', () => {
     });
 
     expect(result).toEqual({ status: 'blocked-existing-branch' });
+  });
+
+  it('refuses cleanly when setup is run from a non-default branch', async () => {
+    execAsyncMock.mockImplementation((_command, args) => {
+      const joined = args.join(' ');
+      if (joined === 'rev-parse --show-toplevel') {
+        return Promise.resolve({ stdout: '/repo\n', stderr: '', code: 0 });
+      }
+      if (joined === 'status --porcelain=v1 -z --untracked-files=all') {
+        return Promise.resolve({ stdout: '?? after.ts\0', stderr: '', code: 0 });
+      }
+      if (joined === 'branch --show-current') {
+        return Promise.resolve({ stdout: 'feature-branch\n', stderr: '', code: 0 });
+      }
+
+      throw new Error(`Unexpected git command: ${joined}`);
+    });
+
+    const result = await offerSetupFinalize({
+      before: makeSnapshot([]),
+      mode: 'default',
+      confirm: vi.fn().mockResolvedValue(true),
+    });
+
+    expect(result).toEqual({ status: 'blocked-base-branch' });
+    expect(execAsyncMock).not.toHaveBeenCalledWith(
+      'git',
+      ['checkout', '-b', 'chore/shipper-setup'],
+      expect.anything()
+    );
   });
 
   it('refuses cleanly when the remote setup branch already exists', async () => {
@@ -305,6 +401,9 @@ describe('offerSetupFinalize', () => {
           code: 0,
         });
       }
+      if (joined === 'branch --show-current') {
+        return Promise.resolve({ stdout: 'main\n', stderr: '', code: 0 });
+      }
 
       throw new Error(`Unexpected git command: ${joined}`);
     });
@@ -319,8 +418,9 @@ describe('offerSetupFinalize', () => {
   });
 
   it('creates the branch, opens the PR, and reports success when checks pass', async () => {
-    mockGitStatusFlow(['?? after.ts\0']);
+    mockGitStatusFlow(['?? after.ts\0'], { currentBranch: 'develop' });
     mockGetSettings.mockReturnValue({ defaultBaseBranch: 'develop' });
+    mockResolveBaseBranch.mockResolvedValueOnce('develop');
     mockFetchChecks
       .mockResolvedValueOnce([makeCheck('build', 'pending')])
       .mockResolvedValueOnce([makeCheck('build', 'pass')]);
@@ -343,6 +443,10 @@ describe('offerSetupFinalize', () => {
     expect(mockGh).toHaveBeenCalledWith(
       expect.arrayContaining(['pr', 'create', '-R', 'owner/repo', '--base', 'develop']),
       { cwd: '/repo' }
+    );
+    expect(mockGh).not.toHaveBeenCalledWith(
+      expect.arrayContaining(['pr', 'view']),
+      expect.anything()
     );
     expect(execAsyncMock).toHaveBeenCalledWith(
       'git',

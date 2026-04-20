@@ -18,11 +18,19 @@ describe('setupCommand', () => {
     vi.restoreAllMocks();
     existsSyncMock.mockReturnValue(false);
     process.exitCode = undefined;
+    vi.spyOn(core, 'getSettings').mockReturnValue({
+      ...core.DEFAULTS,
+      commands: {
+        default: { agent: 'claude' },
+      },
+      merge: { requirePassingChecks: true },
+    });
     vi.spyOn(core, 'resolveMode').mockReturnValue('default');
     vi.spyOn(core, 'readGitStatusSnapshot').mockResolvedValue({
       repoRoot: '/repo',
       entries: [],
       byPath: new Map(),
+      contentSignatureByPath: new Map(),
     });
     vi.spyOn(core, 'offerSetupFinalize').mockResolvedValue({ status: 'no-changes' });
     vi.spyOn(core, 'runPrompt').mockResolvedValue(0);
@@ -91,7 +99,12 @@ describe('setupCommand', () => {
   });
 
   it('forwards the resolved mode and model settings into the finalizer', async () => {
-    const before = { repoRoot: '/repo', entries: [], byPath: new Map() };
+    const before = {
+      repoRoot: '/repo',
+      entries: [],
+      byPath: new Map(),
+      contentSignatureByPath: new Map(),
+    };
     vi.spyOn(core, 'resolveMode').mockReturnValueOnce('interactive');
     vi.spyOn(core, 'readGitStatusSnapshot').mockResolvedValueOnce(before);
     const { setupCommand } = await import('../../src/commands/setup.js');
@@ -106,6 +119,28 @@ describe('setupCommand', () => {
     expect(finalizeCall?.agent).toBe('codex');
     expect(finalizeCall?.model).toBe('gpt-5.4');
     expect(typeof finalizeCall?.confirm).toBe('function');
+  });
+
+  it('reuses configured setup agent and model for finalization when CLI flags are absent', async () => {
+    vi.spyOn(core, 'getSettings').mockReturnValue({
+      ...core.DEFAULTS,
+      commands: {
+        default: { agent: 'claude', model: 'gpt-5.4-mini' },
+        setup: { agent: 'codex', model: 'gpt-5.4' },
+      },
+      merge: { requirePassingChecks: true },
+    });
+    const { setupCommand } = await import('../../src/commands/setup.js');
+
+    await setupCommand(['configure']);
+
+    expect(core.runPrompt).toHaveBeenCalledWith(
+      'setup',
+      expect.objectContaining({ agent: 'codex', model: 'gpt-5.4' })
+    );
+    expect(core.offerSetupFinalize).toHaveBeenCalledWith(
+      expect.objectContaining({ agent: 'codex', model: 'gpt-5.4' })
+    );
   });
 
   it.each(['claude', 'codex', 'copilot'] as const)(

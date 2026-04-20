@@ -1,7 +1,11 @@
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { toErrorMessage } from './errors.js';
 import { getRepoRoot } from './branch.js';
 import { classifyChecks, enrichFailedChecks, fetchChecks, type PRChecksLine } from './checks.js';
 import { gh } from './gh.js';
+import { resolveBaseBranch } from './github.js';
 import { logger } from './logger.js';
 import { runPrompt } from './prompt-runner.js';
 import { getRepoNwo } from './repo.js';
@@ -29,6 +33,7 @@ export interface GitStatusSnapshot {
   repoRoot: string;
   entries: GitStatusEntry[];
   byPath: Map<string, GitStatusEntry>;
+  contentSignatureByPath: Map<string, string>;
 }
 
 export interface SetupFinalizeOptions {
@@ -46,6 +51,7 @@ export interface SetupFinalizeResult {
     | 'declined'
     | 'completed'
     | 'blocked-existing-branch'
+    | 'blocked-base-branch'
     | 'failed';
   prUrl?: string;
   error?: string;
@@ -62,6 +68,10 @@ function buildEntryMap(entries: GitStatusEntry[]): Map<string, GitStatusEntry> {
 
 function entrySignature(entry: GitStatusEntry): string {
   return `${entry.indexStatus}${entry.worktreeStatus}:${entry.originalPath ?? ''}`;
+}
+
+function hashContent(content: Buffer): string {
+  return createHash('sha1').update(content).digest('hex');
 }
 
 function parseStatusSnapshot(raw: string): GitStatusEntry[] {
@@ -125,10 +135,20 @@ async function branchExistsRemotely(repoRoot: string, branchName: string): Promi
   return result.code === 0;
 }
 
+function getComparisonSignature(snapshot: GitStatusSnapshot, entry: GitStatusEntry): string {
+  return JSON.stringify({
+    status: entrySignature(entry),
+    content: snapshot.contentSignatureByPath.get(entry.path) ?? null,
+  });
+}
+
 function getDeltaEntries(before: GitStatusSnapshot, after: GitStatusSnapshot): GitStatusEntry[] {
   return after.entries.filter((entry) => {
     const previous = before.byPath.get(entry.path);
-    return previous === undefined || entrySignature(previous) !== entrySignature(entry);
+    return (
+      previous === undefined ||
+      getComparisonSignature(before, previous) !== getComparisonSignature(after, entry)
+    );
   });
 }
 
@@ -158,10 +178,8 @@ function logChangedFileSummary(
   logger.log(`Total paths that would be committed: ${totalPaths.length}`);
 }
 
-function buildCommitBody(paths: string[]): string {
-  return ['Files captured from shipper setup:', ...paths.map((filePath) => `- ${filePath}`)].join(
-    '\n'
-  );
+function buildCommitBody(paths: string[], heading: string): string {
+  return [heading, ...paths.map((filePath) => `- ${filePath}`)].join('\n');
 }
 
 function buildPrBody(paths: string[]): string {
@@ -301,29 +319,84 @@ async function pushBranch(repoRoot: string, branchName: string): Promise<void> {
 async function openPullRequest(
   repoRoot: string,
   repo: string,
+  baseBranch: string,
   body: string
 ): Promise<{ prRef: string; prUrl: string }> {
-  const settings = getSettings();
   const args = ['pr', 'create', '-R', repo, '--title', INITIAL_COMMIT_SUBJECT, '--body', body];
-  if (settings.defaultBaseBranch) {
-    args.push('--base', settings.defaultBaseBranch);
+  args.push('--base', baseBranch);
+
+  const { stdout } = await gh(args, { cwd: repoRoot });
+  const prUrl = stdout.trim();
+  if (!prUrl) {
+    throw new Error('Failed to open setup PR: gh pr create returned an empty URL.');
   }
 
-  await gh(args, { cwd: repoRoot });
-
-  const { stdout: prRefOut } = await gh(
-    ['pr', 'view', BRANCH_NAME, '-R', repo, '--json', 'number', '-q', '.number'],
-    { cwd: repoRoot }
-  );
-  const { stdout: prUrlOut } = await gh(
-    ['pr', 'view', BRANCH_NAME, '-R', repo, '--json', 'url', '-q', '.url'],
-    { cwd: repoRoot }
-  );
-
   return {
-    prRef: prRefOut.trim(),
-    prUrl: prUrlOut.trim(),
+    prRef: String(parsePrNumberFromUrl(prUrl)),
+    prUrl,
   };
+}
+
+function parsePrNumberFromUrl(url: string): number {
+  const pathname = new URL(url).pathname;
+  const match = /\/pull\/(\d+)\/?$/.exec(pathname);
+  const prNumber = Number(match?.[1]);
+
+  if (!match?.[1] || !Number.isInteger(prNumber) || prNumber <= 0) {
+    throw new Error(`Failed to parse PR number from URL: ${url}`);
+  }
+
+  return prNumber;
+}
+
+async function buildContentSignatureMap(
+  repoRoot: string,
+  entries: GitStatusEntry[]
+): Promise<Map<string, string>> {
+  const signatures = await Promise.all(
+    entries.map(async (entry) => {
+      try {
+        const content = await readFile(path.resolve(repoRoot, entry.path));
+        return [entry.path, hashContent(content)] as const;
+      } catch (error) {
+        if (
+          typeof error === 'object' &&
+          error !== null &&
+          'code' in error &&
+          error.code === 'ENOENT'
+        ) {
+          return undefined;
+        }
+        throw error;
+      }
+    })
+  );
+
+  return new Map(
+    signatures.filter(
+      (signature): signature is readonly [string, string] => signature !== undefined
+    )
+  );
+}
+
+async function getCurrentBranchName(repoRoot: string): Promise<string> {
+  return (
+    await runGit(repoRoot, ['branch', '--show-current'], 'Failed to determine the current branch')
+  ).stdout.trim();
+}
+
+async function ensureBaseBranchSafe(repoRoot: string, repo: string): Promise<string | undefined> {
+  const baseBranch = await resolveBaseBranch(repo, getSettings().defaultBaseBranch);
+  const currentBranch = await getCurrentBranchName(repoRoot);
+
+  if (currentBranch && currentBranch !== baseBranch) {
+    logger.warn(
+      `Setup finalization only runs from "${baseBranch}". You are on "${currentBranch}". Switch to ${baseBranch} and rerun shipper setup, or publish the setup changes manually.`
+    );
+    return undefined;
+  }
+
+  return baseBranch;
 }
 
 async function runRemediationPass(args: {
@@ -361,7 +434,10 @@ async function runRemediationPass(args: {
   await commitCurrentChanges(
     args.repoRoot,
     REMEDIATION_COMMIT_SUBJECT,
-    buildCommitBody(beforeCommit.entries.map((entry) => entry.path)),
+    buildCommitBody(
+      beforeCommit.entries.map((entry) => entry.path),
+      'Files changed while fixing setup PR feedback:'
+    ),
     'Failed to finalize setup remediation changes'
   );
   await pushBranch(args.repoRoot, BRANCH_NAME);
@@ -392,6 +468,7 @@ export async function readGitStatusSnapshot(cwd: string): Promise<GitStatusSnaps
     repoRoot,
     entries,
     byPath: buildEntryMap(entries),
+    contentSignatureByPath: await buildContentSignatureMap(repoRoot, entries),
   };
 }
 
@@ -425,7 +502,12 @@ export async function offerSetupFinalize(
 
   const repoRoot = after.repoRoot;
   const repo = await getRepoNwo();
-  const commitBody = buildCommitBody(afterPaths);
+  const baseBranch = await ensureBaseBranchSafe(repoRoot, repo);
+  if (!baseBranch) {
+    return { status: 'blocked-base-branch' };
+  }
+
+  const commitBody = buildCommitBody(afterPaths, 'Files captured from shipper setup:');
   const prBody = buildPrBody(afterPaths);
 
   if (await branchExistsLocally(repoRoot, BRANCH_NAME)) {
@@ -452,7 +534,7 @@ export async function offerSetupFinalize(
     );
     await pushBranch(repoRoot, BRANCH_NAME);
 
-    const { prRef, prUrl } = await openPullRequest(repoRoot, repo, prBody);
+    const { prRef, prUrl } = await openPullRequest(repoRoot, repo, baseBranch, prBody);
     logger.log(`Opened setup PR: ${prUrl}`);
 
     for (;;) {
