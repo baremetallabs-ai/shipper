@@ -283,7 +283,9 @@ describe('IssueCard', () => {
     };
 
     expect(isValidDropTargetForTest(attentionSource, 'implemented')).toBe(true);
+    expect(isValidDropTargetForTest(attentionSource, 'new')).toBe(true);
     expect(isValidDropTargetForTest(pipelineSource, 'designed')).toBe(true);
+    expect(isValidDropTargetForTest(pipelineSource, 'new')).toBe(false);
     expect(isValidDropTargetForTest(pipelineSource, 'planned')).toBe(false);
   });
 

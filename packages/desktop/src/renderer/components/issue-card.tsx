@@ -57,6 +57,10 @@ function getResetTargetLabel(stage: WorkflowStage): string {
 }
 
 export function isValidDropTarget(source: DragSource, targetStage: WorkflowStage): boolean {
+  if (targetStage === 'new' && source.kind !== 'attention') {
+    return false;
+  }
+
   const resetTargets = getResetTargets(source.issue.labels);
   return resetTargets.includes(targetStage);
 }
