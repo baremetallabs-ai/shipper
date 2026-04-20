@@ -7,7 +7,7 @@ args:
   - acceptEdits
   - --settings
   # prettier-ignore
-  - {"permissions":{"allow":["Bash(./.shipper/scripts/install-deps.sh)","Bash(gh api repos/*)","Bash(gh label list *)","WebSearch"]},"sandbox":{"enabled":true,"autoAllowBashIfSandboxed":true,"excludedCommands":["./.shipper/scripts/install-deps.sh","gh api repos/*","gh label list *"],"network":{"allowedDomains":["github.com","api.github.com","uploads.github.com","registry.npmjs.org"]}}}
+  - {"permissions":{"allow":["Bash(./.shipper/scripts/install-deps.sh)","Bash(gh api repos/*)","Bash(gh label list *)","WebSearch"]},"sandbox":{"enabled":true,"autoAllowBashIfSandboxed":true,"excludedCommands":["./.shipper/scripts/install-deps.sh","gh api repos/*","gh label list *"],"network":{"allowedDomains":["github.com","api.github.com","uploads.github.com","registry.npmjs.org","*.vercel.com"]}}}
 append-user-input: true
 ---
 
