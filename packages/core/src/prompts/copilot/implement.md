@@ -121,7 +121,7 @@ After all plan steps are complete, work through the verification tasks:
 3. If a check fails, fix the issue. If the fix is within the scope of the plan, make the fix and re-verify. If the fix requires changes outside the plan's scope, stop and flag it.
 4. Mark each verification task `completed`.
 
-**Every acceptance criterion from the issue must have a passing verification.** If you can't verify a criterion, do not skip it — flag it.
+**Every acceptance criterion from the issue must have verification evidence: normally a passing verification, or `deferred to review` only when the verification was prescribed by the plan and the sandbox refused to run it.** If you can't verify a criterion and it does not qualify for that deferred-verification path, do not skip it — flag it.
 
 ## Agent Feedback
 
