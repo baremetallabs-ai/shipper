@@ -70,10 +70,43 @@ export function PipelineBoard({
 }: PipelineBoardProps): JSX.Element {
   const { dragSource, dragOverColumn, startDrag, endDrag, setDragOverColumn, clearDrag } =
     useDragDrop();
+  const hasAttentionIssues = attentionIssues.failed.length > 0 || attentionIssues.new.length > 0;
 
   function handleDragStart(event: DragEvent, issue: ListIssueItem, columnIndex: number): void {
     event.dataTransfer.effectAllowed = 'move';
     startDrag(issue, columnIndex);
+  }
+
+  function renderAttentionCards(issues: ListIssueItem[], allowGroom: boolean): JSX.Element {
+    return (
+      <div className="flex flex-wrap gap-3">
+        {issues.map((issue) => (
+          <div key={issue.number} className="w-[240px] shrink-0">
+            <IssueCard
+              issue={issue}
+              onGroom={allowGroom ? onGroom : undefined}
+              onCloseNotPlanned={() => {
+                onCloseNotPlanned(issue);
+              }}
+              onSetPriority={(level) => {
+                onSetPriority(issue, level);
+              }}
+              onUnlock={() => {
+                onUnlockClick(issue);
+              }}
+              onUnblock={() => {
+                onUnblockClick(issue);
+              }}
+              groomDisabled={allowGroom ? !canFetch : undefined}
+              isResetting={resettingIssues.has(issue.number)}
+              isSettingPriority={settingPriorityIssues.has(issue.number)}
+              isUnlocking={unlockingIssues.has(issue.number)}
+              isUnblocking={unblockingIssues.has(issue.number)}
+            />
+          </div>
+        ))}
+      </div>
+    );
   }
 
   return (
@@ -126,7 +159,7 @@ export function PipelineBoard({
         </div>
       ) : (
         <div className="space-y-6 px-6 py-6">
-          {attentionIssues.failed.length > 0 || attentionIssues.new.length > 0 ? (
+          {hasAttentionIssues ? (
             <div className="space-y-3 border-b border-border pb-6">
               {attentionIssues.failed.length > 0 ? (
                 <div className="space-y-3" data-testid="failed-attention-section">
@@ -138,30 +171,7 @@ export function PipelineBoard({
                       Investigate failed runs here before returning work to the pipeline.
                     </p>
                   </div>
-                  <div className="flex flex-wrap gap-3">
-                    {attentionIssues.failed.map((issue) => (
-                      <div key={issue.number} className="w-[240px] shrink-0">
-                        <IssueCard
-                          issue={issue}
-                          onCloseNotPlanned={() => {
-                            onCloseNotPlanned(issue);
-                          }}
-                          onSetPriority={(level) => {
-                            onSetPriority(issue, level);
-                          }}
-                          onUnlock={() => {
-                            onUnlockClick(issue);
-                          }}
-                          onUnblock={() => {
-                            onUnblockClick(issue);
-                          }}
-                          isSettingPriority={settingPriorityIssues.has(issue.number)}
-                          isUnlocking={unlockingIssues.has(issue.number)}
-                          isUnblocking={unblockingIssues.has(issue.number)}
-                        />
-                      </div>
-                    ))}
-                  </div>
+                  {renderAttentionCards(attentionIssues.failed, false)}
                 </div>
               ) : null}
               {attentionIssues.new.length > 0 ? (
@@ -174,32 +184,7 @@ export function PipelineBoard({
                       New issues stay here until they are groomed into the pipeline.
                     </p>
                   </div>
-                  <div className="flex flex-wrap gap-3">
-                    {attentionIssues.new.map((issue) => (
-                      <div key={issue.number} className="w-[240px] shrink-0">
-                        <IssueCard
-                          issue={issue}
-                          onGroom={onGroom}
-                          onCloseNotPlanned={() => {
-                            onCloseNotPlanned(issue);
-                          }}
-                          onSetPriority={(level) => {
-                            onSetPriority(issue, level);
-                          }}
-                          onUnlock={() => {
-                            onUnlockClick(issue);
-                          }}
-                          onUnblock={() => {
-                            onUnblockClick(issue);
-                          }}
-                          groomDisabled={!canFetch}
-                          isSettingPriority={settingPriorityIssues.has(issue.number)}
-                          isUnlocking={unlockingIssues.has(issue.number)}
-                          isUnblocking={unblockingIssues.has(issue.number)}
-                        />
-                      </div>
-                    ))}
-                  </div>
+                  {renderAttentionCards(attentionIssues.new, true)}
                 </div>
               ) : null}
             </div>
