@@ -87,6 +87,48 @@ export async function aggregateSessionUsage(
   return aggregateSessionUsageImpl(repo, issue, since);
 }
 
+export async function aggregateAllIssueUsage(repo: string): Promise<Map<string, TokenUsage>> {
+  const sessionDir = getSessionDir(toRepoSlug(repo));
+  let entries: string[];
+  try {
+    entries = await readdir(sessionDir);
+  } catch (error) {
+    if (!hasErrorCode(error, 'ENOENT')) {
+      logger.warn(`Failed to read session directory for ${repo}`);
+    }
+    return new Map();
+  }
+
+  const totals = new Map<string, TokenUsage>();
+
+  for (const entry of entries) {
+    if (!entry.endsWith('.meta.json')) {
+      continue;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(await readFile(path.join(sessionDir, entry), 'utf-8'));
+    } catch {
+      // Malformed session meta file — skip to next.
+      continue;
+    }
+
+    if (!isSessionMeta(parsed)) {
+      continue;
+    }
+
+    const usage = parseUsage(parsed.usage);
+    if (!usage) {
+      continue;
+    }
+
+    totals.set(parsed.issue, sumTokenUsage(totals.get(parsed.issue), usage));
+  }
+
+  return totals;
+}
+
 async function aggregateSessionUsageDefault(
   repo: string,
   issue: string,
@@ -136,14 +178,7 @@ async function aggregateSessionUsageDefault(
       continue;
     }
 
-    total = total
-      ? {
-          inputTokens: total.inputTokens + usage.inputTokens,
-          outputTokens: total.outputTokens + usage.outputTokens,
-          cacheReadTokens: total.cacheReadTokens + usage.cacheReadTokens,
-          cacheWriteTokens: total.cacheWriteTokens + usage.cacheWriteTokens,
-        }
-      : { ...usage };
+    total = sumTokenUsage(total, usage);
   }
 
   return total;
@@ -216,6 +251,19 @@ function parseUsage(value: unknown): TokenUsage | undefined {
     outputTokens,
     cacheReadTokens,
     cacheWriteTokens,
+  };
+}
+
+function sumTokenUsage(current: TokenUsage | undefined, next: TokenUsage): TokenUsage {
+  if (!current) {
+    return { ...next };
+  }
+
+  return {
+    inputTokens: current.inputTokens + next.inputTokens,
+    outputTokens: current.outputTokens + next.outputTokens,
+    cacheReadTokens: current.cacheReadTokens + next.cacheReadTokens,
+    cacheWriteTokens: current.cacheWriteTokens + next.cacheWriteTokens,
   };
 }
 

@@ -31,6 +31,7 @@ vi.mock('node:os', async () => {
 });
 
 const {
+  aggregateAllIssueUsage,
   aggregateSessionUsage,
   getSessionDir,
   getSessionPaths,
@@ -397,6 +398,177 @@ describe('aggregateSessionUsage', () => {
   });
 });
 
+describe('aggregateAllIssueUsage', () => {
+  it('returns an empty map without warning when the session directory does not exist', async () => {
+    mockHomeDir.value = mkdtempSync(path.join(tmpdir(), 'session-home-'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      await expect(aggregateAllIssueUsage('owner/repo')).resolves.toEqual(new Map());
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+      rmSync(mockHomeDir.value, { recursive: true, force: true });
+    }
+  });
+
+  it('aggregates totals per issue across stages, reruns, and failed sessions', async () => {
+    const tempHome = mkdtempSync(path.join(tmpdir(), 'session-home-'));
+    mockHomeDir.value = tempHome;
+    const sessionDir = getSessionDir('owner-repo');
+
+    try {
+      writeSessionMetaSync(
+        path.join(sessionDir, '308-groomed.meta.json'),
+        buildMeta({
+          issue: '308',
+          stage: 'groom',
+          timestamp: '2026-03-15T01:00:00.000Z',
+          usage: {
+            inputTokens: 10,
+            outputTokens: 4,
+            cacheReadTokens: 3,
+            cacheWriteTokens: 1,
+          },
+        })
+      );
+      writeSessionMetaSync(
+        path.join(sessionDir, '308-implement-rerun.meta.json'),
+        buildMeta({
+          issue: '308',
+          stage: 'implement',
+          timestamp: '2026-03-15T02:00:00.000Z',
+          exitCode: 1,
+          usage: {
+            inputTokens: 8,
+            outputTokens: 6,
+            cacheReadTokens: 2,
+            cacheWriteTokens: 1,
+          },
+        })
+      );
+      writeSessionMetaSync(
+        path.join(sessionDir, '309-plan.meta.json'),
+        buildMeta({
+          issue: '309',
+          stage: 'plan',
+          timestamp: '2026-03-15T03:00:00.000Z',
+          usage: {
+            inputTokens: 5,
+            outputTokens: 2,
+            cacheReadTokens: 1,
+            cacheWriteTokens: 0,
+          },
+        })
+      );
+      writeSessionMetaSync(
+        path.join(sessionDir, '308-pr-review.meta.json'),
+        buildMeta({
+          issue: '308',
+          stage: 'pr-review',
+          timestamp: '2026-03-15T04:00:00.000Z',
+          usage: {
+            inputTokens: 6,
+            outputTokens: 3,
+            cacheReadTokens: 5,
+            cacheWriteTokens: 2,
+          },
+        })
+      );
+
+      await expect(aggregateAllIssueUsage('owner/repo')).resolves.toEqual(
+        new Map([
+          [
+            '308',
+            {
+              inputTokens: 24,
+              outputTokens: 13,
+              cacheReadTokens: 10,
+              cacheWriteTokens: 4,
+            },
+          ],
+          [
+            '309',
+            {
+              inputTokens: 5,
+              outputTokens: 2,
+              cacheReadTokens: 1,
+              cacheWriteTokens: 0,
+            },
+          ],
+        ])
+      );
+    } finally {
+      rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it('skips malformed and usage-less metadata when aggregating repo totals', async () => {
+    const tempHome = mkdtempSync(path.join(tmpdir(), 'session-home-'));
+    mockHomeDir.value = tempHome;
+    const sessionDir = getSessionDir('owner-repo');
+
+    try {
+      writeSessionMetaSync(
+        path.join(sessionDir, '308-valid.meta.json'),
+        buildMeta({
+          issue: '308',
+          timestamp: '2026-03-15T02:00:00.000Z',
+          usage: {
+            inputTokens: 7,
+            outputTokens: 4,
+            cacheReadTokens: 3,
+            cacheWriteTokens: 1,
+          },
+        })
+      );
+      writeSessionMetaSync(
+        path.join(sessionDir, '308-without-usage.meta.json'),
+        buildMeta({
+          issue: '308',
+          timestamp: '2026-03-15T01:00:00.000Z',
+          usage: undefined,
+        })
+      );
+      writeFileSync(path.join(sessionDir, '309-malformed.meta.json'), '{not valid json', 'utf-8');
+      writeSessionMetaSync(path.join(sessionDir, '310-invalid-usage.meta.json'), {
+        ...buildMeta({
+          issue: '310',
+          timestamp: '2026-03-15T03:00:00.000Z',
+          usage: {
+            inputTokens: 9,
+            outputTokens: 2,
+            cacheReadTokens: 1,
+            cacheWriteTokens: 0,
+          },
+        }),
+        usage: {
+          inputTokens: 'bad',
+          outputTokens: 2,
+          cacheReadTokens: 1,
+          cacheWriteTokens: 0,
+        },
+      });
+
+      await expect(aggregateAllIssueUsage('owner/repo')).resolves.toEqual(
+        new Map([
+          [
+            '308',
+            {
+              inputTokens: 7,
+              outputTokens: 4,
+              cacheReadTokens: 3,
+              cacheWriteTokens: 1,
+            },
+          ],
+        ])
+      );
+    } finally {
+      rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+});
+
 function writeSessionMetaSync(metaFile: string, meta: Record<string, unknown>): void {
   mkdirSync(path.dirname(metaFile), { recursive: true });
   writeFileSync(metaFile, `${JSON.stringify(meta, null, 2)}\n`, 'utf-8');
@@ -405,16 +577,18 @@ function writeSessionMetaSync(metaFile: string, meta: Record<string, unknown>): 
 function buildMeta(overrides: {
   issue: string;
   timestamp: string;
+  stage?: string;
+  exitCode?: number;
   usage?: Record<string, unknown>;
 }): Record<string, unknown> {
   return {
     repo: 'owner/repo',
     issue: overrides.issue,
-    stage: 'implement',
+    stage: overrides.stage ?? 'implement',
     agent: 'claude',
     model: 'opus',
     timestamp: overrides.timestamp,
-    exitCode: 0,
+    exitCode: overrides.exitCode ?? 0,
     ...(overrides.usage ? { usage: overrides.usage } : {}),
   };
 }

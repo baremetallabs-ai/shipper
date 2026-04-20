@@ -10,6 +10,7 @@ const state = vi.hoisted(() => ({
   handlers: new Map<string, IpcHandler>(),
   exitCallbacks: new Map<string, () => void>(),
   acquireIssueLockMock: vi.fn<(repo: string, issueNumber: string) => Promise<void>>(),
+  aggregateAllIssueUsageMock: vi.fn(),
   releaseIssueLockMock: vi.fn<(repo: string, issueNumber: string) => Promise<void>>(),
   renewIssueLockMock:
     vi.fn<(repo: string, issueNumber: string, cancelled: { value: boolean }) => Promise<void>>(),
@@ -95,6 +96,7 @@ vi.mock('@dnsquared/shipper-core', async () => {
 
   return {
     acquireIssueLock: state.acquireIssueLockMock,
+    aggregateAllIssueUsage: state.aggregateAllIssueUsageMock,
     buildPromptCommand: state.buildPromptCommandMock,
     checkGhAuth: state.checkGhAuthMock,
     checkGhInstalled: state.checkGhInstalledMock,
@@ -232,6 +234,7 @@ async function loadHandlers(): Promise<Map<string, IpcHandler>> {
   );
   state.getSettingsMock.mockReturnValue({ lockTimeoutMinutes: 30 });
   state.acquireIssueLockMock.mockResolvedValue(undefined);
+  state.aggregateAllIssueUsageMock.mockResolvedValue(new Map());
   state.releaseIssueLockMock.mockResolvedValue(undefined);
   state.renewIssueLockMock.mockResolvedValue(undefined);
   state.ensureRepoCloneMock.mockResolvedValue('/tmp/repo');
@@ -1081,6 +1084,71 @@ describe('desktop IPC locking', () => {
       ok: false,
       error: 'gh failed',
     });
+  });
+
+  it('returns issue totals on list-issues responses, including zero fallbacks', async () => {
+    await loadHandlers();
+    state.listIssuesMock.mockResolvedValueOnce([
+      {
+        number: 42,
+        title: 'Show token totals',
+        labels: ['shipper:planned'],
+        state: 'OPEN',
+        author: 'dnsquared',
+        createdAt: '2026-04-20T00:00:00Z',
+        url: 'https://github.com/owner/repo/issues/42',
+      },
+      {
+        number: 43,
+        title: 'No usage yet',
+        labels: ['shipper:new'],
+        state: 'OPEN',
+        author: 'dnsquared',
+        createdAt: '2026-04-20T00:00:00Z',
+        url: 'https://github.com/owner/repo/issues/43',
+      },
+    ]);
+    state.aggregateAllIssueUsageMock.mockResolvedValueOnce(
+      new Map([
+        [
+          '42',
+          {
+            inputTokens: 10,
+            outputTokens: 20,
+            cacheReadTokens: 30,
+            cacheWriteTokens: 40,
+          },
+        ],
+      ])
+    );
+    const handler = getHandler('list-issues');
+
+    await expect(handler({}, { repo: 'owner/repo' })).resolves.toEqual({
+      ok: true,
+      issues: [
+        {
+          number: 42,
+          title: 'Show token totals',
+          labels: ['shipper:planned'],
+          state: 'OPEN',
+          author: 'dnsquared',
+          createdAt: '2026-04-20T00:00:00Z',
+          url: 'https://github.com/owner/repo/issues/42',
+          totalTokens: 100,
+        },
+        {
+          number: 43,
+          title: 'No usage yet',
+          labels: ['shipper:new'],
+          state: 'OPEN',
+          author: 'dnsquared',
+          createdAt: '2026-04-20T00:00:00Z',
+          url: 'https://github.com/owner/repo/issues/43',
+          totalTokens: 0,
+        },
+      ],
+    });
+    expect(state.aggregateAllIssueUsageMock).toHaveBeenCalledWith('owner/repo');
   });
 
   it('still registers groom on the PTY path with lock acquisition intact', async () => {

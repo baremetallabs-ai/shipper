@@ -4,15 +4,14 @@ import React from 'react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import {
-  FAILED_LABEL,
-  IMPLEMENTED_LABEL,
-  NEW_LABEL,
-  type ListIssueItem,
-} from '@dnsquared/shipper-core';
+import { FAILED_LABEL, IMPLEMENTED_LABEL, NEW_LABEL } from '@dnsquared/shipper-core';
 import { PipelineBoard } from '../../src/renderer/components/pipeline-board.js';
 import { PIPELINE_COLUMNS } from '../../src/renderer/lib/constants.js';
-import type { ActiveShippingCommand, ResetSelection } from '../../src/renderer/types.js';
+import type {
+  ActiveShippingCommand,
+  PipelineIssue,
+  ResetSelection,
+} from '../../src/renderer/types.js';
 
 vi.mock('../../src/renderer/components/ui/dropdown-menu.js', () => ({
   DropdownMenu: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -48,7 +47,7 @@ vi.mock('../../src/renderer/components/ui/dropdown-menu.js', () => ({
   DropdownMenuSubContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
-function createIssue(overrides: Partial<ListIssueItem> = {}): ListIssueItem {
+function createIssue(overrides: Partial<PipelineIssue> = {}): PipelineIssue {
   return {
     number: 22,
     title: 'Verify pipeline board extraction',
@@ -57,14 +56,15 @@ function createIssue(overrides: Partial<ListIssueItem> = {}): ListIssueItem {
     author: 'dnsquared',
     createdAt: '2026-04-03T12:00:00.000Z',
     url: 'https://github.com/owner/repo/issues/22',
+    totalTokens: 2_200,
     ...overrides,
   };
 }
 
 function createColumnMap(
-  entries: Partial<Record<(typeof PIPELINE_COLUMNS)[number], ListIssueItem[]>>
-): Map<string, ListIssueItem[]> {
-  return new Map<string, ListIssueItem[]>(
+  entries: Partial<Record<(typeof PIPELINE_COLUMNS)[number], PipelineIssue[]>>
+): Map<string, PipelineIssue[]> {
+  return new Map<string, PipelineIssue[]>(
     PIPELINE_COLUMNS.map((label) => [label, entries[label] ?? []])
   );
 }
@@ -75,8 +75,8 @@ function renderBoard({
     [IMPLEMENTED_LABEL]: [createIssue()],
   }),
   attentionIssues = {
-    failed: [] as ListIssueItem[],
-    new: [createIssue({ number: 7, title: 'Needs grooming', labels: [NEW_LABEL] })],
+    failed: [] as PipelineIssue[],
+    new: [createIssue({ number: 7, title: 'Needs grooming', labels: [NEW_LABEL], totalTokens: 0 })],
   },
   shippingCommands = new Map<number, ActiveShippingCommand>(),
   resettingIssues = new Set<number>(),
@@ -184,9 +184,16 @@ describe('PipelineBoard', () => {
     renderBoard({
       attentionIssues: {
         failed: [
-          createIssue({ number: 8, title: 'Investigate failed run', labels: [FAILED_LABEL] }),
+          createIssue({
+            number: 8,
+            title: 'Investigate failed run',
+            labels: [FAILED_LABEL],
+            totalTokens: 4_200,
+          }),
         ],
-        new: [createIssue({ number: 7, title: 'Needs grooming', labels: [NEW_LABEL] })],
+        new: [
+          createIssue({ number: 7, title: 'Needs grooming', labels: [NEW_LABEL], totalTokens: 0 }),
+        ],
       },
     });
 
@@ -205,9 +212,16 @@ describe('PipelineBoard', () => {
     renderBoard({
       attentionIssues: {
         failed: [
-          createIssue({ number: 8, title: 'Investigate failed run', labels: [FAILED_LABEL] }),
+          createIssue({
+            number: 8,
+            title: 'Investigate failed run',
+            labels: [FAILED_LABEL],
+            totalTokens: 4_200,
+          }),
         ],
-        new: [createIssue({ number: 7, title: 'Needs grooming', labels: [NEW_LABEL] })],
+        new: [
+          createIssue({ number: 7, title: 'Needs grooming', labels: [NEW_LABEL], totalTokens: 0 }),
+        ],
       },
     });
 
@@ -218,13 +232,48 @@ describe('PipelineBoard', () => {
     renderBoard({
       attentionIssues: {
         failed: [
-          createIssue({ number: 8, title: 'Investigate failed run', labels: [FAILED_LABEL] }),
+          createIssue({
+            number: 8,
+            title: 'Investigate failed run',
+            labels: [FAILED_LABEL],
+            totalTokens: 4_200,
+          }),
         ],
-        new: [createIssue({ number: 7, title: 'Needs grooming', labels: [NEW_LABEL] })],
+        new: [
+          createIssue({ number: 7, title: 'Needs grooming', labels: [NEW_LABEL], totalTokens: 0 }),
+        ],
       },
       resettingIssues: new Set([7, 8]),
     });
 
     expect(screen.getAllByText('Resetting...')).toHaveLength(2);
+  });
+
+  it('renders token indicators for attention and stage cards alongside existing controls', () => {
+    renderBoard({
+      attentionIssues: {
+        failed: [
+          createIssue({
+            number: 8,
+            title: 'Investigate failed run',
+            labels: [FAILED_LABEL],
+            totalTokens: 4_200,
+          }),
+        ],
+        new: [
+          createIssue({ number: 7, title: 'Needs grooming', labels: [NEW_LABEL], totalTokens: 0 }),
+        ],
+      },
+    });
+
+    const failedSection = screen.getByTestId('failed-attention-section');
+    const newSection = screen.getByTestId('new-attention-section');
+    const stageCard = screen.getByTestId('issue-card-22');
+
+    expect(within(failedSection).getByLabelText('4200 total tokens').textContent).toBe('4.2k');
+    expect(within(newSection).getByLabelText('0 total tokens').textContent).toBe('0');
+    expect(within(newSection).getByRole('button', { name: 'Groom' })).toBeTruthy();
+    expect(within(stageCard).getByLabelText('2200 total tokens').textContent).toBe('2.2k');
+    expect(within(stageCard).getByRole('button', { name: 'Ship' })).toBeTruthy();
   });
 });

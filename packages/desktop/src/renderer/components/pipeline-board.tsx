@@ -5,18 +5,18 @@ import { DISPLAY_NAME_MAP, READY_LABEL, type ListIssueItem } from '@dnsquared/sh
 import { useDragDrop } from '../hooks/use-drag-drop.js';
 import { COLUMN_RESET_STAGE, PIPELINE_COLUMNS } from '../lib/constants.js';
 import { cn } from '../lib/utils.js';
-import type { ActiveShippingCommand, ResetSelection } from '../types.js';
+import type { ActiveShippingCommand, PipelineIssue, ResetSelection } from '../types.js';
 import { Badge } from './ui/badge.js';
 import { Button } from './ui/button.js';
 import { IssueCard, getResetTargets, isValidDropTarget } from './issue-card.js';
 
 export interface PipelineBoardProps {
   repo: string;
-  issues: ListIssueItem[];
-  columnMap: Map<string, ListIssueItem[]>;
+  issues: PipelineIssue[];
+  columnMap: Map<string, PipelineIssue[]>;
   attentionIssues: {
-    failed: ListIssueItem[];
-    new: ListIssueItem[];
+    failed: PipelineIssue[];
+    new: PipelineIssue[];
   };
   resettingIssues: ReadonlySet<number>;
   unlockingIssues: ReadonlySet<number>;
@@ -77,13 +77,14 @@ export function PipelineBoard({
     startDrag(issue, columnIndex);
   }
 
-  function renderAttentionCards(issues: ListIssueItem[], allowGroom: boolean): JSX.Element {
+  function renderAttentionCards(issues: PipelineIssue[], allowGroom: boolean): JSX.Element {
     return (
       <div className="flex flex-wrap gap-3">
         {issues.map((issue) => (
           <div key={issue.number} className="w-[240px] shrink-0">
             <IssueCard
               issue={issue}
+              totalTokens={issue.totalTokens}
               onGroom={allowGroom ? onGroom : undefined}
               onCloseNotPlanned={() => {
                 onCloseNotPlanned(issue);
@@ -276,6 +277,7 @@ export function PipelineBoard({
                             <IssueCard
                               key={issue.number}
                               issue={issue}
+                              totalTokens={issue.totalTokens}
                               onResetSelect={(targetStage) => {
                                 onResetSelect({ issue, targetStage });
                               }}

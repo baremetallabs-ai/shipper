@@ -14,6 +14,7 @@ import { PIPELINE_COLUMNS } from '../lib/constants.js';
 import type {
   BackgroundToastItem,
   IssueListResult,
+  PipelineIssue,
   PipelineColumnLabel,
   ResetSelection,
 } from '../types.js';
@@ -27,7 +28,7 @@ interface UseIssuePipelineOptions {
 }
 
 export interface UseIssuePipelineResult {
-  issues: ListIssueItem[];
+  issues: PipelineIssue[];
   stageCache: Map<string, string>;
   isLoading: boolean;
   fetchError: string | null;
@@ -42,10 +43,10 @@ export interface UseIssuePipelineResult {
   isNewIssueOpen: boolean;
   isAdoptOpen: boolean;
   attentionIssues: {
-    failed: ListIssueItem[];
-    new: ListIssueItem[];
+    failed: PipelineIssue[];
+    new: PipelineIssue[];
   };
-  columnMap: Map<PipelineColumnLabel, ListIssueItem[]>;
+  columnMap: Map<PipelineColumnLabel, PipelineIssue[]>;
   setFetchError: Dispatch<SetStateAction<string | null>>;
   setResetSelection: Dispatch<SetStateAction<ResetSelection | null>>;
   setCloseNotPlannedIssue: Dispatch<SetStateAction<ListIssueItem | null>>;
@@ -83,7 +84,7 @@ export function useIssuePipeline({
   hasRunningShipCommand,
   pushToast,
 }: UseIssuePipelineOptions): UseIssuePipelineResult {
-  const [issues, setIssues] = useState<ListIssueItem[]>([]);
+  const [issues, setIssues] = useState<PipelineIssue[]>([]);
   const [stageCache, setStageCache] = useState<Map<string, string>>(new Map());
   const [isLoading, setIsLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -100,12 +101,12 @@ export function useIssuePipeline({
   const requestVersionRef = useRef(0);
 
   const { attentionIssues, columnMap } = useMemo(() => {
-    const nextColumnMap = new Map<PipelineColumnLabel, ListIssueItem[]>(
+    const nextColumnMap = new Map<PipelineColumnLabel, PipelineIssue[]>(
       PIPELINE_COLUMNS.map((label) => [label, []])
     );
     const nextAttentionIssues = {
-      failed: [] as ListIssueItem[],
-      new: [] as ListIssueItem[],
+      failed: [] as PipelineIssue[],
+      new: [] as PipelineIssue[],
     };
 
     for (const issue of issues) {
