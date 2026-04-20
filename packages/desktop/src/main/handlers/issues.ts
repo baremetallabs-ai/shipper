@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron';
 import {
+  aggregateAllIssueUsage,
   gh,
   listIssues,
   LOCKED_LABEL,
@@ -11,9 +12,18 @@ import {
 
 import { loadResetIssue, parseAdoptIssuePayload, parseRepoPayload } from './shared.js';
 
+interface PipelineIssue extends ListIssueItem {
+  totalTokens: number;
+}
+
 interface ListIssuesSuccess {
   ok: true;
-  issues: Awaited<ReturnType<typeof listIssues>>;
+  issues: PipelineIssue[];
+}
+
+interface ListAdoptableIssuesSuccess {
+  ok: true;
+  issues: ListIssueItem[];
 }
 
 interface ListIssuesFailure {
@@ -55,7 +65,19 @@ export function registerIssueHandlers(): void {
 
     try {
       const issues = await listIssues(repo);
-      const response: ListIssuesSuccess = { ok: true, issues };
+      const usageTotals = await aggregateAllIssueUsage(repo);
+      const augmentedIssues = issues.map((issue) => {
+        const usage = usageTotals.get(String(issue.number));
+        const totalTokens = usage
+          ? usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheWriteTokens
+          : 0;
+
+        return {
+          ...issue,
+          totalTokens,
+        };
+      });
+      const response: ListIssuesSuccess = { ok: true, issues: augmentedIssues };
       return response;
     } catch (error) {
       const message = toErrorMessage(error);
@@ -100,7 +122,7 @@ export function registerIssueHandlers(): void {
           url: issue.url,
         }))
         .filter((issue) => !issue.labels.some((label) => label.startsWith('shipper:')));
-      const response: ListIssuesSuccess = { ok: true, issues };
+      const response: ListAdoptableIssuesSuccess = { ok: true, issues };
       return response;
     } catch (error) {
       const message = toErrorMessage(error);

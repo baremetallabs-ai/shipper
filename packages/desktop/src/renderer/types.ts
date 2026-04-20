@@ -16,7 +16,16 @@ export interface AppConfig {
   autoMergeRepos: string[];
 }
 
+export interface PipelineIssue extends ListIssueItem {
+  totalTokens: number;
+}
+
 export interface ListIssuesSuccess {
+  ok: true;
+  issues: PipelineIssue[];
+}
+
+export interface ListAdoptableIssuesSuccess {
   ok: true;
   issues: ListIssueItem[];
 }
@@ -56,7 +65,7 @@ export interface ShipperApi {
   checkPrerequisites: () => Promise<Prerequisites>;
   getConfig: () => Promise<AppConfig>;
   listRepos: () => Promise<string[]>;
-  listAdoptableIssues: (repo: string) => Promise<ListIssuesSuccess | ListIssuesFailure>;
+  listAdoptableIssues: (repo: string) => Promise<ListAdoptableIssuesSuccess | ListIssuesFailure>;
   listIssues: (repo: string) => Promise<ListIssuesSuccess | ListIssuesFailure>;
   setConfig: (config: AppConfig) => Promise<void>;
   adoptIssue: (

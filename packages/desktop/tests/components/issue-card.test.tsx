@@ -80,6 +80,7 @@ describe('IssueCard', () => {
         issue={createIssue({
           labels: [PLANNED_LABEL, PRIORITY_HIGH_LABEL, BLOCKED_LABEL, LOCKED_LABEL],
         })}
+        totalTokens={0}
         isResetting
         shippingStatus="running"
         onStopShip={vi.fn()}
@@ -99,6 +100,7 @@ describe('IssueCard', () => {
     render(
       <IssueCard
         issue={createIssue({ labels: [PLANNED_LABEL, BLOCKED_LABEL, LOCKED_LABEL] })}
+        totalTokens={0}
         onGroom={vi.fn()}
         onShip={vi.fn()}
       />
@@ -109,7 +111,7 @@ describe('IssueCard', () => {
   });
 
   it('renders failed styling on the card surface', () => {
-    render(<IssueCard issue={createIssue({ labels: [FAILED_LABEL] })} />);
+    render(<IssueCard issue={createIssue({ labels: [FAILED_LABEL] })} totalTokens={0} />);
 
     const card = screen.getByTestId('issue-card-12');
 
@@ -119,14 +121,18 @@ describe('IssueCard', () => {
   });
 
   it('renders failed and blocked indicators together', () => {
-    render(<IssueCard issue={createIssue({ labels: [FAILED_LABEL, BLOCKED_LABEL] })} />);
+    render(
+      <IssueCard issue={createIssue({ labels: [FAILED_LABEL, BLOCKED_LABEL] })} totalTokens={0} />
+    );
 
     expect(screen.getByText('Failed')).toBeTruthy();
     expect(screen.getByText('Blocked')).toBeTruthy();
   });
 
   it('renders failed and locked indicators together', () => {
-    render(<IssueCard issue={createIssue({ labels: [FAILED_LABEL, LOCKED_LABEL] })} />);
+    render(
+      <IssueCard issue={createIssue({ labels: [FAILED_LABEL, LOCKED_LABEL] })} totalTokens={0} />
+    );
 
     expect(screen.getByText('Failed')).toBeTruthy();
     expect(screen.getByText('Locked')).toBeTruthy();
@@ -140,6 +146,7 @@ describe('IssueCard', () => {
     render(
       <IssueCard
         issue={createIssue()}
+        totalTokens={0}
         onGroom={onGroom}
         onShip={onShip}
         draggable
@@ -161,7 +168,7 @@ describe('IssueCard', () => {
   });
 
   it('renders the issue number as a GitHub link', () => {
-    render(<IssueCard issue={createIssue()} />);
+    render(<IssueCard issue={createIssue()} totalTokens={0} />);
     const link = screen.getByRole('link', { name: '#12' });
 
     expect(link).toHaveProperty('href', 'https://github.com/owner/repo/issues/12');
@@ -172,7 +179,7 @@ describe('IssueCard', () => {
   it('prevents drag from starting on the issue link', () => {
     const onDragStart = vi.fn();
 
-    render(<IssueCard issue={createIssue()} draggable onDragStart={onDragStart} />);
+    render(<IssueCard issue={createIssue()} totalTokens={0} draggable onDragStart={onDragStart} />);
     const link = screen.getByRole('link', { name: '#12' });
     const dragEvent = createEvent.dragStart(link, {
       dataTransfer: { effectAllowed: 'move' },
@@ -184,7 +191,7 @@ describe('IssueCard', () => {
   });
 
   it('keeps the issue title as plain text', () => {
-    render(<IssueCard issue={createIssue()} />);
+    render(<IssueCard issue={createIssue()} totalTokens={0} />);
 
     expect(screen.queryByRole('link', { name: 'Extract renderer components' })).toBeNull();
   });
@@ -196,6 +203,7 @@ describe('IssueCard', () => {
     render(
       <IssueCard
         issue={createIssue()}
+        totalTokens={0}
         resetTargets={['groomed']}
         onResetSelect={onResetSelect}
         onSetPriority={onSetPriority}
@@ -230,5 +238,21 @@ describe('IssueCard', () => {
     expect(isValidDropTargetForTest(source, 1)).toBe(true);
     expect(isValidDropTargetForTest(source, 2)).toBe(false);
     expect(isValidDropTargetForTest(source, 3)).toBe(false);
+  });
+
+  it('renders zero token totals when there is no session history', () => {
+    render(<IssueCard issue={createIssue()} totalTokens={0} />);
+
+    expect(screen.getByLabelText('0 total tokens').textContent).toBe('0');
+  });
+
+  it('renders compact token totals as non-interactive text', () => {
+    render(<IssueCard issue={createIssue()} totalTokens={12_345} onShip={vi.fn()} />);
+
+    const indicator = screen.getByLabelText('12345 total tokens');
+
+    expect(indicator.textContent).toBe('12.3k');
+    expect(screen.queryByRole('button', { name: '12.3k' })).toBeNull();
+    expect(screen.queryByRole('link', { name: '12.3k' })).toBeNull();
   });
 });

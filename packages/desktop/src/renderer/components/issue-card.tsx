@@ -18,6 +18,7 @@ import {
   RESET_STAGE_LABELS,
   RESET_STAGE_ORDER,
 } from '../lib/constants.js';
+import { formatCompactTokens } from '../lib/format-tokens.js';
 import { cn } from '../lib/utils.js';
 import { Badge } from './ui/badge.js';
 import { Button } from './ui/button.js';
@@ -67,6 +68,7 @@ export function isValidDropTarget(
 
 export interface IssueCardProps {
   issue: ListIssueItem;
+  totalTokens: number;
   onGroom?: (issueNumber: number) => void;
   onResetSelect?: (targetStage: WorkflowStage) => void;
   onSetPriority?: (level: 'high' | 'normal' | 'low') => void;
@@ -90,6 +92,7 @@ export interface IssueCardProps {
 
 export function IssueCard({
   issue,
+  totalTokens,
   onGroom,
   onResetSelect,
   onSetPriority,
@@ -294,32 +297,42 @@ export function IssueCard({
           {isLocked ? <Badge variant="outline">Locked</Badge> : null}
         </div>
       ) : null}
-      {onGroom ? (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            onGroom(issue.number);
-          }}
-          disabled={isGroomDisabled}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          {onGroom ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                onGroom(issue.number);
+              }}
+              disabled={isGroomDisabled}
+            >
+              Groom
+            </Button>
+          ) : null}
+          {onShip ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                onShip(issue.number);
+              }}
+              disabled={isShipDisabled}
+            >
+              Ship
+            </Button>
+          ) : null}
+        </div>
+        <span
+          className="text-xs text-muted-foreground tabular-nums"
+          aria-label={`${totalTokens} total tokens`}
         >
-          Groom
-        </Button>
-      ) : null}
-      {onShip ? (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            onShip(issue.number);
-          }}
-          disabled={isShipDisabled}
-        >
-          Ship
-        </Button>
-      ) : null}
+          {formatCompactTokens(totalTokens)}
+        </span>
+      </div>
       {busyLabel ? (
         <div className="absolute inset-0 flex items-center justify-center rounded-sm bg-background/80">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">

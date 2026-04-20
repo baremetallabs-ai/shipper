@@ -11,6 +11,7 @@ import {
   PLANNED_LABEL,
 } from '@dnsquared/shipper-core';
 import { useIssuePipeline } from '../../src/renderer/hooks/use-issue-pipeline.js';
+import type { PipelineIssue } from '../../src/renderer/types.js';
 import {
   advanceHookTimers,
   createMockShipperApi,
@@ -35,7 +36,7 @@ function createDeferred<T>(): Deferred<T> {
   return { promise, resolve, reject };
 }
 
-function createIssue(number: number, labels: string[] = [PLANNED_LABEL]) {
+function createIssue(number: number, labels: string[] = [PLANNED_LABEL]): PipelineIssue {
   return {
     number,
     title: `Issue ${number}`,
@@ -44,6 +45,7 @@ function createIssue(number: number, labels: string[] = [PLANNED_LABEL]) {
     author: 'octocat',
     createdAt: '2026-04-03T00:00:00Z',
     url: `https://github.com/owner/repo/issues/${number}`,
+    totalTokens: number * 100,
   };
 }
 

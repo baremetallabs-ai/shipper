@@ -11,7 +11,16 @@ interface ConfigPayload {
   autoMergeRepos: string[];
 }
 
+interface PipelineIssue extends ListIssueItem {
+  totalTokens: number;
+}
+
 interface ListIssuesSuccess {
+  ok: true;
+  issues: PipelineIssue[];
+}
+
+interface ListAdoptableIssuesSuccess {
   ok: true;
   issues: ListIssueItem[];
 }
@@ -81,7 +90,7 @@ interface ShipperAPI {
     ghAuth: CheckResult;
   }>;
   getConfig: () => Promise<ConfigPayload>;
-  listAdoptableIssues: (repo: string) => Promise<ListIssuesSuccess | ListIssuesFailure>;
+  listAdoptableIssues: (repo: string) => Promise<ListAdoptableIssuesSuccess | ListIssuesFailure>;
   listRepos: () => Promise<string[]>;
   listIssues: (repo: string) => Promise<ListIssuesSuccess | ListIssuesFailure>;
   setConfig: (config: ConfigPayload) => Promise<void>;

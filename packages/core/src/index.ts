@@ -128,7 +128,7 @@ export {
 } from './lib/reset.js';
 export type { ResultJson } from './lib/result-schema.js';
 export { scripts } from './lib/scripts.js';
-export { aggregateSessionUsage } from './lib/session.js';
+export { aggregateAllIssueUsage, aggregateSessionUsage } from './lib/session.js';
 export type { AgentName, CommandMode, PrReviewWait } from './lib/settings.js';
 export {
   DEFAULTS,
