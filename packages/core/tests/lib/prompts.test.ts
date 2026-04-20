@@ -15,6 +15,16 @@ For example:
 
 Omit this section entirely if no relevant docs are found.`;
 
+function extractEnvironmentFailureEscapeHatch(prompt: string): string {
+  const match = prompt.match(/## Environment failure escape hatch[\s\S]*?\n---/);
+
+  if (!match) {
+    throw new Error('Environment failure escape hatch section not found');
+  }
+
+  return match[0];
+}
+
 describe('groom prompts', () => {
   it.each(['claude', 'codex', 'copilot'])(
     'documents priority choices and label reconciliation for %s',
@@ -225,6 +235,29 @@ describe('plan/design escape-hatch softening', () => {
     expect(prompt).toContain('**In the plan stage:**');
     expect(prompt).toContain('**In the design stage:**');
     expect(prompt).not.toContain('Missing CLI tools, language runtimes, or build toolchains');
+  });
+
+  it('keeps the escape-hatch block byte-identical across all six plan/design prompts', () => {
+    const paths = [
+      'claude/plan',
+      'codex/plan',
+      'copilot/plan',
+      'claude/design',
+      'codex/design',
+      'copilot/design',
+    ];
+    const referenceBlock = extractEnvironmentFailureEscapeHatch(
+      readFileSync(new URL(`../../src/prompts/${paths[0]}.md`, import.meta.url), 'utf-8')
+    );
+
+    for (const path of paths.slice(1)) {
+      const prompt = readFileSync(
+        new URL(`../../src/prompts/${path}.md`, import.meta.url),
+        'utf-8'
+      );
+
+      expect(extractEnvironmentFailureEscapeHatch(prompt)).toBe(referenceBlock);
+    }
   });
 });
 
