@@ -3,7 +3,13 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { BLOCKED_LABEL, LOCKED_LABEL, PLANNED_LABEL } from '@dnsquared/shipper-core';
+import {
+  BLOCKED_LABEL,
+  FAILED_LABEL,
+  LOCKED_LABEL,
+  NEW_LABEL,
+  PLANNED_LABEL,
+} from '@dnsquared/shipper-core';
 import { useIssuePipeline } from '../../src/renderer/hooks/use-issue-pipeline.js';
 import {
   advanceHookTimers,
@@ -203,5 +209,37 @@ describe('useIssuePipeline', () => {
         description: '#9 set to high.',
       })
     );
+  });
+
+  it('buckets failed and new attention issues before stage columns', async () => {
+    const shipper = createMockShipperApi();
+    shipper.install();
+    vi.mocked(shipper.api.listIssues).mockResolvedValue({
+      ok: true,
+      issues: [
+        createIssue(1, [FAILED_LABEL]),
+        createIssue(2, [NEW_LABEL]),
+        createIssue(3, [FAILED_LABEL, BLOCKED_LABEL]),
+        createIssue(4, [FAILED_LABEL, PLANNED_LABEL]),
+        createIssue(5, [PLANNED_LABEL]),
+      ],
+    });
+    const { result } = renderHook(() =>
+      useIssuePipeline({
+        activeRepo: 'owner/repo',
+        canFetch: true,
+        hasActiveRepo: true,
+        hasRunningShipCommand: false,
+        pushToast: vi.fn(),
+      })
+    );
+
+    await act(async () => {
+      await result.current.loadIssues('owner/repo');
+    });
+
+    expect(result.current.attentionIssues.failed.map((issue) => issue.number)).toEqual([1, 3, 4]);
+    expect(result.current.attentionIssues.new.map((issue) => issue.number)).toEqual([2]);
+    expect(result.current.columnMap.get(PLANNED_LABEL)?.map((issue) => issue.number)).toEqual([5]);
   });
 });

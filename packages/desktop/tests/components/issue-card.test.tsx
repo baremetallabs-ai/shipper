@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   BLOCKED_LABEL,
+  FAILED_LABEL,
   LOCKED_LABEL,
   PLANNED_LABEL,
   PR_OPEN_LABEL,
@@ -105,6 +106,30 @@ describe('IssueCard', () => {
 
     expect(screen.getByRole('button', { name: 'Groom' })).toHaveProperty('disabled', true);
     expect(screen.getByRole('button', { name: 'Ship' })).toHaveProperty('disabled', true);
+  });
+
+  it('renders failed styling on the card surface', () => {
+    render(<IssueCard issue={createIssue({ labels: [FAILED_LABEL] })} />);
+
+    const card = screen.getByTestId('issue-card-12');
+
+    expect(card.className).toContain('border-destructive/50');
+    expect(card.className).toContain('bg-destructive/10');
+    expect(screen.getByText('Failed')).toBeTruthy();
+  });
+
+  it('renders failed and blocked indicators together', () => {
+    render(<IssueCard issue={createIssue({ labels: [FAILED_LABEL, BLOCKED_LABEL] })} />);
+
+    expect(screen.getByText('Failed')).toBeTruthy();
+    expect(screen.getByText('Blocked')).toBeTruthy();
+  });
+
+  it('renders failed and locked indicators together', () => {
+    render(<IssueCard issue={createIssue({ labels: [FAILED_LABEL, LOCKED_LABEL] })} />);
+
+    expect(screen.getByText('Failed')).toBeTruthy();
+    expect(screen.getByText('Locked')).toBeTruthy();
   });
 
   it('fires groom, ship, and drag callbacks', () => {
