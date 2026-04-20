@@ -16,7 +16,9 @@ export function ejectCommand(name?: string) {
   if (!promptSet) {
     throw new Error(`Error: No bundled prompts found for agent "${agent}".`);
   }
-  const allFilenames = Object.keys(promptSet).filter((filename) => filename !== 'setup.md');
+  const allFilenames = Object.keys(promptSet).filter(
+    (filename) => filename !== 'setup.md' && filename !== 'setup_remediate.md'
+  );
   const cliNames = allFilenames.map(filenameToCliName);
   const targetDir = path.resolve('.shipper', 'prompts', agent);
   const filenamesToEject = name ? [cliNameToFilename(name)] : allFilenames;
