@@ -1,10 +1,15 @@
 // @vitest-environment jsdom
 
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { IMPLEMENTED_LABEL, NEW_LABEL, type ListIssueItem } from '@dnsquared/shipper-core';
+import {
+  FAILED_LABEL,
+  IMPLEMENTED_LABEL,
+  NEW_LABEL,
+  type ListIssueItem,
+} from '@dnsquared/shipper-core';
 import { PipelineBoard } from '../../src/renderer/components/pipeline-board.js';
 import { PIPELINE_COLUMNS } from '../../src/renderer/lib/constants.js';
 import type { ActiveShippingCommand, ResetSelection } from '../../src/renderer/types.js';
@@ -69,7 +74,10 @@ function renderBoard({
   columnMap = createColumnMap({
     [IMPLEMENTED_LABEL]: [createIssue()],
   }),
-  attentionIssues = [createIssue({ number: 7, title: 'Needs grooming', labels: [NEW_LABEL] })],
+  attentionIssues = {
+    failed: [] as ListIssueItem[],
+    new: [createIssue({ number: 7, title: 'Needs grooming', labels: [NEW_LABEL] })],
+  },
   shippingCommands = new Map<number, ActiveShippingCommand>(),
   onResetSelect = vi.fn<(selection: ResetSelection) => void>(),
   onToggleAutoMerge = vi.fn(),
@@ -115,7 +123,7 @@ describe('PipelineBoard', () => {
 
     expect(screen.getByText('Issues by workflow stage')).toBeTruthy();
     expect(screen.getByText('owner/repo')).toBeTruthy();
-    expect(screen.getByText('Needs attention')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'New' })).toBeTruthy();
     expect(screen.getByText('Needs grooming')).toBeTruthy();
     expect(screen.getByText('Verify pipeline board extraction')).toBeTruthy();
     expect(screen.getAllByText('No issues').length).toBeGreaterThan(0);
@@ -131,7 +139,7 @@ describe('PipelineBoard', () => {
     const onResetSelect = vi.fn<(selection: ResetSelection) => void>();
 
     renderBoard({
-      attentionIssues: [],
+      attentionIssues: { failed: [], new: [] },
       onResetSelect,
     });
 
@@ -147,7 +155,7 @@ describe('PipelineBoard', () => {
     const onResetSelect = vi.fn<(selection: ResetSelection) => void>();
 
     renderBoard({
-      attentionIssues: [],
+      attentionIssues: { failed: [], new: [] },
       onResetSelect,
     });
 
@@ -169,5 +177,39 @@ describe('PipelineBoard', () => {
     fireEvent.drop(prOpenHeading, { dataTransfer });
 
     expect(onResetSelect).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders separate Failed and New attention sections', () => {
+    renderBoard({
+      attentionIssues: {
+        failed: [
+          createIssue({ number: 8, title: 'Investigate failed run', labels: [FAILED_LABEL] }),
+        ],
+        new: [createIssue({ number: 7, title: 'Needs grooming', labels: [NEW_LABEL] })],
+      },
+    });
+
+    const failedSection = screen.getByTestId('failed-attention-section');
+    const newSection = screen.getByTestId('new-attention-section');
+
+    expect(within(failedSection).getByRole('heading', { name: 'Failed' })).toBeTruthy();
+    expect(within(failedSection).getByText('Investigate failed run')).toBeTruthy();
+    expect(within(failedSection).queryByText('Needs grooming')).toBeNull();
+    expect(within(newSection).getByRole('heading', { name: 'New' })).toBeTruthy();
+    expect(within(newSection).getByText('Needs grooming')).toBeTruthy();
+    expect(within(newSection).queryByText('Investigate failed run')).toBeNull();
+  });
+
+  it('shows Groom only for new attention cards', () => {
+    renderBoard({
+      attentionIssues: {
+        failed: [
+          createIssue({ number: 8, title: 'Investigate failed run', labels: [FAILED_LABEL] }),
+        ],
+        new: [createIssue({ number: 7, title: 'Needs grooming', labels: [NEW_LABEL] })],
+      },
+    });
+
+    expect(screen.getAllByRole('button', { name: 'Groom' })).toHaveLength(1);
   });
 });

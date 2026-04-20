@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 
-import { NEW_LABEL, toErrorMessage, type ListIssueItem } from '@dnsquared/shipper-core';
+import {
+  FAILED_LABEL,
+  NEW_LABEL,
+  toErrorMessage,
+  type ListIssueItem,
+} from '@dnsquared/shipper-core';
 
 import { syncWorkflowStageCacheForRepo } from '../lib/app-utils.js';
 import { getShipperApi } from '../lib/shipper-api.js';
@@ -36,7 +41,10 @@ export interface UseIssuePipelineResult {
   unlockConfirmIssue: ListIssueItem | null;
   isNewIssueOpen: boolean;
   isAdoptOpen: boolean;
-  attentionIssues: ListIssueItem[];
+  attentionIssues: {
+    failed: ListIssueItem[];
+    new: ListIssueItem[];
+  };
   columnMap: Map<PipelineColumnLabel, ListIssueItem[]>;
   setFetchError: Dispatch<SetStateAction<string | null>>;
   setResetSelection: Dispatch<SetStateAction<ResetSelection | null>>;
@@ -95,11 +103,19 @@ export function useIssuePipeline({
     const nextColumnMap = new Map<PipelineColumnLabel, ListIssueItem[]>(
       PIPELINE_COLUMNS.map((label) => [label, []])
     );
-    const nextAttentionIssues: ListIssueItem[] = [];
+    const nextAttentionIssues = {
+      failed: [] as ListIssueItem[],
+      new: [] as ListIssueItem[],
+    };
 
     for (const issue of issues) {
+      if (issue.labels.includes(FAILED_LABEL)) {
+        nextAttentionIssues.failed.push(issue);
+        continue;
+      }
+
       if (issue.labels.includes(NEW_LABEL)) {
-        nextAttentionIssues.push(issue);
+        nextAttentionIssues.new.push(issue);
         continue;
       }
 

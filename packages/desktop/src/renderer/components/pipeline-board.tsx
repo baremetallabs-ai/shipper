@@ -14,7 +14,10 @@ export interface PipelineBoardProps {
   repo: string;
   issues: ListIssueItem[];
   columnMap: Map<string, ListIssueItem[]>;
-  attentionIssues: ListIssueItem[];
+  attentionIssues: {
+    failed: ListIssueItem[];
+    new: ListIssueItem[];
+  };
   resettingIssues: ReadonlySet<number>;
   unlockingIssues: ReadonlySet<number>;
   unblockingIssues: ReadonlySet<number>;
@@ -123,42 +126,82 @@ export function PipelineBoard({
         </div>
       ) : (
         <div className="space-y-6 px-6 py-6">
-          {attentionIssues.length > 0 ? (
+          {attentionIssues.failed.length > 0 || attentionIssues.new.length > 0 ? (
             <div className="space-y-3 border-b border-border pb-6">
-              <div>
-                <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                  Needs attention
-                </h3>
-                <p className="text-sm text-muted-foreground">
-                  New issues stay here until they are groomed into the pipeline.
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-3">
-                {attentionIssues.map((issue) => (
-                  <div key={issue.number} className="w-[240px] shrink-0">
-                    <IssueCard
-                      issue={issue}
-                      onGroom={onGroom}
-                      onCloseNotPlanned={() => {
-                        onCloseNotPlanned(issue);
-                      }}
-                      onSetPriority={(level) => {
-                        onSetPriority(issue, level);
-                      }}
-                      onUnlock={() => {
-                        onUnlockClick(issue);
-                      }}
-                      onUnblock={() => {
-                        onUnblockClick(issue);
-                      }}
-                      groomDisabled={!canFetch}
-                      isSettingPriority={settingPriorityIssues.has(issue.number)}
-                      isUnlocking={unlockingIssues.has(issue.number)}
-                      isUnblocking={unblockingIssues.has(issue.number)}
-                    />
+              {attentionIssues.failed.length > 0 ? (
+                <div className="space-y-3" data-testid="failed-attention-section">
+                  <div>
+                    <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                      Failed
+                    </h3>
+                    <p className="text-sm text-muted-foreground">
+                      Investigate failed runs here before returning work to the pipeline.
+                    </p>
                   </div>
-                ))}
-              </div>
+                  <div className="flex flex-wrap gap-3">
+                    {attentionIssues.failed.map((issue) => (
+                      <div key={issue.number} className="w-[240px] shrink-0">
+                        <IssueCard
+                          issue={issue}
+                          onCloseNotPlanned={() => {
+                            onCloseNotPlanned(issue);
+                          }}
+                          onSetPriority={(level) => {
+                            onSetPriority(issue, level);
+                          }}
+                          onUnlock={() => {
+                            onUnlockClick(issue);
+                          }}
+                          onUnblock={() => {
+                            onUnblockClick(issue);
+                          }}
+                          isSettingPriority={settingPriorityIssues.has(issue.number)}
+                          isUnlocking={unlockingIssues.has(issue.number)}
+                          isUnblocking={unblockingIssues.has(issue.number)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {attentionIssues.new.length > 0 ? (
+                <div className="space-y-3" data-testid="new-attention-section">
+                  <div>
+                    <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                      New
+                    </h3>
+                    <p className="text-sm text-muted-foreground">
+                      New issues stay here until they are groomed into the pipeline.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-3">
+                    {attentionIssues.new.map((issue) => (
+                      <div key={issue.number} className="w-[240px] shrink-0">
+                        <IssueCard
+                          issue={issue}
+                          onGroom={onGroom}
+                          onCloseNotPlanned={() => {
+                            onCloseNotPlanned(issue);
+                          }}
+                          onSetPriority={(level) => {
+                            onSetPriority(issue, level);
+                          }}
+                          onUnlock={() => {
+                            onUnlockClick(issue);
+                          }}
+                          onUnblock={() => {
+                            onUnblockClick(issue);
+                          }}
+                          groomDisabled={!canFetch}
+                          isSettingPriority={settingPriorityIssues.has(issue.number)}
+                          isUnlocking={unlockingIssues.has(issue.number)}
+                          isUnblocking={unblockingIssues.has(issue.number)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
           ) : null}
 

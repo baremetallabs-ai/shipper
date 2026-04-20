@@ -4,6 +4,7 @@ import { Check, EllipsisVertical, LoaderCircle, Square } from 'lucide-react';
 import {
   BLOCKED_LABEL,
   DISPLAY_NAME_MAP,
+  FAILED_LABEL,
   getPriorityTier,
   LOCKED_LABEL,
   type ListIssueItem,
@@ -109,6 +110,7 @@ export function IssueCard({
   onDragStart,
   onDragEnd,
 }: IssueCardProps): JSX.Element {
+  const isFailed = issue.labels.includes(FAILED_LABEL);
   const isBlocked = issue.labels.includes(BLOCKED_LABEL);
   const isLocked = issue.labels.includes(LOCKED_LABEL);
   const priorityTier = getPriorityTier(issue.labels);
@@ -139,6 +141,7 @@ export function IssueCard({
 
   return (
     <article
+      data-testid={`issue-card-${issue.number}`}
       draggable={draggable}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
@@ -146,6 +149,7 @@ export function IssueCard({
         'relative space-y-3 rounded-sm border border-border bg-background px-4 py-4 transition-opacity',
         isBusy && 'opacity-70',
         shippingStatus === 'running' && 'shipping-active',
+        isFailed && 'border-destructive/50 bg-destructive/10',
         draggable && 'cursor-grab'
       )}
     >
@@ -269,7 +273,7 @@ export function IssueCard({
         </div>
       </div>
       <h4 className="text-sm font-semibold leading-snug text-foreground">{issue.title}</h4>
-      {priorityTier !== 1 || isBlocked || isLocked ? (
+      {priorityTier !== 1 || isFailed || isBlocked || isLocked ? (
         <div className="flex flex-wrap gap-2">
           {priorityTier === 0 ? (
             <Badge variant="outline" className="border-orange-500 text-orange-600">
@@ -279,6 +283,11 @@ export function IssueCard({
           {priorityTier === 2 ? (
             <Badge variant="outline" className="text-muted-foreground">
               Low
+            </Badge>
+          ) : null}
+          {isFailed ? (
+            <Badge variant="outline" className="border-destructive text-destructive">
+              Failed
             </Badge>
           ) : null}
           {isBlocked ? <Badge variant="outline">Blocked</Badge> : null}
