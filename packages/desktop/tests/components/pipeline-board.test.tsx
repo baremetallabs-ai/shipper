@@ -4,7 +4,17 @@ import React from 'react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { FAILED_LABEL, IMPLEMENTED_LABEL, NEW_LABEL } from '@dnsquared/shipper-core';
+import {
+  DESIGNED_LABEL,
+  FAILED_LABEL,
+  GROOMED_LABEL,
+  IMPLEMENTED_LABEL,
+  NEW_LABEL,
+  PLANNED_LABEL,
+  PR_OPEN_LABEL,
+  PR_REVIEWED_LABEL,
+  READY_LABEL,
+} from '@dnsquared/shipper-core';
 import { PipelineBoard } from '../../src/renderer/components/pipeline-board.js';
 import { PIPELINE_COLUMNS } from '../../src/renderer/lib/constants.js';
 import type {
@@ -114,7 +124,6 @@ function renderBoard({
 
   return render(<PipelineBoard {...props} />);
 }
-
 describe('PipelineBoard', () => {
   it('renders board sections, issues, empty columns, and toolbar toggles', () => {
     const onToggleAutoMerge = vi.fn();
@@ -152,6 +161,40 @@ describe('PipelineBoard', () => {
     expect(selection?.targetStage).toBe('planned');
   });
 
+  it('shows a primary Reset action on failed attention cards and keeps overflow Reset available', () => {
+    const onResetSelect = vi.fn<(selection: ResetSelection) => void>();
+
+    renderBoard({
+      attentionIssues: {
+        failed: [
+          createIssue({
+            number: 8,
+            title: 'Investigate failed run',
+            labels: [FAILED_LABEL],
+            totalTokens: 4_200,
+          }),
+        ],
+        new: [
+          createIssue({ number: 7, title: 'Needs grooming', labels: [NEW_LABEL], totalTokens: 0 }),
+        ],
+      },
+      onResetSelect,
+    });
+
+    const failedSection = screen.getByTestId('failed-attention-section');
+
+    expect(within(failedSection).getAllByRole('button', { name: 'Reset' })).toHaveLength(2);
+    expect(within(failedSection).queryByRole('button', { name: 'Groom' })).toBeNull();
+    expect(within(failedSection).queryByRole('button', { name: 'Ship' })).toBeNull();
+    expect(within(failedSection).getAllByRole('button', { name: 'Planned' })).toHaveLength(2);
+
+    fireEvent.click(within(failedSection).getAllByRole('button', { name: 'Planned' })[0]);
+
+    const [selection] = onResetSelect.mock.calls[0] ?? [];
+    expect(selection?.issue.number).toBe(8);
+    expect(selection?.targetStage).toBe('planned');
+  });
+
   it('allows valid leftward drops and rejects invalid rightward drops', () => {
     const onResetSelect = vi.fn<(selection: ResetSelection) => void>();
 
@@ -178,6 +221,103 @@ describe('PipelineBoard', () => {
     fireEvent.drop(prOpenHeading, { dataTransfer });
 
     expect(onResetSelect).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows failed attention cards to reset via drag-and-drop to eligible stages', () => {
+    const onResetSelect = vi.fn<(selection: ResetSelection) => void>();
+
+    renderBoard({
+      attentionIssues: {
+        failed: [
+          createIssue({
+            number: 8,
+            title: 'Investigate failed run',
+            labels: [FAILED_LABEL],
+            totalTokens: 4_200,
+          }),
+        ],
+        new: [
+          createIssue({ number: 7, title: 'Needs grooming', labels: [NEW_LABEL], totalTokens: 0 }),
+        ],
+      },
+      onResetSelect,
+    });
+
+    const failedIssueTitle = screen.getByText('Investigate failed run');
+    const newSection = screen.getByTestId('new-attention-section');
+    const targets = [
+      { stage: 'new', element: newSection },
+      {
+        stage: 'groomed',
+        element: screen.getByTestId(`pipeline-column-${GROOMED_LABEL}`),
+      },
+      {
+        stage: 'designed',
+        element: screen.getByTestId(`pipeline-column-${DESIGNED_LABEL}`),
+      },
+      {
+        stage: 'planned',
+        element: screen.getByTestId(`pipeline-column-${PLANNED_LABEL}`),
+      },
+      {
+        stage: 'implemented',
+        element: screen.getByTestId(`pipeline-column-${IMPLEMENTED_LABEL}`),
+      },
+    ] as const;
+
+    for (const [index, target] of targets.entries()) {
+      const dataTransfer = { effectAllowed: '', dropEffect: '' };
+      fireEvent.dragStart(failedIssueTitle, { dataTransfer });
+      fireEvent.dragEnter(target.element, { dataTransfer });
+
+      expect(target.element.className).toContain('bg-blue-500/10');
+
+      fireEvent.drop(target.element, { dataTransfer });
+
+      const [selection] = onResetSelect.mock.calls[index] ?? [];
+      expect(selection?.issue.number).toBe(8);
+      expect(selection?.targetStage).toBe(target.stage);
+    }
+  });
+
+  it('rejects failed-card drops on PR Open, PR Reviewed, and Ready', () => {
+    const onResetSelect = vi.fn<(selection: ResetSelection) => void>();
+
+    renderBoard({
+      attentionIssues: {
+        failed: [
+          createIssue({
+            number: 8,
+            title: 'Investigate failed run',
+            labels: [FAILED_LABEL],
+            totalTokens: 4_200,
+          }),
+        ],
+        new: [
+          createIssue({ number: 7, title: 'Needs grooming', labels: [NEW_LABEL], totalTokens: 0 }),
+        ],
+      },
+      onResetSelect,
+    });
+
+    const failedIssueTitle = screen.getByText('Investigate failed run');
+    const blockedTargets = [
+      screen.getByTestId(`pipeline-column-${PR_OPEN_LABEL}`),
+      screen.getByTestId(`pipeline-column-${PR_REVIEWED_LABEL}`),
+      screen.getByTestId(`pipeline-column-${READY_LABEL}`),
+    ];
+
+    for (const target of blockedTargets) {
+      const dataTransfer = { effectAllowed: '', dropEffect: '' };
+      fireEvent.dragStart(failedIssueTitle, { dataTransfer });
+      fireEvent.dragEnter(target, { dataTransfer });
+
+      expect(target.className).not.toContain('bg-blue-500/10');
+
+      fireEvent.drop(target, { dataTransfer });
+    }
+
+    expect(onResetSelect).not.toHaveBeenCalled();
   });
 
   it('renders separate Failed and New attention sections', () => {
@@ -226,6 +366,27 @@ describe('PipelineBoard', () => {
     });
 
     expect(screen.getAllByRole('button', { name: 'Groom' })).toHaveLength(1);
+  });
+
+  it('keeps failed Reset actions available when the New section is not rendered', () => {
+    renderBoard({
+      attentionIssues: {
+        failed: [
+          createIssue({
+            number: 8,
+            title: 'Investigate failed run',
+            labels: [FAILED_LABEL],
+            totalTokens: 4_200,
+          }),
+        ],
+        new: [],
+      },
+    });
+
+    const failedSection = screen.getByTestId('failed-attention-section');
+
+    expect(screen.queryByTestId('new-attention-section')).toBeNull();
+    expect(within(failedSection).getAllByRole('button', { name: 'Reset' })).toHaveLength(2);
   });
 
   it('shows resetting overlays for attention cards in either section', () => {

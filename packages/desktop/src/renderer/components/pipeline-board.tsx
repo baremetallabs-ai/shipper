@@ -1,6 +1,12 @@
 import type { DragEvent, JSX } from 'react';
 
-import { DISPLAY_NAME_MAP, READY_LABEL, type ListIssueItem } from '@dnsquared/shipper-core';
+import {
+  DISPLAY_NAME_MAP,
+  FAILED_LABEL,
+  READY_LABEL,
+  type ListIssueItem,
+  type WorkflowStage,
+} from '@dnsquared/shipper-core';
 
 import { useDragDrop } from '../hooks/use-drag-drop.js';
 import { COLUMN_RESET_STAGE, PIPELINE_COLUMNS } from '../lib/constants.js';
@@ -68,44 +74,137 @@ export function PipelineBoard({
   onShip,
   onCancelShip,
 }: PipelineBoardProps): JSX.Element {
-  const { dragSource, dragOverColumn, startDrag, endDrag, setDragOverColumn, clearDrag } =
-    useDragDrop();
+  const {
+    dragSource,
+    dragOverStage,
+    startPipelineDrag,
+    startAttentionDrag,
+    endDrag,
+    setDragOverStage,
+    clearDrag,
+  } = useDragDrop();
   const hasAttentionIssues = attentionIssues.failed.length > 0 || attentionIssues.new.length > 0;
 
-  function handleDragStart(event: DragEvent, issue: ListIssueItem, columnIndex: number): void {
+  function handlePipelineDragStart(
+    event: DragEvent,
+    issue: ListIssueItem,
+    columnIndex: number
+  ): void {
     event.dataTransfer.effectAllowed = 'move';
-    startDrag(issue, columnIndex);
+    startPipelineDrag({ issue, columnIndex });
   }
 
-  function renderAttentionCards(issues: PipelineIssue[], allowGroom: boolean): JSX.Element {
+  function handleAttentionDragStart(event: DragEvent, issue: ListIssueItem): void {
+    event.dataTransfer.effectAllowed = 'move';
+    startAttentionDrag(issue);
+  }
+
+  function isBusyIssue(issueNumber: number): boolean {
+    return (
+      resettingIssues.has(issueNumber) ||
+      unlockingIssues.has(issueNumber) ||
+      unblockingIssues.has(issueNumber)
+    );
+  }
+
+  function isValidStageDropTarget(targetStage: WorkflowStage): boolean {
+    return dragSource !== null && isValidDropTarget(dragSource, targetStage);
+  }
+
+  function handleStageDragOver(event: DragEvent, targetStage: WorkflowStage): void {
+    if (!isValidStageDropTarget(targetStage)) {
+      event.dataTransfer.dropEffect = 'none';
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+  }
+
+  function handleStageDragEnter(event: DragEvent, targetStage: WorkflowStage): void {
+    if (!isValidStageDropTarget(targetStage)) {
+      setDragOverStage(null);
+      return;
+    }
+
+    event.preventDefault();
+    setDragOverStage(targetStage);
+  }
+
+  function handleStageDragLeave(event: DragEvent): void {
+    const { relatedTarget } = event;
+    if (!(relatedTarget instanceof Node) || !event.currentTarget.contains(relatedTarget)) {
+      setDragOverStage(null);
+    }
+  }
+
+  function handleStageDrop(event: DragEvent, targetStage: WorkflowStage): void {
+    event.preventDefault();
+
+    if (!dragSource || !isValidDropTarget(dragSource, targetStage)) {
+      clearDrag();
+      return;
+    }
+
+    onResetSelect({
+      issue: dragSource.issue,
+      targetStage,
+    });
+
+    clearDrag();
+  }
+
+  function renderAttentionCards(
+    issues: PipelineIssue[],
+    options: { allowGroom: boolean; allowFailedDrag: boolean }
+  ): JSX.Element {
     return (
       <div className="flex flex-wrap gap-3">
-        {issues.map((issue) => (
-          <div key={issue.number} className="w-[240px] shrink-0">
-            <IssueCard
-              issue={issue}
-              totalTokens={issue.totalTokens}
-              onGroom={allowGroom ? onGroom : undefined}
-              onCloseNotPlanned={() => {
-                onCloseNotPlanned(issue);
-              }}
-              onSetPriority={(level) => {
-                onSetPriority(issue, level);
-              }}
-              onUnlock={() => {
-                onUnlockClick(issue);
-              }}
-              onUnblock={() => {
-                onUnblockClick(issue);
-              }}
-              groomDisabled={allowGroom ? !canFetch : undefined}
-              isResetting={resettingIssues.has(issue.number)}
-              isSettingPriority={settingPriorityIssues.has(issue.number)}
-              isUnlocking={unlockingIssues.has(issue.number)}
-              isUnblocking={unblockingIssues.has(issue.number)}
-            />
-          </div>
-        ))}
+        {issues.map((issue) => {
+          const resetTargets = getResetTargets(issue.labels);
+          const isFailedCard = issue.labels.includes(FAILED_LABEL);
+          const isBusy = isBusyIssue(issue.number);
+
+          return (
+            <div key={issue.number} className="w-[240px] shrink-0">
+              <IssueCard
+                issue={issue}
+                totalTokens={issue.totalTokens}
+                onGroom={options.allowGroom ? onGroom : undefined}
+                onResetSelect={(targetStage) => {
+                  onResetSelect({ issue, targetStage });
+                }}
+                onCloseNotPlanned={() => {
+                  onCloseNotPlanned(issue);
+                }}
+                onSetPriority={(level) => {
+                  onSetPriority(issue, level);
+                }}
+                onUnlock={() => {
+                  onUnlockClick(issue);
+                }}
+                onUnblock={() => {
+                  onUnblockClick(issue);
+                }}
+                resetTargets={resetTargets}
+                groomDisabled={options.allowGroom ? !canFetch : undefined}
+                isResetting={resettingIssues.has(issue.number)}
+                isSettingPriority={settingPriorityIssues.has(issue.number)}
+                isUnlocking={unlockingIssues.has(issue.number)}
+                isUnblocking={unblockingIssues.has(issue.number)}
+                draggable={options.allowFailedDrag && isFailedCard && !isBusy}
+                onDragStart={
+                  options.allowFailedDrag && isFailedCard && !isBusy
+                    ? (event) => {
+                        handleAttentionDragStart(event, issue);
+                      }
+                    : undefined
+                }
+                onDragEnd={options.allowFailedDrag && isFailedCard && !isBusy ? endDrag : undefined}
+              />
+            </div>
+          );
+        })}
       </div>
     );
   }
@@ -172,11 +271,35 @@ export function PipelineBoard({
                       Investigate failed runs here before returning work to the pipeline.
                     </p>
                   </div>
-                  {renderAttentionCards(attentionIssues.failed, false)}
+                  {renderAttentionCards(attentionIssues.failed, {
+                    allowGroom: false,
+                    allowFailedDrag: true,
+                  })}
                 </div>
               ) : null}
               {attentionIssues.new.length > 0 ? (
-                <div className="space-y-3" data-testid="new-attention-section">
+                <div
+                  className={cn(
+                    'space-y-3 rounded-sm border border-transparent p-2 transition-colors',
+                    dragSource !== null &&
+                      (isValidStageDropTarget('new')
+                        ? dragOverStage === 'new'
+                          ? 'border-blue-400 bg-blue-500/10'
+                          : 'border-blue-400/40'
+                        : 'opacity-50')
+                  )}
+                  data-testid="new-attention-section"
+                  onDragOver={(event) => {
+                    handleStageDragOver(event, 'new');
+                  }}
+                  onDragEnter={(event) => {
+                    handleStageDragEnter(event, 'new');
+                  }}
+                  onDragLeave={handleStageDragLeave}
+                  onDrop={(event) => {
+                    handleStageDrop(event, 'new');
+                  }}
+                >
                   <div>
                     <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-muted-foreground">
                       New
@@ -185,7 +308,10 @@ export function PipelineBoard({
                       New issues stay here until they are groomed into the pipeline.
                     </p>
                   </div>
-                  {renderAttentionCards(attentionIssues.new, true)}
+                  {renderAttentionCards(attentionIssues.new, {
+                    allowGroom: true,
+                    allowFailedDrag: false,
+                  })}
                 </div>
               ) : null}
             </div>
@@ -196,12 +322,16 @@ export function PipelineBoard({
               {PIPELINE_COLUMNS.map((label, columnIndex) => {
                 const stageIssues = columnMap.get(label) ?? [];
                 const isReadyColumn = label === READY_LABEL;
+                const targetStage = COLUMN_RESET_STAGE[label];
                 const isValidTarget =
-                  dragSource !== null && isValidDropTarget(dragSource, columnIndex);
+                  dragSource !== null && targetStage
+                    ? isValidDropTarget(dragSource, targetStage)
+                    : false;
 
                 return (
                   <section
                     key={label}
+                    data-testid={`pipeline-column-${label}`}
                     className={cn(
                       'flex w-[240px] shrink-0 flex-col gap-4 rounded-sm border px-4 py-4 transition-colors',
                       isReadyColumn
@@ -209,57 +339,36 @@ export function PipelineBoard({
                         : 'border-border bg-background/40',
                       dragSource !== null &&
                         (isValidTarget
-                          ? dragOverColumn === columnIndex
+                          ? dragOverStage === targetStage
                             ? 'border-blue-400 bg-blue-500/10'
                             : 'border-blue-400/40'
                           : 'opacity-50')
                     )}
                     onDragOver={(event) => {
-                      if (!dragSource || !isValidDropTarget(dragSource, columnIndex)) {
+                      if (!targetStage) {
                         event.dataTransfer.dropEffect = 'none';
                         return;
                       }
 
-                      event.preventDefault();
-                      event.dataTransfer.dropEffect = 'move';
+                      handleStageDragOver(event, targetStage);
                     }}
                     onDragEnter={(event) => {
-                      if (!dragSource || !isValidDropTarget(dragSource, columnIndex)) {
-                        setDragOverColumn(null);
+                      if (!targetStage) {
+                        setDragOverStage(null);
                         return;
                       }
 
-                      event.preventDefault();
-                      setDragOverColumn(columnIndex);
+                      handleStageDragEnter(event, targetStage);
                     }}
-                    onDragLeave={(event) => {
-                      const { relatedTarget } = event;
-                      if (
-                        !(relatedTarget instanceof Node) ||
-                        !event.currentTarget.contains(relatedTarget)
-                      ) {
-                        setDragOverColumn(null);
-                      }
-                    }}
+                    onDragLeave={handleStageDragLeave}
                     onDrop={(event) => {
-                      event.preventDefault();
-
-                      if (!dragSource || !isValidDropTarget(dragSource, columnIndex)) {
+                      if (!targetStage) {
+                        event.preventDefault();
                         clearDrag();
                         return;
                       }
 
-                      const targetLabel = PIPELINE_COLUMNS[columnIndex];
-                      const targetStage = targetLabel ? COLUMN_RESET_STAGE[targetLabel] : undefined;
-
-                      if (targetStage) {
-                        onResetSelect({
-                          issue: dragSource.issue,
-                          targetStage,
-                        });
-                      }
-
-                      clearDrag();
+                      handleStageDrop(event, targetStage);
                     }}
                   >
                     <div>
@@ -308,14 +417,9 @@ export function PipelineBoard({
                                     }
                                   : undefined
                               }
-                              draggable={
-                                !resettingIssues.has(issue.number) &&
-                                !unlockingIssues.has(issue.number) &&
-                                !unblockingIssues.has(issue.number) &&
-                                !shippingStatus
-                              }
+                              draggable={!isBusyIssue(issue.number) && !shippingStatus}
                               onDragStart={(event) => {
-                                handleDragStart(event, issue, columnIndex);
+                                handlePipelineDragStart(event, issue, columnIndex);
                               }}
                               onDragEnd={endDrag}
                             />
