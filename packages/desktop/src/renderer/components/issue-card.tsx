@@ -12,12 +12,11 @@ import {
 } from '@dnsquared/shipper-core';
 
 import {
-  COLUMN_RESET_STAGE,
-  PIPELINE_COLUMNS,
   POST_IMPLEMENTATION_LABELS,
   RESET_STAGE_LABELS,
   RESET_STAGE_ORDER,
 } from '../lib/constants.js';
+import type { DragSource } from '../hooks/use-drag-drop.js';
 import { formatCompactTokens } from '../lib/format-tokens.js';
 import { cn } from '../lib/utils.js';
 import { Badge } from './ui/badge.js';
@@ -46,6 +45,10 @@ export function getResetTargets(labels: string[]): WorkflowStage[] {
     }
   }
 
+  if (labels.includes(FAILED_LABEL)) {
+    return RESET_STAGE_ORDER.map(({ stage }) => stage);
+  }
+
   return [];
 }
 
@@ -53,15 +56,7 @@ function getResetTargetLabel(stage: WorkflowStage): string {
   return DISPLAY_NAME_MAP[RESET_STAGE_LABELS[stage]] ?? stage;
 }
 
-export function isValidDropTarget(
-  source: { issue: ListIssueItem; columnIndex: number },
-  targetColumnIndex: number
-): boolean {
-  if (targetColumnIndex >= source.columnIndex) return false;
-  const targetLabel = PIPELINE_COLUMNS[targetColumnIndex];
-  if (!targetLabel) return false;
-  const targetStage = COLUMN_RESET_STAGE[targetLabel];
-  if (!targetStage) return false;
+export function isValidDropTarget(source: DragSource, targetStage: WorkflowStage): boolean {
   const resetTargets = getResetTargets(source.issue.labels);
   return resetTargets.includes(targetStage);
 }
@@ -127,7 +122,7 @@ export function IssueCard({
       : isUnblocking
         ? 'Unblocking...'
         : null;
-  const isGroomDisabled = groomDisabled || isBlocked || isLocked || isShipping;
+  const isGroomDisabled = groomDisabled || isBlocked || isLocked || isFailed || isShipping;
   const canUnlock = isLocked && !!onUnlock && !isShipping;
   const canUnblock = isBlocked && !isLocked && !!onUnblock && !isShipping;
   const canCloseNotPlanned = !!onCloseNotPlanned && !isLocked && !isShipping;
@@ -136,7 +131,7 @@ export function IssueCard({
   const hasFlatActions = canCloseNotPlanned || canUnlock || canUnblock;
   const showOverflowMenu = hasResetMenu || hasFlatActions || hasPriorityMenu;
   const showStopShipButton = isShipping && onStopShip !== undefined;
-  const isShipDisabled = shipDisabled || isBlocked || isLocked || isShipping;
+  const isShipDisabled = shipDisabled || isBlocked || isLocked || isFailed || isShipping;
 
   function handleUnlockSelect(): void {
     onUnlock?.();
@@ -299,32 +294,56 @@ export function IssueCard({
       ) : null}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          {onGroom ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                onGroom(issue.number);
-              }}
-              disabled={isGroomDisabled}
-            >
-              Groom
-            </Button>
-          ) : null}
-          {onShip ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                onShip(issue.number);
-              }}
-              disabled={isShipDisabled}
-            >
-              Ship
-            </Button>
-          ) : null}
+          {isFailed && hasResetMenu ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button type="button" size="sm">
+                  Reset
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                {resetTargets.map((targetStage) => (
+                  <DropdownMenuItem
+                    key={targetStage}
+                    onSelect={() => {
+                      onResetSelect(targetStage);
+                    }}
+                  >
+                    {getResetTargetLabel(targetStage)}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <>
+              {onGroom ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    onGroom(issue.number);
+                  }}
+                  disabled={isGroomDisabled}
+                >
+                  Groom
+                </Button>
+              ) : null}
+              {onShip ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    onShip(issue.number);
+                  }}
+                  disabled={isShipDisabled}
+                >
+                  Ship
+                </Button>
+              ) : null}
+            </>
+          )}
         </div>
         <span className="text-xs text-muted-foreground tabular-nums">
           <span className="sr-only">{`${totalTokens} total tokens`}</span>

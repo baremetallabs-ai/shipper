@@ -14,6 +14,7 @@ import {
   type ListIssueItem,
   type WorkflowStage,
 } from '@dnsquared/shipper-core';
+import type { DragSource } from '../../src/renderer/hooks/use-drag-drop.js';
 import {
   IssueCard,
   getResetTargets,
@@ -56,8 +57,8 @@ vi.mock('../../src/renderer/components/ui/dropdown-menu.js', () => ({
 
 const getResetTargetsForTest = getResetTargets as unknown as (labels: string[]) => WorkflowStage[];
 const isValidDropTargetForTest = isValidDropTarget as unknown as (
-  source: { issue: ListIssueItem; columnIndex: number },
-  targetColumnIndex: number
+  source: DragSource,
+  targetStage: WorkflowStage
 ) => boolean;
 
 function createIssue(overrides: Partial<ListIssueItem> = {}): ListIssueItem {
@@ -196,6 +197,33 @@ describe('IssueCard', () => {
     expect(screen.queryByRole('link', { name: 'Extract renderer components' })).toBeNull();
   });
 
+  it('renders a primary Reset control for failed cards and keeps the overflow Reset menu', () => {
+    const onResetSelect = vi.fn();
+
+    render(
+      <IssueCard
+        issue={createIssue({ labels: [FAILED_LABEL] })}
+        totalTokens={0}
+        onGroom={vi.fn()}
+        onShip={vi.fn()}
+        resetTargets={['new', 'groomed']}
+        onResetSelect={onResetSelect}
+      />
+    );
+
+    expect(screen.queryByRole('button', { name: 'Groom' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Ship' })).toBeNull();
+    expect(screen.getAllByRole('button', { name: 'Reset' })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'New' })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'Groomed' })).toHaveLength(2);
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'New' })[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Groomed' })[1]);
+
+    expect(onResetSelect).toHaveBeenNthCalledWith(1, 'new');
+    expect(onResetSelect).toHaveBeenNthCalledWith(2, 'groomed');
+  });
+
   it('invokes reset and priority menu actions', () => {
     const onResetSelect = vi.fn();
     const onSetPriority = vi.fn();
@@ -220,7 +248,7 @@ describe('IssueCard', () => {
     expect(onSetPriority).toHaveBeenCalledWith('high');
   });
 
-  it('derives reset targets and validates only leftward drops', () => {
+  it('derives reset targets for failed-only and failed-plus-stage issues', () => {
     expect(getResetTargetsForTest([PLANNED_LABEL])).toEqual(['new', 'groomed', 'designed']);
     expect(getResetTargetsForTest([PR_OPEN_LABEL])).toEqual([
       'new',
@@ -229,15 +257,34 @@ describe('IssueCard', () => {
       'planned',
       'implemented',
     ]);
+    expect(getResetTargetsForTest([FAILED_LABEL])).toEqual([
+      'new',
+      'groomed',
+      'designed',
+      'planned',
+      'implemented',
+    ]);
+    expect(getResetTargetsForTest([FAILED_LABEL, PLANNED_LABEL])).toEqual([
+      'new',
+      'groomed',
+      'designed',
+    ]);
+  });
 
-    const source = {
+  it('validates reset drop targets for attention and pipeline drag sources', () => {
+    const attentionSource: DragSource = {
+      kind: 'attention',
+      issue: createIssue({ labels: [FAILED_LABEL] }),
+    };
+    const pipelineSource: DragSource = {
+      kind: 'pipeline',
       issue: createIssue({ labels: [PLANNED_LABEL] }),
       columnIndex: 2,
     };
 
-    expect(isValidDropTargetForTest(source, 1)).toBe(true);
-    expect(isValidDropTargetForTest(source, 2)).toBe(false);
-    expect(isValidDropTargetForTest(source, 3)).toBe(false);
+    expect(isValidDropTargetForTest(attentionSource, 'implemented')).toBe(true);
+    expect(isValidDropTargetForTest(pipelineSource, 'designed')).toBe(true);
+    expect(isValidDropTargetForTest(pipelineSource, 'planned')).toBe(false);
   });
 
   it('renders zero token totals when there is no session history', () => {

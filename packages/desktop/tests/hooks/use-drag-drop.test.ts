@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { useDragDrop } from '../../src/renderer/hooks/use-drag-drop.js';
 
 describe('useDragDrop', () => {
-  it('tracks the current drag source and hovered column', () => {
+  it('tracks pipeline and attention drag sources with a hovered stage', () => {
     const issue = {
       number: 42,
       title: 'Dragged issue',
@@ -19,12 +19,20 @@ describe('useDragDrop', () => {
     const { result } = renderHook(() => useDragDrop());
 
     act(() => {
-      result.current.startDrag(issue, 2);
-      result.current.setDragOverColumn(0);
+      result.current.startPipelineDrag({ issue, columnIndex: 2 });
+      result.current.setDragOverStage('groomed');
     });
 
-    expect(result.current.dragSource).toEqual({ issue, columnIndex: 2 });
-    expect(result.current.dragOverColumn).toBe(0);
+    expect(result.current.dragSource).toEqual({ kind: 'pipeline', issue, columnIndex: 2 });
+    expect(result.current.dragOverStage).toBe('groomed');
+
+    act(() => {
+      result.current.startAttentionDrag(issue);
+      result.current.setDragOverStage('new');
+    });
+
+    expect(result.current.dragSource).toEqual({ kind: 'attention', issue });
+    expect(result.current.dragOverStage).toBe('new');
   });
 
   it('clears drag state on endDrag and clearDrag', () => {
@@ -40,20 +48,21 @@ describe('useDragDrop', () => {
     const { result } = renderHook(() => useDragDrop());
 
     act(() => {
-      result.current.startDrag(issue, 1);
-      result.current.setDragOverColumn(0);
+      result.current.startPipelineDrag({ issue, columnIndex: 1 });
+      result.current.setDragOverStage('new');
       result.current.endDrag();
     });
 
     expect(result.current.dragSource).toBeNull();
-    expect(result.current.dragOverColumn).toBeNull();
+    expect(result.current.dragOverStage).toBeNull();
 
     act(() => {
-      result.current.startDrag(issue, 3);
+      result.current.startAttentionDrag(issue);
+      result.current.setDragOverStage('implemented');
       result.current.clearDrag();
     });
 
     expect(result.current.dragSource).toBeNull();
-    expect(result.current.dragOverColumn).toBeNull();
+    expect(result.current.dragOverStage).toBeNull();
   });
 });

@@ -1,32 +1,48 @@
 import { useState } from 'react';
 
-import type { ListIssueItem } from '@dnsquared/shipper-core';
+import type { ListIssueItem, WorkflowStage } from '@dnsquared/shipper-core';
 
-interface DragSource {
+export type DragSource =
+  | {
+      kind: 'pipeline';
+      issue: ListIssueItem;
+      columnIndex: number;
+    }
+  | {
+      kind: 'attention';
+      issue: ListIssueItem;
+    };
+
+interface PipelineDragInput {
   issue: ListIssueItem;
   columnIndex: number;
 }
 
 export interface UseDragDropResult {
   dragSource: DragSource | null;
-  dragOverColumn: number | null;
-  startDrag: (issue: ListIssueItem, columnIndex: number) => void;
+  dragOverStage: WorkflowStage | null;
+  startPipelineDrag: (input: PipelineDragInput) => void;
+  startAttentionDrag: (issue: ListIssueItem) => void;
   endDrag: () => void;
-  setDragOverColumn: (columnIndex: number | null) => void;
+  setDragOverStage: (stage: WorkflowStage | null) => void;
   clearDrag: () => void;
 }
 
 export function useDragDrop(): UseDragDropResult {
   const [dragSource, setDragSource] = useState<DragSource | null>(null);
-  const [dragOverColumn, setDragOverColumn] = useState<number | null>(null);
+  const [dragOverStage, setDragOverStage] = useState<WorkflowStage | null>(null);
 
   function clearDrag(): void {
     setDragSource(null);
-    setDragOverColumn(null);
+    setDragOverStage(null);
   }
 
-  function startDrag(issue: ListIssueItem, columnIndex: number): void {
-    setDragSource({ issue, columnIndex });
+  function startPipelineDrag({ issue, columnIndex }: PipelineDragInput): void {
+    setDragSource({ kind: 'pipeline', issue, columnIndex });
+  }
+
+  function startAttentionDrag(issue: ListIssueItem): void {
+    setDragSource({ kind: 'attention', issue });
   }
 
   function endDrag(): void {
@@ -35,10 +51,11 @@ export function useDragDrop(): UseDragDropResult {
 
   return {
     dragSource,
-    dragOverColumn,
-    startDrag,
+    dragOverStage,
+    startPipelineDrag,
+    startAttentionDrag,
     endDrag,
-    setDragOverColumn,
+    setDragOverStage,
     clearDrag,
   };
 }
