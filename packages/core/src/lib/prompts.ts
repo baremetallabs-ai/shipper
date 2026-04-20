@@ -8,6 +8,7 @@ import prReviewPrompt from '../prompts/claude/pr_review.md';
 import prRemediatePrompt from '../prompts/claude/pr_remediate.md';
 import unblockPrompt from '../prompts/claude/unblock.md';
 import setupPrompt from '../prompts/claude/setup.md';
+import setupRemediatePrompt from '../prompts/claude/setup_remediate.md';
 
 import codexNewPrompt from '../prompts/codex/new.md';
 import codexGroomPrompt from '../prompts/codex/groom.md';
@@ -19,6 +20,7 @@ import codexPrReviewPrompt from '../prompts/codex/pr_review.md';
 import codexPrRemediatePrompt from '../prompts/codex/pr_remediate.md';
 import codexUnblockPrompt from '../prompts/codex/unblock.md';
 import codexSetupPrompt from '../prompts/codex/setup.md';
+import codexSetupRemediatePrompt from '../prompts/codex/setup_remediate.md';
 
 import copilotNewPrompt from '../prompts/copilot/new.md';
 import copilotGroomPrompt from '../prompts/copilot/groom.md';
@@ -30,6 +32,7 @@ import copilotPrReviewPrompt from '../prompts/copilot/pr_review.md';
 import copilotPrRemediatePrompt from '../prompts/copilot/pr_remediate.md';
 import copilotUnblockPrompt from '../prompts/copilot/unblock.md';
 import copilotSetupPrompt from '../prompts/copilot/setup.md';
+import copilotSetupRemediatePrompt from '../prompts/copilot/setup_remediate.md';
 
 export const agentPrompts: Record<string, Record<string, string>> = {
   claude: {
@@ -43,6 +46,7 @@ export const agentPrompts: Record<string, Record<string, string>> = {
     'pr_remediate.md': prRemediatePrompt,
     'unblock.md': unblockPrompt,
     'setup.md': setupPrompt,
+    'setup_remediate.md': setupRemediatePrompt,
   },
   codex: {
     'new.md': codexNewPrompt,
@@ -55,6 +59,7 @@ export const agentPrompts: Record<string, Record<string, string>> = {
     'pr_remediate.md': codexPrRemediatePrompt,
     'unblock.md': codexUnblockPrompt,
     'setup.md': codexSetupPrompt,
+    'setup_remediate.md': codexSetupRemediatePrompt,
   },
   copilot: {
     'new.md': copilotNewPrompt,
@@ -67,5 +72,6 @@ export const agentPrompts: Record<string, Record<string, string>> = {
     'pr_remediate.md': copilotPrRemediatePrompt,
     'unblock.md': copilotUnblockPrompt,
     'setup.md': copilotSetupPrompt,
+    'setup_remediate.md': copilotSetupRemediatePrompt,
   },
 };

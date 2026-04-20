@@ -158,6 +158,27 @@ describe('pr_remediate prompts', () => {
   );
 });
 
+describe('setup_remediate prompts', () => {
+  it.each(['claude', 'codex', 'copilot'])(
+    'append PR text plus user input and keep transport in shipper for %s',
+    (agent) => {
+      const prompt = readFileSync(
+        new URL(`../../src/prompts/${agent}/setup_remediate.md`, import.meta.url),
+        'utf-8'
+      );
+
+      expect(prompt).toContain('Shipper already created the branch and PR');
+      expect(prompt).toContain('append-pr: true');
+      expect(prompt).toContain('append-user-input: true');
+      expect(prompt).not.toContain('append-issue: true');
+      expect(prompt).not.toContain('gh pr create');
+      expect(prompt).not.toContain('gh pr checks');
+      expect(prompt).not.toContain('git push');
+      expect(prompt).not.toContain('git checkout -b');
+    }
+  );
+});
+
 describe('implement prompts', () => {
   it.each(['claude', 'codex', 'copilot'])(
     'warn against force-adding .shipper files for %s',

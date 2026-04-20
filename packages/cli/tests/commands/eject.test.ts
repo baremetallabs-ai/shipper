@@ -107,6 +107,9 @@ describe('ejectCommand', () => {
       path.resolve('.shipper', 'prompts', 'claude', 'unblock.md'),
     ]);
     expect(writtenPaths.some((writtenPath) => writtenPath.endsWith('setup.md'))).toBe(false);
+    expect(writtenPaths.some((writtenPath) => writtenPath.endsWith('setup_remediate.md'))).toBe(
+      false
+    );
     expect(logSpy).toHaveBeenCalledWith('[shipper] Summary: wrote 9, skipped 0');
   });
 

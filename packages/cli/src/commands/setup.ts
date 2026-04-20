@@ -1,11 +1,21 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { runPrompt, type AgentName, type CommandMode } from '@dnsquared/shipper-core';
+import {
+  logger,
+  offerSetupFinalize,
+  readGitStatusSnapshot,
+  resolveMode,
+  runPrompt,
+  type AgentName,
+  type CommandMode,
+} from '@dnsquared/shipper-core';
+import { confirm } from '../lib/confirm.js';
 
 export async function setupCommand(
   words: string[],
   options: { mode?: CommandMode; agent?: AgentName; model?: string } = {}
 ): Promise<void> {
+  const effectiveMode = resolveMode('setup', options.mode);
   const userText = words.join(' ').trim();
 
   let userInput: string;
@@ -19,10 +29,39 @@ export async function setupCommand(
       : `Run setup for ${repoName}. This is a fresh setup — no .shipper/ directory found.`;
   }
 
-  process.exitCode = await runPrompt('setup', {
+  const before = await readGitStatusSnapshot(process.cwd());
+  const setupExitCode = await runPrompt('setup', {
     userInput,
-    mode: options.mode,
+    mode: effectiveMode,
     agent: options.agent,
     model: options.model,
   });
+  process.exitCode = setupExitCode;
+
+  if (setupExitCode !== 0) {
+    return;
+  }
+
+  if (effectiveMode === 'headless') {
+    process.exitCode = 0;
+    return;
+  }
+
+  const finalizeResult = await offerSetupFinalize({
+    before,
+    mode: effectiveMode,
+    agent: options.agent,
+    model: options.model,
+    confirm,
+  });
+
+  if (finalizeResult.status === 'failed') {
+    if (finalizeResult.error) {
+      logger.error(finalizeResult.error);
+    }
+    process.exitCode = 1;
+    return;
+  }
+
+  process.exitCode = 0;
 }

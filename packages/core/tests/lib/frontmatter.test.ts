@@ -187,6 +187,7 @@ You are helping a developer turn a rough idea into a lightweight GitHub issue.`;
       '../../src/prompts/claude/implement.md',
       '../../src/prompts/claude/pr_open.md',
       '../../src/prompts/claude/pr_remediate.md',
+      '../../src/prompts/claude/setup_remediate.md',
       '../../src/prompts/claude/setup.md',
     ];
 
@@ -212,9 +213,11 @@ You are helping a developer turn a rough idea into a lightweight GitHub issue.`;
       '../../src/prompts/codex/implement.md',
       '../../src/prompts/codex/pr_open.md',
       '../../src/prompts/codex/pr_remediate.md',
+      '../../src/prompts/codex/setup_remediate.md',
       '../../src/prompts/claude/implement.md',
       '../../src/prompts/claude/pr_open.md',
       '../../src/prompts/claude/pr_remediate.md',
+      '../../src/prompts/claude/setup_remediate.md',
     ];
 
     for (const promptPath of promptPaths) {
@@ -223,6 +226,20 @@ You are helping a developer turn a rough idea into a lightweight GitHub issue.`;
       expect(result.frontmatter['append-user-input'], `${promptPath} must append user input`).toBe(
         true
       );
+    }
+  });
+
+  it('requires append-pr on the setup remediation prompts', () => {
+    const promptPaths = [
+      '../../src/prompts/claude/setup_remediate.md',
+      '../../src/prompts/codex/setup_remediate.md',
+      '../../src/prompts/copilot/setup_remediate.md',
+    ];
+
+    for (const promptPath of promptPaths) {
+      const input = readFileSync(resolve(testDir, promptPath), 'utf8');
+      const result = parseFrontmatter(input);
+      expect(result.frontmatter['append-pr'], `${promptPath} must append PR text`).toBe(true);
     }
   });
 });

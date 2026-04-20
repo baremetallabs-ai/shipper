@@ -129,6 +129,12 @@ export {
 export type { ResultJson } from './lib/result-schema.js';
 export { scripts } from './lib/scripts.js';
 export { aggregateAllIssueUsage, aggregateSessionUsage } from './lib/session.js';
+export type {
+  GitStatusEntry,
+  GitStatusSnapshot,
+  SetupFinalizeResult,
+} from './lib/setup-finalize.js';
+export { offerSetupFinalize, readGitStatusSnapshot } from './lib/setup-finalize.js';
 export type { AgentName, CommandMode, PrReviewWait } from './lib/settings.js';
 export {
   DEFAULTS,
