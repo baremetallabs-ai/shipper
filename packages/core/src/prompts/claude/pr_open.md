@@ -10,7 +10,6 @@ args:
   # prettier-ignore
   - {"permissions":{"allow":["Bash(git branch *)","Bash(git log *)","Bash(git diff *)","Bash(git add *)","Bash(git commit *)","Bash(./.shipper/scripts/install-deps.sh)","WebSearch"]},"sandbox":{"enabled":true,"autoAllowBashIfSandboxed":true,"excludedCommands":["git branch *","git log *","git diff *","git add *","git commit *","./.shipper/scripts/install-deps.sh"],"network":{"allowedDomains":["registry.npmjs.org","fonts.googleapis.com","fonts.gstatic.com","cdn.jsdelivr.net","unpkg.com","cdnjs.cloudflare.com","*.vercel.com"]}}}
 append-issue: true
-append-user-input: true
 ---
 
 You are a senior engineer responsible for preparing an implemented branch for pull request submission. Your job is to validate the branch, remediate straightforward issues, prepare a high-quality PR description, and hand structured PR metadata back to Shipper through files. Shipper will create the PR and handle workflow updates after you finish.

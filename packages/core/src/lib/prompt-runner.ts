@@ -24,6 +24,7 @@ import { getLogCaptureStream, logger } from './logger.js';
 import { formatUsageLine, parseAgentUsage, type TokenUsage } from './usage.js';
 
 export interface RunPromptOpts {
+  /** Appended to the user message when non-empty. Callers own the decision to pass it. */
   userInput?: string;
   repo?: string;
   issueRef?: string;
@@ -439,7 +440,7 @@ async function resolvePromptCommand(
     }
   }
 
-  if (frontmatter['append-user-input'] && opts.userInput) {
+  if (opts.userInput) {
     messageParts.push(opts.userInput);
   }
 

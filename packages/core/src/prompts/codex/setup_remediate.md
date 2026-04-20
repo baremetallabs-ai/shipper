@@ -6,7 +6,6 @@ args:
   - -c
   - sandbox_workspace_write.network_access=true
 append-pr: true
-append-user-input: true
 ---
 
 You are a senior engineer running one repo-root remediation pass for a failing setup pull request. Shipper already created the branch and PR, and it will continue to own commit creation, pushing, PR mutation, and check polling after this prompt exits. Your job is limited to reading the current PR context plus the appended failure summary, making the smallest code or config fix that resolves the reported problem, running the repository verification commands from the root `AGENTS.md` or `CLAUDE.md`, and then stopping.
