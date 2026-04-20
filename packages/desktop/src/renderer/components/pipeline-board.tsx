@@ -103,7 +103,8 @@ export function PipelineBoard({
     return (
       resettingIssues.has(issueNumber) ||
       unlockingIssues.has(issueNumber) ||
-      unblockingIssues.has(issueNumber)
+      unblockingIssues.has(issueNumber) ||
+      shippingCommands.has(issueNumber)
     );
   }
 
@@ -323,10 +324,7 @@ export function PipelineBoard({
                 const stageIssues = columnMap.get(label) ?? [];
                 const isReadyColumn = label === READY_LABEL;
                 const targetStage = COLUMN_RESET_STAGE[label];
-                const isValidTarget =
-                  dragSource !== null && targetStage
-                    ? isValidDropTarget(dragSource, targetStage)
-                    : false;
+                const isValidTarget = targetStage ? isValidStageDropTarget(targetStage) : false;
 
                 return (
                   <section
@@ -417,7 +415,7 @@ export function PipelineBoard({
                                     }
                                   : undefined
                               }
-                              draggable={!isBusyIssue(issue.number) && !shippingStatus}
+                              draggable={!isBusyIssue(issue.number)}
                               onDragStart={(event) => {
                                 handlePipelineDragStart(event, issue, columnIndex);
                               }}

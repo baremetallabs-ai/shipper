@@ -2,6 +2,7 @@ import { ipcMain } from 'electron';
 import {
   acquireIssueLock,
   executeReset,
+  FAILED_LABEL,
   getCurrentStage,
   getStageIndex,
   getStageLabel,
@@ -11,6 +12,7 @@ import {
   parseStage,
   releaseIssueLock,
   scanArtifacts,
+  STAGE_LABEL_NAMES,
   toErrorMessage,
   type WorkflowStage,
 } from '@dnsquared/shipper-core';
@@ -74,9 +76,15 @@ async function getResetValidationError(
   targetStage: WorkflowStage
 ): Promise<string | null> {
   const labels = issue.labels.map((label) => label.name);
+  const isFailedOnly =
+    labels.includes(FAILED_LABEL) && !labels.some((label) => STAGE_LABEL_NAMES.includes(label));
 
   if (labels.includes(LOCKED_LABEL) && !(await isLockStale(repo, String(issue.number)))) {
     return `Issue #${issue.number} is locked by another shipper instance. Reset is unavailable until that run finishes.`;
+  }
+
+  if (isFailedOnly) {
+    return null;
   }
 
   const currentStage = getCurrentStage(labels);

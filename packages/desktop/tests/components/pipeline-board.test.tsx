@@ -320,6 +320,25 @@ describe('PipelineBoard', () => {
     expect(onResetSelect).not.toHaveBeenCalled();
   });
 
+  it('rejects pipeline-card drops on the New attention section', () => {
+    const onResetSelect = vi.fn<(selection: ResetSelection) => void>();
+
+    renderBoard({ onResetSelect });
+
+    const issueTitle = screen.getByText('Verify pipeline board extraction');
+    const newSection = screen.getByTestId('new-attention-section');
+    const dataTransfer = { effectAllowed: '', dropEffect: '' };
+
+    fireEvent.dragStart(issueTitle, { dataTransfer });
+    fireEvent.dragEnter(newSection, { dataTransfer });
+
+    expect(newSection.className).not.toContain('bg-blue-500/10');
+
+    fireEvent.drop(newSection, { dataTransfer });
+
+    expect(onResetSelect).not.toHaveBeenCalled();
+  });
+
   it('renders separate Failed and New attention sections', () => {
     renderBoard({
       attentionIssues: {

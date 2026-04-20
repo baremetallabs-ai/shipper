@@ -60,6 +60,7 @@ vi.mock('@dnsquared/shipper-core', async () => {
   const { isPlainObject, toError, toErrorMessage } =
     await vi.importActual<typeof import('@dnsquared/shipper-core')>('@dnsquared/shipper-core');
   const stages = ['new', 'groomed', 'designed', 'planned', 'implemented'] as const;
+  const stageLabels = stages.map((stage) => `shipper:${stage}`);
 
   function normalizeStage(input: string): string {
     return input.replace(/^shipper:/, '');
@@ -109,6 +110,7 @@ vi.mock('@dnsquared/shipper-core', async () => {
     getStageLabel,
     getValidTargets,
     gh: state.ghMock,
+    FAILED_LABEL: 'shipper:failed',
     isPlainObject,
     isLockStale: state.isLockStaleMock,
     listIssues: state.listIssuesMock,
@@ -119,6 +121,7 @@ vi.mock('@dnsquared/shipper-core', async () => {
     releaseIssueLock: state.releaseIssueLockMock,
     renewIssueLock: state.renewIssueLockMock,
     scanArtifacts: state.scanArtifactsMock,
+    STAGE_LABEL_NAMES: stageLabels,
     toError,
     toErrorMessage,
   };
@@ -808,6 +811,63 @@ describe('desktop IPC locking', () => {
       state.executeResetMock.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER
     );
     expect(state.releaseIssueLockMock).toHaveBeenCalledWith('owner/repo', '42');
+  });
+
+  it('allows failed-only issues through scan-reset validation', async () => {
+    await loadHandlers();
+    queueResetIssue(['shipper:failed']);
+    state.scanArtifactsMock.mockResolvedValueOnce({
+      targetStage: 'planned',
+      targetLabel: 'shipper:planned',
+      labelsToRemove: [],
+      addTarget: false,
+      prs: [],
+      branchesToDelete: [],
+      localBranches: [],
+      localWorktrees: [],
+      commentIds: [],
+    });
+    const handler = getHandler('scan-reset');
+
+    await expect(
+      handler({}, { repo: 'owner/repo', issueNumber: 42, targetStage: 'planned' })
+    ).resolves.toEqual({
+      ok: true,
+      scan: {
+        targetStage: 'planned',
+        targetLabel: 'shipper:planned',
+        labelsToRemove: [],
+        addTarget: false,
+        prs: [],
+        branchesToDelete: [],
+        localBranches: [],
+        localWorktrees: [],
+        commentCount: 0,
+      },
+    });
+    expect(state.scanArtifactsMock).toHaveBeenCalledWith(
+      42,
+      'owner/repo',
+      'planned',
+      ['shipper:failed'],
+      expect.objectContaining({ repoName: 'repo' })
+    );
+  });
+
+  it('allows failed-only issues through execute-reset validation', async () => {
+    await loadHandlers();
+    queueResetIssue(['shipper:failed']);
+    const handler = getHandler('execute-reset');
+
+    await expect(
+      handler({}, { repo: 'owner/repo', issueNumber: 42, targetStage: 'planned' })
+    ).resolves.toEqual({ ok: true });
+    expect(state.acquireIssueLockMock).toHaveBeenCalledWith('owner/repo', '42');
+    expect(state.executeResetMock).toHaveBeenCalledWith(
+      42,
+      expect.objectContaining({ targetStage: 'groomed', targetLabel: 'shipper:groomed' }),
+      'owner/repo'
+    );
   });
 
   it('releases the reset lock when executeReset fails', async () => {
