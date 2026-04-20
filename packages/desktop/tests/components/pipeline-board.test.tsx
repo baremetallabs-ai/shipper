@@ -79,6 +79,7 @@ function renderBoard({
     new: [createIssue({ number: 7, title: 'Needs grooming', labels: [NEW_LABEL] })],
   },
   shippingCommands = new Map<number, ActiveShippingCommand>(),
+  resettingIssues = new Set<number>(),
   onResetSelect = vi.fn<(selection: ResetSelection) => void>(),
   onToggleAutoMerge = vi.fn(),
   onToggleAutoShip = vi.fn(),
@@ -88,7 +89,7 @@ function renderBoard({
     issues,
     columnMap,
     attentionIssues,
-    resettingIssues: new Set<number>(),
+    resettingIssues,
     unlockingIssues: new Set<number>(),
     unblockingIssues: new Set<number>(),
     settingPriorityIssues: new Set<number>(),
@@ -211,5 +212,19 @@ describe('PipelineBoard', () => {
     });
 
     expect(screen.getAllByRole('button', { name: 'Groom' })).toHaveLength(1);
+  });
+
+  it('shows resetting overlays for attention cards in either section', () => {
+    renderBoard({
+      attentionIssues: {
+        failed: [
+          createIssue({ number: 8, title: 'Investigate failed run', labels: [FAILED_LABEL] }),
+        ],
+        new: [createIssue({ number: 7, title: 'Needs grooming', labels: [NEW_LABEL] })],
+      },
+      resettingIssues: new Set([7, 8]),
+    });
+
+    expect(screen.getAllByText('Resetting...')).toHaveLength(2);
   });
 });
