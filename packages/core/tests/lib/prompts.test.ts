@@ -201,3 +201,50 @@ describe('new prompts', () => {
     }
   );
 });
+
+describe('plan/design escape-hatch softening', () => {
+  it.each([
+    'claude/plan',
+    'codex/plan',
+    'copilot/plan',
+    'claude/design',
+    'codex/design',
+    'copilot/design',
+  ])('narrows verdict: fail triggers to stage-blocking failures in %s', (path) => {
+    const prompt = readFileSync(new URL(`../../src/prompts/${path}.md`, import.meta.url), 'utf-8');
+
+    expect(prompt).toContain(
+      "`verdict: fail` is reserved for failures that block this stage's own work."
+    );
+    expect(prompt).toContain(
+      'The agent cannot read the repository or the issue body it needs as input.'
+    );
+    expect(prompt).toContain('The agent cannot write output files under `.shipper/output/`');
+    expect(prompt).toContain('exercise the feature under study');
+    expect(prompt).toContain('**does not trigger the escape hatch**');
+    expect(prompt).toContain('**In the plan stage:**');
+    expect(prompt).toContain('**In the design stage:**');
+    expect(prompt).not.toContain('Missing CLI tools, language runtimes, or build toolchains');
+  });
+});
+
+describe('implement/unblock escape hatch stays broad', () => {
+  it.each([
+    'claude/implement',
+    'codex/implement',
+    'copilot/implement',
+    'claude/unblock',
+    'codex/unblock',
+    'copilot/unblock',
+  ])('preserves the original broad escape-hatch wording in %s', (path) => {
+    const prompt = readFileSync(new URL(`../../src/prompts/${path}.md`, import.meta.url), 'utf-8');
+
+    expect(prompt).toContain(
+      'If a failure is caused by the **environment, sandbox, or repository configuration**'
+    );
+    expect(prompt).toContain(
+      'Sandbox permission denials (file system, network, or process restrictions)'
+    );
+    expect(prompt).toContain('Missing CLI tools, language runtimes, or build toolchains');
+  });
+});
