@@ -326,11 +326,9 @@ export function IssueCard({
             </Button>
           ) : null}
         </div>
-        <span
-          className="text-xs text-muted-foreground tabular-nums"
-          aria-label={`${totalTokens} total tokens`}
-        >
-          {formatCompactTokens(totalTokens)}
+        <span className="text-xs text-muted-foreground tabular-nums">
+          <span className="sr-only">{`${totalTokens} total tokens`}</span>
+          <span aria-hidden="true">{formatCompactTokens(totalTokens)}</span>
         </span>
       </div>
       {busyLabel ? (

@@ -64,8 +64,10 @@ export function registerIssueHandlers(): void {
     }
 
     try {
-      const issues = await listIssues(repo);
-      const usageTotals = await aggregateAllIssueUsage(repo);
+      const [issues, usageTotals] = await Promise.all([
+        listIssues(repo),
+        aggregateAllIssueUsage(repo),
+      ]);
       const augmentedIssues = issues.map((issue) => {
         const usage = usageTotals.get(String(issue.number));
         const totalTokens = usage

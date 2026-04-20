@@ -270,10 +270,13 @@ describe('PipelineBoard', () => {
     const newSection = screen.getByTestId('new-attention-section');
     const stageCard = screen.getByTestId('issue-card-22');
 
-    expect(within(failedSection).getByLabelText('4200 total tokens').textContent).toBe('4.2k');
-    expect(within(newSection).getByLabelText('0 total tokens').textContent).toBe('0');
+    expect(within(failedSection).getByText('4200 total tokens')).toBeTruthy();
+    expect(within(failedSection).getByText('4.2k')).toBeTruthy();
+    expect(within(newSection).getByText('0 total tokens')).toBeTruthy();
+    expect(within(newSection).getByText('0')).toBeTruthy();
     expect(within(newSection).getByRole('button', { name: 'Groom' })).toBeTruthy();
-    expect(within(stageCard).getByLabelText('2200 total tokens').textContent).toBe('2.2k');
+    expect(within(stageCard).getByText('2200 total tokens')).toBeTruthy();
+    expect(within(stageCard).getByText('2.2k')).toBeTruthy();
     expect(within(stageCard).getByRole('button', { name: 'Ship' })).toBeTruthy();
   });
 });
