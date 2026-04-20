@@ -243,15 +243,17 @@ describe('IssueCard', () => {
   it('renders zero token totals when there is no session history', () => {
     render(<IssueCard issue={createIssue()} totalTokens={0} />);
 
-    expect(screen.getByLabelText('0 total tokens').textContent).toBe('0');
+    expect(String(screen.getByText('0 total tokens').className)).toContain('sr-only');
+    expect(screen.getByText('0').outerHTML).toContain('aria-hidden="true"');
   });
 
   it('renders compact token totals as non-interactive text', () => {
     render(<IssueCard issue={createIssue()} totalTokens={12_345} onShip={vi.fn()} />);
 
-    const indicator = screen.getByLabelText('12345 total tokens');
+    const indicator = screen.getByText('12.3k');
 
-    expect(indicator.textContent).toBe('12.3k');
+    expect(String(screen.getByText('12345 total tokens').className)).toContain('sr-only');
+    expect(indicator.outerHTML).toContain('aria-hidden="true"');
     expect(screen.queryByRole('button', { name: '12.3k' })).toBeNull();
     expect(screen.queryByRole('link', { name: '12.3k' })).toBeNull();
   });

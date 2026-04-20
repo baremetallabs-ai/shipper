@@ -100,20 +100,19 @@ export async function aggregateAllIssueUsage(repo: string): Promise<Map<string, 
   }
 
   const totals = new Map<string, TokenUsage>();
+  const parsedEntries = await Promise.all(
+    entries
+      .filter((entry) => entry.endsWith('.meta.json'))
+      .map(async (entry) => {
+        try {
+          return JSON.parse(await readFile(path.join(sessionDir, entry), 'utf-8')) as unknown;
+        } catch {
+          return undefined;
+        }
+      })
+  );
 
-  for (const entry of entries) {
-    if (!entry.endsWith('.meta.json')) {
-      continue;
-    }
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(await readFile(path.join(sessionDir, entry), 'utf-8'));
-    } catch {
-      // Malformed session meta file — skip to next.
-      continue;
-    }
-
+  for (const parsed of parsedEntries) {
     if (!isSessionMeta(parsed)) {
       continue;
     }
