@@ -115,18 +115,14 @@ The `.shipper/output/` directory is gitignored by design — the orchestrator re
 
 ## Environment failure escape hatch
 
-If a failure is caused by the **environment, sandbox, or repository configuration** — not by a code problem you can fix — stop immediately and escalate. Do not retry.
+`verdict: fail` is reserved for failures that block this stage's own work. The only sanctioned triggers are:
 
-Use a general heuristic to distinguish environment failures from code failures. Examples of environment failures include:
+- The agent cannot read the repository or the issue body it needs as input.
+- The agent cannot write output files under `.shipper/output/` (for example `comment-<number>.md` or `result.json`).
 
-- Sandbox permission denials (file system, network, or process restrictions)
-- Missing CLI tools, language runtimes, or build toolchains
-- Dependency install failures (`npm install`, `pip install`, etc.) caused by registry issues, auth errors, or missing system libraries
-- Build system misconfiguration that predates the current change
-- File system permission errors unrelated to the current change
-- Network or credential issues the agent cannot resolve
+Any other denial — sandbox restrictions on exploratory commands, missing optional tooling — **does not trigger the escape hatch**. Unblock is read-only against issue data; if you cannot reach a verdict for non-trigger reasons, return `verdict: reject` with an explanation in the comment.
 
-**When you detect an environment failure:**
+**When a sanctioned fail trigger fires:**
 
 1. Stop immediately. Do not retry.
 2. Write the failure report to `.shipper/output/comment-<number>.md`.
