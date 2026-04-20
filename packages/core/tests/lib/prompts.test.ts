@@ -200,16 +200,24 @@ describe('setup prompts', () => {
       expect(prompt).toContain('.github/workflows/pr-checks.yml');
       expect(prompt).toContain('Present the inferred command list to the user');
       expect(prompt).toContain('Describe the planned workflow in natural language only.');
+      expect(prompt).toContain('do not overwrite it; explain why and skip the write');
       expect(prompt).toContain('gh api repos/{owner}/{repo} --jq .default_branch');
       expect(prompt).toContain('gh api repos/{owner}/{repo}/rulesets -X POST');
+      expect(prompt).toContain('Include the required `name` field in the ruleset payload');
       expect(prompt).toContain('required_status_checks');
-      expect(prompt).toContain('required_workflows');
+      expect(prompt).toContain('use the `workflows` rule type, not `required_workflows`');
+      expect(prompt).toContain('gh api repos/{owner}/{repo} --jq .id');
+      expect(prompt).toContain('repository_id');
+      expect(prompt).toContain(
+        'The `commands.default.agent` field matches the installed coding agent (`"claude"`, `"codex"`, or `"copilot"`).'
+      );
       expect(prompt).toContain('Do not add a YAML parser dependency.');
       expect(prompt).toContain('pull_request_target');
       expect(prompt).toContain(
         'Shipper recommends adding lint, format-check, type-check, test, and build scripts'
       );
       expect(prompt).toContain('branch protections');
+      expect(prompt).toContain('do not send an empty `required_status_checks` rule');
     }
   );
 });

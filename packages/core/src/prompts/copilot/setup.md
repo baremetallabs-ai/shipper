@@ -63,7 +63,8 @@ If verification commands can be inferred:
 - Resolve the default branch with `gh api repos/{owner}/{repo} --jq .default_branch`.
 - Each job should use `actions/checkout@v4`, the matching ecosystem setup action, the configured `installCommand`, and then the single verification command.
 - Require explicit confirmation before writing anything.
-- When the user confirms, write `.github/workflows/pr-checks.yml` with `on: pull_request: branches: [<default branch>]`.
+- Before writing, check whether `.github/workflows/pr-checks.yml` already exists. If it does, do not overwrite it; explain why and skip the write.
+- When the user confirms and the target file does not already exist, write `.github/workflows/pr-checks.yml` with `on: pull_request: branches: [<default branch>]`.
 - Keep the workflow simple: no matrix, no file-content preview, and no caching magic beyond what the setup action provides by default.
 - After writing the workflow, immediately update the `AGENTS.md` Commands section from task 2 so the selected checks become the source of truth for future setup runs.
 
@@ -71,8 +72,11 @@ After the scaffold step resolves, regardless of outcome:
 
 - Always ask whether to configure branch protections on the default branch after scaffold success, user decline, or the no-infer path.
 - On yes, create a repository ruleset with `gh api repos/{owner}/{repo}/rulesets -X POST`.
+- Include the required `name` field in the ruleset payload (for example, `Shipper PR Checks`).
 - Target `~DEFAULT_BRANCH`.
-- Use `required_status_checks` with the selected check names, and include `required_workflows` when this task just created `.github/workflows/pr-checks.yml`.
+- If selected check names exist, use a `required_status_checks` rule with those check names.
+- If this task just created `.github/workflows/pr-checks.yml` and you also want a workflow-file rule, use the `workflows` rule type, not `required_workflows`. Resolve `repository_id` with `gh api repos/{owner}/{repo} --jq .id`, then include both `repository_id` and `path: ".github/workflows/pr-checks.yml"` in the workflow entry.
+- If no selected check names exist because the user declined scaffolding or no commands could be inferred, explain that Shipper cannot configure a "require PR checks to pass" ruleset yet and do not send an empty `required_status_checks` rule.
 - Do not use classic branch protection APIs.
 - If `gh api` returns `403`, surface that the user lacks permission to administer branch protections and continue without failing setup.
 

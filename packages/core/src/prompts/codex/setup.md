@@ -63,7 +63,8 @@ If verification commands can be inferred:
 - Resolve the default branch with `gh api repos/{owner}/{repo} --jq .default_branch`.
 - Each job should use `actions/checkout@v4`, the matching ecosystem setup action, the configured `installCommand`, and then the single verification command.
 - Require explicit confirmation before writing anything.
-- When the user confirms, write `.github/workflows/pr-checks.yml` with `on: pull_request: branches: [<default branch>]`.
+- Before writing, check whether `.github/workflows/pr-checks.yml` already exists. If it does, do not overwrite it; explain why and skip the write.
+- When the user confirms and the target file does not already exist, write `.github/workflows/pr-checks.yml` with `on: pull_request: branches: [<default branch>]`.
 - Keep the workflow simple: no matrix, no file-content preview, and no caching magic beyond what the setup action provides by default.
 - After writing the workflow, immediately update the `AGENTS.md` Commands section from task 2 so the selected checks become the source of truth for future setup runs.
 
@@ -71,8 +72,11 @@ After the scaffold step resolves, regardless of outcome:
 
 - Always ask whether to configure branch protections on the default branch after scaffold success, user decline, or the no-infer path.
 - On yes, create a repository ruleset with `gh api repos/{owner}/{repo}/rulesets -X POST`.
+- Include the required `name` field in the ruleset payload (for example, `Shipper PR Checks`).
 - Target `~DEFAULT_BRANCH`.
-- Use `required_status_checks` with the selected check names, and include `required_workflows` when this task just created `.github/workflows/pr-checks.yml`.
+- If selected check names exist, use a `required_status_checks` rule with those check names.
+- If this task just created `.github/workflows/pr-checks.yml` and you also want a workflow-file rule, use the `workflows` rule type, not `required_workflows`. Resolve `repository_id` with `gh api repos/{owner}/{repo} --jq .id`, then include both `repository_id` and `path: ".github/workflows/pr-checks.yml"` in the workflow entry.
+- If no selected check names exist because the user declined scaffolding or no commands could be inferred, explain that Shipper cannot configure a "require PR checks to pass" ruleset yet and do not send an empty `required_status_checks` rule.
 - Do not use classic branch protection APIs.
 - If `gh api` returns `403`, surface that the user lacks permission to administer branch protections and continue without failing setup.
 
@@ -81,7 +85,7 @@ After the scaffold step resolves, regardless of outcome:
 Read `.shipper/settings.json` and verify:
 
 - All required fields are present and have reasonable values.
-- The `commands.default.agent` field matches the installed coding agent (`"claude"` or `"codex"`).
+- The `commands.default.agent` field matches the installed coding agent (`"claude"`, `"codex"`, or `"copilot"`).
 - Report any issues or suggestions.
 
 ### 5. Hooks configuration
@@ -162,10 +166,10 @@ The canonical settings schema is:
 ### Commands map
 
 - `commands.default` is required. It sets the baseline `agent` and optional `mode`.
-- `commands.default.agent` is required and must be `"claude"` or `"codex"`.
+- `commands.default.agent` is required and must be `"claude"`, `"codex"`, or `"copilot"`.
 - `commands.default.mode` is optional and may be `"headless"`, `"interactive"`, or `"default"`.
 - Per-step overrides are optional keys in the same map: `new`, `groom`, `design`, `plan`, `implement`, `pr_open`, `pr_review`, `pr_remediate`, `unblock`, `setup`.
-- Each per-step override may set `agent`, `mode`, or both. Valid agents are `"claude"` and `"codex"`. Valid modes are `"headless"`, `"interactive"`, and `"default"`.
+- Each per-step override may set `agent`, `mode`, or both. Valid agents are `"claude"`, `"codex"`, and `"copilot"`. Valid modes are `"headless"`, `"interactive"`, and `"default"`.
 - Resolution order is: per-step override -> `commands.default` -> built-in defaults.
 
 ### settings.local.json
@@ -181,7 +185,7 @@ The canonical settings schema is:
 
 1. Run `gh auth status` and confirm the GitHub CLI is authenticated for the repository you are working in.
 2. Run `which gh` and confirm the `gh` CLI is installed and available on `PATH`.
-3. Run `which claude` or `which codex`, depending on the configured agent, and confirm the agent CLI is installed and on `PATH`.
+3. Run `which claude`, `which codex`, or `which copilot`, depending on the configured agent, and confirm the agent CLI is installed and on `PATH`.
 4. Run `./.shipper/scripts/install-deps.sh`, then inspect both the exit code and the command output for dependency or environment failures.
 5. Read `.shipper/settings.json` and confirm it is valid JSON with the expected canonical fields and values.
 6. Run `gh label list` and confirm the required `shipper:*` labels exist.
