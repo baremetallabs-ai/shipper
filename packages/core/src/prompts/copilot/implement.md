@@ -121,7 +121,7 @@ After all plan steps are complete, work through the verification tasks:
 3. If a check fails, fix the issue. If the fix is within the scope of the plan, make the fix and re-verify. If the fix requires changes outside the plan's scope, stop and flag it.
 4. Mark each verification task `completed`.
 
-**Every acceptance criterion from the issue must have a passing verification.** If you can't verify a criterion, do not skip it — flag it. However, if a verification step requires a runtime the sandbox cannot provide (e.g., launching a GUI app like Electron), note it as "deferred to review" in your implementation summary and proceed to Phase 4. Do not trigger the environment failure escape hatch when the only thing blocked is a verification step — if all code changes are committed and automated checks pass, the implementation succeeded.
+**Every acceptance criterion from the issue must have a passing verification.** If you can't verify a criterion, do not skip it — flag it.
 
 ## Agent Feedback
 
@@ -184,18 +184,26 @@ Do not mutate GitHub directly. The orchestrator handles comments and label trans
 
 ## Environment failure escape hatch
 
-If a failure is caused by the **environment, sandbox, or repository configuration** — not by a code problem you can fix — stop immediately and escalate. Do not retry.
+`verdict: fail` is reserved for failures that block this stage's own work. The only sanctioned triggers are:
 
-Use a general heuristic to distinguish environment failures from code failures. Examples of environment failures include:
+- The agent cannot read the repository or the issue body it needs as input.
+- The agent cannot write output files under `.shipper/output/` (for example `comment-<number>.md` or `result.json`).
 
-- Sandbox permission denials (file system, network, or process restrictions)
-- Missing CLI tools, language runtimes, or build toolchains
-- Dependency install failures (`npm install`, `pip install`, etc.) caused by registry issues, auth errors, or missing system libraries
-- Build system misconfiguration that predates the current change
-- File system permission errors unrelated to the current change
-- Network or credential issues the agent cannot resolve
+### Deferred verification
 
-**When you detect an environment failure:**
+When a verification step **prescribed by the implementation plan** is **refused by the sandbox** (for example, a GUI runtime the sandbox will not launch, or any other verification command the sandbox blocks before it can run), do **not** trigger the escape hatch. Instead:
+
+1. Confirm every code change prescribed by the plan is committed.
+2. Under the `### Verification` subsection of your implementation summary, record (a) which plan step was blocked, (b) that the sandbox refused the verification command, and (c) that a human reviewer or CI must confirm it — mark it "deferred to review."
+3. Return `verdict: accept`.
+
+This clause applies **only** when **both** conditions hold: the verification step was prescribed by the plan, **and** the sandbox refused the command. It does **not** apply to:
+
+- Verifications that ran and failed (test failures, lint failures, non-zero exits) — those remain scope-guard or normal failure cases.
+- Sandbox denials of commands the agent ran for exploratory or speculative purposes outside the plan.
+- Agent-initiated verification steps that were not in the plan.
+
+**When a sanctioned fail trigger fires:**
 
 1. Stop immediately. Do not retry.
 2. Write the failure report to `.shipper/output/comment-<number>.md`.

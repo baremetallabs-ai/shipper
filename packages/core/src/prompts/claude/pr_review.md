@@ -252,14 +252,24 @@ For this stage, always write `.shipper/output/result.json` with `"verdict": "acc
 }
 ```
 
-### Fail verdict
-
-If an environment problem prevents you from completing the review:
-
-1. Write `.shipper/output/comment-<number>.md` describing the failure and why it is environmental rather than a code issue.
-2. Write `.shipper/output/result.json` with `"verdict": "fail"` and the same `comment` path.
-3. Stop immediately.
-
 Do not submit the review yourself and do not attempt direct GitHub mutation. Shipper will consume the payload, submit the review, post the issue comment, and transition the stage after you exit.
 
 The `.shipper/output/` directory is gitignored by design — the orchestrator reads output files directly from the filesystem, not from git. Do not modify `.shipper/.gitignore`.
+
+## Environment failure escape hatch
+
+`verdict: fail` is reserved for failures that block this stage's own work. The only sanctioned triggers are:
+
+- The agent cannot read the review inputs under `.shipper/input/` (`pr-diff.patch`, `pr-files.json`, `pr-metadata.json`) or the appended issue/PR text.
+- The agent cannot write output files under `.shipper/output/` (for example `comment-<number>.md`, `review-payload-<number>.json`, or `result.json`).
+
+Any other denial — sandbox restrictions on exploratory commands, missing optional tooling — **does not trigger the escape hatch**. `pr_review` is read-only against the diff; if the review still cannot be written for non-trigger reasons, explain it in the review summary and set the review event to `COMMENT`.
+
+**When a sanctioned fail trigger fires:**
+
+1. Stop immediately. Do not retry.
+2. Write the failure report to `.shipper/output/comment-<number>.md`.
+3. Write `.shipper/output/result.json` with `"verdict": "fail"` and the comment path.
+4. Stop.
+
+---

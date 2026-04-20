@@ -261,23 +261,124 @@ describe('plan/design escape-hatch softening', () => {
   });
 });
 
-describe('implement/unblock escape hatch stays broad', () => {
-  it.each([
-    'claude/implement',
-    'codex/implement',
-    'copilot/implement',
+describe('implement/unblock/pr_review escape-hatch softening', () => {
+  const implementPaths = ['claude/implement', 'codex/implement', 'copilot/implement'];
+  const unblockPaths = ['claude/unblock', 'codex/unblock', 'copilot/unblock'];
+  const prReviewPaths = ['claude/pr_review', 'codex/pr_review', 'copilot/pr_review'];
+  const updatedPaths = [...implementPaths, ...unblockPaths, ...prReviewPaths];
+
+  it.each(updatedPaths)(
+    'narrows verdict: fail triggers to stage-blocking failures in %s',
+    (path) => {
+      const prompt = readFileSync(
+        new URL(`../../src/prompts/${path}.md`, import.meta.url),
+        'utf-8'
+      );
+
+      expect(prompt).toContain(
+        "`verdict: fail` is reserved for failures that block this stage's own work."
+      );
+      expect(prompt).toContain('The agent cannot write output files under `.shipper/output/`');
+      expect(prompt).not.toContain('Missing CLI tools, language runtimes, or build toolchains');
+    }
+  );
+
+  it.each([...implementPaths, ...unblockPaths])(
+    'uses repository-or-issue input wording in %s',
+    (path) => {
+      const prompt = readFileSync(
+        new URL(`../../src/prompts/${path}.md`, import.meta.url),
+        'utf-8'
+      );
+
+      expect(prompt).toContain(
+        'The agent cannot read the repository or the issue body it needs as input.'
+      );
+    }
+  );
+
+  it.each(prReviewPaths)('uses review-input wording in %s', (path) => {
+    const prompt = readFileSync(new URL(`../../src/prompts/${path}.md`, import.meta.url), 'utf-8');
+
+    expect(prompt).toContain('The agent cannot read the review inputs under `.shipper/input/`');
+  });
+
+  it('keeps the escape-hatch block byte-identical across implement prompts', () => {
+    const referenceBlock = extractEnvironmentFailureEscapeHatch(
+      readFileSync(new URL(`../../src/prompts/${implementPaths[0]}.md`, import.meta.url), 'utf-8')
+    );
+
+    for (const path of implementPaths.slice(1)) {
+      const prompt = readFileSync(
+        new URL(`../../src/prompts/${path}.md`, import.meta.url),
+        'utf-8'
+      );
+
+      expect(extractEnvironmentFailureEscapeHatch(prompt)).toBe(referenceBlock);
+    }
+  });
+
+  it('keeps the escape-hatch block byte-identical across unblock prompts', () => {
+    const referenceBlock = extractEnvironmentFailureEscapeHatch(
+      readFileSync(new URL(`../../src/prompts/${unblockPaths[0]}.md`, import.meta.url), 'utf-8')
+    );
+
+    for (const path of unblockPaths.slice(1)) {
+      const prompt = readFileSync(
+        new URL(`../../src/prompts/${path}.md`, import.meta.url),
+        'utf-8'
+      );
+
+      expect(extractEnvironmentFailureEscapeHatch(prompt)).toBe(referenceBlock);
+    }
+  });
+
+  it('keeps the escape-hatch block byte-identical across pr_review prompts', () => {
+    const referenceBlock = extractEnvironmentFailureEscapeHatch(
+      readFileSync(new URL(`../../src/prompts/${prReviewPaths[0]}.md`, import.meta.url), 'utf-8')
+    );
+
+    for (const path of prReviewPaths.slice(1)) {
+      const prompt = readFileSync(
+        new URL(`../../src/prompts/${path}.md`, import.meta.url),
+        'utf-8'
+      );
+
+      expect(extractEnvironmentFailureEscapeHatch(prompt)).toBe(referenceBlock);
+    }
+  });
+});
+
+describe('implement deferred-verification clause', () => {
+  const implementPaths = ['claude/implement', 'codex/implement', 'copilot/implement'];
+  const nonImplementPaths = [
     'claude/unblock',
     'codex/unblock',
     'copilot/unblock',
-  ])('preserves the original broad escape-hatch wording in %s', (path) => {
+    'claude/pr_review',
+    'codex/pr_review',
+    'copilot/pr_review',
+  ];
+
+  it.each(implementPaths)('locks in the implement-only wording in %s', (path) => {
     const prompt = readFileSync(new URL(`../../src/prompts/${path}.md`, import.meta.url), 'utf-8');
 
-    expect(prompt).toContain(
-      'If a failure is caused by the **environment, sandbox, or repository configuration**'
-    );
-    expect(prompt).toContain(
-      'Sandbox permission denials (file system, network, or process restrictions)'
-    );
-    expect(prompt).toContain('Missing CLI tools, language runtimes, or build toolchains');
+    expect(prompt).toContain('prescribed by the implementation plan');
+    expect(prompt).toContain('refused by the sandbox');
+    expect(prompt).toContain('deferred to review');
   });
+
+  it.each(nonImplementPaths)(
+    'keeps implement-only deferred-verification wording out of %s',
+    (path) => {
+      const prompt = readFileSync(
+        new URL(`../../src/prompts/${path}.md`, import.meta.url),
+        'utf-8'
+      );
+
+      expect(prompt).not.toContain('prescribed by the implementation plan');
+      expect(prompt).not.toContain('refused by the sandbox');
+      expect(prompt).not.toContain('deferred to review');
+    }
+  );
 });
