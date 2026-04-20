@@ -263,7 +263,7 @@ The `.shipper/output/` directory is gitignored by design — the orchestrator re
 - The agent cannot read the review inputs under `.shipper/input/` (`pr-diff.patch`, `pr-files.json`, `pr-metadata.json`) or the appended issue/PR text.
 - The agent cannot write output files under `.shipper/output/` (for example `comment-<number>.md`, `review-payload-<number>.json`, or `result.json`).
 
-Any other denial — sandbox restrictions on exploratory commands, missing optional tooling — **does not trigger the escape hatch**. `pr_review` is read-only against the diff; if the review still cannot be written for non-trigger reasons, explain it in the review summary and set the review event to `COMMENT`.
+Any other denial — sandbox restrictions on exploratory commands, missing optional tooling — **does not trigger the escape hatch**. `pr_review` is read-only against the diff; if the review cannot be completed for non-trigger reasons, explain it in the review summary and set the review event to `COMMENT`.
 
 **When a sanctioned fail trigger fires:**
 
