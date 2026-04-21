@@ -170,7 +170,7 @@ export function PipelineBoard({
             <div key={issue.number} className="w-[240px] shrink-0">
               <IssueCard
                 issue={issue}
-                totalTokens={issue.totalTokens}
+                tokenUsage={issue.tokenUsage}
                 onGroom={options.allowGroom ? onGroom : undefined}
                 onResetSelect={(targetStage) => {
                   onResetSelect({ issue, targetStage });
@@ -384,7 +384,7 @@ export function PipelineBoard({
                             <IssueCard
                               key={issue.number}
                               issue={issue}
-                              totalTokens={issue.totalTokens}
+                              tokenUsage={issue.tokenUsage}
                               onResetSelect={(targetStage) => {
                                 onResetSelect({ issue, targetStage });
                               }}

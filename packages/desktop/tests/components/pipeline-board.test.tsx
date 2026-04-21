@@ -14,6 +14,7 @@ import {
   PR_OPEN_LABEL,
   PR_REVIEWED_LABEL,
   READY_LABEL,
+  type TokenUsage,
 } from '@dnsquared/shipper-core';
 import { PipelineBoard } from '../../src/renderer/components/pipeline-board.js';
 import { PIPELINE_COLUMNS } from '../../src/renderer/lib/constants.js';
@@ -57,6 +58,113 @@ vi.mock('../../src/renderer/components/ui/dropdown-menu.js', () => ({
   DropdownMenuSubContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
+vi.mock('../../src/renderer/components/ui/tooltip.js', async () => {
+  const React = await import('react');
+
+  type TooltipContextValue = {
+    open: boolean;
+    setOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  };
+
+  type TriggerChildProps = {
+    onPointerEnter?: (event: React.PointerEvent) => void;
+    onPointerLeave?: (event: React.PointerEvent) => void;
+    onFocus?: (event: React.FocusEvent) => void;
+    onBlur?: (event: React.FocusEvent) => void;
+    onKeyDown?: (event: React.KeyboardEvent) => void;
+  };
+
+  const TooltipContext = React.createContext<TooltipContextValue | null>(null);
+
+  return {
+    TooltipProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+    Tooltip: ({ children }: { children: React.ReactNode }) => {
+      const [open, setOpen] = React.useState(false);
+      return (
+        <TooltipContext.Provider value={{ open, setOpen }}>{children}</TooltipContext.Provider>
+      );
+    },
+    TooltipTrigger: ({
+      children,
+      asChild,
+    }: {
+      children: React.ReactElement<TriggerChildProps>;
+      asChild?: boolean;
+    }) => {
+      const context = React.useContext(TooltipContext);
+      if (!context) {
+        return children;
+      }
+
+      const child = React.Children.only(children);
+      const triggerProps: TriggerChildProps = {
+        onPointerEnter: (event) => {
+          child.props.onPointerEnter?.(event);
+          context.setOpen(true);
+        },
+        onPointerLeave: (event) => {
+          child.props.onPointerLeave?.(event);
+          context.setOpen(false);
+        },
+        onFocus: (event) => {
+          child.props.onFocus?.(event);
+          context.setOpen(true);
+        },
+        onBlur: (event) => {
+          child.props.onBlur?.(event);
+          context.setOpen(false);
+        },
+        onKeyDown: (event) => {
+          child.props.onKeyDown?.(event);
+          if (event.key === 'Escape') {
+            context.setOpen(false);
+          }
+        },
+      };
+
+      if (asChild) {
+        return React.cloneElement(child, triggerProps);
+      }
+
+      return <button type="button" {...triggerProps} />;
+    },
+    TooltipContent: ({
+      children,
+      ...props
+    }: React.ComponentProps<'div'> & { children: React.ReactNode }) => {
+      const context = React.useContext(TooltipContext);
+      if (!context?.open) {
+        return null;
+      }
+
+      return <div {...props}>{children}</div>;
+    },
+  };
+});
+
+function createTokenUsage(overrides: Partial<TokenUsage> = {}): TokenUsage {
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    ...overrides,
+  };
+}
+
+function createStageTokenUsage(): TokenUsage {
+  return createTokenUsage({ inputTokens: 1_200, outputTokens: 1_000 });
+}
+
+function createFailedTokenUsage(): TokenUsage {
+  return createTokenUsage({
+    inputTokens: 2_000,
+    outputTokens: 1_000,
+    cacheReadTokens: 1_000,
+    cacheWriteTokens: 200,
+  });
+}
+
 function createIssue(overrides: Partial<PipelineIssue> = {}): PipelineIssue {
   return {
     number: 22,
@@ -66,7 +174,7 @@ function createIssue(overrides: Partial<PipelineIssue> = {}): PipelineIssue {
     author: 'dnsquared',
     createdAt: '2026-04-03T12:00:00.000Z',
     url: 'https://github.com/owner/repo/issues/22',
-    totalTokens: 2_200,
+    tokenUsage: createStageTokenUsage(),
     ...overrides,
   };
 }
@@ -86,7 +194,14 @@ function renderBoard({
   }),
   attentionIssues = {
     failed: [] as PipelineIssue[],
-    new: [createIssue({ number: 7, title: 'Needs grooming', labels: [NEW_LABEL], totalTokens: 0 })],
+    new: [
+      createIssue({
+        number: 7,
+        title: 'Needs grooming',
+        labels: [NEW_LABEL],
+        tokenUsage: createTokenUsage(),
+      }),
+    ],
   },
   shippingCommands = new Map<number, ActiveShippingCommand>(),
   resettingIssues = new Set<number>(),
@@ -124,6 +239,7 @@ function renderBoard({
 
   return render(<PipelineBoard {...props} />);
 }
+
 describe('PipelineBoard', () => {
   it('renders board sections, issues, empty columns, and toolbar toggles', () => {
     const onToggleAutoMerge = vi.fn();
@@ -171,11 +287,16 @@ describe('PipelineBoard', () => {
             number: 8,
             title: 'Investigate failed run',
             labels: [FAILED_LABEL],
-            totalTokens: 4_200,
+            tokenUsage: createFailedTokenUsage(),
           }),
         ],
         new: [
-          createIssue({ number: 7, title: 'Needs grooming', labels: [NEW_LABEL], totalTokens: 0 }),
+          createIssue({
+            number: 7,
+            title: 'Needs grooming',
+            labels: [NEW_LABEL],
+            tokenUsage: createTokenUsage(),
+          }),
         ],
       },
       onResetSelect,
@@ -233,11 +354,16 @@ describe('PipelineBoard', () => {
             number: 8,
             title: 'Investigate failed run',
             labels: [FAILED_LABEL],
-            totalTokens: 4_200,
+            tokenUsage: createFailedTokenUsage(),
           }),
         ],
         new: [
-          createIssue({ number: 7, title: 'Needs grooming', labels: [NEW_LABEL], totalTokens: 0 }),
+          createIssue({
+            number: 7,
+            title: 'Needs grooming',
+            labels: [NEW_LABEL],
+            tokenUsage: createTokenUsage(),
+          }),
         ],
       },
       onResetSelect,
@@ -290,11 +416,16 @@ describe('PipelineBoard', () => {
             number: 8,
             title: 'Investigate failed run',
             labels: [FAILED_LABEL],
-            totalTokens: 4_200,
+            tokenUsage: createFailedTokenUsage(),
           }),
         ],
         new: [
-          createIssue({ number: 7, title: 'Needs grooming', labels: [NEW_LABEL], totalTokens: 0 }),
+          createIssue({
+            number: 7,
+            title: 'Needs grooming',
+            labels: [NEW_LABEL],
+            tokenUsage: createTokenUsage(),
+          }),
         ],
       },
       onResetSelect,
@@ -347,11 +478,16 @@ describe('PipelineBoard', () => {
             number: 8,
             title: 'Investigate failed run',
             labels: [FAILED_LABEL],
-            totalTokens: 4_200,
+            tokenUsage: createFailedTokenUsage(),
           }),
         ],
         new: [
-          createIssue({ number: 7, title: 'Needs grooming', labels: [NEW_LABEL], totalTokens: 0 }),
+          createIssue({
+            number: 7,
+            title: 'Needs grooming',
+            labels: [NEW_LABEL],
+            tokenUsage: createTokenUsage(),
+          }),
         ],
       },
     });
@@ -375,11 +511,16 @@ describe('PipelineBoard', () => {
             number: 8,
             title: 'Investigate failed run',
             labels: [FAILED_LABEL],
-            totalTokens: 4_200,
+            tokenUsage: createFailedTokenUsage(),
           }),
         ],
         new: [
-          createIssue({ number: 7, title: 'Needs grooming', labels: [NEW_LABEL], totalTokens: 0 }),
+          createIssue({
+            number: 7,
+            title: 'Needs grooming',
+            labels: [NEW_LABEL],
+            tokenUsage: createTokenUsage(),
+          }),
         ],
       },
     });
@@ -395,7 +536,7 @@ describe('PipelineBoard', () => {
             number: 8,
             title: 'Investigate failed run',
             labels: [FAILED_LABEL],
-            totalTokens: 4_200,
+            tokenUsage: createFailedTokenUsage(),
           }),
         ],
         new: [],
@@ -416,11 +557,16 @@ describe('PipelineBoard', () => {
             number: 8,
             title: 'Investigate failed run',
             labels: [FAILED_LABEL],
-            totalTokens: 4_200,
+            tokenUsage: createFailedTokenUsage(),
           }),
         ],
         new: [
-          createIssue({ number: 7, title: 'Needs grooming', labels: [NEW_LABEL], totalTokens: 0 }),
+          createIssue({
+            number: 7,
+            title: 'Needs grooming',
+            labels: [NEW_LABEL],
+            tokenUsage: createTokenUsage(),
+          }),
         ],
       },
       resettingIssues: new Set([7, 8]),
@@ -437,11 +583,16 @@ describe('PipelineBoard', () => {
             number: 8,
             title: 'Investigate failed run',
             labels: [FAILED_LABEL],
-            totalTokens: 4_200,
+            tokenUsage: createFailedTokenUsage(),
           }),
         ],
         new: [
-          createIssue({ number: 7, title: 'Needs grooming', labels: [NEW_LABEL], totalTokens: 0 }),
+          createIssue({
+            number: 7,
+            title: 'Needs grooming',
+            labels: [NEW_LABEL],
+            tokenUsage: createTokenUsage(),
+          }),
         ],
       },
     });
@@ -450,13 +601,25 @@ describe('PipelineBoard', () => {
     const newSection = screen.getByTestId('new-attention-section');
     const stageCard = screen.getByTestId('issue-card-22');
 
-    expect(within(failedSection).getByText('4200 total tokens')).toBeTruthy();
-    expect(within(failedSection).getByText('4.2k')).toBeTruthy();
-    expect(within(newSection).getByText('0 total tokens')).toBeTruthy();
-    expect(within(newSection).getByText('0')).toBeTruthy();
+    expect(
+      within(failedSection).getByRole('button', {
+        name: '4,200 total tokens: 2,000 input, 1,000 output, 1,000 cache read, 200 cache write',
+      })
+    ).toBeTruthy();
+    expect(within(failedSection).getByText('4.2k tokens')).toBeTruthy();
+    expect(
+      within(newSection).getByRole('button', {
+        name: '0 total tokens: 0 input, 0 output, 0 cache read, 0 cache write',
+      })
+    ).toBeTruthy();
+    expect(within(newSection).getByText('0 tokens')).toBeTruthy();
     expect(within(newSection).getByRole('button', { name: 'Groom' })).toBeTruthy();
-    expect(within(stageCard).getByText('2200 total tokens')).toBeTruthy();
-    expect(within(stageCard).getByText('2.2k')).toBeTruthy();
+    expect(
+      within(stageCard).getByRole('button', {
+        name: '2,200 total tokens: 1,200 input, 1,000 output, 0 cache read, 0 cache write',
+      })
+    ).toBeTruthy();
+    expect(within(stageCard).getByText('2.2k tokens')).toBeTruthy();
     expect(within(stageCard).getByRole('button', { name: 'Ship' })).toBeTruthy();
   });
 });

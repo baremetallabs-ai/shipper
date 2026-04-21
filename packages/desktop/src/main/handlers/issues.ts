@@ -8,12 +8,13 @@ import {
   PRIORITY_LOW_LABEL,
   toErrorMessage,
   type ListIssueItem,
+  type TokenUsage,
 } from '@dnsquared/shipper-core';
 
 import { loadResetIssue, parseAdoptIssuePayload, parseRepoPayload } from './shared.js';
 
 interface PipelineIssue extends ListIssueItem {
-  totalTokens: number;
+  tokenUsage: TokenUsage;
 }
 
 interface ListIssuesSuccess {
@@ -40,6 +41,13 @@ interface RawListIssueData {
   createdAt: string;
   url: string;
 }
+
+const zeroUsage: TokenUsage = {
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+};
 
 function parseIssueListJson(repo: string, json: string): RawListIssueData[] {
   try {
@@ -70,13 +78,10 @@ export function registerIssueHandlers(): void {
       ]);
       const augmentedIssues = issues.map((issue) => {
         const usage = usageTotals.get(String(issue.number));
-        const totalTokens = usage
-          ? usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheWriteTokens
-          : 0;
 
         return {
           ...issue,
-          totalTokens,
+          tokenUsage: usage ?? zeroUsage,
         };
       });
       const response: ListIssuesSuccess = { ok: true, issues: augmentedIssues };

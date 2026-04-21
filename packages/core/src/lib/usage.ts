@@ -2,13 +2,9 @@ import { createReadStream } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { logger } from './logger.js';
 import type { AgentName } from './settings.js';
+import type { TokenUsage } from './token-usage.js';
 
-export interface TokenUsage {
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-  cacheWriteTokens: number;
-}
+export type { TokenUsage } from './token-usage.js';
 
 const numberFormatter = new Intl.NumberFormat('en-US');
 

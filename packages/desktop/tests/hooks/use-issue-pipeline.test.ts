@@ -9,6 +9,7 @@ import {
   LOCKED_LABEL,
   NEW_LABEL,
   PLANNED_LABEL,
+  type TokenUsage,
 } from '@dnsquared/shipper-core';
 import { useIssuePipeline } from '../../src/renderer/hooks/use-issue-pipeline.js';
 import type { PipelineIssue } from '../../src/renderer/types.js';
@@ -45,7 +46,17 @@ function createIssue(number: number, labels: string[] = [PLANNED_LABEL]): Pipeli
     author: 'octocat',
     createdAt: '2026-04-03T00:00:00Z',
     url: `https://github.com/owner/repo/issues/${number}`,
-    totalTokens: number * 100,
+    tokenUsage: createTokenUsage({ inputTokens: number * 100 }),
+  };
+}
+
+function createTokenUsage(overrides: Partial<TokenUsage> = {}): TokenUsage {
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    ...overrides,
   };
 }
 

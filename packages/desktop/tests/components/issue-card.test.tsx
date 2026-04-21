@@ -12,6 +12,7 @@ import {
   PR_OPEN_LABEL,
   PRIORITY_HIGH_LABEL,
   type ListIssueItem,
+  type TokenUsage,
   type WorkflowStage,
 } from '@dnsquared/shipper-core';
 import type { DragSource } from '../../src/renderer/hooks/use-drag-drop.js';
@@ -55,6 +56,90 @@ vi.mock('../../src/renderer/components/ui/dropdown-menu.js', () => ({
   DropdownMenuSubContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
+vi.mock('../../src/renderer/components/ui/tooltip.js', async () => {
+  const React = await import('react');
+
+  type TooltipContextValue = {
+    open: boolean;
+    setOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  };
+
+  type TriggerChildProps = {
+    onPointerEnter?: (event: React.PointerEvent) => void;
+    onPointerLeave?: (event: React.PointerEvent) => void;
+    onFocus?: (event: React.FocusEvent) => void;
+    onBlur?: (event: React.FocusEvent) => void;
+    onKeyDown?: (event: React.KeyboardEvent) => void;
+  };
+
+  const TooltipContext = React.createContext<TooltipContextValue | null>(null);
+
+  return {
+    TooltipProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+    Tooltip: ({ children }: { children: React.ReactNode }) => {
+      const [open, setOpen] = React.useState(false);
+      return (
+        <TooltipContext.Provider value={{ open, setOpen }}>{children}</TooltipContext.Provider>
+      );
+    },
+    TooltipTrigger: ({
+      children,
+      asChild,
+    }: {
+      children: React.ReactElement<TriggerChildProps>;
+      asChild?: boolean;
+    }) => {
+      const context = React.useContext(TooltipContext);
+      if (!context) {
+        return children;
+      }
+
+      const child = React.Children.only(children);
+      const triggerProps: TriggerChildProps = {
+        onPointerEnter: (event) => {
+          child.props.onPointerEnter?.(event);
+          context.setOpen(true);
+        },
+        onPointerLeave: (event) => {
+          child.props.onPointerLeave?.(event);
+          context.setOpen(false);
+        },
+        onFocus: (event) => {
+          child.props.onFocus?.(event);
+          context.setOpen(true);
+        },
+        onBlur: (event) => {
+          child.props.onBlur?.(event);
+          context.setOpen(false);
+        },
+        onKeyDown: (event) => {
+          child.props.onKeyDown?.(event);
+          if (event.key === 'Escape') {
+            context.setOpen(false);
+          }
+        },
+      };
+
+      if (asChild) {
+        return React.cloneElement(child, triggerProps);
+      }
+
+      return <button type="button" {...triggerProps} />;
+    },
+    TooltipContent: ({
+      children,
+      ...props
+    }: React.ComponentProps<'div'> & { children: React.ReactNode }) => {
+      const context = React.useContext(TooltipContext);
+      if (!context?.open) {
+        return null;
+      }
+
+      return <div {...props}>{children}</div>;
+    },
+  };
+});
+
 const getResetTargetsForTest = getResetTargets as unknown as (labels: string[]) => WorkflowStage[];
 const isValidDropTargetForTest = isValidDropTarget as unknown as (
   source: DragSource,
@@ -74,6 +159,16 @@ function createIssue(overrides: Partial<ListIssueItem> = {}): ListIssueItem {
   };
 }
 
+function createTokenUsage(overrides: Partial<TokenUsage> = {}): TokenUsage {
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    ...overrides,
+  };
+}
+
 describe('IssueCard', () => {
   it('renders issue details, badges, busy overlay, and stop-ship action', () => {
     render(
@@ -81,7 +176,7 @@ describe('IssueCard', () => {
         issue={createIssue({
           labels: [PLANNED_LABEL, PRIORITY_HIGH_LABEL, BLOCKED_LABEL, LOCKED_LABEL],
         })}
-        totalTokens={0}
+        tokenUsage={createTokenUsage()}
         isResetting
         shippingStatus="running"
         onStopShip={vi.fn()}
@@ -101,7 +196,7 @@ describe('IssueCard', () => {
     render(
       <IssueCard
         issue={createIssue({ labels: [PLANNED_LABEL, BLOCKED_LABEL, LOCKED_LABEL] })}
-        totalTokens={0}
+        tokenUsage={createTokenUsage()}
         onGroom={vi.fn()}
         onShip={vi.fn()}
       />
@@ -112,7 +207,9 @@ describe('IssueCard', () => {
   });
 
   it('renders failed styling on the card surface', () => {
-    render(<IssueCard issue={createIssue({ labels: [FAILED_LABEL] })} totalTokens={0} />);
+    render(
+      <IssueCard issue={createIssue({ labels: [FAILED_LABEL] })} tokenUsage={createTokenUsage()} />
+    );
 
     const card = screen.getByTestId('issue-card-12');
 
@@ -123,7 +220,10 @@ describe('IssueCard', () => {
 
   it('renders failed and blocked indicators together', () => {
     render(
-      <IssueCard issue={createIssue({ labels: [FAILED_LABEL, BLOCKED_LABEL] })} totalTokens={0} />
+      <IssueCard
+        issue={createIssue({ labels: [FAILED_LABEL, BLOCKED_LABEL] })}
+        tokenUsage={createTokenUsage()}
+      />
     );
 
     expect(screen.getByText('Failed')).toBeTruthy();
@@ -132,7 +232,10 @@ describe('IssueCard', () => {
 
   it('renders failed and locked indicators together', () => {
     render(
-      <IssueCard issue={createIssue({ labels: [FAILED_LABEL, LOCKED_LABEL] })} totalTokens={0} />
+      <IssueCard
+        issue={createIssue({ labels: [FAILED_LABEL, LOCKED_LABEL] })}
+        tokenUsage={createTokenUsage()}
+      />
     );
 
     expect(screen.getByText('Failed')).toBeTruthy();
@@ -147,7 +250,7 @@ describe('IssueCard', () => {
     render(
       <IssueCard
         issue={createIssue()}
-        totalTokens={0}
+        tokenUsage={createTokenUsage()}
         onGroom={onGroom}
         onShip={onShip}
         draggable
@@ -169,7 +272,7 @@ describe('IssueCard', () => {
   });
 
   it('renders the issue number as a GitHub link', () => {
-    render(<IssueCard issue={createIssue()} totalTokens={0} />);
+    render(<IssueCard issue={createIssue()} tokenUsage={createTokenUsage()} />);
     const link = screen.getByRole('link', { name: '#12' });
 
     expect(link).toHaveProperty('href', 'https://github.com/owner/repo/issues/12');
@@ -180,7 +283,14 @@ describe('IssueCard', () => {
   it('prevents drag from starting on the issue link', () => {
     const onDragStart = vi.fn();
 
-    render(<IssueCard issue={createIssue()} totalTokens={0} draggable onDragStart={onDragStart} />);
+    render(
+      <IssueCard
+        issue={createIssue()}
+        tokenUsage={createTokenUsage()}
+        draggable
+        onDragStart={onDragStart}
+      />
+    );
     const link = screen.getByRole('link', { name: '#12' });
     const dragEvent = createEvent.dragStart(link, {
       dataTransfer: { effectAllowed: 'move' },
@@ -192,7 +302,7 @@ describe('IssueCard', () => {
   });
 
   it('keeps the issue title as plain text', () => {
-    render(<IssueCard issue={createIssue()} totalTokens={0} />);
+    render(<IssueCard issue={createIssue()} tokenUsage={createTokenUsage()} />);
 
     expect(screen.queryByRole('link', { name: 'Extract renderer components' })).toBeNull();
   });
@@ -203,7 +313,7 @@ describe('IssueCard', () => {
     render(
       <IssueCard
         issue={createIssue({ labels: [FAILED_LABEL] })}
-        totalTokens={0}
+        tokenUsage={createTokenUsage()}
         onGroom={vi.fn()}
         onShip={vi.fn()}
         resetTargets={['new', 'groomed']}
@@ -231,7 +341,7 @@ describe('IssueCard', () => {
     render(
       <IssueCard
         issue={createIssue()}
-        totalTokens={0}
+        tokenUsage={createTokenUsage()}
         resetTargets={['groomed']}
         onResetSelect={onResetSelect}
         onSetPriority={onSetPriority}
@@ -289,21 +399,113 @@ describe('IssueCard', () => {
     expect(isValidDropTargetForTest(pipelineSource, 'planned')).toBe(false);
   });
 
-  it('renders zero token totals when there is no session history', () => {
-    render(<IssueCard issue={createIssue()} totalTokens={0} />);
+  it('renders zero token totals as a focusable button with the full spoken breakdown', () => {
+    render(<IssueCard issue={createIssue()} tokenUsage={createTokenUsage()} />);
 
-    expect(String(screen.getByText('0 total tokens').className)).toContain('sr-only');
-    expect(screen.getByText('0').outerHTML).toContain('aria-hidden="true"');
+    expect(screen.getByText('0 tokens')).toBeTruthy();
+    expect(
+      screen.getByRole('button', {
+        name: '0 total tokens: 0 input, 0 output, 0 cache read, 0 cache write',
+      })
+    ).toBeTruthy();
   });
 
-  it('renders compact token totals as non-interactive text', () => {
-    render(<IssueCard issue={createIssue()} totalTokens={12_345} onShip={vi.fn()} />);
+  it('renders exact totals below one thousand and compact totals at one thousand and above', () => {
+    const { rerender } = render(
+      <IssueCard
+        issue={createIssue()}
+        tokenUsage={createTokenUsage({ inputTokens: 321, outputTokens: 666 })}
+      />
+    );
 
-    const indicator = screen.getByText('12.3k');
+    expect(screen.getByText('987 tokens')).toBeTruthy();
 
-    expect(String(screen.getByText('12345 total tokens').className)).toContain('sr-only');
-    expect(indicator.outerHTML).toContain('aria-hidden="true"');
-    expect(screen.queryByRole('button', { name: '12.3k' })).toBeNull();
-    expect(screen.queryByRole('link', { name: '12.3k' })).toBeNull();
+    rerender(
+      <IssueCard
+        issue={createIssue()}
+        tokenUsage={createTokenUsage({
+          inputTokens: 5_000,
+          outputTokens: 3_000,
+          cacheReadTokens: 2_000,
+          cacheWriteTokens: 2_345,
+        })}
+        onShip={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('12.3k tokens')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Ship' })).toBeTruthy();
+  });
+
+  it('opens the tooltip on pointer hover and closes it on pointer leave', () => {
+    render(
+      <IssueCard
+        issue={createIssue()}
+        tokenUsage={createTokenUsage({
+          inputTokens: 5_000,
+          outputTokens: 3_000,
+          cacheReadTokens: 2_000,
+          cacheWriteTokens: 2_345,
+        })}
+      />
+    );
+
+    const tokenButton = screen.getByRole('button', {
+      name: '12,345 total tokens: 5,000 input, 3,000 output, 2,000 cache read, 2,345 cache write',
+    });
+
+    expect(screen.queryByText('Input')).toBeNull();
+
+    fireEvent.pointerEnter(tokenButton);
+
+    const rows = screen.getAllByText(/^(Input|Output|Cache read|Cache write)$/);
+    expect(rows).toHaveLength(4);
+    expect(rows[0]?.textContent).toBe('Input');
+    expect(rows[1]?.textContent).toBe('Output');
+    expect(rows[2]?.textContent).toBe('Cache read');
+    expect(rows[3]?.textContent).toBe('Cache write');
+    expect(screen.getByText('5k')).toBeTruthy();
+    expect(screen.getByText('3k')).toBeTruthy();
+    expect(screen.getByText('2k')).toBeTruthy();
+    expect(screen.getByText('2.3k')).toBeTruthy();
+
+    fireEvent.pointerLeave(tokenButton);
+
+    expect(screen.queryByText('Input')).toBeNull();
+  });
+
+  it('opens the tooltip on focus and closes it on Escape and blur', () => {
+    render(
+      <IssueCard
+        issue={createIssue()}
+        tokenUsage={createTokenUsage({
+          inputTokens: 987,
+          outputTokens: 1_200,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 1_400_000,
+        })}
+      />
+    );
+
+    const tokenButton = screen.getByRole('button', {
+      name: '1,402,187 total tokens: 987 input, 1,200 output, 0 cache read, 1,400,000 cache write',
+    });
+
+    fireEvent.focus(tokenButton);
+
+    expect(screen.getByText('Input')).toBeTruthy();
+    expect(screen.getByText('987')).toBeTruthy();
+    expect(screen.getByText('1.2k')).toBeTruthy();
+    expect(screen.getByText('0')).toBeTruthy();
+    expect(screen.getByText('1.4M')).toBeTruthy();
+
+    fireEvent.keyDown(tokenButton, { key: 'Escape' });
+    expect(screen.queryByText('Input')).toBeNull();
+
+    fireEvent.focus(tokenButton);
+    expect(screen.getByText('Input')).toBeTruthy();
+
+    fireEvent.blur(tokenButton);
+    expect(screen.queryByText('Input')).toBeNull();
   });
 });
