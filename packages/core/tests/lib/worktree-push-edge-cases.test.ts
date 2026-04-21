@@ -6,7 +6,6 @@ const fetchOriginOrThrowMock = vi.fn();
 const getCurrentBranchMock = vi.fn();
 const getCommitsAheadCountMock = vi.fn();
 const remoteRefExistsMock = vi.fn();
-const stripProtectedPathsMock = vi.fn();
 const abortRebaseMock = vi.fn();
 
 vi.mock('../../src/lib/worktree/helpers.js', async () => {
@@ -23,10 +22,6 @@ vi.mock('../../src/lib/worktree/helpers.js', async () => {
   };
 });
 
-vi.mock('../../src/lib/worktree/protected-paths.js', () => ({
-  stripProtectedPaths: stripProtectedPathsMock,
-}));
-
 vi.mock('../../src/lib/worktree/conflicts.js', async () => {
   const actual = await vi.importActual<typeof import('../../src/lib/worktree/conflicts.js')>(
     '../../src/lib/worktree/conflicts.js'
@@ -42,7 +37,6 @@ const { pushWorktree } = await import('../../src/lib/worktree.js');
 describe('push edge cases', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    stripProtectedPathsMock.mockResolvedValue(undefined);
     fetchOriginOrThrowMock.mockResolvedValue(undefined);
     getCurrentBranchMock.mockResolvedValue('feature/retry');
     getCommitsAheadCountMock.mockResolvedValue(1);
@@ -51,9 +45,7 @@ describe('push edge cases', () => {
   });
 
   it('surfaces git ls-files failures from protected-path stripping', async () => {
-    stripProtectedPathsMock.mockRejectedValue(
-      new Error('git ls-files -- .shipper/output/ .shipper/input/ .shipper/tmp/')
-    );
+    execAsyncMock.mockResolvedValueOnce({ code: 1, stdout: '', stderr: 'ls-files failed' });
 
     await expect(
       pushWorktree({
@@ -62,11 +54,15 @@ describe('push edge cases', () => {
         baseBranch: 'main',
         pushMode: 'new-branch',
       })
-    ).rejects.toThrow('git ls-files -- .shipper/output/ .shipper/input/ .shipper/tmp/');
+    ).rejects.toThrow(
+      'git ls-files -- .shipper/output/ .shipper/input/ .shipper/tmp/ exited with code 1:\nls-files failed'
+    );
   });
 
   it('aborts before push when git checkout -- . fails', async () => {
-    execAsyncMock.mockResolvedValueOnce({ code: 1, stdout: '', stderr: 'checkout failed' });
+    execAsyncMock
+      .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ code: 1, stdout: '', stderr: 'checkout failed' });
 
     await expect(
       pushWorktree({
@@ -80,6 +76,7 @@ describe('push edge cases', () => {
 
   it('aborts before push when git clean -fd --exclude=.shipper fails', async () => {
     execAsyncMock
+      .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })
       .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })
       .mockResolvedValueOnce({ code: 1, stdout: '', stderr: 'clean failed' });
 
@@ -95,6 +92,7 @@ describe('push edge cases', () => {
 
   it('preserves abort failure detail when the recovery rebase fails', async () => {
     execAsyncMock
+      .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' }) // ls-files
       .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' }) // checkout
       .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' }) // clean
       .mockResolvedValueOnce({ code: 0, stdout: '.git/hooks\n', stderr: '' }) // hooks path
@@ -113,5 +111,28 @@ describe('push edge cases', () => {
     ).rejects.toThrow(
       'git rebase --autostash origin/feature/retry failed.\ngit rebase --autostash origin/feature/retry exited with code 1:\nmerge conflict\nA best-effort git rebase --abort also failed: git exited with code 1'
     );
+  });
+
+  it('re-checks the commit count before retrying a force-push attempt', async () => {
+    getCommitsAheadCountMock.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+    execAsyncMock
+      .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' }) // ls-files
+      .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' }) // checkout
+      .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' }) // clean
+      .mockResolvedValueOnce({ code: 0, stdout: '.git/hooks\n', stderr: '' }) // hooks path
+      .mockResolvedValueOnce({ code: 1, stdout: '', stderr: 'non-fast-forward' }); // push
+
+    await expect(
+      pushWorktree({
+        wtPath: '/tmp/wt',
+        repoRoot: '/tmp/repo',
+        baseBranch: 'main',
+        pushMode: 'force-with-lease',
+      })
+    ).rejects.toThrow('Refusing to push: branch has 0 commits ahead of base branch');
+
+    expect(fetchOriginOrThrowMock).toHaveBeenCalledTimes(1);
+    expect(getCurrentBranchMock).toHaveBeenCalledTimes(2);
+    expect(getCommitsAheadCountMock).toHaveBeenCalledTimes(2);
   });
 });

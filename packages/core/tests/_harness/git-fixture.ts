@@ -25,8 +25,6 @@ interface GitClone {
   cleanup: () => void;
 }
 
-const trackedTempDirs: string[] = [];
-
 function buildCleanEnv(extraEnv?: EnvMap): EnvMap {
   return {
     ...Object.fromEntries(
@@ -90,19 +88,12 @@ export interface GitFixture {
   cleanup: () => void;
 }
 
-export function cleanupGitFixtures(): void {
-  for (const tempDir of trackedTempDirs.splice(0)) {
-    rmSync(tempDir, { recursive: true, force: true });
-  }
-}
-
 export function sh(value: string): string {
   return shellQuote(value);
 }
 
 export function createGitFixture(name: string, branchName = 'feature'): GitFixture {
   const tempDir = mkdtempSync(path.join(tmpdir(), `shipper-${name}-`));
-  trackedTempDirs.push(tempDir);
 
   const remoteDir = path.join(tempDir, 'remote.git');
   const repoDir = path.join(tempDir, 'repo');
@@ -202,10 +193,6 @@ export function createGitFixture(name: string, branchName = 'feature'): GitFixtu
     }
   };
   const cleanup = (): void => {
-    const index = trackedTempDirs.indexOf(tempDir);
-    if (index !== -1) {
-      trackedTempDirs.splice(index, 1);
-    }
     rmSync(tempDir, { recursive: true, force: true });
   };
 
