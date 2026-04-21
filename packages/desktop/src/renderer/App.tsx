@@ -169,7 +169,7 @@ export default function App(): JSX.Element {
   };
 
   return (
-    <TooltipProvider delayDuration={0}>
+    <TooltipProvider>
       <div className="flex h-screen flex-col bg-transparent">
         <BackgroundToastRegion
           toasts={backgroundState.toasts}

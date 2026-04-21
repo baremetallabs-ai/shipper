@@ -4,7 +4,20 @@ import { forwardRef } from 'react';
 
 import { cn } from '../../lib/utils.js';
 
-export const TooltipProvider = TooltipPrimitive.Provider;
+export function TooltipProvider({
+  delayDuration = 0,
+  disableHoverableContent = true,
+  ...props
+}: ComponentProps<typeof TooltipPrimitive.Provider>) {
+  return (
+    <TooltipPrimitive.Provider
+      delayDuration={delayDuration}
+      disableHoverableContent={disableHoverableContent}
+      {...props}
+    />
+  );
+}
+
 export const Tooltip = TooltipPrimitive.Root;
 export const TooltipTrigger = TooltipPrimitive.Trigger;
 
