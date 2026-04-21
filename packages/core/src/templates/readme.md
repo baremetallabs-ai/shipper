@@ -1,6 +1,6 @@
 # .shipper/
 
-This folder is managed by [Shipper CLI](https://github.com/anthropics/shipper-cli), a workflow orchestrator that drives GitHub issues through a structured development lifecycle using AI-powered coding agents.
+This folder is managed by [Shipper CLI](https://github.com/dnsquared/shipper-cli), a workflow orchestrator that drives GitHub issues through a structured development lifecycle using AI-powered coding agents.
 
 ## Quick Start
 
@@ -120,5 +120,5 @@ Hook scripts must be executable. Run `chmod +x .shipper/hooks/<hook-name>` after
 ## Further Help
 
 - Run `shipper --help` to see all available commands
-- See the project [README](https://github.com/anthropics/shipper-cli#readme) for full documentation
-- [Open an issue](https://github.com/anthropics/shipper-cli/issues) to report bugs or request features
+- See the project [README](https://github.com/dnsquared/shipper-cli#readme) for full documentation
+- [Open an issue](https://github.com/dnsquared/shipper-cli/issues) to report bugs or request features

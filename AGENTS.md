@@ -2,18 +2,19 @@
 
 ## Project Structure & Module Organization
 
-This repo is an npm workspaces monorepo with three packages under `packages/`:
+This repo is an npm workspaces monorepo with four packages under `packages/`:
 
 - `packages/core`: shared workflow logic, prompt resolution, GitHub helpers, scripts, and tests in `tests/`.
 - `packages/cli`: the `shipper` CLI entrypoint and command implementations in `src/commands/`, with Vitest coverage in `tests/`.
 - `packages/desktop`: Electron app code split across `src/main`, `src/preload`, and `src/renderer`, plus smoke tests in `tests/`.
+- `packages/mcp`: MCP server that exposes Shipper workflow tools to AI agents, with tests in `tests/`.
 
 Bundled agent prompts live in `packages/core/src/prompts/`. Build output goes to `packages/*/dist` or `packages/desktop/out` and should not be edited directly.
 
 ## Build, Test, and Development Commands
 
 - `npm install`: install workspace dependencies and Husky hooks.
-- `npm run build`: build `core`, `cli`, and `desktop`.
+- `npm run build`: build `core`, `cli`, `mcp`, and `desktop`.
 - `npm run dev -- <args>`: run the CLI in development mode via `tsx`.
 - `npm run lint`: run ESLint across the repo.
 - `npm run format:check`: verify Prettier formatting.
