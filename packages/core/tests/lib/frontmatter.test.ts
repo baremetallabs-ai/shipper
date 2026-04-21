@@ -188,7 +188,8 @@ append-issue: true
 Body text here.`;
 
     const result = parseFrontmatter(input);
-    expect(result.frontmatter['append-user-input']).toBeUndefined();
+    const frontmatter = result.frontmatter as Record<string, unknown>;
+    expect(frontmatter['append-user-input']).toBeUndefined();
     expect(result.frontmatter['append-issue']).toBe(true);
     expect(result.body).toBe('Body text here.');
   });
