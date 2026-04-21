@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { parseFrontmatter } from '../../src/lib/frontmatter.js';
 
 const expectedRelevantDocumentationSection = `# Relevant Documentation (optional — include only if relevant docs are found)
 
@@ -188,9 +189,16 @@ describe('bundled prompt frontmatter', () => {
 
       for (const promptFile of promptFiles) {
         const prompt = readFileSync(new URL(promptFile, promptDir), 'utf-8');
-        expect(prompt, `${agent}/${promptFile} still contains append-user-input`).not.toContain(
-          'append-user-input'
-        );
+        const { frontmatter } = parseFrontmatter(prompt);
+        const frontmatterRecord = frontmatter as Record<string, unknown>;
+        expect(
+          frontmatterRecord['append-user-input'],
+          `${agent}/${promptFile} still exposes append-user-input in parsed frontmatter`
+        ).toBeUndefined();
+        expect(
+          prompt,
+          `${agent}/${promptFile} still contains append-user-input as a frontmatter key`
+        ).not.toMatch(/(^|\n)append-user-input\s*:/m);
       }
     }
   });
