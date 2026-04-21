@@ -149,6 +149,7 @@ export { runStageScaffold, simpleInvoker, transportInvoker } from './lib/stage-s
 export type { LabelTransition, Verdict } from './lib/stage-transitions.js';
 export { resolveTransition } from './lib/stage-transitions.js';
 export { isPlainObject } from './lib/type-guards.js';
+export type { TokenUsage } from './lib/token-usage.js';
 export { totalTokens } from './lib/usage.js';
 export { CLI_VERSION, checkVersionFreshness } from './lib/version.js';
 export {

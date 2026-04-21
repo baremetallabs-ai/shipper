@@ -20,6 +20,7 @@ import { TerminalDrawer } from './components/terminal-drawer.js';
 import { UnlockConfirmDialog } from './components/unlock-confirm-dialog.js';
 import { Alert, AlertDescription, AlertTitle } from './components/ui/alert.js';
 import { Button } from './components/ui/button.js';
+import { TooltipProvider } from './components/ui/tooltip.js';
 import { useBackgroundCommands } from './hooks/use-background-commands.js';
 import { useIssuePipeline } from './hooks/use-issue-pipeline.js';
 import { useRepos } from './hooks/use-repos.js';
@@ -168,227 +169,229 @@ export default function App(): JSX.Element {
   };
 
   return (
-    <div className="flex h-screen flex-col bg-transparent">
-      <BackgroundToastRegion
-        toasts={backgroundState.toasts}
-        onDismiss={backgroundState.dismissToast}
-        onRetry={backgroundState.handleRetryToast}
-      />
-      <BackgroundLogViewer
-        open={backgroundState.logViewer.open}
-        title={backgroundState.logViewer.title}
-        content={backgroundState.logViewer.content}
-        onOpenChange={backgroundState.handleLogViewerOpenChange}
-      />
-      <RepoPickerDialog
-        open={reposState.isPickerOpen}
-        onOpenChange={reposState.setIsPickerOpen}
-        repos={reposState.repos}
-        onSelectRepo={reposState.handleAddRepo}
-      />
-      <NewIssueDialog
-        open={pipelineState.isNewIssueOpen}
-        onOpenChange={pipelineState.setIsNewIssueOpen}
-        repos={reposState.repos}
-        activeRepo={activeRepo}
-        onSubmit={(request, repo) => {
-          void handleShipperNew(request, repo);
-        }}
-      />
-      <AdoptDialog
-        open={pipelineState.isAdoptOpen}
-        onOpenChange={pipelineState.setIsAdoptOpen}
-        repo={activeRepo}
-        onAdopted={() => {
-          void pipelineState.loadIssues(activeRepo);
-        }}
-      />
-      <ResetConfirmDialog
-        open={pipelineState.resetSelection !== null}
-        onOpenChange={(open) => {
-          if (!open) {
-            pipelineState.setResetSelection(null);
-          }
-        }}
-        repo={activeRepo}
-        issueNumber={pipelineState.resetSelection?.issue.number ?? null}
-        targetStage={pipelineState.resetSelection?.targetStage ?? null}
-        onResetStart={pipelineState.trackResetIssue}
-        onResetSuccess={pipelineState.handleResetSuccess}
-        onResetFailure={pipelineState.clearResetIssue}
-      />
-      <CloseNotPlannedDialog
-        open={pipelineState.closeNotPlannedIssue !== null}
-        onOpenChange={(open) => {
-          if (!open) {
-            pipelineState.setCloseNotPlannedIssue(null);
-          }
-        }}
-        repo={activeRepo}
-        issue={pipelineState.closeNotPlannedIssue}
-        onSuccess={pipelineState.handleCloseNotPlannedSuccess}
-        onError={pipelineState.handleCloseNotPlannedError}
-      />
-      <UnlockConfirmDialog
-        open={pipelineState.unlockConfirmIssue !== null}
-        onOpenChange={(open) => {
-          if (!open) {
-            pipelineState.setUnlockConfirmIssue(null);
-          }
-        }}
-        issue={pipelineState.unlockConfirmIssue}
-        onConfirm={pipelineState.handleUnlockDialogConfirm}
-      />
-      <SessionCloseDialog
-        session={terminalState.pendingCloseSession}
-        onOpenChange={terminalState.handlePendingCloseOpenChange}
-        onConfirm={() => {
-          void terminalState.handleConfirmCloseSession();
-        }}
-      />
-
-      <div className="flex min-h-0 flex-1">
-        <ActionQueueDrawer
-          open={backgroundState.actionQueueOpen}
-          onToggle={backgroundState.handleToggleActionQueue}
-          commands={actionQueueCommands}
-          onCancel={(sessionId) => {
-            void backgroundState.handleCancelBackground(sessionId);
-          }}
-          onShowLogs={(sessionId) => {
-            void backgroundState.handleShowBackgroundLogs(sessionId);
-          }}
-          onClearFinished={backgroundState.handleClearFinishedBackground}
-          onDismiss={backgroundState.handleDismissBackground}
+    <TooltipProvider delayDuration={0}>
+      <div className="flex h-screen flex-col bg-transparent">
+        <BackgroundToastRegion
+          toasts={backgroundState.toasts}
+          onDismiss={backgroundState.dismissToast}
+          onRetry={backgroundState.handleRetryToast}
         />
-        <div
-          ref={terminalState.contentPaneRef}
-          tabIndex={-1}
-          className="min-w-0 flex-1 overflow-y-auto"
-        >
-          <AppHeader
-            repos={reposState.repos}
-            activeRepo={activeRepo}
-            activeCommandRepos={backgroundState.activeCommandRepos}
-            onSelectRepo={(repo) => {
-              void reposState.handleSwitchRepo(repo);
+        <BackgroundLogViewer
+          open={backgroundState.logViewer.open}
+          title={backgroundState.logViewer.title}
+          content={backgroundState.logViewer.content}
+          onOpenChange={backgroundState.handleLogViewerOpenChange}
+        />
+        <RepoPickerDialog
+          open={reposState.isPickerOpen}
+          onOpenChange={reposState.setIsPickerOpen}
+          repos={reposState.repos}
+          onSelectRepo={reposState.handleAddRepo}
+        />
+        <NewIssueDialog
+          open={pipelineState.isNewIssueOpen}
+          onOpenChange={pipelineState.setIsNewIssueOpen}
+          repos={reposState.repos}
+          activeRepo={activeRepo}
+          onSubmit={(request, repo) => {
+            void handleShipperNew(request, repo);
+          }}
+        />
+        <AdoptDialog
+          open={pipelineState.isAdoptOpen}
+          onOpenChange={pipelineState.setIsAdoptOpen}
+          repo={activeRepo}
+          onAdopted={() => {
+            void pipelineState.loadIssues(activeRepo);
+          }}
+        />
+        <ResetConfirmDialog
+          open={pipelineState.resetSelection !== null}
+          onOpenChange={(open) => {
+            if (!open) {
+              pipelineState.setResetSelection(null);
+            }
+          }}
+          repo={activeRepo}
+          issueNumber={pipelineState.resetSelection?.issue.number ?? null}
+          targetStage={pipelineState.resetSelection?.targetStage ?? null}
+          onResetStart={pipelineState.trackResetIssue}
+          onResetSuccess={pipelineState.handleResetSuccess}
+          onResetFailure={pipelineState.clearResetIssue}
+        />
+        <CloseNotPlannedDialog
+          open={pipelineState.closeNotPlannedIssue !== null}
+          onOpenChange={(open) => {
+            if (!open) {
+              pipelineState.setCloseNotPlannedIssue(null);
+            }
+          }}
+          repo={activeRepo}
+          issue={pipelineState.closeNotPlannedIssue}
+          onSuccess={pipelineState.handleCloseNotPlannedSuccess}
+          onError={pipelineState.handleCloseNotPlannedError}
+        />
+        <UnlockConfirmDialog
+          open={pipelineState.unlockConfirmIssue !== null}
+          onOpenChange={(open) => {
+            if (!open) {
+              pipelineState.setUnlockConfirmIssue(null);
+            }
+          }}
+          issue={pipelineState.unlockConfirmIssue}
+          onConfirm={pipelineState.handleUnlockDialogConfirm}
+        />
+        <SessionCloseDialog
+          session={terminalState.pendingCloseSession}
+          onOpenChange={terminalState.handlePendingCloseOpenChange}
+          onConfirm={() => {
+            void terminalState.handleConfirmCloseSession();
+          }}
+        />
+
+        <div className="flex min-h-0 flex-1">
+          <ActionQueueDrawer
+            open={backgroundState.actionQueueOpen}
+            onToggle={backgroundState.handleToggleActionQueue}
+            commands={actionQueueCommands}
+            onCancel={(sessionId) => {
+              void backgroundState.handleCancelBackground(sessionId);
             }}
-            onCloseRepo={(repo) => {
-              void reposState.handleCloseRepo(repo);
+            onShowLogs={(sessionId) => {
+              void backgroundState.handleShowBackgroundLogs(sessionId);
             }}
-            onAddRepo={openRepoPicker}
-            onReorderRepos={(nextRepos) => {
-              void reposState.handleReorderRepos(nextRepos);
-            }}
+            onClearFinished={backgroundState.handleClearFinishedBackground}
+            onDismiss={backgroundState.handleDismissBackground}
           />
+          <div
+            ref={terminalState.contentPaneRef}
+            tabIndex={-1}
+            className="min-w-0 flex-1 overflow-y-auto"
+          >
+            <AppHeader
+              repos={reposState.repos}
+              activeRepo={activeRepo}
+              activeCommandRepos={backgroundState.activeCommandRepos}
+              onSelectRepo={(repo) => {
+                void reposState.handleSwitchRepo(repo);
+              }}
+              onCloseRepo={(repo) => {
+                void reposState.handleCloseRepo(repo);
+              }}
+              onAddRepo={openRepoPicker}
+              onReorderRepos={(nextRepos) => {
+                void reposState.handleReorderRepos(nextRepos);
+              }}
+            />
 
-          <main className="mx-auto flex max-w-7xl flex-col gap-4 px-6 py-6">
-            {reposState.prerequisiteMessage ? (
-              <Alert variant="destructive">
-                <AlertTitle>GitHub CLI required</AlertTitle>
-                <AlertDescription>{reposState.prerequisiteMessage}</AlertDescription>
-              </Alert>
-            ) : null}
+            <main className="mx-auto flex max-w-7xl flex-col gap-4 px-6 py-6">
+              {reposState.prerequisiteMessage ? (
+                <Alert variant="destructive">
+                  <AlertTitle>GitHub CLI required</AlertTitle>
+                  <AlertDescription>{reposState.prerequisiteMessage}</AlertDescription>
+                </Alert>
+              ) : null}
 
-            {pipelineState.fetchError ? (
-              <Alert variant="destructive" className="pr-24">
-                <AlertTitle>Issue fetch failed</AlertTitle>
-                <AlertDescription>{pipelineState.fetchError}</AlertDescription>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="absolute top-2 right-2"
-                  onClick={() => {
-                    pipelineState.setFetchError(null);
+              {pipelineState.fetchError ? (
+                <Alert variant="destructive" className="pr-24">
+                  <AlertTitle>Issue fetch failed</AlertTitle>
+                  <AlertDescription>{pipelineState.fetchError}</AlertDescription>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="absolute top-2 right-2"
+                    onClick={() => {
+                      pipelineState.setFetchError(null);
+                    }}
+                  >
+                    Dismiss
+                  </Button>
+                </Alert>
+              ) : null}
+
+              {hasActiveRepo && repoInitialized === true ? (
+                <PipelineToolbar
+                  lastUpdated={pipelineState.lastUpdated}
+                  canFetch={canFetch}
+                  isLoading={pipelineState.isLoading}
+                  onNewIssue={pipelineState.handleOpenNewIssue}
+                  onAdopt={pipelineState.handleOpenAdopt}
+                  onRefresh={() => {
+                    void pipelineState.handleRefresh();
                   }}
-                >
-                  Dismiss
-                </Button>
-              </Alert>
-            ) : null}
+                />
+              ) : null}
 
-            {hasActiveRepo && repoInitialized === true ? (
-              <PipelineToolbar
-                lastUpdated={pipelineState.lastUpdated}
-                canFetch={canFetch}
-                isLoading={pipelineState.isLoading}
-                onNewIssue={pipelineState.handleOpenNewIssue}
-                onAdopt={pipelineState.handleOpenAdopt}
-                onRefresh={() => {
-                  void pipelineState.handleRefresh();
-                }}
-              />
-            ) : null}
+              {showPipelineBoard ? (
+                <PipelineBoard
+                  repo={activeRepo}
+                  issues={pipelineState.issues}
+                  columnMap={pipelineState.columnMap}
+                  attentionIssues={pipelineState.attentionIssues}
+                  resettingIssues={pipelineState.resettingIssues}
+                  unlockingIssues={pipelineState.unlockingIssues}
+                  unblockingIssues={pipelineState.unblockingIssues}
+                  settingPriorityIssues={pipelineState.settingPriorityIssues}
+                  shippingCommands={backgroundState.shippingCommands}
+                  autoMergeEnabled={autoMergeEnabled}
+                  autoShipEnabled={autoShipEnabled}
+                  isLoading={pipelineState.isLoading}
+                  canFetch={canFetch}
+                  hasActiveRepo={hasActiveRepo}
+                  isSavingAutoMerge={reposState.isSavingAutoMerge}
+                  onToggleAutoMerge={handleToggleAutoMerge}
+                  onToggleAutoShip={handleToggleAutoShip}
+                  onResetSelect={pipelineState.setResetSelection}
+                  onCloseNotPlanned={pipelineState.setCloseNotPlannedIssue}
+                  onSetPriority={(issue, level) => {
+                    void pipelineState.handleSetPriority(issue, level);
+                  }}
+                  onUnlockClick={(issue) => {
+                    void pipelineState.handleUnlockClick(issue);
+                  }}
+                  onUnblockClick={(issue) => {
+                    void pipelineState.handleUnblockClick(issue);
+                  }}
+                  onGroom={(issueNumber) => {
+                    void handleShipperGroom(issueNumber);
+                  }}
+                  onShip={(issueNumber) => {
+                    void handleShipperShip(issueNumber);
+                  }}
+                  onCancelShip={(sessionId) => {
+                    void backgroundState.handleCancelBackground(sessionId);
+                  }}
+                />
+              ) : (
+                <PipelineEmptyState
+                  repoCount={reposState.repos.length}
+                  repoInitialized={repoInitialized}
+                  canFetch={canFetch}
+                  hasActiveRepo={hasActiveRepo}
+                  onAddRepo={openRepoPicker}
+                  onInit={() => {
+                    void handleShipperInit();
+                  }}
+                />
+              )}
+            </main>
+          </div>
 
-            {showPipelineBoard ? (
-              <PipelineBoard
-                repo={activeRepo}
-                issues={pipelineState.issues}
-                columnMap={pipelineState.columnMap}
-                attentionIssues={pipelineState.attentionIssues}
-                resettingIssues={pipelineState.resettingIssues}
-                unlockingIssues={pipelineState.unlockingIssues}
-                unblockingIssues={pipelineState.unblockingIssues}
-                settingPriorityIssues={pipelineState.settingPriorityIssues}
-                shippingCommands={backgroundState.shippingCommands}
-                autoMergeEnabled={autoMergeEnabled}
-                autoShipEnabled={autoShipEnabled}
-                isLoading={pipelineState.isLoading}
-                canFetch={canFetch}
-                hasActiveRepo={hasActiveRepo}
-                isSavingAutoMerge={reposState.isSavingAutoMerge}
-                onToggleAutoMerge={handleToggleAutoMerge}
-                onToggleAutoShip={handleToggleAutoShip}
-                onResetSelect={pipelineState.setResetSelection}
-                onCloseNotPlanned={pipelineState.setCloseNotPlannedIssue}
-                onSetPriority={(issue, level) => {
-                  void pipelineState.handleSetPriority(issue, level);
-                }}
-                onUnlockClick={(issue) => {
-                  void pipelineState.handleUnlockClick(issue);
-                }}
-                onUnblockClick={(issue) => {
-                  void pipelineState.handleUnblockClick(issue);
-                }}
-                onGroom={(issueNumber) => {
-                  void handleShipperGroom(issueNumber);
-                }}
-                onShip={(issueNumber) => {
-                  void handleShipperShip(issueNumber);
-                }}
-                onCancelShip={(sessionId) => {
-                  void backgroundState.handleCancelBackground(sessionId);
-                }}
-              />
-            ) : (
-              <PipelineEmptyState
-                repoCount={reposState.repos.length}
-                repoInitialized={repoInitialized}
-                canFetch={canFetch}
-                hasActiveRepo={hasActiveRepo}
-                onAddRepo={openRepoPicker}
-                onInit={() => {
-                  void handleShipperInit();
-                }}
-              />
-            )}
-          </main>
+          {terminalState.hasSession ? (
+            <TerminalDrawer
+              sessions={terminalState.sessions}
+              activeSessionId={terminalState.activeSessionId}
+              open={terminalState.drawerOpen}
+              toggleButtonRef={terminalState.toggleButtonRef}
+              drawerPanelRef={terminalState.drawerPanelRef}
+              onToggle={terminalState.handleToggleDrawer}
+              onSelectSession={terminalState.handleSelectSession}
+              onCloseSession={terminalState.handleCloseSession}
+              onSessionInput={terminalState.handleSessionInput}
+            />
+          ) : null}
         </div>
-
-        {terminalState.hasSession ? (
-          <TerminalDrawer
-            sessions={terminalState.sessions}
-            activeSessionId={terminalState.activeSessionId}
-            open={terminalState.drawerOpen}
-            toggleButtonRef={terminalState.toggleButtonRef}
-            drawerPanelRef={terminalState.drawerPanelRef}
-            onToggle={terminalState.handleToggleDrawer}
-            onSelectSession={terminalState.handleSelectSession}
-            onCloseSession={terminalState.handleCloseSession}
-            onSessionInput={terminalState.handleSessionInput}
-          />
-        ) : null}
       </div>
-    </div>
+    </TooltipProvider>
   );
 }

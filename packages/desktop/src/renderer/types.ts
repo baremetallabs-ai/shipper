@@ -1,4 +1,4 @@
-import type { ListIssueItem, WorkflowStage } from '@dnsquared/shipper-core';
+import type { ListIssueItem, TokenUsage, WorkflowStage } from '@dnsquared/shipper-core';
 
 export interface CheckResult {
   ok: boolean;
@@ -17,7 +17,7 @@ export interface AppConfig {
 }
 
 export interface PipelineIssue extends ListIssueItem {
-  totalTokens: number;
+  tokenUsage: TokenUsage;
 }
 
 export interface ListIssuesSuccess {

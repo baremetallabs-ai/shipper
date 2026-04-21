@@ -1146,7 +1146,7 @@ describe('desktop IPC locking', () => {
     });
   });
 
-  it('returns issue totals on list-issues responses, including zero fallbacks', async () => {
+  it('returns token usage on list-issues responses, including zero fallbacks', async () => {
     await loadHandlers();
     state.listIssuesMock.mockResolvedValueOnce([
       {
@@ -1194,7 +1194,12 @@ describe('desktop IPC locking', () => {
           author: 'dnsquared',
           createdAt: '2026-04-20T00:00:00Z',
           url: 'https://github.com/owner/repo/issues/42',
-          totalTokens: 100,
+          tokenUsage: {
+            inputTokens: 10,
+            outputTokens: 20,
+            cacheReadTokens: 30,
+            cacheWriteTokens: 40,
+          },
         },
         {
           number: 43,
@@ -1204,7 +1209,12 @@ describe('desktop IPC locking', () => {
           author: 'dnsquared',
           createdAt: '2026-04-20T00:00:00Z',
           url: 'https://github.com/owner/repo/issues/43',
-          totalTokens: 0,
+          tokenUsage: {
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+          },
         },
       ],
     });

@@ -1,5 +1,6 @@
 export { toError, toErrorMessage } from './lib/errors.js';
 export { isPlainObject } from './lib/type-guards.js';
+export type { TokenUsage } from './lib/token-usage.js';
 export {
   LABELS,
   WORKFLOW_LABELS,

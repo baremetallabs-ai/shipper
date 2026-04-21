@@ -8,6 +8,7 @@ import {
   getPriorityTier,
   LOCKED_LABEL,
   type ListIssueItem,
+  type TokenUsage,
   type WorkflowStage,
 } from '@dnsquared/shipper-core';
 
@@ -31,6 +32,16 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from './ui/dropdown-menu.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip.js';
+
+const spokenTokenFormatter = new Intl.NumberFormat('en-US');
+
+const TOKEN_USAGE_ROWS = [
+  { label: 'Input', key: 'inputTokens' },
+  { label: 'Output', key: 'outputTokens' },
+  { label: 'Cache read', key: 'cacheReadTokens' },
+  { label: 'Cache write', key: 'cacheWriteTokens' },
+] as const satisfies Array<{ label: string; key: keyof TokenUsage }>;
 
 export function getResetTargets(labels: string[]): WorkflowStage[] {
   const hasPrLabels = POST_IMPLEMENTATION_LABELS.some((label) => labels.includes(label));
@@ -67,7 +78,7 @@ export function isValidDropTarget(source: DragSource, targetStage: WorkflowStage
 
 export interface IssueCardProps {
   issue: ListIssueItem;
-  totalTokens: number;
+  tokenUsage: TokenUsage;
   onGroom?: (issueNumber: number) => void;
   onResetSelect?: (targetStage: WorkflowStage) => void;
   onSetPriority?: (level: 'high' | 'normal' | 'low') => void;
@@ -89,9 +100,22 @@ export interface IssueCardProps {
   onDragEnd?: () => void;
 }
 
+function getTotalTokens(tokenUsage: TokenUsage): number {
+  return TOKEN_USAGE_ROWS.reduce((total, row) => total + tokenUsage[row.key], 0);
+}
+
+function formatTokenBreakdownSentence(tokenUsage: TokenUsage): string {
+  const total = getTotalTokens(tokenUsage);
+  const rows = TOKEN_USAGE_ROWS.map(
+    (row) => `${spokenTokenFormatter.format(tokenUsage[row.key])} ${row.label.toLowerCase()}`
+  );
+
+  return `${spokenTokenFormatter.format(total)} total tokens: ${rows.join(', ')}`;
+}
+
 export function IssueCard({
   issue,
-  totalTokens,
+  tokenUsage,
   onGroom,
   onResetSelect,
   onSetPriority,
@@ -136,6 +160,8 @@ export function IssueCard({
   const showOverflowMenu = hasResetMenu || hasFlatActions || hasPriorityMenu;
   const showStopShipButton = isShipping && onStopShip !== undefined;
   const isShipDisabled = shipDisabled || isBlocked || isLocked || isFailed || isShipping;
+  const totalTokens = getTotalTokens(tokenUsage);
+  const tokenBreakdownSentence = formatTokenBreakdownSentence(tokenUsage);
 
   function handleUnlockSelect(): void {
     onUnlock?.();
@@ -349,10 +375,32 @@ export function IssueCard({
             </>
           )}
         </div>
-        <span className="text-xs text-muted-foreground tabular-nums">
-          <span className="sr-only">{`${totalTokens} total tokens`}</span>
-          <span aria-hidden="true">{formatCompactTokens(totalTokens)}</span>
-        </span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              className="cursor-default rounded-[2px] text-xs text-muted-foreground tabular-nums outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            >
+              <span className="sr-only">{tokenBreakdownSentence}</span>
+              <span aria-hidden="true">{`${formatCompactTokens(totalTokens)} tokens`}</span>
+            </button>
+          </TooltipTrigger>
+          <TooltipContent
+            aria-hidden="true"
+            side="top"
+            align="end"
+            className="min-w-[11rem] space-y-1"
+          >
+            {TOKEN_USAGE_ROWS.map((row) => (
+              <div key={row.key} className="flex items-center justify-between gap-3 text-xs">
+                <span className="text-muted-foreground">{row.label}</span>
+                <span className="tabular-nums text-foreground">
+                  {formatCompactTokens(tokenUsage[row.key])}
+                </span>
+              </div>
+            ))}
+          </TooltipContent>
+        </Tooltip>
       </div>
       {busyLabel ? (
         <div className="absolute inset-0 flex items-center justify-center rounded-sm bg-background/80">
