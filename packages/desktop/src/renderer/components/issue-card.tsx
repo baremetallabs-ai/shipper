@@ -379,7 +379,8 @@ export function IssueCard({
           <TooltipTrigger asChild>
             <button
               type="button"
-              className="cursor-default rounded-[2px] text-xs text-muted-foreground tabular-nums outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              aria-describedby={undefined}
+              className="cursor-help rounded-[2px] text-xs text-muted-foreground tabular-nums outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
             >
               <span className="sr-only">{tokenBreakdownSentence}</span>
               <span aria-hidden="true">{`${formatCompactTokens(totalTokens)} tokens`}</span>

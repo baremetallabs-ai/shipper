@@ -4,7 +4,7 @@ import { logger } from './logger.js';
 import type { AgentName } from './settings.js';
 import type { TokenUsage } from './token-usage.js';
 
-export type { TokenUsage } from './token-usage.js';
+export type { TokenUsage };
 
 const numberFormatter = new Intl.NumberFormat('en-US');
 
