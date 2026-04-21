@@ -27,6 +27,7 @@ At runtime, `runPrompt()` resolves prompts in this order:
 - Bundled default: `packages/core/src/prompts/<agent>/<name>.md`
 
 Use `shipper eject` to scaffold editable local overrides under `./.shipper/prompts/<agent>/`. Shipper still stores temporary runtime files under `./.shipper/tmp/`.
+
 Shipper also ships `packages/mcp`, an MCP server that exposes the workflow tools to AI agents.
 
 ## State model
