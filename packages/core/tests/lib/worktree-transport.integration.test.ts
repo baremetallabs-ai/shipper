@@ -2,7 +2,7 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ConflictContext } from '../../src/lib/worktree.js';
-import { cleanupGitFixtures, createGitFixture, hasPath, sh } from '../_harness/git-fixture.js';
+import { createGitFixture, hasPath, sh } from '../_harness/git-fixture.js';
 
 function writeExecutable(filePath: string, content: string): void {
   mkdirSync(path.dirname(filePath), { recursive: true });
@@ -39,16 +39,23 @@ function remoteRefSha(fixture: ReturnType<typeof createGitFixture>, refName: str
   return fixture.runGit(fixture.remoteDir, ['rev-parse', refName]).trim();
 }
 
+const activeFixtures: Array<ReturnType<typeof createGitFixture>> = [];
+
+function makeFixture(name: string, branchName?: string): ReturnType<typeof createGitFixture> {
+  const fixture = createGitFixture(name, branchName);
+  activeFixtures.push(fixture);
+  return fixture;
+}
+
 afterEach(() => {
-  cleanupGitFixtures();
-  for (const key of ['HOOK_MARKER_FILE', 'HOOK_TEMP_REPO']) {
-    Reflect.deleteProperty(process.env, key);
+  for (const fixture of activeFixtures.splice(0)) {
+    fixture.cleanup();
   }
 });
 
 describe('syncWorktree integration', () => {
   it('reruns installCommand after a clean rebase before returning', async () => {
-    const fixture = createGitFixture('transport-sync-clean-rebase');
+    const fixture = makeFixture('transport-sync-clean-rebase');
     fixture.commitFile(fixture.worktreeDir, 'feature.txt', 'feature work\n', 'feature work');
     advanceMain(fixture, 'main.txt', 'main work\n', 'main work');
 
@@ -78,7 +85,7 @@ describe('syncWorktree integration', () => {
   }, 20_000);
 
   it('stages resolved files before rebase --continue and reruns installCommand after conflict resolution', async () => {
-    const fixture = createGitFixture('transport-sync-conflict');
+    const fixture = makeFixture('transport-sync-conflict');
     const conflictPath = createTextConflict(fixture);
     const installLog = path.join(fixture.tempDir, 'install.log');
     const installCommand = createInstallCommand(fixture.tempDir, 'install-after-conflict.sh', [
@@ -117,7 +124,7 @@ describe('syncWorktree integration', () => {
   }, 20_000);
 
   it('reruns installCommand when the conflict callback already completed the rebase', async () => {
-    const fixture = createGitFixture('transport-sync-complete-rebase');
+    const fixture = makeFixture('transport-sync-complete-rebase');
     const conflictPath = createTextConflict(fixture);
     const installLog = path.join(fixture.tempDir, 'install.log');
     const installCommand = createInstallCommand(
@@ -155,7 +162,7 @@ describe('syncWorktree integration', () => {
   }, 20_000);
 
   it('passes install failure output to the remediation callback and retries successfully', async () => {
-    const fixture = createGitFixture('transport-sync-install-retry');
+    const fixture = makeFixture('transport-sync-install-retry');
     fixture.commitFile(fixture.worktreeDir, 'feature.txt', 'feature work\n', 'feature work');
     advanceMain(fixture, 'main.txt', 'main work\n', 'main work');
 
@@ -193,7 +200,7 @@ describe('syncWorktree integration', () => {
   }, 20_000);
 
   it('throws after exhausting install remediation attempts', async () => {
-    const fixture = createGitFixture('transport-sync-install-exhaust');
+    const fixture = makeFixture('transport-sync-install-exhaust');
     fixture.commitFile(fixture.worktreeDir, 'feature.txt', 'feature work\n', 'feature work');
     advanceMain(fixture, 'main.txt', 'main work\n', 'main work');
 
@@ -221,7 +228,7 @@ describe('syncWorktree integration', () => {
   }, 20_000);
 
   it('throws on the first install failure when no remediation callback is provided', async () => {
-    const fixture = createGitFixture('transport-sync-install-no-remediation');
+    const fixture = makeFixture('transport-sync-install-no-remediation');
     fixture.commitFile(fixture.worktreeDir, 'feature.txt', 'feature work\n', 'feature work');
     advanceMain(fixture, 'main.txt', 'main work\n', 'main work');
 
@@ -246,7 +253,7 @@ describe('syncWorktree integration', () => {
   }, 20_000);
 
   it('resets to the remote branch before rebasing when origin/current-branch exists', async () => {
-    const fixture = createGitFixture('transport-sync-reset-remote');
+    const fixture = makeFixture('transport-sync-reset-remote');
     fixture.commitFile(fixture.worktreeDir, 'kept.txt', 'keep me\n', 'keep me');
     fixture.runGit(fixture.worktreeDir, ['push', '-u', 'origin', 'HEAD']);
     fixture.commitFile(fixture.worktreeDir, 'discarded.txt', 'discard me\n', 'discard me');
@@ -271,7 +278,7 @@ describe('syncWorktree integration', () => {
   }, 20_000);
 
   it('surfaces unresolved and thrown conflict-resolution callbacks', async () => {
-    const fixture = createGitFixture('transport-sync-unresolved');
+    const fixture = makeFixture('transport-sync-unresolved');
     createTextConflict(fixture);
     const { syncWorktree } = await fixture.importWorktreeModule();
 
@@ -303,7 +310,7 @@ describe('syncWorktree integration', () => {
 
 describe('withGitTransport integration', () => {
   it('runs install before the first agent invocation and still pushes after a non-zero initial agent exit', async () => {
-    const fixture = createGitFixture('transport-with-install-before-agent');
+    const fixture = makeFixture('transport-with-install-before-agent');
     fixture.commitFile(fixture.worktreeDir, 'feature.txt', 'feature work\n', 'feature work');
     advanceMain(fixture, 'main.txt', 'main work\n', 'main work');
 
@@ -336,7 +343,7 @@ describe('withGitTransport integration', () => {
   }, 20_000);
 
   it('passes install failure output to the agent, retries, and continues before push', async () => {
-    const fixture = createGitFixture('transport-with-install-remediation');
+    const fixture = makeFixture('transport-with-install-remediation');
     fixture.commitFile(fixture.worktreeDir, 'feature.txt', 'feature work\n', 'feature work');
     advanceMain(fixture, 'main.txt', 'main work\n', 'main work');
 
@@ -386,7 +393,7 @@ describe('withGitTransport integration', () => {
   }, 20_000);
 
   it('returns the install remediation agent exit code before the main agent runs', async () => {
-    const fixture = createGitFixture('transport-with-install-agent-exit');
+    const fixture = makeFixture('transport-with-install-agent-exit');
     fixture.commitFile(fixture.worktreeDir, 'feature.txt', 'feature work\n', 'feature work');
     advanceMain(fixture, 'main.txt', 'main work\n', 'main work');
 
@@ -415,7 +422,7 @@ describe('withGitTransport integration', () => {
   }, 20_000);
 
   it('retries the original push after a pre-push hook failure', async () => {
-    const fixture = createGitFixture('transport-with-hook-retry');
+    const fixture = makeFixture('transport-with-hook-retry');
     fixture.commitFile(fixture.worktreeDir, 'feature.txt', 'feature work\n', 'feature work');
     advanceMain(fixture, 'main.txt', 'main work\n', 'main work');
 
@@ -458,7 +465,7 @@ describe('withGitTransport integration', () => {
   }, 20_000);
 
   it('passes conflicts without inline markers through to the agent', async () => {
-    const fixture = createGitFixture('transport-with-binary-conflict');
+    const fixture = makeFixture('transport-with-binary-conflict');
     const binaryPath = 'assets/logo.png';
     mkdirSync(path.dirname(path.join(fixture.worktreeDir, binaryPath)), { recursive: true });
     writeFileSync(path.join(fixture.worktreeDir, binaryPath), Buffer.from([0, 1, 2, 3]));
@@ -490,7 +497,7 @@ describe('withGitTransport integration', () => {
   }, 20_000);
 
   it('returns the agent exit code without pushing when the initial rebase conflict is unresolved', async () => {
-    const fixture = createGitFixture('transport-with-rebase-abort');
+    const fixture = makeFixture('transport-with-rebase-abort');
     createTextConflict(fixture);
     const { withGitTransport } = await fixture.importWorktreeModule();
     const runAgent = vi.fn().mockResolvedValue(2);

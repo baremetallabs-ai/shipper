@@ -19,7 +19,7 @@ vi.mock('node:child_process', async () => {
 });
 
 const { getCommitsAheadCount } = await import('../../src/lib/worktree.js');
-const { toError } = await import('../../src/lib/worktree/helpers.js');
+const { execAsync, toError } = await import('../../src/lib/worktree/helpers.js');
 
 function queueExecResult(opts: { code?: number; stdout?: string; stderr?: string } = {}): void {
   const { code = 0, stdout = '', stderr = '' } = opts;
@@ -91,6 +91,46 @@ describe('getCommitsAheadCount', () => {
       'git rev-list --count origin/main..HEAD returned a non-numeric commit count'
     );
     expect(gitArgsFromExecCalls()).toEqual([['rev-list', '--count', 'origin/main..HEAD']]);
+  });
+});
+
+describe('execAsync', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('maps string-coded execFile errors to exit code 1 and falls back to the error message', async () => {
+    execFileMock.mockImplementationOnce(
+      (
+        _command: string,
+        _args: string[],
+        _execOpts: unknown,
+        callback: (error: Error | null, stdout: string, stderr: string) => void
+      ) => {
+        globalThis.queueMicrotask(() => {
+          const error = new Error('stdout maxBuffer length exceeded') as Error & {
+            code?: string;
+            stdout?: string;
+            stderr?: string;
+          };
+          error.code = 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER';
+          error.stdout = '';
+          error.stderr = '';
+          callback(error, '', '');
+        });
+        return {} as object;
+      }
+    );
+
+    await expect(execAsync('npm ci', [], { cwd: '/tmp/wt' })).resolves.toEqual({
+      code: 1,
+      stdout: '',
+      stderr: 'stdout maxBuffer length exceeded',
+    });
   });
 });
 

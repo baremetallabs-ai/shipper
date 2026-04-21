@@ -12,7 +12,15 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { pushWorktree } from '../../src/lib/worktree.js';
-import { cleanupGitFixtures, createGitFixture, sh } from '../_harness/git-fixture.js';
+import { createGitFixture, sh } from '../_harness/git-fixture.js';
+
+const activeFixtures: Array<ReturnType<typeof createGitFixture>> = [];
+
+function makeFixture(name: string, branchName?: string): ReturnType<typeof createGitFixture> {
+  const fixture = createGitFixture(name, branchName);
+  activeFixtures.push(fixture);
+  return fixture;
+}
 
 function remoteRefSha(fixture: ReturnType<typeof createGitFixture>, refName: string): string {
   return fixture.runGit(fixture.remoteDir, ['rev-parse', refName]).trim();
@@ -54,7 +62,9 @@ function pushRemoteBranchCommit(
 }
 
 afterEach(() => {
-  cleanupGitFixtures();
+  for (const fixture of activeFixtures.splice(0)) {
+    fixture.cleanup();
+  }
   for (const tempDir of manualTempDirs.splice(0)) {
     rmSync(tempDir, { recursive: true, force: true });
   }
@@ -261,7 +271,12 @@ describe('pushWorktree integration', () => {
   }, 20_000);
 
   it('pushes a new branch successfully', async () => {
-    const fixture = createGitFixture('push-new-branch');
+    const fixture = makeFixture('push-new-branch');
+    const hookContent = ['#!/bin/sh', 'exit 0', ''].join('\n');
+    fixture.writeRelativePrePushHook(hookContent);
+    fixture.writeFile(fixture.worktreeDir, '.husky/pre-push', hookContent);
+    chmodSync(path.join(fixture.worktreeDir, '.husky', 'pre-push'), 0o755);
+    fixture.runGit(fixture.worktreeDir, ['config', 'core.hooksPath', '.husky']);
     fixture.commitFile(fixture.worktreeDir, 'feature.txt', 'feature change\n', 'feature');
     await expect(
       pushWorktree({
@@ -278,7 +293,7 @@ describe('pushWorktree integration', () => {
   }, 20_000);
 
   it('fetches, rebases onto the remote branch, and force-pushes after a failed new-branch push', async () => {
-    const fixture = createGitFixture('push-recovery-rebase');
+    const fixture = makeFixture('push-recovery-rebase');
     fixture.commitFile(fixture.worktreeDir, 'feature.txt', 'local feature\n', 'local feature');
     pushRemoteBranchCommit(
       fixture,
@@ -305,7 +320,7 @@ describe('pushWorktree integration', () => {
   }, 20_000);
 
   it('retries the original push args when the remote branch does not exist yet', async () => {
-    const fixture = createGitFixture('push-remote-absent-retry');
+    const fixture = makeFixture('push-remote-absent-retry');
     fixture.commitFile(fixture.worktreeDir, 'feature.txt', 'feature change\n', 'feature');
     const rejectCounter = path.join(fixture.tempDir, 'reject-count');
     fixture.writeRemotePreReceiveHook(
@@ -338,7 +353,7 @@ describe('pushWorktree integration', () => {
   }, 20_000);
 
   it('stops after repeated push failures and throws the final error', async () => {
-    const fixture = createGitFixture('push-retry-exhaustion');
+    const fixture = makeFixture('push-retry-exhaustion');
     fixture.commitFile(fixture.worktreeDir, 'feature.txt', 'feature change\n', 'feature');
     const rejectCounter = path.join(fixture.tempDir, 'reject-count');
     fixture.writeRemotePreReceiveHook(
@@ -366,7 +381,7 @@ describe('pushWorktree integration', () => {
   }, 20_000);
 
   it('refuses to force-push when the branch has no commits ahead of the base branch', async () => {
-    const fixture = createGitFixture('push-force-no-ahead');
+    const fixture = makeFixture('push-force-no-ahead');
     fixture.runGit(fixture.worktreeDir, ['push', '-u', 'origin', 'HEAD']);
     await expect(
       pushWorktree({
@@ -379,7 +394,7 @@ describe('pushWorktree integration', () => {
   }, 20_000);
 
   it('logs and proceeds with force-push when the commit-count safety check fails', async () => {
-    const fixture = createGitFixture('push-force-count-check-fails');
+    const fixture = makeFixture('push-force-count-check-fails');
     fixture.commitFile(fixture.worktreeDir, 'feature.txt', 'feature change\n', 'feature');
     fixture.runGit(fixture.worktreeDir, ['push', '-u', 'origin', 'HEAD']);
     fixture.commitFile(fixture.worktreeDir, 'feature-2.txt', 'second change\n', 'feature 2');
@@ -405,7 +420,7 @@ describe('pushWorktree integration', () => {
   }, 20_000);
 
   it('strips tracked protected files, preserves .gitkeep files, and pushes the amended commit', async () => {
-    const fixture = createGitFixture('push-strip-protected');
+    const fixture = makeFixture('push-strip-protected');
     fixture.commitFile(fixture.worktreeDir, 'feature.txt', 'feature change\n', 'feature');
     fixture.writeFile(fixture.worktreeDir, '.shipper/output/result.json', '{"ok":true}\n');
     fixture.writeFile(fixture.worktreeDir, '.shipper/input/request.json', '{"issue":653}\n');
@@ -441,7 +456,7 @@ describe('pushWorktree integration', () => {
   }, 20_000);
 
   it('resets the index before push and skips amend when only staged protected files were present', async () => {
-    const fixture = createGitFixture('push-staged-protected');
+    const fixture = makeFixture('push-staged-protected');
     fixture.commitFile(fixture.worktreeDir, 'feature.txt', 'feature change\n', 'feature');
     const headBefore = fixture.currentHead(fixture.worktreeDir);
     fixture.writeFile(fixture.worktreeDir, '.shipper/output/result.json', '{"ok":true}\n');
