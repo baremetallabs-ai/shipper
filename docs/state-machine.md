@@ -1,6 +1,6 @@
 # Label-Based State Machine
 
-Shipper uses GitHub issue labels as the sole representation of workflow state. Each issue carries exactly one `shipper:*` workflow label at a time, plus zero or more control labels.
+Shipper uses GitHub issue labels as the sole representation of workflow state. Each issue carries exactly one `shipper:*` workflow label at a time, plus zero or more control and priority labels.
 
 ## Labels
 

@@ -6,11 +6,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A CLI workflow orchestrator for GitHub-hosted repos. Prompt-driven commands use prompts bundled with the CLI, with optional repo-local overrides under `.shipper/prompts/<agent>/`. Shipper handles orchestration; GitHub issues and labels are the source of truth for workflow state.
 
-This repo is a small monorepo:
+This repo is a small monorepo with four packages:
 
 - `packages/cli` - the CLI entrypoint and command implementations
 - `packages/core` - shared library code for prompts, settings, GitHub integration, worktrees, and locking
 - `packages/desktop` - Electron desktop app in early development
+- `packages/mcp` - MCP server exposing Shipper workflow tools to AI agents
 
 ## Commands
 
@@ -24,10 +25,9 @@ npm run format         # prettier --write .
 npm run test           # vitest run (per-workspace)
 npm run test:coverage  # vitest run --coverage (per-workspace)
 npm run test:watch     # vitest (watch mode)
-npx vitest run packages/cli/tests/lib/branch.test.ts   # Run a single test file
 ```
 
-**Important:** Always run tests via `npm run test` (workspace scripts), never `npx vitest run` from the repo root. The root has no vitest config — running there picks up all test files without per-package alias resolution and will produce false failures.
+**Important:** Always run tests via `npm run test` (workspace scripts). For package-specific runs, use the same workspace pattern as the root config, for example `npm run test --workspace=packages/cli`.
 
 ## CI
 
@@ -49,7 +49,7 @@ npx vitest run packages/cli/tests/lib/branch.test.ts   # Run a single test file
 
 **GitHub integration:** All GitHub interaction goes through the `gh` CLI. See `packages/core/src/lib/github.ts`. Any structured `gh --json` payload must be parsed through `packages/core/src/lib/gh-schemas.ts` or `packages/core/src/lib/gh-json.ts`; do not use `JSON.parse(...) as T` for `gh` output.
 
-**Workflow state machine via labels:** `shipper:new` -> `shipper:groomed` -> `shipper:designed` -> `shipper:planned` -> `shipper:implemented` -> `shipper:pr-open` -> `shipper:pr-reviewed` -> `shipper:ready`. Control labels: `shipper:blocked` and `shipper:locked`. The `next` command auto-advances based on the current workflow label.
+**Workflow state machine via labels:** `shipper:new` -> `shipper:groomed` -> `shipper:designed` -> `shipper:planned` -> `shipper:implemented` -> `shipper:pr-open` -> `shipper:pr-reviewed` -> `shipper:ready`. Control labels: `shipper:blocked`, `shipper:locked`, and `shipper:failed`. Priority labels: `shipper:priority-high` and `shipper:priority-low`. The `next` command auto-advances based on the current workflow label.
 
 ## Code Conventions
 
