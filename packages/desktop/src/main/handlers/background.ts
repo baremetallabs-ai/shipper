@@ -329,7 +329,7 @@ export function registerBackgroundHandlers(backgroundManager: BackgroundManager)
       throw new Error('Invalid bg-remove-queued-session payload.');
     }
 
-    backgroundManager.removeQueuedSession(parsedPayload.sessionId);
+    return backgroundManager.removeQueuedSession(parsedPayload.sessionId);
   });
 
   ipcMain.handle('bg-get-output', (_event, payload: unknown) => {

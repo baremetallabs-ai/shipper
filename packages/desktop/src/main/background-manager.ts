@@ -62,6 +62,8 @@ export interface SpawnBackgroundSessionOptions {
     | Promise<Partial<BackgroundSessionMeta> | undefined>;
 }
 
+export type RemoveQueuedSessionResult = 'ignored' | 'pause-requested' | 'paused';
+
 interface BackgroundSession {
   id: string;
   command: BackgroundCommand;
@@ -202,15 +204,15 @@ export class BackgroundManager {
     }, GRACE_TIMEOUT_MS);
   }
 
-  requestPause(sessionId: string): void {
+  requestPause(sessionId: string): boolean {
     const session = this.sessions.get(sessionId);
     if (!session || session.command !== 'ship' || session.status !== 'running') {
-      return;
+      return false;
     }
 
     const pauseSentinelPath = session.pauseSentinelPath;
     if (!pauseSentinelPath) {
-      return;
+      return false;
     }
 
     try {
@@ -221,18 +223,28 @@ export class BackgroundManager {
 
     session.meta = { ...session.meta, pausePending: true };
     this.emitStatus(session);
+    return true;
   }
 
-  removeQueuedSession(sessionId: string): void {
+  removeQueuedSession(sessionId: string): RemoveQueuedSessionResult {
     const session = this.sessions.get(sessionId);
-    if (!session || session.command !== 'ship' || session.status !== 'queued') {
-      return;
+    if (!session || session.command !== 'ship') {
+      return 'ignored';
+    }
+
+    if (session.status === 'running') {
+      return this.requestPause(sessionId) ? 'pause-requested' : 'ignored';
+    }
+
+    if (session.status !== 'queued') {
+      return 'ignored';
     }
 
     this.removeQueuedShip(session);
     session.exitCode = null;
     session.status = 'paused';
     this.emitStatus(session);
+    return 'paused';
   }
 
   destroyAll(): void {

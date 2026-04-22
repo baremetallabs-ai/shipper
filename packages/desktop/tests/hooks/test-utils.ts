@@ -108,7 +108,7 @@ export function createMockShipperApi(): MockShipperApiController {
     spawnBackgroundUnblock: vi.fn(() => Promise.resolve({ sessionId: 'bg-unblock-1' })),
     killBackground: vi.fn(() => Promise.resolve()),
     requestPauseActive: vi.fn(() => Promise.resolve()),
-    removeQueuedSession: vi.fn(() => Promise.resolve()),
+    removeQueuedSession: vi.fn(() => Promise.resolve('paused')),
     getBackgroundOutput: vi.fn(() => Promise.resolve('')),
     ptyWrite: vi.fn(() => Promise.resolve()),
     ptyResize: vi.fn(() => Promise.resolve()),
