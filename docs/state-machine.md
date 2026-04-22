@@ -56,7 +56,7 @@ shipper:pr-open
   |  pr-review
   v
 shipper:pr-reviewed <--+
-  |  pr-remediate      |  review loop (max 3 tight cycles)
+  |  pr-remediate      |  reject/resume stays within the overall transition cap
   +--------------------+
   |
   v
@@ -137,7 +137,8 @@ A non-NEW reject stays inside that per-issue ship loop. Auto-ship only records a
 run ends in a terminal error, such as a crash, an explicit `fail`, transition-cap exhaustion, or a
 reject that rolls the issue back to `shipper:new`.
 
-A review cycle cap (`MAX_REVIEW_CYCLES = 3`) prevents infinite tight `pr-reviewed <-> pr-remediate` loops.
+The shared per-run transition cap (`MAX_TRANSITIONS = 15`) prevents infinite loops, including
+tight `pr-reviewed <-> pr-remediate` reject/resume cycles.
 
 ## The `reset` command
 
