@@ -21,6 +21,14 @@ interface StructuredResultOptions {
   sessionLogPath?: string;
 }
 
+interface FailureSummaryOptions {
+  command: string;
+  sessionLogPath?: string;
+  finalMessage?: string;
+  detail?: string;
+  forceError?: boolean;
+}
+
 interface CreateIssuePayload {
   issueNumber: number;
   title: string;
@@ -120,7 +128,13 @@ export function formatCreateIssueResult(
   opts: { command: string; finalMessage?: string; sessionLogPath?: string }
 ): ToolTextResult {
   if (!payload) {
-    return formatFailureSummary(result, opts.command, opts.sessionLogPath);
+    return formatFailureSummary(result, {
+      command: opts.command,
+      sessionLogPath: opts.sessionLogPath,
+      finalMessage: opts.finalMessage,
+      detail: 'Unable to recover created issue details from post-run metadata.',
+      forceError: true,
+    });
   }
 
   return formatStructuredResult({
@@ -137,7 +151,13 @@ export function formatAdvanceResult(
   opts: { command: string; finalMessage?: string; sessionLogPath?: string }
 ): ToolTextResult {
   if (!payload) {
-    return formatFailureSummary(result, opts.command, opts.sessionLogPath);
+    return formatFailureSummary(result, {
+      command: opts.command,
+      sessionLogPath: opts.sessionLogPath,
+      finalMessage: opts.finalMessage,
+      detail: 'Unable to recover the stage transition from post-run metadata.',
+      forceError: true,
+    });
   }
 
   const headerLines = [`Stage: ${payload.from} -> ${payload.to} (${payload.verdict})`];
@@ -159,7 +179,13 @@ export function formatUnblockResult(
   opts: { command: string; finalMessage?: string; sessionLogPath?: string }
 ): ToolTextResult {
   if (!payload) {
-    return formatFailureSummary(result, opts.command, opts.sessionLogPath);
+    return formatFailureSummary(result, {
+      command: opts.command,
+      sessionLogPath: opts.sessionLogPath,
+      finalMessage: opts.finalMessage,
+      detail: 'Unable to recover the unblock verdict from post-run metadata.',
+      forceError: true,
+    });
   }
 
   return formatStructuredResult({
@@ -183,25 +209,29 @@ function formatStructuredResult(opts: StructuredResultOptions): ToolTextResult {
   return buildResult(text, opts.result);
 }
 
-function formatFailureSummary(
-  result: SpawnResult,
-  command: string,
-  sessionLogPath?: string
-): ToolTextResult {
+function formatFailureSummary(result: SpawnResult, opts: FailureSummaryOptions): ToolTextResult {
   const parts = [
-    result.timedOut ? `[timed out] ${command}` : `[exit ${result.exitCode}] ${command}`,
+    result.timedOut ? `[timed out] ${opts.command}` : `[exit ${result.exitCode}] ${opts.command}`,
   ];
+  if (opts.detail) {
+    parts.push(opts.detail);
+  }
   const stderrTail = getStderrTail(result.stderr);
   if (stderrTail) {
     parts.push('', '--- stderr (tail) ---', stderrTail);
   }
-  parts.push('', `Session log: ${sessionLogPath ?? '<not found>'}`);
 
-  return buildResult(parts.join('\n'), result);
+  if (opts.finalMessage !== undefined || !result.timedOut) {
+    parts.push('', '---', opts.finalMessage ?? MISSING_FINAL_MESSAGE_LINE);
+  }
+
+  parts.push('', `Session log: ${opts.sessionLogPath ?? '<not found>'}`);
+
+  return buildResult(parts.join('\n'), result, opts.forceError);
 }
 
-function buildResult(text: string, result: SpawnResult): ToolTextResult {
-  const isError = result.timedOut || result.exitCode !== 0;
+function buildResult(text: string, result: SpawnResult, forceError = false): ToolTextResult {
+  const isError = forceError || result.timedOut || result.exitCode !== 0;
   return isError
     ? { content: [{ type: 'text', text }], isError: true }
     : { content: [{ type: 'text', text }] };

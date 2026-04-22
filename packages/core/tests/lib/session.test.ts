@@ -598,7 +598,7 @@ describe('findLatestSessionMeta', () => {
 
     try {
       writeSessionMetaSync(
-        path.join(sessionDir, '307-implement.meta.json'),
+        path.join(sessionDir, '307-implement-2026-03-15T03-00-00-000Z.meta.json'),
         buildMeta({
           issue: '307',
           stage: 'implement',
@@ -606,7 +606,7 @@ describe('findLatestSessionMeta', () => {
         })
       );
       writeSessionMetaSync(
-        path.join(sessionDir, '308-plan.meta.json'),
+        path.join(sessionDir, '308-plan-2026-03-15T03-30-00-000Z.meta.json'),
         buildMeta({
           issue: '308',
           stage: 'plan',
@@ -614,7 +614,7 @@ describe('findLatestSessionMeta', () => {
         })
       );
       writeSessionMetaSync(
-        path.join(sessionDir, '308-implement-old.meta.json'),
+        path.join(sessionDir, '308-implement-2026-03-14T23-59-59-000Z.meta.json'),
         buildMeta({
           issue: '308',
           stage: 'implement',
@@ -622,7 +622,7 @@ describe('findLatestSessionMeta', () => {
         })
       );
       writeSessionMetaSync(
-        path.join(sessionDir, '308-implement-current.meta.json'),
+        path.join(sessionDir, '308-implement-2026-03-15T04-00-00-000Z.meta.json'),
         buildMeta({
           issue: '308',
           stage: 'implement',
@@ -631,7 +631,7 @@ describe('findLatestSessionMeta', () => {
         })
       );
       writeSessionMetaSync(
-        path.join(sessionDir, '308-implement-latest.meta.json'),
+        path.join(sessionDir, '308-implement-2026-03-15T05-00-00-000Z.meta.json'),
         buildMeta({
           issue: '308',
           stage: 'implement',
@@ -665,17 +665,24 @@ describe('findLatestSessionMeta', () => {
 
     try {
       mkdirSync(sessionDir, { recursive: true });
-      writeFileSync(path.join(sessionDir, '308-bad.meta.json'), '{bad json', 'utf-8');
-      writeSessionMetaSync(path.join(sessionDir, '308-invalid-timestamp.meta.json'), {
-        ...buildMeta({
-          issue: '308',
-          stage: 'implement',
-          timestamp: '2026-03-15T02:00:00.000Z',
-        }),
-        timestamp: 'not-a-date',
-      });
+      writeFileSync(
+        path.join(sessionDir, '308-implement-2026-03-15T01-00-00-000Z.meta.json'),
+        '{bad json',
+        'utf-8'
+      );
       writeSessionMetaSync(
-        path.join(sessionDir, '308-valid.meta.json'),
+        path.join(sessionDir, '308-implement-2026-03-15T02-00-00-000Z.meta.json'),
+        {
+          ...buildMeta({
+            issue: '308',
+            stage: 'implement',
+            timestamp: '2026-03-15T02:00:00.000Z',
+          }),
+          timestamp: 'not-a-date',
+        }
+      );
+      writeSessionMetaSync(
+        path.join(sessionDir, '308-implement-2026-03-15T03-00-00-000Z.meta.json'),
         buildMeta({
           issue: '308',
           stage: 'implement',

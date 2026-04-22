@@ -47,7 +47,7 @@ const STAGE_FOR_LABEL = {
   'shipper:pr-open': 'pr_review',
   'shipper:pr-reviewed': 'pr_remediate',
 } as const;
-const ISSUE_URL_RE = /https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/issues\/(\d+)/;
+const ISSUE_URL_RE = /https:\/\/github\.com\/([^/\s]+\/[^/\s]+)\/issues\/(\d+)/g;
 
 type AdvanceStageName = (typeof STAGE_FOR_LABEL)[keyof typeof STAGE_FOR_LABEL];
 type AdvanceVerdict = 'accept' | 'reject' | 'fail';
@@ -290,24 +290,41 @@ function resolveAdvanceOutcome(
   return undefined;
 }
 
+function resolveNoopAdvanceOutcome(
+  preStageLabel: string | undefined,
+  result: { exitCode: number; timedOut: boolean }
+): { from: string; to: string; verdict: string } | undefined {
+  if (preStageLabel !== 'shipper:ready' || result.timedOut || result.exitCode !== 0) {
+    return undefined;
+  }
+
+  return { from: preStageLabel, to: preStageLabel, verdict: 'noop' };
+}
+
 function findIssueUrl(
+  repo: string,
   message: string | undefined
 ): { issueNumber: number; url: string } | undefined {
   if (!message) {
     return undefined;
   }
 
-  const match = message.match(ISSUE_URL_RE);
-  if (!match?.[0] || !match[1]) {
-    return undefined;
+  const matches = [...message.matchAll(ISSUE_URL_RE)];
+  for (let index = matches.length - 1; index >= 0; index -= 1) {
+    const match = matches[index];
+    if (!match?.[0] || !match[1] || !match[2] || match[1] !== repo) {
+      continue;
+    }
+
+    const issueNumber = Number.parseInt(match[2], 10);
+    if (!Number.isFinite(issueNumber)) {
+      continue;
+    }
+
+    return { issueNumber, url: match[0] };
   }
 
-  const issueNumber = Number.parseInt(match[1], 10);
-  if (!Number.isFinite(issueNumber)) {
-    return undefined;
-  }
-
-  return { issueNumber, url: match[0] };
+  return undefined;
 }
 
 async function listRecentNewIssues(repo: string, since: Date): Promise<GhIssueCandidate[]> {
@@ -376,12 +393,21 @@ async function resolveCreatedIssuePayload(
   startedAt: Date,
   finalMessage: string | undefined
 ): Promise<{ issueNumber: number; title: string; url: string } | undefined> {
-  const fromMessage = findIssueUrl(finalMessage);
+  const fromMessage = findIssueUrl(repo, finalMessage);
   if (fromMessage) {
-    return fetchIssueDetails(repo, fromMessage.issueNumber);
+    try {
+      return await fetchIssueDetails(repo, fromMessage.issueNumber);
+    } catch {
+      return undefined;
+    }
   }
 
-  const issues = await listRecentNewIssues(repo, startedAt);
+  let issues: GhIssueCandidate[];
+  try {
+    issues = await listRecentNewIssues(repo, startedAt);
+  } catch {
+    return undefined;
+  }
   if (issues.length === 0) {
     return undefined;
   }
@@ -389,10 +415,34 @@ async function resolveCreatedIssuePayload(
   const newest = [...issues].sort((a, b) => {
     const aTime = a.createdAt ? Date.parse(a.createdAt) : Number.NEGATIVE_INFINITY;
     const bTime = b.createdAt ? Date.parse(b.createdAt) : Number.NEGATIVE_INFINITY;
-    return bTime - aTime;
-  })[0];
+    const aValue = Number.isNaN(aTime) ? Number.NEGATIVE_INFINITY : aTime;
+    const bValue = Number.isNaN(bTime) ? Number.NEGATIVE_INFINITY : bTime;
+    return bValue - aValue;
+  });
+  const titleMatches =
+    finalMessage !== undefined
+      ? newest.filter(
+          (issue) => typeof issue.title === 'string' && finalMessage.includes(issue.title)
+        )
+      : [];
+  const candidate =
+    titleMatches.length === 1
+      ? titleMatches[0]
+      : titleMatches.length > 1
+        ? undefined
+        : newest.length === 1
+          ? newest[0]
+          : undefined;
 
-  return newest ? fetchIssueDetails(repo, newest.number) : undefined;
+  if (!candidate) {
+    return undefined;
+  }
+
+  try {
+    return await fetchIssueDetails(repo, candidate.number);
+  } catch {
+    return undefined;
+  }
 }
 
 function mapUnblockVerdict(
@@ -525,17 +575,20 @@ export function registerTools(server: McpServer, repo: string): void {
         }
 
         const preStageLabel = findCurrentStageLabel(preLabels);
+        const preStage = parseAdvanceStage(preStageLabel);
         const startedAt = new Date();
         const args = ['next', String(issue), '--mode', 'headless'];
         const result = await spawnShipper(args, { timeoutMs: agentTimeoutMs() });
         const postIssue = await fetchIssueLabels(repo, issue);
         const postLabels = postIssue.labels.map((label) => label.name);
-        const outcome = resolveAdvanceOutcome(preStageLabel, postLabels);
-        const sessionContext = preStageLabel
+        const outcome =
+          resolveAdvanceOutcome(preStageLabel, postLabels) ??
+          resolveNoopAdvanceOutcome(preStageLabel, result);
+        const sessionContext = preStage
           ? await resolveSessionContext({
               repoSlug: sessionRepo.repoSlug,
               issue: String(issue),
-              stage: parseAdvanceStage(preStageLabel) ?? 'implement',
+              stage: preStage,
               since: startedAt,
             })
           : {};
