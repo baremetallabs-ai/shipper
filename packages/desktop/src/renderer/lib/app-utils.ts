@@ -4,6 +4,7 @@ import {
   FAILED_LABEL,
   getPriorityTier,
   LOCKED_LABEL,
+  NEW_LABEL,
   STAGE_LABEL_NAMES,
   type ListIssueItem,
 } from '@dnsquared/shipper-core';
@@ -25,6 +26,10 @@ type FetchIssueTimelinesFn = (
   repo: string,
   issueNumbers: number[]
 ) => Promise<Map<number, TimelineLabelEvent[]>>;
+
+const AUTO_UNBLOCK_PRIORITY_LABELS = STAGE_LABEL_NAMES.filter((label) => label !== NEW_LABEL)
+  .slice()
+  .reverse();
 
 function sortIssuesByLabelTime<T extends { number: number; title: string }>(
   issues: T[],
@@ -299,7 +304,7 @@ export function sortBlockedIssuesByStagePriority(issues: ListIssueItem[]): ListI
     .map((issue, issueIndex) => ({
       issue,
       issueIndex,
-      stageIndex: AUTO_SHIP_PRIORITY_LABELS.findIndex((label) => issue.labels.includes(label)),
+      stageIndex: AUTO_UNBLOCK_PRIORITY_LABELS.findIndex((label) => issue.labels.includes(label)),
     }))
     .sort((left, right) => {
       const leftStageIndex = left.stageIndex >= 0 ? left.stageIndex : Number.MAX_SAFE_INTEGER;

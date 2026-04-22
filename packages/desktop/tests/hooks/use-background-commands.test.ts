@@ -5,9 +5,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   BLOCKED_LABEL,
-  IMPLEMENTED_LABEL,
   PLANNED_LABEL,
   PR_REVIEWED_LABEL,
+  READY_LABEL,
 } from '@dnsquared/shipper-core';
 import type { IssuePipelineBridge, IssueListResult } from '../../src/renderer/types.js';
 import { useBackgroundCommands } from '../../src/renderer/hooks/use-background-commands.js';
@@ -228,7 +228,7 @@ describe('useBackgroundCommands', () => {
       ok: true,
       issues: [
         createIssue(42, [PLANNED_LABEL, BLOCKED_LABEL]),
-        createIssue(43, [IMPLEMENTED_LABEL, BLOCKED_LABEL]),
+        createIssue(43, [READY_LABEL, BLOCKED_LABEL]),
       ],
     });
     const pipelineBridge = createPipelineBridge();
