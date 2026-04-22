@@ -15,7 +15,7 @@ import { Badge } from './ui/badge.js';
 import { Button } from './ui/button.js';
 
 export type ActionQueueCommand = 'new' | 'ship' | 'init' | 'unblock';
-export type ActionQueueStatus = 'queued' | 'running' | 'complete' | 'failed';
+export type ActionQueueStatus = 'queued' | 'running' | 'complete' | 'failed' | 'paused';
 
 export interface ActionQueueItem {
   id: string;
@@ -44,7 +44,8 @@ const statusPriority: Record<ActionQueueStatus, number> = {
   running: 0,
   queued: 1,
   failed: 2,
-  complete: 3,
+  paused: 3,
+  complete: 4,
 };
 
 function getStatusBadgeVariant(
@@ -54,6 +55,8 @@ function getStatusBadgeVariant(
     case 'running':
       return 'secondary';
     case 'queued':
+      return 'outline';
+    case 'paused':
       return 'outline';
     case 'complete':
       return 'success';
@@ -72,6 +75,8 @@ function getStatusLabel(status: ActionQueueStatus, cancelled: boolean | undefine
       return 'Running';
     case 'queued':
       return 'Queued';
+    case 'paused':
+      return 'Paused';
     case 'complete':
       return 'Complete';
     case 'failed':
@@ -237,7 +242,9 @@ export function ActionQueueDrawer({
                           <Square className="size-3.5 fill-current" />
                         </Button>
                       ) : null}
-                      {item.status === 'failed' || item.status === 'complete' ? (
+                      {item.status === 'failed' ||
+                      item.status === 'complete' ||
+                      item.status === 'paused' ? (
                         <Button
                           type="button"
                           variant="ghost"

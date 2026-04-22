@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import type { RefObject, SetStateAction } from 'react';
 
-import { BLOCKED_LABEL, LOCKED_LABEL, toErrorMessage } from '@dnsquared/shipper-core';
+import {
+  BLOCKED_LABEL,
+  LOCKED_LABEL,
+  PR_REVIEWED_LABEL,
+  toErrorMessage,
+  type ListIssueItem,
+} from '@dnsquared/shipper-core';
 
 import {
   getActiveShipIssueNumbers,
@@ -77,6 +83,7 @@ export interface UseBackgroundCommandsResult {
   logViewer: BackgroundLogViewerState;
   actionQueueOpen: boolean;
   autoShipRepos: Set<string>;
+  pausePendingIssues: Set<number>;
   shippingCommands: Map<number, ActiveShippingCommand>;
   activeCommandRepos: Set<string>;
   hasRunningShipCommand: boolean;
@@ -89,6 +96,8 @@ export interface UseBackgroundCommandsResult {
   handleCancelBackground: (sessionId: string) => Promise<void>;
   handleShowBackgroundLogs: (sessionId: string) => Promise<void>;
   handleRetryToast: (toastId: string) => Promise<void>;
+  handlePauseIssue: (issue: ListIssueItem) => Promise<void>;
+  handleResumeIssue: (issueNumber: number, repo?: string) => Promise<void>;
   enableAutoShipForRepo: (repo: string) => void;
   clearAutoShipStateForRepo: (repo: string) => void;
 }
@@ -102,6 +111,7 @@ export function useBackgroundCommands({
   const [backgroundCommands, setBackgroundCommands] = useState<BackgroundCommandState[]>([]);
   const [toasts, setToasts] = useState<BackgroundToastItem[]>([]);
   const [autoShipRepos, setAutoShipRepos] = useState<Set<string>>(new Set());
+  const [pausePendingIssues, setPausePendingIssues] = useState<Set<number>>(new Set());
   const [logViewer, setLogViewer] = useState<BackgroundLogViewerState>({
     open: false,
     sessionId: null,
@@ -199,6 +209,11 @@ export function useBackgroundCommands({
     autoUnblockIssuesRef.current.delete(repo);
   }, []);
 
+  const getPausedIssueNumbers = useCallback(
+    () => pipelineBridgeRef.current?.getPausedIssues() ?? new Set<number>(),
+    [pipelineBridgeRef]
+  );
+
   const enableAutoShipForRepo = useCallback((repo: string) => {
     setAutoShipRepos((currentRepos) => {
       if (currentRepos.has(repo)) {
@@ -235,6 +250,10 @@ export function useBackgroundCommands({
       }
 
       if (command === 'ship' && (status === 'complete' || status === 'failed')) {
+        return pipelineBridgeRef.current?.loadIssues(repo) ?? null;
+      }
+
+      if (command === 'ship' && status === 'paused') {
         return pipelineBridgeRef.current?.loadIssues(repo) ?? null;
       }
 
@@ -299,6 +318,58 @@ export function useBackgroundCommands({
     autoUnblockIssuesRef.current.set(repo, currentIssues);
   }
 
+  const handleResumeIssue = useCallback(
+    async (issueNumber: number, repo = activeRepo) => {
+      if (!repo) {
+        return;
+      }
+
+      await getShipperApi().resumeIssue(repo, issueNumber);
+      pipelineBridgeRef.current?.clearPausedIssue(issueNumber);
+    },
+    [activeRepo, pipelineBridgeRef]
+  );
+
+  const handlePauseIssue = useCallback(
+    async (issue: ListIssueItem) => {
+      if (!activeRepo) {
+        return;
+      }
+
+      const repo = activeRepo;
+      const shippingCommand = shippingCommands.get(issue.number);
+      const lastKnownIssue = pipelineBridgeRef.current?.getIssueByNumber(issue.number) ?? issue;
+
+      if (shippingCommand?.status === 'running') {
+        if (lastKnownIssue.labels.includes(PR_REVIEWED_LABEL)) {
+          pushToast({
+            id: `pause-final-stage-${issue.number}`,
+            sessionId: shippingCommand.id,
+            variant: 'cancelled',
+            title: `#${issue.number} is at the final stage`,
+            description: 'Use Stop to halt abruptly.',
+          });
+          return;
+        }
+
+        await getShipperApi().requestPauseActive(shippingCommand.id);
+        setPausePendingIssues((current) => new Set(current).add(issue.number));
+        return;
+      }
+
+      if (shippingCommand?.status === 'queued') {
+        await getShipperApi().removeQueuedSession(shippingCommand.id);
+        await getShipperApi().pauseIssue(repo, issue.number);
+        pipelineBridgeRef.current?.trackPausedIssue(issue.number);
+        return;
+      }
+
+      await getShipperApi().pauseIssue(repo, issue.number);
+      pipelineBridgeRef.current?.trackPausedIssue(issue.number);
+    },
+    [activeRepo, pipelineBridgeRef, pushToast, shippingCommands]
+  );
+
   const handleBackgroundStatus = useEffectEvent(async (event: BackgroundStatusPayload) => {
     const previousCommand = backgroundCommandsRef.current.find(
       (command) => command.id === event.sessionId
@@ -311,6 +382,7 @@ export function useBackgroundCommands({
     const issueUrl = event.meta?.issueUrl ?? previousCommand?.issueUrl;
     const logFile = event.meta?.logFile ?? previousCommand?.logFile;
     const cancelled = event.meta?.cancelled ?? previousCommand?.cancelled ?? false;
+    const pausePending = event.meta?.pausePending ?? previousCommand?.pausePending ?? false;
     const isAutoUnblock =
       issueNumber !== undefined && event.command === 'unblock'
         ? isAutoUnblockIssue(event.repo, issueNumber)
@@ -329,6 +401,7 @@ export function useBackgroundCommands({
         merge,
         latestOutput,
         cancelled,
+        pausePending,
       }),
       output,
       request,
@@ -338,6 +411,7 @@ export function useBackgroundCommands({
       logFile,
       exitCode: event.exitCode,
       cancelled,
+      pausePending,
     };
     const currentCommands = backgroundCommandsRef.current;
     const existingIndex = currentCommands.findIndex((command) => command.id === event.sessionId);
@@ -359,6 +433,33 @@ export function useBackgroundCommands({
         pipelineBridgeRef.current?.clearUnblockIssue(issueNumber);
         clearAutoUnblockIssue(event.repo, issueNumber);
       }
+    }
+
+    if (event.command === 'ship' && issueNumber !== undefined) {
+      if (pausePending) {
+        setPausePendingIssues((current) => new Set(current).add(issueNumber));
+      }
+
+      if (event.status === 'failed' || event.status === 'paused') {
+        setPausePendingIssues((current) => {
+          const next = new Set(current);
+          next.delete(issueNumber);
+          return next;
+        });
+      }
+    }
+
+    if (event.status === 'paused' && event.command === 'ship' && issueNumber !== undefined) {
+      await getShipperApi().pauseIssue(event.repo, issueNumber);
+      pipelineBridgeRef.current?.trackPausedIssue(issueNumber);
+      pushToast({
+        id: `paused-${event.repo}-${issueNumber}`,
+        sessionId: event.sessionId,
+        variant: 'cancelled',
+        title: `#${issueNumber} paused`,
+        description: 'The current stage finished and no further stage was started.',
+      });
+      await refreshRepoAfterBackground(event.repo, event.command, event.status);
     }
 
     if (event.status === 'complete' && event.command !== 'unblock') {
@@ -453,7 +554,8 @@ export function useBackgroundCommands({
           const candidate = selectNextAutoShipIssue(
             issueResult.issues,
             activeIssueNumbers,
-            skippedIssueNumbers
+            skippedIssueNumbers,
+            new Set(getPausedIssueNumbers())
           );
 
           if (candidate) {
@@ -558,31 +660,33 @@ export function useBackgroundCommands({
 
     if (
       event.command === 'ship' &&
-      (event.status === 'complete' || event.status === 'failed') &&
+      (event.status === 'complete' || event.status === 'failed' || event.status === 'paused') &&
       !cancelled &&
       autoShipRepos.has(event.repo)
     ) {
-      const currentFailures = autoShipFailuresRef.current.get(event.repo) ?? 0;
-      const currentSkipped = autoShipSkippedRef.current.get(event.repo) ?? new Set<number>();
-      const nextFailureState = getNextAutoShipFailureState(
-        event.status,
-        issueNumber,
-        currentFailures,
-        currentSkipped
-      );
-      autoShipFailuresRef.current.set(event.repo, nextFailureState.consecutiveFailures);
-      autoShipSkippedRef.current.set(event.repo, nextFailureState.skippedIssueNumbers);
+      if (event.status !== 'paused') {
+        const currentFailures = autoShipFailuresRef.current.get(event.repo) ?? 0;
+        const currentSkipped = autoShipSkippedRef.current.get(event.repo) ?? new Set<number>();
+        const nextFailureState = getNextAutoShipFailureState(
+          event.status,
+          issueNumber,
+          currentFailures,
+          currentSkipped
+        );
+        autoShipFailuresRef.current.set(event.repo, nextFailureState.consecutiveFailures);
+        autoShipSkippedRef.current.set(event.repo, nextFailureState.skippedIssueNumbers);
 
-      if (nextFailureState.pauseAutoShip) {
-        clearAutoShipStateForRepo(event.repo);
-        pushToast({
-          id: `auto-ship-paused-${event.repo}-${Date.now()}`,
-          sessionId: event.sessionId,
-          variant: 'error',
-          title: 'Auto-ship paused',
-          description: `${MAX_AUTO_SHIP_CONSECUTIVE_FAILURES} consecutive failures disabled auto-ship for this repository.`,
-        });
-        return;
+        if (nextFailureState.pauseAutoShip) {
+          clearAutoShipStateForRepo(event.repo);
+          pushToast({
+            id: `auto-ship-paused-${event.repo}-${Date.now()}`,
+            sessionId: event.sessionId,
+            variant: 'error',
+            title: 'Auto-ship paused',
+            description: `${MAX_AUTO_SHIP_CONSECUTIVE_FAILURES} consecutive failures disabled auto-ship for this repository.`,
+          });
+          return;
+        }
       }
 
       const activeIssueNumbers = getActiveShipIssueNumbers(postEventCommands, event.repo);
@@ -600,7 +704,8 @@ export function useBackgroundCommands({
         const nextIssue = selectNextAutoShipIssue(
           issueResult.issues,
           activeIssueNumbers,
-          skippedIssueNumbers
+          skippedIssueNumbers,
+          new Set(getPausedIssueNumbers())
         );
 
         if (!nextIssue) {
@@ -683,7 +788,8 @@ export function useBackgroundCommands({
       const candidate = selectNextAutoShipIssue(
         issueResult.issues,
         activeIssueNumbers,
-        skippedIssueNumbers
+        skippedIssueNumbers,
+        new Set(getPausedIssueNumbers())
       );
 
       if (candidate) {
@@ -765,6 +871,7 @@ export function useBackgroundCommands({
               merge: command.merge,
               latestOutput: getLatestOutputLine(output),
               cancelled: command.cancelled,
+              pausePending: command.pausePending,
             }),
           };
         })
@@ -949,6 +1056,7 @@ export function useBackgroundCommands({
     logViewer,
     actionQueueOpen,
     autoShipRepos,
+    pausePendingIssues,
     shippingCommands,
     activeCommandRepos,
     hasRunningShipCommand,
@@ -961,6 +1069,8 @@ export function useBackgroundCommands({
     handleCancelBackground,
     handleShowBackgroundLogs,
     handleRetryToast,
+    handlePauseIssue,
+    handleResumeIssue,
     enableAutoShipForRepo,
     clearAutoShipStateForRepo,
   };

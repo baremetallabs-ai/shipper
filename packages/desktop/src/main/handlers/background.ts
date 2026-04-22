@@ -314,6 +314,24 @@ export function registerBackgroundHandlers(backgroundManager: BackgroundManager)
     backgroundManager.kill(parsedPayload.sessionId);
   });
 
+  ipcMain.handle('bg-request-pause', (_event, payload: unknown) => {
+    const parsedPayload = parseSessionIdPayload(payload);
+    if (parsedPayload === null) {
+      throw new Error('Invalid bg-request-pause payload.');
+    }
+
+    backgroundManager.requestPause(parsedPayload.sessionId);
+  });
+
+  ipcMain.handle('bg-remove-queued-session', (_event, payload: unknown) => {
+    const parsedPayload = parseSessionIdPayload(payload);
+    if (parsedPayload === null) {
+      throw new Error('Invalid bg-remove-queued-session payload.');
+    }
+
+    backgroundManager.removeQueuedSession(parsedPayload.sessionId);
+  });
+
   ipcMain.handle('bg-get-output', (_event, payload: unknown) => {
     const parsedPayload = parseSessionIdPayload(payload);
     if (parsedPayload === null) {

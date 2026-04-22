@@ -14,6 +14,7 @@ export {
   rerunFailedChecks,
 } from './lib/checks.js';
 export { toError, toErrorMessage } from './lib/errors.js';
+export { PAUSED_EXIT_CODE } from './lib/exit-codes.js';
 export { gh } from './lib/gh.js';
 export { GhPayloadError } from './lib/gh-json.js';
 export type { MergeQueueSearchNode, PrViewForMerge } from './lib/gh-schemas.js';

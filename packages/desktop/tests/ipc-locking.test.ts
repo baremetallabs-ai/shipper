@@ -28,6 +28,8 @@ const state = vi.hoisted(() => ({
   backgroundSetWindowMock: vi.fn(),
   backgroundSpawnMock: vi.fn<(options: Record<string, unknown>) => void>(),
   backgroundKillMock: vi.fn<(sessionId: string) => void>(),
+  backgroundRequestPauseMock: vi.fn<(sessionId: string) => void>(),
+  backgroundRemoveQueuedSessionMock: vi.fn<(sessionId: string) => void>(),
   backgroundGetOutputMock: vi.fn<(sessionId: string) => Promise<string> | string>(),
   backgroundDestroyAllMock: vi.fn(),
   ptySetWindowMock: vi.fn(),
@@ -194,6 +196,8 @@ vi.mock('../src/main/background-manager.js', () => ({
       return { sessionId: 'background-session' };
     };
     kill = state.backgroundKillMock;
+    requestPause = state.backgroundRequestPauseMock;
+    removeQueuedSession = state.backgroundRemoveQueuedSessionMock;
     getOutput = state.backgroundGetOutputMock;
     destroyAll = state.backgroundDestroyAllMock;
   },
@@ -266,6 +270,8 @@ async function loadHandlers(): Promise<Map<string, IpcHandler>> {
   state.listIssuesMock.mockResolvedValue([]);
   state.backgroundSpawnMock.mockReset();
   state.backgroundKillMock.mockReset();
+  state.backgroundRequestPauseMock.mockReset();
+  state.backgroundRemoveQueuedSessionMock.mockReset();
   state.backgroundGetOutputMock.mockResolvedValue('');
   state.backgroundDestroyAllMock.mockReset();
 
@@ -589,6 +595,31 @@ describe('desktop IPC locking', () => {
 
     expect(state.ptyDestroyAllMock).toHaveBeenCalledTimes(1);
     expect(state.backgroundDestroyAllMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('forwards bg-request-pause and bg-remove-queued-session payloads to the background manager', async () => {
+    await loadHandlers();
+    const requestPauseHandler = getHandler('bg-request-pause');
+    const removeQueuedHandler = getHandler('bg-remove-queued-session');
+
+    await requestPauseHandler({}, { sessionId: 'ship-1' });
+    await removeQueuedHandler({}, { sessionId: 'ship-2' });
+
+    expect(state.backgroundRequestPauseMock).toHaveBeenCalledWith('ship-1');
+    expect(state.backgroundRemoveQueuedSessionMock).toHaveBeenCalledWith('ship-2');
+  });
+
+  it('validates bg-request-pause and bg-remove-queued-session payloads', async () => {
+    await loadHandlers();
+    const requestPauseHandler = getHandler('bg-request-pause');
+    const removeQueuedHandler = getHandler('bg-remove-queued-session');
+
+    expect(() => requestPauseHandler({}, { sessionId: 42 })).toThrow(
+      'Invalid bg-request-pause payload.'
+    );
+    expect(() => removeQueuedHandler({}, null)).toThrow(
+      'Invalid bg-remove-queued-session payload.'
+    );
   });
 
   it('acquires the issue lock before spawning a groom PTY', async () => {
@@ -1315,6 +1346,9 @@ describe('desktop IPC locking', () => {
         'execute-reset',
         'get-config',
         'list-repos',
+        'pause-state:list',
+        'pause-state:add',
+        'pause-state:remove',
         'set-config',
         'pty-spawn-shipper-groom',
         'pty-spawn-shipper-setup',
@@ -1326,6 +1360,8 @@ describe('desktop IPC locking', () => {
         'bg-spawn-init',
         'bg-spawn-unblock',
         'bg-kill',
+        'bg-request-pause',
+        'bg-remove-queued-session',
         'bg-get-output',
       ].sort()
     );

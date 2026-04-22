@@ -16,6 +16,7 @@ import type { PipelineIssue } from '../../src/renderer/types.js';
 import {
   advanceHookTimers,
   createMockShipperApi,
+  flushHookEffects,
   setupHookTestTimers,
   teardownHookTestTimers,
 } from './test-utils.js';
@@ -222,6 +223,54 @@ describe('useIssuePipeline', () => {
         description: '#9 set to high.',
       })
     );
+  });
+
+  it('hydrates paused issues per repo, supports optimistic pause updates, and clears them', async () => {
+    const shipper = createMockShipperApi();
+    shipper.install();
+    vi.mocked(shipper.api.listPausedIssues)
+      .mockResolvedValueOnce([4, 9])
+      .mockResolvedValueOnce([7]);
+    vi.mocked(shipper.api.listIssues).mockResolvedValue({
+      ok: true,
+      issues: [createIssue(4), createIssue(9)],
+    });
+
+    const { result, rerender } = renderHook(
+      ({ activeRepo }: { activeRepo: string }) =>
+        useIssuePipeline({
+          activeRepo,
+          canFetch: true,
+          hasActiveRepo: true,
+          hasRunningShipCommand: false,
+          pushToast: vi.fn(),
+        }),
+      { initialProps: { activeRepo: 'owner/repo' } }
+    );
+
+    await flushHookEffects();
+    expect(result.current.pausedIssues).toEqual(new Set([4, 9]));
+
+    act(() => {
+      result.current.trackPausedIssue(10);
+      result.current.clearPausedIssue(4);
+    });
+
+    expect(result.current.pausedIssues).toEqual(new Set([9, 10]));
+
+    await act(async () => {
+      await result.current.loadIssues('owner/repo');
+    });
+    expect(result.current.getIssueByNumber(9)?.number).toBe(9);
+
+    rerender({ activeRepo: 'other/repo' });
+    await flushHookEffects();
+    expect(result.current.pausedIssues).toEqual(new Set([7]));
+
+    act(() => {
+      result.current.clearIssueState();
+    });
+    expect(result.current.pausedIssues).toEqual(new Set());
   });
 
   it('buckets failed and new attention issues before stage columns', async () => {

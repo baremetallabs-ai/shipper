@@ -193,6 +193,49 @@ describe('shipOneIssue', () => {
     });
   });
 
+  it('continues normal stage progression when the pause probe returns false', async () => {
+    scriptLabels(['shipper:planned', 'shipper:ready']);
+    const pauseProbe = vi.fn().mockResolvedValue(false);
+    const { shipOneIssue } = await import('../../src/commands/ship-execute.js');
+
+    await expect(
+      shipOneIssue({
+        repo: 'owner/repo',
+        issue: '42',
+        merge: false,
+        collectTokens: false,
+        pauseProbe,
+      })
+    ).resolves.toEqual({ success: true });
+
+    expect(pauseProbe).toHaveBeenCalledTimes(1);
+    expect(runStageForLabelMock).toHaveBeenCalledWith('owner/repo', '42', 'shipper:planned', {
+      mode: 'default',
+      agent: undefined,
+      model: undefined,
+      skipInitialPrRemediateWait: false,
+    });
+  });
+
+  it('exits cleanly with a paused result before starting the next stage when pause is requested', async () => {
+    scriptLabels(['shipper:planned']);
+    const pauseProbe = vi.fn().mockResolvedValue(true);
+    const { shipOneIssue } = await import('../../src/commands/ship-execute.js');
+
+    await expect(
+      shipOneIssue({
+        repo: 'owner/repo',
+        issue: '42',
+        merge: false,
+        collectTokens: false,
+        pauseProbe,
+      })
+    ).resolves.toEqual({ success: true, paused: true });
+
+    expect(pauseProbe).toHaveBeenCalledTimes(1);
+    expect(runStageForLabelMock).not.toHaveBeenCalled();
+  });
+
   it('resumes after a reject, prints the reject transcript entry, and can still finish', async () => {
     scriptLabels([
       'shipper:groomed',
