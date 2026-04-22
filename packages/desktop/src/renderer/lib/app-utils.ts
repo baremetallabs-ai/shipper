@@ -34,6 +34,26 @@ const AUTO_UNBLOCK_PRIORITY_LABELS = STAGE_LABEL_NAMES.filter((label) => label !
   .slice()
   .reverse();
 
+function compareAutoShipCandidateBuckets(
+  left: Pick<AutoShipCandidate, 'priorityTier' | 'stageIndex'>,
+  right: Pick<AutoShipCandidate, 'priorityTier' | 'stageIndex'>
+): number {
+  if (left.priorityTier !== right.priorityTier) {
+    return left.priorityTier - right.priorityTier;
+  }
+
+  return left.stageIndex - right.stageIndex;
+}
+
+function compareAutoShipCandidates(left: AutoShipCandidate, right: AutoShipCandidate): number {
+  const bucketComparison = compareAutoShipCandidateBuckets(left, right);
+  if (bucketComparison !== 0) {
+    return bucketComparison;
+  }
+
+  return left.issueIndex - right.issueIndex;
+}
+
 function sortIssuesByLabelTime<T extends { number: number; title: string }>(
   issues: T[],
   timelinesByIssue: Map<number, TimelineLabelEvent[]>,
@@ -260,8 +280,9 @@ export async function selectNextAutoShipIssue(
     getShipperApi().unlockIssue(currentRepo, issueNumber)
 ): Promise<ListIssueItem | null> {
   const candidates: AutoShipCandidate[] = [];
-  const lockedCandidates: Array<{ issue: ListIssueItem; issueIndex: number }> = [];
+  const lockedCandidates: AutoShipCandidate[] = [];
   const staleLockedIssueNumbers = new Set<number>();
+  let bestUnlockedCandidate: AutoShipCandidate | undefined;
 
   issues.forEach((issue, issueIndex) => {
     if (
@@ -280,54 +301,61 @@ export async function selectNextAutoShipIssue(
     }
 
     if (issue.labels.includes(LOCKED_LABEL)) {
-      lockedCandidates.push({ issue, issueIndex });
+      lockedCandidates.push({
+        issue,
+        priorityTier: getPriorityTier(issue.labels),
+        stageIndex,
+        issueIndex,
+      });
       return;
     }
 
-    candidates.push({
+    const candidate = {
       issue,
       priorityTier: getPriorityTier(issue.labels),
       stageIndex,
       issueIndex,
-    });
+    };
+    candidates.push(candidate);
+    if (!bestUnlockedCandidate || compareAutoShipCandidates(candidate, bestUnlockedCandidate) < 0) {
+      bestUnlockedCandidate = candidate;
+    }
   });
 
+  lockedCandidates.sort(compareAutoShipCandidates);
+  let bestStaleLockedCandidate: AutoShipCandidate | undefined;
+
   for (const lockedCandidate of lockedCandidates) {
-    const { issue, issueIndex } = lockedCandidate;
+    if (
+      bestStaleLockedCandidate &&
+      compareAutoShipCandidateBuckets(lockedCandidate, bestStaleLockedCandidate) > 0
+    ) {
+      break;
+    }
+
+    if (
+      bestUnlockedCandidate &&
+      compareAutoShipCandidateBuckets(lockedCandidate, bestUnlockedCandidate) > 0
+    ) {
+      break;
+    }
+
+    const { issue } = lockedCandidate;
     const isStale = await isLockStaleForSelection(repo, issue.number, checkLockStale);
     if (!isStale) {
       continue;
     }
 
-    const stageIndex = AUTO_SHIP_PRIORITY_LABELS.findIndex((label) => issue.labels.includes(label));
-    if (stageIndex < 0) {
-      continue;
-    }
-
-    candidates.push({
-      issue,
-      priorityTier: getPriorityTier(issue.labels),
-      stageIndex,
-      issueIndex,
-    });
+    candidates.push(lockedCandidate);
     staleLockedIssueNumbers.add(issue.number);
+    bestStaleLockedCandidate ??= lockedCandidate;
   }
 
   if (candidates.length === 0) {
     return null;
   }
 
-  candidates.sort((left, right) => {
-    if (left.priorityTier !== right.priorityTier) {
-      return left.priorityTier - right.priorityTier;
-    }
-
-    if (left.stageIndex !== right.stageIndex) {
-      return left.stageIndex - right.stageIndex;
-    }
-
-    return left.issueIndex - right.issueIndex;
-  });
+  candidates.sort(compareAutoShipCandidates);
 
   const winningCandidate = candidates[0];
   if (!winningCandidate) {
@@ -406,6 +434,16 @@ export async function selectInitialAutoUnblockIssue(
     issues.filter((issue) => issue.labels.includes(BLOCKED_LABEL))
   );
   const skippedLockedIssueNumbers: number[] = [];
+  const buildSelectionResult = (
+    issue: ListIssueItem,
+    index: number
+  ): SelectNextAutoUnblockIssueResult => ({
+    issue,
+    remainingIssueNumbers: [
+      ...skippedLockedIssueNumbers,
+      ...blockedIssues.slice(index + 1).map((candidate) => candidate.number),
+    ],
+  });
 
   for (let index = 0; index < blockedIssues.length; index += 1) {
     const issue = blockedIssues[index];
@@ -414,13 +452,7 @@ export async function selectInitialAutoUnblockIssue(
     }
 
     if (!issue.labels.includes(LOCKED_LABEL)) {
-      return {
-        issue,
-        remainingIssueNumbers: [
-          ...skippedLockedIssueNumbers,
-          ...blockedIssues.slice(index + 1).map((candidate) => candidate.number),
-        ],
-      };
+      return buildSelectionResult(issue, index);
     }
 
     const isStale = await isLockStaleForSelection(repo, issue.number, checkLockStale);
@@ -430,13 +462,7 @@ export async function selectInitialAutoUnblockIssue(
     }
 
     await unlockIssueBestEffort(repo, issue.number, unlockIssue);
-    return {
-      issue,
-      remainingIssueNumbers: [
-        ...skippedLockedIssueNumbers,
-        ...blockedIssues.slice(index + 1).map((candidate) => candidate.number),
-      ],
-    };
+    return buildSelectionResult(issue, index);
   }
 
   return {
