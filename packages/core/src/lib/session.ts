@@ -145,14 +145,13 @@ export async function findLatestSessionMeta(opts: {
     return undefined;
   }
 
-  let latest: SessionMeta | undefined;
-  let latestTimestamp = Number.NEGATIVE_INFINITY;
+  const prefix = `${opts.issue}-${opts.stage}-`;
+  const matchingEntries = entries
+    .filter((entry) => entry.startsWith(prefix) && entry.endsWith('.meta.json'))
+    .sort()
+    .reverse();
 
-  for (const entry of entries) {
-    if (!entry.endsWith('.meta.json')) {
-      continue;
-    }
-
+  for (const entry of matchingEntries) {
     let parsed: unknown;
     try {
       parsed = JSON.parse(await readFile(path.join(sessionDir, entry), 'utf-8'));
@@ -166,15 +165,18 @@ export async function findLatestSessionMeta(opts: {
 
     const timestamp = new Date(parsed.timestamp);
     const time = timestamp.getTime();
-    if (Number.isNaN(time) || timestamp < opts.since || time <= latestTimestamp) {
+    if (Number.isNaN(time)) {
       continue;
     }
 
-    latest = parsed;
-    latestTimestamp = time;
+    if (timestamp < opts.since) {
+      break;
+    }
+
+    return parsed;
   }
 
-  return latest;
+  return undefined;
 }
 
 async function aggregateSessionUsageDefault(

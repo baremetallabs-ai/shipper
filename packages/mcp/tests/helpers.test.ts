@@ -113,6 +113,25 @@ describe('tool-specific result formatters', () => {
     expect(result.content[0]?.text).not.toContain('full transcript');
   });
 
+  it('forces isError when structured payload recovery fails after an exit-0 run', () => {
+    const result = formatCreateIssueResult(
+      { exitCode: 0, stdout: '', stderr: '', timedOut: false },
+      undefined,
+      {
+        command: 'shipper new <request> --mode headless',
+        finalMessage: 'Created issue draft and printed the summary.',
+        sessionLogPath: '/tmp/create.jsonl',
+      }
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain(
+      'Unable to recover created issue details from post-run metadata.'
+    );
+    expect(result.content[0]?.text).toContain('Created issue draft and printed the summary.');
+    expect(result.content[0]?.text).toContain('Session log: /tmp/create.jsonl');
+  });
+
   it('renders session-log-missing markers on structured success paths', () => {
     const result = formatUnblockResult(
       { exitCode: 0, stdout: '', stderr: '', timedOut: false },

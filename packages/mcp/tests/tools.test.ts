@@ -177,7 +177,7 @@ describe('shipper_advance', () => {
       logFile: '/tmp/advance.jsonl',
     });
     mockExtractFinalMessage.mockResolvedValue('Implemented the requested change.');
-    mockTryResolvePr.mockResolvedValue(17);
+    mockTryResolvePr.mockResolvedValue('17');
 
     const getTool = collectTools();
     const result = await getTool('shipper_advance')({ issue: 42 });
@@ -287,6 +287,28 @@ describe('shipper_advance', () => {
     expect(result.content[0]?.text).not.toContain('"type":"assistant"');
   });
 
+  it('returns a no-op advance result when the issue is already ready', async () => {
+    mockGh
+      .mockResolvedValueOnce(issueLabelsResponse('shipper:ready'))
+      .mockResolvedValueOnce(issueLabelsResponse('shipper:ready'));
+    mockSpawnShipper.mockResolvedValue({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      timedOut: false,
+    });
+
+    const getTool = collectTools();
+    const result = await getTool('shipper_advance')({ issue: 42 });
+
+    expect(mockFindLatestSessionMeta).not.toHaveBeenCalled();
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0]?.text).toContain('Stage: shipper:ready -> shipper:ready (noop)');
+    expect(result.content[0]?.text).toContain(
+      'No final message was captured in this run. See session log for details.'
+    );
+  });
+
   it('refuses to advance a shipper:new issue', async () => {
     mockGh.mockResolvedValue(issueLabelsResponse('shipper:new'));
 
@@ -340,6 +362,56 @@ describe('shipper_create_issue', () => {
     expect(text).not.toContain('--- stdout ---');
     expect(text).not.toContain('response_item');
     expect(text.length).toBeLessThan(8192);
+  });
+
+  it('prefers the last matching issue URL from the current repo in the final message', async () => {
+    mockSpawnShipper.mockResolvedValue({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      timedOut: false,
+    });
+    mockFindLatestSessionMeta.mockResolvedValue({
+      issue: 'unlinked',
+      stage: 'new',
+      timestamp: '2026-04-21T00:00:00.000Z',
+      agent: 'codex',
+      model: 'gpt-5',
+      repo: 'owner/repo',
+      exitCode: 0,
+      logFile: '/tmp/create-last-url.jsonl',
+    });
+    mockExtractFinalMessage.mockResolvedValue(
+      [
+        'Related: https://github.com/owner/repo/issues/11',
+        'Cross-repo: https://github.com/other/repo/issues/12',
+        'Created issue: https://github.com/owner/repo/issues/55',
+      ].join('\n')
+    );
+    mockGh.mockResolvedValue({
+      stdout: JSON.stringify({
+        number: 55,
+        title: 'Prefer the created issue URL',
+        url: 'https://github.com/owner/repo/issues/55',
+      }),
+      stderr: '',
+    });
+
+    const getTool = collectTools();
+    const result = await getTool('shipper_create_issue')({ request: 'Prefer last URL' });
+
+    expect(mockGh).toHaveBeenCalledTimes(1);
+    expect(mockGh).toHaveBeenCalledWith([
+      'issue',
+      'view',
+      '55',
+      '-R',
+      'owner/repo',
+      '--json',
+      'number,title,url',
+    ]);
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0]?.text).toContain('Created issue: #55 Prefer the created issue URL');
   });
 
   it('uses the exact missing-final-message fallback while still returning structured payload', async () => {
@@ -434,6 +506,88 @@ describe('shipper_create_issue', () => {
 
     expect(result.content[0]?.text).toContain('Created issue: #57 Recovered via fallback');
     expect(result.content[0]?.text).toContain('Created the issue and wrote a summary.');
+  });
+
+  it('requires an unambiguous fallback issue candidate before recovering the payload', async () => {
+    mockSpawnShipper.mockResolvedValue({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      timedOut: false,
+    });
+    mockFindLatestSessionMeta.mockResolvedValue({
+      issue: 'unlinked',
+      stage: 'new',
+      timestamp: '2026-04-21T00:00:00.000Z',
+      agent: 'claude',
+      model: 'sonnet',
+      repo: 'owner/repo',
+      exitCode: 0,
+      logFile: '/tmp/ambiguous.jsonl',
+    });
+    mockExtractFinalMessage.mockResolvedValue('Created the issue and wrote a summary.');
+    mockGh.mockResolvedValue({
+      stdout: JSON.stringify([
+        {
+          number: 57,
+          title: 'First candidate',
+          url: 'https://github.com/owner/repo/issues/57',
+          createdAt: '2026-04-21T00:00:03.000Z',
+        },
+        {
+          number: 58,
+          title: 'Second candidate',
+          url: 'https://github.com/owner/repo/issues/58',
+          createdAt: '2026-04-21T00:00:04.000Z',
+        },
+      ]),
+      stderr: '',
+    });
+
+    const getTool = collectTools();
+    const result = await getTool('shipper_create_issue')({ request: 'Fallback ambiguity' });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain(
+      'Unable to recover created issue details from post-run metadata.'
+    );
+    expect(result.content[0]?.text).toContain('Created the issue and wrote a summary.');
+    expect(result.content[0]?.text).toContain('Session log: /tmp/ambiguous.jsonl');
+  });
+
+  it('keeps the final message and session log when issue recovery gh calls fail', async () => {
+    mockSpawnShipper.mockResolvedValue({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      timedOut: false,
+    });
+    mockFindLatestSessionMeta.mockResolvedValue({
+      issue: 'unlinked',
+      stage: 'new',
+      timestamp: '2026-04-21T00:00:00.000Z',
+      agent: 'codex',
+      model: 'gpt-5',
+      repo: 'owner/repo',
+      exitCode: 0,
+      logFile: '/tmp/create-gh-failure.jsonl',
+    });
+    mockExtractFinalMessage.mockResolvedValue(
+      'Created issue: https://github.com/owner/repo/issues/55\nSummary follows.'
+    );
+    mockGh.mockRejectedValue(new Error('gh issue view failed'));
+
+    const getTool = collectTools();
+    const result = await getTool('shipper_create_issue')({ request: 'GH recovery failure' });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain(
+      'Unable to recover created issue details from post-run metadata.'
+    );
+    expect(result.content[0]?.text).toContain(
+      'Created issue: https://github.com/owner/repo/issues/55'
+    );
+    expect(result.content[0]?.text).toContain('Session log: /tmp/create-gh-failure.jsonl');
   });
 });
 
