@@ -1355,6 +1355,7 @@ describe('desktop IPC locking', () => {
       [
         'check-prerequisites',
         'check-init',
+        'fetch-issue-timelines',
         'list-issues',
         'list-adoptable-issues',
         'adopt-issue',

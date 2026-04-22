@@ -17,6 +17,7 @@ import {
   getNextAutoShipFailureState,
   selectNextAutoShipIssue,
   selectNextAutoUnblockIssue,
+  sortBlockedIssuesByStagePriority,
 } from '../lib/app-utils.js';
 import { getShipperApi } from '../lib/shipper-api.js';
 import { MAX_AUTO_SHIP_CONSECUTIVE_FAILURES } from '../lib/constants.js';
@@ -689,7 +690,8 @@ export function useBackgroundCommands({
             autoShipSkippedRef.current.get(event.repo) ?? new Set<number>();
           const activeIssueNumbers = getActiveShipIssueNumbers(postEventCommands, event.repo);
           const pausedIssueNumbers = await getPausedIssueNumbersForRepo(event.repo);
-          const candidate = selectNextAutoShipIssue(
+          const candidate = await selectNextAutoShipIssue(
+            event.repo,
             issueResult.issues,
             activeIssueNumbers,
             skippedIssueNumbers,
@@ -842,7 +844,8 @@ export function useBackgroundCommands({
 
         const skippedIssueNumbers = autoShipSkippedRef.current.get(event.repo) ?? new Set<number>();
         const pausedIssueNumbers = await getPausedIssueNumbersForRepo(event.repo);
-        const nextIssue = selectNextAutoShipIssue(
+        const nextIssue = await selectNextAutoShipIssue(
+          event.repo,
           issueResult.issues,
           activeIssueNumbers,
           skippedIssueNumbers,
@@ -850,8 +853,11 @@ export function useBackgroundCommands({
         );
 
         if (!nextIssue) {
-          const blockedIssues = issueResult.issues.filter(
-            (issue) => issue.labels.includes(BLOCKED_LABEL) && !issue.labels.includes(LOCKED_LABEL)
+          const blockedIssues = sortBlockedIssuesByStagePriority(
+            issueResult.issues.filter(
+              (issue) =>
+                issue.labels.includes(BLOCKED_LABEL) && !issue.labels.includes(LOCKED_LABEL)
+            )
           );
 
           if (blockedIssues.length === 0) {
@@ -928,7 +934,8 @@ export function useBackgroundCommands({
       const skippedIssueNumbers = autoShipSkippedRef.current.get(event.repo) ?? new Set<number>();
       const activeIssueNumbers = getActiveShipIssueNumbers(postEventCommands, event.repo);
       const pausedIssueNumbers = await getPausedIssueNumbersForRepo(event.repo);
-      const candidate = selectNextAutoShipIssue(
+      const candidate = await selectNextAutoShipIssue(
+        event.repo,
         issueResult.issues,
         activeIssueNumbers,
         skippedIssueNumbers,

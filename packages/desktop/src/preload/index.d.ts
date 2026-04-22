@@ -30,6 +30,14 @@ interface ListIssuesFailure {
   error: string;
 }
 
+interface TimelineLabelEvent {
+  event: string;
+  label?: {
+    name?: string;
+  } | null;
+  created_at?: string;
+}
+
 type WorkflowStage = 'new' | 'groomed' | 'designed' | 'planned' | 'implemented';
 
 interface ArtifactScanSummary {
@@ -96,6 +104,10 @@ interface ShipperAPI {
   listAdoptableIssues: (repo: string) => Promise<ListAdoptableIssuesSuccess | ListIssuesFailure>;
   listRepos: () => Promise<string[]>;
   listIssues: (repo: string) => Promise<ListIssuesSuccess | ListIssuesFailure>;
+  fetchIssueTimelines: (
+    repo: string,
+    issueNumbers: number[]
+  ) => Promise<Map<number, TimelineLabelEvent[]>>;
   listPausedIssues: (repo: string) => Promise<number[]>;
   setConfig: (config: ConfigPayload) => Promise<void>;
   adoptIssue: (

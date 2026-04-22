@@ -53,6 +53,8 @@ const shipperAPI = {
   listRepos: () => ipcRenderer.invoke('list-repos'),
   listAdoptableIssues: (repo: string) => ipcRenderer.invoke('list-adoptable-issues', { repo }),
   listIssues: (repo: string) => ipcRenderer.invoke('list-issues', { repo }),
+  fetchIssueTimelines: (repo: string, issueNumbers: number[]) =>
+    ipcRenderer.invoke('fetch-issue-timelines', { repo, issueNumbers }),
   listPausedIssues: (repo: string) => ipcRenderer.invoke('pause-state:list', repo),
   setConfig: (config: ConfigPayload) => ipcRenderer.invoke('set-config', config),
   adoptIssue: (repo: string, issueNumber: number) =>

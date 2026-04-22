@@ -3,7 +3,12 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BLOCKED_LABEL, PLANNED_LABEL, PR_REVIEWED_LABEL } from '@dnsquared/shipper-core';
+import {
+  BLOCKED_LABEL,
+  IMPLEMENTED_LABEL,
+  PLANNED_LABEL,
+  PR_REVIEWED_LABEL,
+} from '@dnsquared/shipper-core';
 import type { IssuePipelineBridge, IssueListResult } from '../../src/renderer/types.js';
 import { useBackgroundCommands } from '../../src/renderer/hooks/use-background-commands.js';
 import { createMockShipperApi, flushHookEffects } from './test-utils.js';
@@ -212,6 +217,50 @@ describe('useBackgroundCommands', () => {
       expect(result.current.autoShipRepos.has('owner/repo')).toBe(false);
       expect(result.current.toasts).toContainEqual(
         expect.objectContaining({ title: 'Auto-ship paused' })
+      );
+    });
+  });
+
+  it('starts auto-unblock from the highest-priority blocked workflow stage', async () => {
+    const shipper = createMockShipperApi();
+    shipper.install();
+    vi.mocked(shipper.api.listIssues).mockResolvedValue({
+      ok: true,
+      issues: [
+        createIssue(42, [PLANNED_LABEL, BLOCKED_LABEL]),
+        createIssue(43, [IMPLEMENTED_LABEL, BLOCKED_LABEL]),
+      ],
+    });
+    const pipelineBridge = createPipelineBridge();
+    const { result } = renderHook(() =>
+      useBackgroundCommands({
+        activeRepo: 'owner/repo',
+        autoMergeRepos: new Set(),
+        checkInitState: vi.fn(() => Promise.resolve(undefined)),
+        pipelineBridgeRef: { current: pipelineBridge },
+      })
+    );
+    await flushHookEffects();
+
+    act(() => {
+      result.current.enableAutoShipForRepo('owner/repo');
+    });
+    shipper.emitBackgroundStatus({
+      sessionId: 'ship-priority-unblock',
+      command: 'ship',
+      repo: 'owner/repo',
+      status: 'complete',
+      meta: { issueNumber: 41, merge: false },
+    });
+    await flushHookEffects();
+
+    await waitFor(() => {
+      expect(shipper.api.spawnBackgroundUnblock).toHaveBeenCalledWith(43, 'owner/repo');
+      expect(pipelineBridge.trackUnblockIssue).toHaveBeenCalledWith(43);
+      expect(result.current.toasts).toContainEqual(
+        expect.objectContaining({
+          title: 'Auto-ship: attempting unblock of #43',
+        })
       );
     });
   });

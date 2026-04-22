@@ -9,6 +9,7 @@ import {
 } from '@dnsquared/shipper-core';
 
 import { AUTO_SHIP_PRIORITY_LABELS, MAX_AUTO_SHIP_CONSECUTIVE_FAILURES } from './constants.js';
+import { getShipperApi } from './shipper-api.js';
 import type {
   AutoShipCandidate,
   AutoShipFailureState,
@@ -17,7 +18,37 @@ import type {
   BackgroundDetailInput,
   BackgroundRetryPayload,
   SelectNextAutoUnblockIssueResult,
+  TimelineLabelEvent,
 } from '../types.js';
+
+type FetchIssueTimelinesFn = (
+  repo: string,
+  issueNumbers: number[]
+) => Promise<Map<number, TimelineLabelEvent[]>>;
+
+function sortIssuesByLabelTime<T extends { number: number; title: string }>(
+  issues: T[],
+  timelinesByIssue: Map<number, TimelineLabelEvent[]>,
+  label: string
+): T[] {
+  const withTimestamps = issues.map((issue) => {
+    const events = timelinesByIssue.get(issue.number) ?? [];
+    const labelEvents = events.filter(
+      (event) => event.event === 'labeled' && event.label?.name === label && event.created_at
+    );
+    const lastEvent = labelEvents.length > 0 ? labelEvents[labelEvents.length - 1] : undefined;
+    return { issue, timestamp: lastEvent?.created_at ?? '' };
+  });
+
+  withTimestamps.sort((left, right) => {
+    if (!left.timestamp && !right.timestamp) return 0;
+    if (!left.timestamp) return 1;
+    if (!right.timestamp) return -1;
+    return left.timestamp.localeCompare(right.timestamp);
+  });
+
+  return withTimestamps.map((entry) => entry.issue);
+}
 
 export function getBackgroundTitle(
   command: BackgroundCommandKind,
@@ -179,12 +210,15 @@ export function syncWorkflowStageCacheForRepo(
   return next;
 }
 
-export function selectNextAutoShipIssue(
+export async function selectNextAutoShipIssue(
+  repo: string,
   issues: ListIssueItem[],
   activeIssueNumbers: Set<number>,
   skippedIssueNumbers: Set<number>,
-  pausedIssueNumbers: Set<number>
-): ListIssueItem | null {
+  pausedIssueNumbers: Set<number>,
+  fetchIssueTimelines: FetchIssueTimelinesFn = (currentRepo, issueNumbers) =>
+    getShipperApi().fetchIssueTimelines(currentRepo, issueNumbers)
+): Promise<ListIssueItem | null> {
   const candidates: AutoShipCandidate[] = [];
 
   issues.forEach((issue, issueIndex) => {
@@ -228,7 +262,56 @@ export function selectNextAutoShipIssue(
     return left.issueIndex - right.issueIndex;
   });
 
-  return candidates[0]?.issue ?? null;
+  const winningCandidate = candidates[0];
+  if (!winningCandidate) {
+    return null;
+  }
+
+  const bucketCandidates = candidates.filter(
+    (candidate) =>
+      candidate.priorityTier === winningCandidate.priorityTier &&
+      candidate.stageIndex === winningCandidate.stageIndex
+  );
+
+  if (bucketCandidates.length < 2) {
+    return winningCandidate.issue;
+  }
+
+  const currentStageLabel = AUTO_SHIP_PRIORITY_LABELS[winningCandidate.stageIndex];
+  if (!currentStageLabel) {
+    return winningCandidate.issue;
+  }
+
+  const bucketIssues = bucketCandidates.map((candidate) => candidate.issue);
+  const bucketIssueNumbers = bucketIssues.map((issue) => issue.number);
+  const timelinesByIssue = await fetchIssueTimelines(repo, bucketIssueNumbers).catch(
+    () =>
+      new Map<number, TimelineLabelEvent[]>(
+        bucketIssueNumbers.map((issueNumber) => [issueNumber, [] as TimelineLabelEvent[]])
+      )
+  );
+
+  return sortIssuesByLabelTime(bucketIssues, timelinesByIssue, currentStageLabel)[0] ?? null;
+}
+
+export function sortBlockedIssuesByStagePriority(issues: ListIssueItem[]): ListIssueItem[] {
+  return issues
+    .map((issue, issueIndex) => ({
+      issue,
+      issueIndex,
+      stageIndex: AUTO_SHIP_PRIORITY_LABELS.findIndex((label) => issue.labels.includes(label)),
+    }))
+    .sort((left, right) => {
+      const leftStageIndex = left.stageIndex >= 0 ? left.stageIndex : Number.MAX_SAFE_INTEGER;
+      const rightStageIndex = right.stageIndex >= 0 ? right.stageIndex : Number.MAX_SAFE_INTEGER;
+
+      if (leftStageIndex !== rightStageIndex) {
+        return leftStageIndex - rightStageIndex;
+      }
+
+      return left.issueIndex - right.issueIndex;
+    })
+    .map(({ issue }) => issue);
 }
 
 export function selectNextAutoUnblockIssue(
