@@ -12,6 +12,10 @@ const { execFileMock, randomBytesMock } = vi.hoisted(() => ({
   randomBytesMock: vi.fn<(size: number) => Buffer>(),
 }));
 
+function createExecFileError(message: string): Error & { code: number } {
+  return Object.assign(new Error(message), { code: 128 });
+}
+
 vi.mock('node:child_process', async () => {
   const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
   const execFile = Object.assign(
@@ -80,8 +84,13 @@ describe('newCommand', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-04-22T02:38:36Z'));
     execFileMock.mockReset();
-    execFileMock.mockImplementation((_cmd: string, _args: string[], ...rest: unknown[]) => {
+    execFileMock.mockImplementation((_cmd: string, args: string[], ...rest: unknown[]) => {
       const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
+      if (args[0] === 'rev-parse' && args[1] === '--verify' && args[2]?.startsWith('refs/heads/')) {
+        cb(createExecFileError('branch not found'));
+        return;
+      }
+
       cb(null, '', '');
     });
     randomBytesMock.mockReset();
@@ -137,7 +146,9 @@ describe('newCommand', () => {
         name: 'new',
         opts: {
           userInput: 'my request',
+          repo,
           cwd: fake.wtPath(),
+          baseBranch: 'main',
           mode: 'headless',
           agent: 'codex',
           model: 'gpt-5.4',
@@ -153,7 +164,7 @@ describe('newCommand', () => {
     );
     expect(execFileMock).toHaveBeenCalledWith(
       'git',
-      ['branch', '-D', branchName],
+      ['branch', '-d', branchName],
       { cwd: fake.repoRoot() },
       expect.any(Function)
     );
@@ -169,7 +180,9 @@ describe('newCommand', () => {
     expect(promptCalls[0]?.opts).toEqual(
       expect.objectContaining({
         userInput: 'my request',
+        repo,
         cwd: fake.wtPath(),
+        baseBranch: 'main',
         mode: undefined,
       })
     );
@@ -185,7 +198,9 @@ describe('newCommand', () => {
     expect(promptCalls[0]?.opts).toEqual(
       expect.objectContaining({
         userInput: undefined,
+        repo,
         cwd: fake.wtPath(),
+        baseBranch: 'main',
         mode: undefined,
       })
     );
@@ -201,7 +216,9 @@ describe('newCommand', () => {
     expect(promptCalls[0]?.opts).toEqual(
       expect.objectContaining({
         userInput: undefined,
+        repo,
         cwd: fake.wtPath(),
+        baseBranch: 'main',
         mode: 'interactive',
       })
     );
@@ -252,7 +269,9 @@ describe('newCommand', () => {
     expect(promptCalls[0]?.opts).toEqual(
       expect.objectContaining({
         userInput: undefined,
+        repo,
         cwd: fake.wtPath(),
+        baseBranch: 'main',
         agent: 'codex',
       })
     );
@@ -280,7 +299,7 @@ describe('newCommand', () => {
     const branchName = withStageHooksSpy.mock.calls[0]?.[1].branchName;
     expect(execFileMock).toHaveBeenCalledWith(
       'git',
-      ['branch', '-D', branchName],
+      ['branch', '-d', branchName],
       { cwd: fake.repoRoot() },
       expect.any(Function)
     );
@@ -299,7 +318,43 @@ describe('newCommand', () => {
     const branchName = withStageHooksSpy.mock.calls[0]?.[1].branchName;
     expect(execFileMock).toHaveBeenCalledWith(
       'git',
-      ['branch', '-D', branchName],
+      ['branch', '-d', branchName],
+      { cwd: fake.repoRoot() },
+      expect.any(Function)
+    );
+  });
+
+  it('regenerates the branch name when a matching local ref already exists', async () => {
+    randomBytesMock
+      .mockReturnValueOnce(Buffer.from('a3f91c', 'hex'))
+      .mockReturnValueOnce(Buffer.from('b4e2d0', 'hex'));
+    execFileMock.mockImplementation((_cmd: string, args: string[], ...rest: unknown[]) => {
+      const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
+      if (
+        args[0] === 'rev-parse' &&
+        args[1] === '--verify' &&
+        args[2] === 'refs/heads/shipper/new-20260422-023836-a3f91c'
+      ) {
+        cb(null, '', '');
+        return;
+      }
+      if (args[0] === 'rev-parse' && args[1] === '--verify' && args[2]?.startsWith('refs/heads/')) {
+        cb(createExecFileError('branch not found'));
+        return;
+      }
+
+      cb(null, '', '');
+    });
+    const withStageHooksSpy = vi.spyOn(core, 'withStageHooks');
+    const { newCommand } = await importCommand();
+
+    await expect(newCommand(repo, ['my', 'request'])).resolves.toBeUndefined();
+
+    const branchName = withStageHooksSpy.mock.calls[0]?.[1].branchName;
+    expect(branchName).toBe('shipper/new-20260422-023836-b4e2d0');
+    expect(execFileMock).toHaveBeenCalledWith(
+      'git',
+      ['branch', '-d', 'shipper/new-20260422-023836-b4e2d0'],
       { cwd: fake.repoRoot() },
       expect.any(Function)
     );

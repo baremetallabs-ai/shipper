@@ -15,6 +15,7 @@ import {
 } from '@dnsquared/shipper-core';
 
 const execFileAsync = promisify(execFile);
+const MAX_BRANCH_GENERATION_ATTEMPTS = 10;
 
 function pad(value: number): string {
   return String(value).padStart(2, '0');
@@ -26,6 +27,28 @@ function generateNewBranch(): string {
     `${now.getUTCFullYear()}${pad(now.getUTCMonth() + 1)}${pad(now.getUTCDate())}` +
     `-${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}${pad(now.getUTCSeconds())}`;
   return `shipper/new-${stamp}-${randomBytes(3).toString('hex')}`;
+}
+
+async function branchExists(repoRoot: string, branch: string): Promise<boolean> {
+  try {
+    await execFileAsync('git', ['rev-parse', '--verify', `refs/heads/${branch}`], {
+      cwd: repoRoot,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function generateUniqueNewBranch(repoRoot: string): Promise<string> {
+  for (let attempt = 0; attempt < MAX_BRANCH_GENERATION_ATTEMPTS; attempt += 1) {
+    const branch = generateNewBranch();
+    if (!(await branchExists(repoRoot, branch))) {
+      return branch;
+    }
+  }
+
+  throw new Error('Failed to generate a unique ephemeral branch name for shipper new.');
 }
 
 export async function newCommand(
@@ -43,7 +66,7 @@ export async function newCommand(
   }
 
   const repoRoot = await getRepoRoot();
-  const branch = generateNewBranch();
+  const branch = await generateUniqueNewBranch(repoRoot);
   const baseBranch = await resolveBaseBranch(repo, getSettings().defaultBaseBranch);
 
   let exitCode = 1;
@@ -60,7 +83,9 @@ export async function newCommand(
         async (wtPath) =>
           await runPrompt('new', {
             userInput: request || undefined,
+            repo,
             cwd: wtPath,
+            baseBranch,
             mode: options.mode,
             agent: options.agent,
             model: options.model,
@@ -70,7 +95,7 @@ export async function newCommand(
     });
   } finally {
     try {
-      await execFileAsync('git', ['branch', '-D', branch], { cwd: repoRoot });
+      await execFileAsync('git', ['branch', '-d', branch], { cwd: repoRoot });
     } catch {
       // The branch might not exist if worktree setup failed before creation.
     }
