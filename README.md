@@ -78,6 +78,7 @@ Behavior:
 
 - Agent asks a small number of clarifying questions.
 - Agent drafts a concise issue with title, summary, acceptance criteria, out of scope, and notes.
+- Runs inside a fresh ephemeral git worktree created from the configured base branch, so the agent drafts against the same clean view every downstream stage sees. Uncommitted or in-progress files in your checkout are not visible to the agent; commit and push them first or describe them in the request if they matter.
 - Agent creates the issue via `gh issue create --body-file ...` and applies label `shipper:new`.
 - Shared flags: `--mode <headless|interactive|default>`, `--agent <claude|codex>`, and `--model <model>`.
 

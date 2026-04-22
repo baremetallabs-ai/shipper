@@ -43,7 +43,7 @@ npm run test:watch     # vitest (watch mode)
 
 **Prompt-driven execution:** Bundled prompts live in `packages/core/src/prompts/`. `runPrompt()` in `packages/core/src/lib/prompt-runner.ts` resolves a repo-local override in `.shipper/prompts/<agent>/` before falling back to the bundled prompt, then spawns the configured agent CLI.
 
-**Ephemeral worktrees:** Implementation and PR commands use temporary git worktrees stored in `~/.shipper/worktrees/`. `withWorktree()` in `packages/core/src/lib/worktree.ts` handles create -> callback -> cleanup with signal handler support.
+**Ephemeral worktrees:** The `new`, `groom`, `design`, `plan`, `implement`, and PR commands use temporary git worktrees stored in `~/.shipper/worktrees/`. `withWorktree()` in `packages/core/src/lib/worktree.ts` handles create -> callback -> cleanup with signal handler support.
 
 **Ship orchestration:** `packages/cli/src/commands/stage-dispatch.ts` is the shared in-process stage entry used by `shipper next` and sequential `shipper ship`. Parallel auto-ship keeps fault isolation by forking `packages/cli/src/ship-worker.ts` and exchanging one run message plus one result message over IPC.
 

@@ -167,7 +167,7 @@ addPromptOptions(
     .option('--log-file <path>', 'write agent output to a specific log file')
     .action(
       wrapAction(async (request: string[], options: RawPromptOptions & { logFile?: string }) => {
-        await newCommand(request, {
+        await newCommand(requireResolvedRepo(), request, {
           ...normalizePromptOptions(options),
           logFile: options.logFile,
         });
