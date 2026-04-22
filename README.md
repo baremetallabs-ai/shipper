@@ -38,6 +38,10 @@ Workflow states (the happy path):
 
 `shipper:new` -> `shipper:groomed` -> `shipper:designed` -> `shipper:planned` -> `shipper:implemented` -> `shipper:pr-open` -> `shipper:pr-reviewed` -> `shipper:ready`
 
+Reject verdicts move an issue backward to an earlier workflow label. `shipper next` and
+`shipper ship` treat those rollbacks as interior workflow events rather than command failures, while
+crashes and explicit `fail` verdicts remain terminal.
+
 Control labels:
 
 - `shipper:blocked` - dependency block, resolved by `shipper unblock`
@@ -225,13 +229,15 @@ Behavior:
 
 - Reads the current shipper label.
 - Runs the corresponding next-stage command through the shared in-process stage dispatcher.
+- If the stage rejects, logs the rolled-back workflow label and exits zero. Crashes and explicit
+  `fail` verdicts still exit non-zero.
 - Works with both issue numbers and PR numbers.
 - `--agent <claude|codex>` overrides the agent used for the dispatched step.
 - `--model <model>` overrides the model used for the dispatched step.
 
 Output:
 
-- The issue advances one step in the workflow.
+- The issue advances one step in the workflow or is left at the rolled-back label after a reject.
 
 ## `shipper ship <issue> [--merge]` or `shipper ship --auto [--parallel <n>] [--agent <name>]`
 
@@ -240,15 +246,26 @@ Purpose: run the full workflow end-to-end.
 Behavior:
 
 - Runs the remaining stages through the same in-process stage dispatcher used by `shipper next`.
+- Reject verdicts roll the issue back and the per-issue ship loop resumes from the new label. A
+  resumed issue that eventually reaches `shipper:ready` is reported as a normal pass.
+- If a reject rolls a single-issue run back to `shipper:new`, `shipper ship <issue>` stops before
+  running interactive `groom`, leaves the issue at `shipper:new`, logs that grooming is required,
+  and exits zero.
 - `--merge` auto-merges the PR after reaching `shipper:ready`.
-- `--auto` runs a continuous loop that auto-selects issues, ships them, and merges their PRs. It is mutually exclusive with an explicit issue number and implies `--merge`.
-- `--parallel <n>` sets the number of parallel slots in auto-ship mode and requires `--auto`. Sequential auto runs stay in-process; parallel auto uses one worker process per active issue over a small IPC protocol.
+- `--auto` runs a continuous loop that auto-selects issues, ships them, and merges their PRs. It
+  is mutually exclusive with an explicit issue number and implies `--merge`.
+- In auto-ship, non-NEW rejects stay interior to the per-issue run. A reject that rolls back to
+  `shipper:new` is still recorded as a failure and skipped for the rest of that auto run because
+  grooming is interactive and `shipper:new` is not an auto candidate.
+- `--parallel <n>` sets the number of parallel slots in auto-ship mode and requires `--auto`.
+  Sequential auto runs stay in-process; parallel auto uses one worker process per active issue over
+  a small IPC protocol.
 - `--agent <claude|codex>` overrides the agent used by dispatched steps.
 - `--model <model>` overrides the model used by dispatched steps.
 
 Output:
 
-- The issue progresses through all remaining stages.
+- The issue progresses through all remaining stages, including resumed reject loops when needed.
 
 ## `shipper merge [number] [--once] [--dry-run] [--interval <seconds>] [--repo <owner/repo>]`
 

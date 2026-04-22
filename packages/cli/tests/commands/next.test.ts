@@ -185,7 +185,36 @@ describe('nextCommand', () => {
     expect(fake.state.labelTransitions).toEqual([]);
   });
 
-  it('propagates the dispatcher exit code back to the CLI boundary', async () => {
+  it('logs the rolled-back label and exits zero on reject', async () => {
+    fake.setIssue('159', {
+      labels: ['shipper:pr-reviewed'],
+      title: 'Reviewed issue',
+    });
+    stubIssueRefLookup('159');
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    runStageForLabelMock.mockImplementationOnce(() => {
+      fake.state.issues.get('159')?.labels.clear();
+      fake.state.issues.get('159')?.labels.add('shipper:pr-open');
+      return {
+        success: false,
+        exitCode: 1,
+        verdict: 'reject',
+      };
+    });
+
+    const { nextCommand } = await import('../../src/commands/next.js');
+
+    await expect(nextCommand(repo, '159')).resolves.toBeUndefined();
+
+    expect(process.exitCode).toBe(0);
+    expect(
+      logSpy.mock.calls.some(([line]) =>
+        String(line).includes('Stage rejected: issue #159 rolled back to shipper:pr-open.')
+      )
+    ).toBe(true);
+  });
+
+  it('keeps explicit fail verdicts as terminal failures', async () => {
     fake.setIssue('159', {
       labels: ['shipper:planned'],
       title: 'Planned issue',
@@ -194,6 +223,7 @@ describe('nextCommand', () => {
     runStageForLabelMock.mockResolvedValueOnce({
       success: false,
       exitCode: 7,
+      verdict: 'fail',
       error: 'stage failed',
     });
 
@@ -202,5 +232,24 @@ describe('nextCommand', () => {
     await expect(nextCommand(repo, '159')).resolves.toBeUndefined();
 
     expect(process.exitCode).toBe(7);
+  });
+
+  it('keeps crashes without a verdict as terminal failures', async () => {
+    fake.setIssue('159', {
+      labels: ['shipper:planned'],
+      title: 'Planned issue',
+    });
+    stubIssueRefLookup('159');
+    runStageForLabelMock.mockResolvedValueOnce({
+      success: false,
+      exitCode: 9,
+      error: 'stage crashed',
+    });
+
+    const { nextCommand } = await import('../../src/commands/next.js');
+
+    await expect(nextCommand(repo, '159')).resolves.toBeUndefined();
+
+    expect(process.exitCode).toBe(9);
   });
 });

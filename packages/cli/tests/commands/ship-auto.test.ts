@@ -177,4 +177,58 @@ describe('shipAutoSequential', () => {
     expect(spawnMock).not.toHaveBeenCalled();
     expect(forkMock).not.toHaveBeenCalled();
   });
+
+  it('records resumed issues that finish successfully as pass results', async () => {
+    const skippedSnapshots: number[][] = [];
+    let callCount = 0;
+
+    selectNextCandidateMock.mockImplementation((_repo, skipped: Set<number>) => {
+      skippedSnapshots.push([...skipped].sort((a, b) => a - b));
+      callCount += 1;
+      return callCount === 1 ? { number: 1, title: 'Reject resumed issue' } : null;
+    });
+    shipOneIssueMock.mockResolvedValueOnce({ success: true });
+
+    const { shipAutoSequential } = await import('../../src/commands/ship-auto.js');
+    await shipAutoSequential('owner/repo');
+
+    expect(process.exitCode).toBeUndefined();
+    expect(skippedSnapshots).toEqual([[], [1]]);
+    expect(shipOneIssueMock).toHaveBeenCalledTimes(1);
+    const logs = vi.mocked(console.log).mock.calls.map(([line]) => String(line));
+    expect(
+      logs.some((line) => line.includes('Reject resumed issue') && line.includes('✓ pass'))
+    ).toBe(true);
+  });
+
+  it('records reject-to-new failures as fail and skips them for the rest of the run', async () => {
+    const skippedSnapshots: number[][] = [];
+    let callCount = 0;
+
+    selectNextCandidateMock.mockImplementation((_repo, skipped: Set<number>) => {
+      skippedSnapshots.push([...skipped].sort((a, b) => a - b));
+      callCount += 1;
+      if (callCount === 1) {
+        return { number: 1, title: 'Needs grooming' };
+      }
+      return skipped.has(1) ? null : { number: 1, title: 'Needs grooming' };
+    });
+    shipOneIssueMock.mockResolvedValueOnce({
+      success: false,
+      error:
+        'Issue #1 rolled back to shipper:new after stage "design" - stopping to avoid interactive groom stage.',
+    });
+
+    const { shipAutoSequential } = await import('../../src/commands/ship-auto.js');
+    await shipAutoSequential('owner/repo');
+
+    expect(process.exitCode).toBe(1);
+    expect(skippedSnapshots).toEqual([[], [1]]);
+    expect(shipOneIssueMock).toHaveBeenCalledTimes(1);
+    const logs = vi.mocked(console.log).mock.calls.map(([line]) => String(line));
+    expect(logs.some((line) => line.includes('Needs grooming') && line.includes('✗ fail'))).toBe(
+      true
+    );
+    expect(logs.some((line) => line.includes('rolled back to shipper:new'))).toBe(true);
+  });
 });

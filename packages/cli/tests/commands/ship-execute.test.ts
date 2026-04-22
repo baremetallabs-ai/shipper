@@ -193,8 +193,112 @@ describe('shipOneIssue', () => {
     });
   });
 
-  it('stops when a skipped path resets work to shipper:new', async () => {
-    scriptLabels(['shipper:planned', 'shipper:new']);
+  it('resumes after a reject, prints the reject transcript entry, and can still finish', async () => {
+    scriptLabels([
+      'shipper:groomed',
+      'shipper:designed',
+      'shipper:groomed',
+      'shipper:designed',
+      'shipper:planned',
+      'shipper:implemented',
+      'shipper:pr-open',
+      'shipper:pr-reviewed',
+      'shipper:ready',
+    ]);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    let planRuns = 0;
+    runStageForLabelMock.mockImplementation((_repo, _issue, label) => {
+      if (label === 'shipper:designed') {
+        planRuns += 1;
+        return planRuns === 1
+          ? { success: false, exitCode: 1, verdict: 'reject' }
+          : { success: true, exitCode: 0, verdict: 'accept' };
+      }
+      return { success: true, exitCode: 0, verdict: 'accept' };
+    });
+    const { shipOneIssue } = await import('../../src/commands/ship-execute.js');
+
+    await expect(
+      shipOneIssue({ repo: 'owner/repo', issue: '42', merge: false, collectTokens: false })
+    ).resolves.toEqual({ success: true });
+
+    const dispatchedLabels = runStageForLabelMock.mock.calls.map((call): string => String(call[2]));
+    expect(dispatchedLabels).toEqual([
+      'shipper:groomed',
+      'shipper:designed',
+      'shipper:groomed',
+      'shipper:designed',
+      'shipper:planned',
+      'shipper:implemented',
+      'shipper:pr-open',
+      'shipper:pr-reviewed',
+    ]);
+    const logs = logSpy.mock.calls.map(([line]) => String(line));
+    const rejectIndex = logs.findIndex((line) =>
+      line.includes('↻ plan — rejected to shipper:groomed')
+    );
+    const beforeIndex = logs.findIndex((line) => line.includes('✓ design'));
+    const afterIndex = logs.findIndex(
+      (line, index) => index > rejectIndex && line.includes('✓ design')
+    );
+    expect(rejectIndex).toBeGreaterThan(beforeIndex);
+    expect(afterIndex).toBeGreaterThan(rejectIndex);
+  });
+
+  it('resumes a pr-remediate reject from shipper:pr-open and runs another review cycle', async () => {
+    scriptLabels([
+      'shipper:pr-reviewed',
+      'shipper:pr-open',
+      'shipper:pr-reviewed',
+      'shipper:ready',
+    ]);
+    let prRemediateRuns = 0;
+    runStageForLabelMock.mockImplementation((_repo, _issue, label) => {
+      if (label === 'shipper:pr-reviewed') {
+        prRemediateRuns += 1;
+        return prRemediateRuns === 1
+          ? { success: false, exitCode: 1, verdict: 'reject' }
+          : { success: true, exitCode: 0, verdict: 'accept' };
+      }
+      return { success: true, exitCode: 0, verdict: 'accept' };
+    });
+    const { shipOneIssue } = await import('../../src/commands/ship-execute.js');
+
+    await expect(
+      shipOneIssue({ repo: 'owner/repo', issue: '42', merge: false, collectTokens: false })
+    ).resolves.toEqual({ success: true });
+
+    const dispatchedLabels = runStageForLabelMock.mock.calls.map((call): string => String(call[2]));
+    expect(dispatchedLabels).toEqual([
+      'shipper:pr-reviewed',
+      'shipper:pr-open',
+      'shipper:pr-reviewed',
+    ]);
+  });
+
+  it('stops a single-issue run at shipper:new after a reject and asks for grooming', async () => {
+    scriptLabels(['shipper:groomed', 'shipper:new']);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    runStageForLabelMock.mockResolvedValueOnce({ success: false, exitCode: 1, verdict: 'reject' });
+    const { shipOneIssue } = await import('../../src/commands/ship-execute.js');
+
+    await expect(
+      shipOneIssue({ repo: 'owner/repo', issue: '42', merge: false, collectTokens: false })
+    ).resolves.toEqual({ success: true });
+
+    expect(runStageForLabelMock).toHaveBeenCalledTimes(1);
+    expect(
+      logSpy.mock.calls.some(([line]) =>
+        String(line).includes(
+          'Issue #42 rolled back to shipper:new after stage "design". Re-invoke after grooming.'
+        )
+      )
+    ).toBe(true);
+  });
+
+  it('fails auto or worker-style runs when a reject rolls work back to shipper:new', async () => {
+    scriptLabels(['shipper:groomed', 'shipper:new']);
+    runStageForLabelMock.mockResolvedValueOnce({ success: false, exitCode: 1, verdict: 'reject' });
     const { shipOneIssue } = await import('../../src/commands/ship-execute.js');
 
     await expect(
@@ -208,23 +312,23 @@ describe('shipOneIssue', () => {
     ).resolves.toEqual({
       success: false,
       error:
-        'Issue #42 was reset to shipper:new by stage "implement" - stopping to avoid interactive groom stage.',
+        'Issue #42 rolled back to shipper:new after stage "design" - stopping to avoid interactive groom stage.',
     });
   });
 
-  it('applies the transition cap and relabels the issue as failed', async () => {
-    const labels = [
-      'shipper:planned',
-      'shipper:implemented',
-      'shipper:pr-open',
-      'shipper:pr-reviewed',
-      'shipper:groomed',
-      'shipper:designed',
-    ];
+  it('counts reject resumes toward the transition cap and relabels the issue as failed', async () => {
     scriptLabels([
-      labels[0],
-      ...Array.from({ length: 15 }, (_, index) => labels[(index + 1) % labels.length]),
+      'shipper:designed',
+      ...Array.from({ length: 15 }, (_, index) =>
+        index % 2 === 0 ? 'shipper:groomed' : 'shipper:designed'
+      ),
     ]);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    runStageForLabelMock.mockImplementation((_repo, _issue, label) =>
+      label === 'shipper:designed'
+        ? { success: false, exitCode: 1, verdict: 'reject' }
+        : { success: true, exitCode: 0, verdict: 'accept' }
+    );
     const { shipOneIssue } = await import('../../src/commands/ship-execute.js');
 
     const result = await shipOneIssue({
@@ -236,11 +340,65 @@ describe('shipOneIssue', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('Issue #42 hit transition cap (15)');
+    expect(runStageForLabelMock).toHaveBeenCalledTimes(15);
     expect(fake.state.labelTransitions).toContainEqual({
       target: 'issue',
       number: '42',
       add: ['shipper:failed'],
-      remove: ['shipper:pr-reviewed'],
+      remove: ['shipper:groomed'],
+    });
+    expect(
+      logSpy.mock.calls.some(([line]) =>
+        String(line).includes('↻ plan — rejected to shipper:groomed')
+      )
+    ).toBe(true);
+    expect(logSpy.mock.calls.some(([line]) => String(line).includes('✗ design — failed'))).toBe(
+      true
+    );
+  });
+
+  it('treats explicit fail verdicts as terminal failures', async () => {
+    scriptLabels(['shipper:planned']);
+    runStageForLabelMock.mockResolvedValueOnce({
+      success: false,
+      exitCode: 1,
+      verdict: 'fail',
+      error: 'stage failed',
+    });
+    const { shipOneIssue } = await import('../../src/commands/ship-execute.js');
+
+    await expect(
+      shipOneIssue({ repo: 'owner/repo', issue: '42', merge: false, collectTokens: false })
+    ).resolves.toEqual({ success: false, error: 'stage failed' });
+    expect(runStageForLabelMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats crashes without a verdict as terminal failures', async () => {
+    scriptLabels(['shipper:planned']);
+    runStageForLabelMock.mockResolvedValueOnce({
+      success: false,
+      exitCode: 1,
+      error: 'stage crashed',
+    });
+    const { shipOneIssue } = await import('../../src/commands/ship-execute.js');
+
+    await expect(
+      shipOneIssue({ repo: 'owner/repo', issue: '42', merge: false, collectTokens: false })
+    ).resolves.toEqual({ success: false, error: 'stage crashed' });
+    expect(runStageForLabelMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('aborts when a reject does not move the workflow label', async () => {
+    scriptLabels(['shipper:designed', 'shipper:designed']);
+    runStageForLabelMock.mockResolvedValueOnce({ success: false, exitCode: 1, verdict: 'reject' });
+    const { shipOneIssue } = await import('../../src/commands/ship-execute.js');
+
+    await expect(
+      shipOneIssue({ repo: 'owner/repo', issue: '42', merge: false, collectTokens: false })
+    ).resolves.toEqual({
+      success: false,
+      error:
+        'Label did not advance after stage "plan" (still "shipper:designed"). Aborting to avoid infinite loop.',
     });
   });
 

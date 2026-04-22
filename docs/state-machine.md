@@ -78,17 +78,43 @@ gh issue edit <ISSUE> --add-label "shipper:groomed" --remove-label "shipper:new"
 
 Agents can roll back to an earlier stage if the work is insufficient:
 
-| Stage        | Can roll back to                        |
-| ------------ | --------------------------------------- |
-| design       | `shipper:new`                           |
-| plan         | `shipper:groomed` or `shipper:new`      |
-| implement    | `shipper:designed` or `shipper:groomed` |
-| pr-open      | `shipper:planned`                       |
-| pr-remediate | `shipper:planned`                       |
+| Stage        | Can roll back to      |
+| ------------ | --------------------- |
+| design       | `shipper:new`         |
+| plan         | `shipper:groomed`     |
+| implement    | `shipper:designed`    |
+| pr-open      | `shipper:planned`     |
+| pr-review    | `shipper:implemented` |
+| pr-remediate | `shipper:pr-open`     |
+
+### Reject is an interior event
+
+`shipper ship <issue>`, `shipper ship --auto`, and `shipper next` treat a stage `reject`
+verdict as an orderly rollback, not as a terminal command failure. After the stage updates the
+issue label, the ship loop re-reads that rolled-back label and continues from the corresponding
+stage.
+
+The existing safety rails still apply:
+
+- Every forward or backward label change counts toward the per-run transition cap
+  (`MAX_TRANSITIONS = 15`). Hitting the cap still relabels the issue `shipper:failed`.
+- If a reject does not change the workflow label, the run still aborts to avoid an infinite loop.
+- Crashes (no verdict) and explicit `fail` verdicts are still terminal failures.
+
+Rolling back to `shipper:new` is the one special case:
+
+- Single-issue `shipper ship <issue>` stops before running interactive `groom`, leaves the issue at
+  `shipper:new`, logs that grooming is required, and exits zero.
+- `shipper ship --auto` still records that issue as a failure and adds it to the in-run skip set,
+  because `shipper:new` is not an auto-ship candidate.
 
 ## The `next` command
 
-Auto-advances an issue by reading its current label and dispatching to the corresponding stage through the shared in-process dispatcher. `next` validates that exactly one workflow label is present, rejects issues marked `shipper:failed`, and refuses blocked issues except `shipper:new`, which can always be groomed.
+Auto-advances an issue by reading its current label and dispatching to the corresponding stage
+through the shared in-process dispatcher. `next` validates that exactly one workflow label is
+present, rejects issues marked `shipper:failed`, and refuses blocked issues except `shipper:new`,
+which can always be groomed. If the dispatched stage rejects, `next` logs the rolled-back label and
+exits zero. Crashes and explicit `fail` verdicts still exit non-zero.
 
 ## The `ship --auto` command
 
@@ -106,6 +132,10 @@ Issues are ordered by priority first: `shipper:priority-high`, then normal prior
 After exhausting available issues, auto-ship attempts to unblock `shipper:blocked` issues. If any are unblocked, it loops back to process the newly available issues.
 
 Sequential auto-ship and single-issue `shipper ship <issue>` runs execute stages in-process through the same dispatcher that powers `shipper next`. Parallel auto-ship keeps one OS process per active issue for fault isolation and communicates with each worker through a small fork/IPC protocol.
+
+A non-NEW reject stays inside that per-issue ship loop. Auto-ship only records a failure when the
+run ends in a terminal error, such as a crash, an explicit `fail`, transition-cap exhaustion, or a
+reject that rolls the issue back to `shipper:new`.
 
 A review cycle cap (`MAX_REVIEW_CYCLES = 3`) prevents infinite tight `pr-reviewed <-> pr-remediate` loops.
 

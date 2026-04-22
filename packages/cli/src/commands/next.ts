@@ -11,6 +11,7 @@ import {
   withIssueLock,
 } from '@dnsquared/shipper-core';
 import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
+import { getCurrentLabel } from './ship-execute.js';
 import { runStageForLabel } from './stage-dispatch.js';
 
 export async function nextCommand(
@@ -88,5 +89,11 @@ export async function nextCommand(
     issueStr,
     async () => await runStageForLabel(repo, issueStr, label, { mode, agent, model })
   );
+  if (result.verdict === 'reject') {
+    const rolledBackLabel = (await getCurrentLabel(repo, issueStr)) ?? '(unknown)';
+    logger.log(`Stage rejected: issue #${issueNumber} rolled back to ${rolledBackLabel}.`);
+    process.exitCode = 0;
+    return;
+  }
   process.exitCode = result.exitCode;
 }
