@@ -100,13 +100,16 @@ export function getBackgroundRetryPayload(
   repo: string,
   request?: string,
   issueNumber?: number,
-  merge?: boolean
+  merge?: boolean,
+  origin?: 'auto' | 'manual'
 ): BackgroundRetryPayload | undefined {
   switch (command) {
     case 'new':
       return request ? { command, repo, request } : undefined;
     case 'ship':
-      return issueNumber ? { command, repo, issueNumber, merge: merge ?? false } : undefined;
+      return issueNumber
+        ? { command, repo, issueNumber, merge: merge ?? false, origin }
+        : undefined;
     case 'init':
       return { command, repo };
     case 'unblock':

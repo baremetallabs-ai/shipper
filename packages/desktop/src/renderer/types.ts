@@ -111,12 +111,14 @@ export interface ShipperApi {
   spawnBackgroundShip: (
     issueNumber: number,
     repo: string,
-    merge: boolean
+    merge: boolean,
+    origin?: 'auto' | 'manual'
   ) => Promise<{ sessionId: string }>;
   spawnBackgroundInit: (repo: string) => Promise<{ sessionId: string }>;
   spawnBackgroundUnblock: (issueNumber: number, repo: string) => Promise<{ sessionId: string }>;
   killBackground: (sessionId: string) => Promise<void>;
   requestPauseActive: (sessionId: string) => Promise<void>;
+  requestAutoShipHalt: (repo: string) => Promise<number>;
   removeQueuedSession: (sessionId: string) => Promise<'ignored' | 'pause-requested' | 'paused'>;
   getBackgroundOutput: (sessionId: string) => Promise<string>;
   ptyWrite: (sessionId: string, data: string) => Promise<void>;
@@ -168,7 +170,13 @@ export type BackgroundCommandStatus = 'queued' | 'running' | 'complete' | 'faile
 
 export type BackgroundRetryPayload =
   | { command: 'new'; repo: string; request: string }
-  | { command: 'ship'; repo: string; issueNumber: number; merge: boolean }
+  | {
+      command: 'ship';
+      repo: string;
+      issueNumber: number;
+      merge: boolean;
+      origin?: 'auto' | 'manual';
+    }
   | { command: 'init'; repo: string }
   | { command: 'unblock'; repo: string; issueNumber: number };
 
@@ -180,6 +188,8 @@ export interface BackgroundStatusMeta {
   request?: string;
   cancelled?: boolean;
   pausePending?: boolean;
+  origin?: 'auto' | 'manual';
+  autoShipHalted?: boolean;
 }
 
 export interface BackgroundStatusPayload {
@@ -212,6 +222,8 @@ export interface BackgroundCommandState {
   exitCode?: number | null;
   cancelled: boolean;
   pausePending?: boolean;
+  origin?: 'auto' | 'manual';
+  autoShipHalted?: boolean;
 }
 
 export type ActiveShippingCommand = BackgroundCommandState & {

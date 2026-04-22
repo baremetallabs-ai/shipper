@@ -19,6 +19,7 @@ interface SpawnBackgroundNewPayload extends SpawnBackgroundCommandPayload {
 interface SpawnBackgroundShipPayload extends SpawnBackgroundCommandPayload {
   issueNumber: number;
   merge: boolean;
+  origin?: 'auto' | 'manual';
 }
 
 interface SessionIdPayload {
@@ -67,7 +68,11 @@ function parseSpawnBackgroundShipPayload(value: unknown): SpawnBackgroundShipPay
   }
 
   const payload = parseSpawnBackgroundCommandPayload(value);
-  if (payload === null || !isPositiveInteger(value.issueNumber)) {
+  if (
+    payload === null ||
+    !isPositiveInteger(value.issueNumber) ||
+    ('origin' in value && value.origin !== 'auto' && value.origin !== 'manual')
+  ) {
     return null;
   }
 
@@ -75,6 +80,7 @@ function parseSpawnBackgroundShipPayload(value: unknown): SpawnBackgroundShipPay
     ...payload,
     issueNumber: value.issueNumber,
     merge: 'merge' in value && typeof value.merge === 'boolean' ? value.merge : false,
+    origin: 'origin' in value ? (value.origin as 'auto' | 'manual') : undefined,
   };
 }
 
@@ -261,6 +267,7 @@ export function registerBackgroundHandlers(backgroundManager: BackgroundManager)
       meta: {
         issueNumber: parsedPayload.issueNumber,
         merge: parsedPayload.merge,
+        origin: parsedPayload.origin,
       },
     });
   });
@@ -321,6 +328,15 @@ export function registerBackgroundHandlers(backgroundManager: BackgroundManager)
     }
 
     backgroundManager.requestPause(parsedPayload.sessionId);
+  });
+
+  ipcMain.handle('bg-request-auto-ship-halt', (_event, payload: unknown) => {
+    const parsedPayload = parseSpawnBackgroundCommandPayload(payload);
+    if (parsedPayload === null) {
+      throw new Error('Invalid bg-request-auto-ship-halt payload.');
+    }
+
+    return backgroundManager.requestAutoShipHalt(parsedPayload.repo);
   });
 
   ipcMain.handle('bg-remove-queued-session', (_event, payload: unknown) => {

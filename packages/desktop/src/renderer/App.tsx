@@ -184,13 +184,14 @@ export default function App(): JSX.Element {
     void reposState.handleToggleAutoMerge(activeRepo);
   }
 
-  function handleToggleAutoShip(): void {
+  async function handleToggleAutoShip(): Promise<void> {
     if (!activeRepo) {
       return;
     }
 
     if (backgroundState.autoShipRepos.has(activeRepo)) {
       backgroundState.clearAutoShipStateForRepo(activeRepo);
+      await getShipperApi().requestAutoShipHalt(activeRepo);
       return;
     }
 
@@ -403,7 +404,9 @@ export default function App(): JSX.Element {
                   hasActiveRepo={hasActiveRepo}
                   isSavingAutoMerge={reposState.isSavingAutoMerge}
                   onToggleAutoMerge={handleToggleAutoMerge}
-                  onToggleAutoShip={handleToggleAutoShip}
+                  onToggleAutoShip={() => {
+                    void handleToggleAutoShip();
+                  }}
                   onResetSelect={pipelineState.setResetSelection}
                   onCloseNotPlanned={pipelineState.setCloseNotPlannedIssue}
                   onSetPriority={(issue, level) => {

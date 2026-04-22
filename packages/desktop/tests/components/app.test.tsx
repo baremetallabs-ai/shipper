@@ -11,6 +11,7 @@ const state = vi.hoisted(() => ({
   terminalState: {} as Record<string, unknown>,
   spawnShipperSetupMock: vi.fn(),
   spawnBackgroundShipMock: vi.fn(),
+  requestAutoShipHaltMock: vi.fn(),
 }));
 
 vi.mock('../../src/renderer/hooks/use-repos.js', () => ({
@@ -36,6 +37,7 @@ vi.mock('../../src/renderer/lib/shipper-api.js', () => ({
     spawnBackgroundNew: vi.fn(),
     spawnBackgroundShip: state.spawnBackgroundShipMock,
     spawnBackgroundInit: vi.fn(),
+    requestAutoShipHalt: state.requestAutoShipHaltMock,
   }),
 }));
 
@@ -68,15 +70,31 @@ vi.mock('../../src/renderer/components/new-issue-dialog.js', () => ({
 }));
 
 vi.mock('../../src/renderer/components/pipeline-board.js', () => ({
-  PipelineBoard: ({ onShip }: { onShip: (issueNumber: number) => void }) => (
-    <button
-      type="button"
-      onClick={() => {
-        onShip(42);
-      }}
-    >
-      Ship issue
-    </button>
+  PipelineBoard: ({
+    onShip,
+    onToggleAutoShip,
+  }: {
+    onShip: (issueNumber: number) => void;
+    onToggleAutoShip: () => void;
+  }) => (
+    <>
+      <button
+        type="button"
+        onClick={() => {
+          onShip(42);
+        }}
+      >
+        Ship issue
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          onToggleAutoShip();
+        }}
+      >
+        Toggle auto-ship
+      </button>
+    </>
   ),
 }));
 
@@ -141,6 +159,7 @@ import App from '../../src/renderer/App.js';
 function resetMockState(): void {
   state.spawnShipperSetupMock.mockReset();
   state.spawnBackgroundShipMock.mockReset();
+  state.requestAutoShipHaltMock.mockReset();
   state.reposState = {
     activeRepo: 'owner/repo',
     autoMergeRepos: new Set<string>(),
@@ -342,5 +361,28 @@ describe('App setup launch', () => {
     expect(state.backgroundState.handleResumeIssue).not.toHaveBeenCalled();
     expect(state.spawnBackgroundShipMock).not.toHaveBeenCalled();
     expect(screen.queryByText('This issue is paused. Resume and ship anyway?')).toBeNull();
+  });
+
+  it('clears auto-ship state before requesting an auto-ship halt when toggled off', async () => {
+    state.backgroundState.autoShipRepos = new Set<string>(['owner/repo']);
+    const callOrder: string[] = [];
+    state.backgroundState.clearAutoShipStateForRepo = vi.fn(() => {
+      callOrder.push('clear');
+    });
+    state.requestAutoShipHaltMock.mockImplementation(() => {
+      callOrder.push('halt');
+      return Promise.resolve(1);
+    });
+
+    render(<App />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Toggle auto-ship' }));
+      await Promise.resolve();
+    });
+
+    expect(state.backgroundState.clearAutoShipStateForRepo).toHaveBeenCalledWith('owner/repo');
+    expect(state.requestAutoShipHaltMock).toHaveBeenCalledWith('owner/repo');
+    expect(callOrder).toEqual(['clear', 'halt']);
   });
 });

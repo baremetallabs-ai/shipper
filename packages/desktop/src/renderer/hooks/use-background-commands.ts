@@ -350,7 +350,8 @@ export function useBackgroundCommands({
           await getShipperApi().spawnBackgroundShip(
             payload.issueNumber,
             payload.repo,
-            payload.merge
+            payload.merge,
+            payload.origin
           );
           return;
         case 'init':
@@ -509,6 +510,8 @@ export function useBackgroundCommands({
     const issueUrl = event.meta?.issueUrl ?? previousCommand?.issueUrl;
     const logFile = event.meta?.logFile ?? previousCommand?.logFile;
     const cancelled = event.meta?.cancelled ?? previousCommand?.cancelled ?? false;
+    const origin = event.meta?.origin ?? previousCommand?.origin;
+    const autoShipHalted = event.meta?.autoShipHalted ?? previousCommand?.autoShipHalted ?? false;
     const pausePending =
       event.command === 'ship' && event.status === 'running'
         ? (event.meta?.pausePending ?? previousCommand?.pausePending ?? false)
@@ -542,6 +545,8 @@ export function useBackgroundCommands({
       exitCode: event.exitCode,
       cancelled,
       pausePending,
+      origin,
+      autoShipHalted,
     };
     const currentCommands = backgroundCommandsRef.current;
     const existingIndex = currentCommands.findIndex((command) => command.id === event.sessionId);
@@ -593,38 +598,40 @@ export function useBackgroundCommands({
     }
 
     if (event.status === 'complete' && event.command !== 'unblock') {
-      const successToast: BackgroundToastItem =
-        event.command === 'new'
-          ? {
-              id: event.sessionId,
-              sessionId: event.sessionId,
-              variant: 'success',
-              title: issueNumber ? `Issue #${issueNumber} created` : 'Issue created',
-              description:
-                issueNumber && issueUrl
-                  ? 'The new issue is ready in GitHub.'
-                  : 'The new issue command completed successfully.',
-              issueUrl,
-              issueLabel: issueNumber ? `Open issue #${issueNumber}` : undefined,
-            }
-          : {
-              id: event.sessionId,
-              sessionId: event.sessionId,
-              variant: 'success',
-              title:
-                event.command === 'init'
-                  ? `Initialized ${event.repo}`
-                  : issueNumber
-                    ? `Ship #${issueNumber} ${merge ? 'merged' : 'finished'}`
-                    : 'Ship finished',
-              description:
-                event.command === 'init'
-                  ? 'Repository labels and settings were updated.'
-                  : merge
-                    ? 'The background ship command completed and merged successfully.'
-                    : 'The background ship command completed successfully.',
-            };
-      pushToast(successToast);
+      if (!autoShipHalted) {
+        const successToast: BackgroundToastItem =
+          event.command === 'new'
+            ? {
+                id: event.sessionId,
+                sessionId: event.sessionId,
+                variant: 'success',
+                title: issueNumber ? `Issue #${issueNumber} created` : 'Issue created',
+                description:
+                  issueNumber && issueUrl
+                    ? 'The new issue is ready in GitHub.'
+                    : 'The new issue command completed successfully.',
+                issueUrl,
+                issueLabel: issueNumber ? `Open issue #${issueNumber}` : undefined,
+              }
+            : {
+                id: event.sessionId,
+                sessionId: event.sessionId,
+                variant: 'success',
+                title:
+                  event.command === 'init'
+                    ? `Initialized ${event.repo}`
+                    : issueNumber
+                      ? `Ship #${issueNumber} ${merge ? 'merged' : 'finished'}`
+                      : 'Ship finished',
+                description:
+                  event.command === 'init'
+                    ? 'Repository labels and settings were updated.'
+                    : merge
+                      ? 'The background ship command completed and merged successfully.'
+                      : 'The background ship command completed successfully.',
+              };
+        pushToast(successToast);
+      }
       await refreshRepoAfterBackground(event.repo, event.command, event.status);
     }
 
@@ -694,7 +701,8 @@ export function useBackgroundCommands({
             await getShipperApi().spawnBackgroundShip(
               candidate.number,
               event.repo,
-              autoMergeRepos.has(event.repo)
+              autoMergeRepos.has(event.repo),
+              'auto'
             );
             pushToast({
               id: `auto-ship-${event.repo}-${candidate.number}-${Date.now()}`,
@@ -768,7 +776,8 @@ export function useBackgroundCommands({
           event.repo,
           request,
           issueNumber,
-          merge
+          merge,
+          origin
         );
 
         pushToast({
@@ -885,7 +894,8 @@ export function useBackgroundCommands({
         await getShipperApi().spawnBackgroundShip(
           nextIssue.number,
           event.repo,
-          autoMergeRepos.has(event.repo)
+          autoMergeRepos.has(event.repo),
+          'auto'
         );
         pushToast({
           id: `auto-ship-${event.repo}-${nextIssue.number}-${Date.now()}`,
@@ -930,7 +940,8 @@ export function useBackgroundCommands({
         await getShipperApi().spawnBackgroundShip(
           candidate.number,
           event.repo,
-          autoMergeRepos.has(event.repo)
+          autoMergeRepos.has(event.repo),
+          'auto'
         );
         pushToast({
           id: `auto-ship-${event.repo}-${candidate.number}-${Date.now()}`,

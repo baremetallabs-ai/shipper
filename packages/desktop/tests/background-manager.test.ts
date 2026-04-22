@@ -398,6 +398,73 @@ describe('BackgroundManager', () => {
     );
   });
 
+  it('halts only running auto-origin ship sessions for the requested repo', () => {
+    const manager = createManager();
+
+    manager.spawn({
+      sessionId: 'ship-auto',
+      command: 'ship',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['ship', '41', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+      meta: { issueNumber: 41, origin: 'auto' },
+    });
+    manager.spawn({
+      sessionId: 'ship-manual',
+      command: 'ship',
+      repo: 'other/repo',
+      commandName: 'shipper',
+      args: ['ship', '42', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+      meta: { issueNumber: 42, origin: 'manual' },
+    });
+
+    expect(manager.requestAutoShipHalt('owner/repo')).toBe(1);
+
+    expect(existsSync(join(tempDir, 'pause-sentinels', 'ship-auto'))).toBe(true);
+    expect(existsSync(join(tempDir, 'pause-sentinels', 'ship-manual'))).toBe(false);
+  });
+
+  it('ignores queued, manual, and already-halted ship sessions when auto-ship halt is requested', () => {
+    const manager = createManager();
+
+    manager.spawn({
+      sessionId: 'ship-auto-running',
+      command: 'ship',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['ship', '41', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+      meta: { issueNumber: 41, origin: 'auto' },
+    });
+    manager.spawn({
+      sessionId: 'ship-auto-queued',
+      command: 'ship',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['ship', '42', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+      meta: { issueNumber: 42, origin: 'auto' },
+    });
+    manager.spawn({
+      sessionId: 'ship-manual-running',
+      command: 'ship',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['ship', '43', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+      meta: { issueNumber: 43, origin: 'manual' },
+    });
+
+    expect(manager.requestAutoShipHalt('owner/repo')).toBe(1);
+    expect(manager.requestAutoShipHalt('owner/repo')).toBe(0);
+
+    expect(existsSync(join(tempDir, 'pause-sentinels', 'ship-auto-running'))).toBe(true);
+    expect(existsSync(join(tempDir, 'pause-sentinels', 'ship-auto-queued'))).toBe(false);
+    expect(existsSync(join(tempDir, 'pause-sentinels', 'ship-manual-running'))).toBe(false);
+  });
+
   it('marks a queued ship session as paused without setting cancelled metadata', () => {
     const manager = createManager();
 
@@ -510,6 +577,60 @@ describe('BackgroundManager', () => {
       })
     );
     expect(existsSync(pauseSentinelPath)).toBe(false);
+  });
+
+  it('maps auto-ship halts to complete while preserving paused status for user pauses', () => {
+    const autoHaltManager = createManager();
+
+    autoHaltManager.spawn({
+      sessionId: 'ship-auto-halt',
+      command: 'ship',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['ship', '41', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+      meta: { issueNumber: 41, origin: 'auto' },
+    });
+    autoHaltManager.requestAutoShipHalt('owner/repo');
+    latestChild().close(PAUSED_EXIT_CODE);
+
+    const autoHaltEvent = statusEvents().find(
+      (event) => event.sessionId === 'ship-auto-halt' && event.status === 'complete'
+    );
+    expect(autoHaltEvent).toEqual(
+      expect.objectContaining({
+        sessionId: 'ship-auto-halt',
+        status: 'complete',
+        exitCode: PAUSED_EXIT_CODE,
+      })
+    );
+    expect(autoHaltEvent?.meta).toEqual(
+      expect.objectContaining({
+        issueNumber: 41,
+        autoShipHalted: true,
+      })
+    );
+
+    const userPauseManager = createManager();
+    userPauseManager.spawn({
+      sessionId: 'ship-user-pause',
+      command: 'ship',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['ship', '42', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+      meta: { issueNumber: 42, origin: 'auto' },
+    });
+    userPauseManager.requestPause('ship-user-pause');
+    latestChild().close(PAUSED_EXIT_CODE);
+
+    expect(statusEvents()).toContainEqual(
+      expect.objectContaining({
+        sessionId: 'ship-user-pause',
+        status: 'paused',
+        exitCode: PAUSED_EXIT_CODE,
+      })
+    );
   });
 
   it('keeps cancelled failure semantics when stop wins during a pending pause', () => {
