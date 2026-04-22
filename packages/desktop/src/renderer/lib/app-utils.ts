@@ -18,6 +18,7 @@ import type {
   BackgroundCommandState,
   BackgroundDetailInput,
   BackgroundRetryPayload,
+  ShipperApi,
   SelectNextAutoUnblockIssueResult,
   TimelineLabelEvent,
 } from '../types.js';
@@ -26,6 +27,8 @@ type FetchIssueTimelinesFn = (
   repo: string,
   issueNumbers: number[]
 ) => Promise<Map<number, TimelineLabelEvent[]>>;
+type CheckLockStaleFn = ShipperApi['checkLockStale'];
+type UnlockIssueFn = ShipperApi['unlockIssue'];
 
 const AUTO_UNBLOCK_PRIORITY_LABELS = STAGE_LABEL_NAMES.filter((label) => label !== NEW_LABEL)
   .slice()
@@ -53,6 +56,34 @@ function sortIssuesByLabelTime<T extends { number: number; title: string }>(
   });
 
   return withTimestamps.map((entry) => entry.issue);
+}
+
+async function isLockStaleForSelection(
+  repo: string,
+  issueNumber: number,
+  checkLockStale: CheckLockStaleFn
+): Promise<boolean> {
+  try {
+    return (await checkLockStale(repo, issueNumber)).stale;
+  } catch {
+    return false;
+  }
+}
+
+async function unlockIssueBestEffort(
+  repo: string,
+  issueNumber: number,
+  unlockIssue: UnlockIssueFn
+): Promise<void> {
+  try {
+    const result = await unlockIssue(repo, issueNumber);
+    if (!result.ok) {
+      console.warn(`[shipper] Failed to clear stale lock for #${issueNumber}: ${result.error}`);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[shipper] Failed to clear stale lock for #${issueNumber}: ${message}`);
+  }
 }
 
 export function getBackgroundTitle(
@@ -222,9 +253,15 @@ export async function selectNextAutoShipIssue(
   skippedIssueNumbers: Set<number>,
   pausedIssueNumbers: Set<number>,
   fetchIssueTimelines: FetchIssueTimelinesFn = (currentRepo, issueNumbers) =>
-    getShipperApi().fetchIssueTimelines(currentRepo, issueNumbers)
+    getShipperApi().fetchIssueTimelines(currentRepo, issueNumbers),
+  checkLockStale: CheckLockStaleFn = (currentRepo, issueNumber) =>
+    getShipperApi().checkLockStale(currentRepo, issueNumber),
+  unlockIssue: UnlockIssueFn = (currentRepo, issueNumber) =>
+    getShipperApi().unlockIssue(currentRepo, issueNumber)
 ): Promise<ListIssueItem | null> {
   const candidates: AutoShipCandidate[] = [];
+  const lockedCandidates: Array<{ issue: ListIssueItem; issueIndex: number }> = [];
+  const staleLockedIssueNumbers = new Set<number>();
 
   issues.forEach((issue, issueIndex) => {
     if (
@@ -232,14 +269,18 @@ export async function selectNextAutoShipIssue(
       skippedIssueNumbers.has(issue.number) ||
       pausedIssueNumbers.has(issue.number) ||
       issue.labels.includes(BLOCKED_LABEL) ||
-      issue.labels.includes(FAILED_LABEL) ||
-      issue.labels.includes(LOCKED_LABEL)
+      issue.labels.includes(FAILED_LABEL)
     ) {
       return;
     }
 
     const stageIndex = AUTO_SHIP_PRIORITY_LABELS.findIndex((label) => issue.labels.includes(label));
     if (stageIndex < 0) {
+      return;
+    }
+
+    if (issue.labels.includes(LOCKED_LABEL)) {
+      lockedCandidates.push({ issue, issueIndex });
       return;
     }
 
@@ -250,6 +291,27 @@ export async function selectNextAutoShipIssue(
       issueIndex,
     });
   });
+
+  for (const lockedCandidate of lockedCandidates) {
+    const { issue, issueIndex } = lockedCandidate;
+    const isStale = await isLockStaleForSelection(repo, issue.number, checkLockStale);
+    if (!isStale) {
+      continue;
+    }
+
+    const stageIndex = AUTO_SHIP_PRIORITY_LABELS.findIndex((label) => issue.labels.includes(label));
+    if (stageIndex < 0) {
+      continue;
+    }
+
+    candidates.push({
+      issue,
+      priorityTier: getPriorityTier(issue.labels),
+      stageIndex,
+      issueIndex,
+    });
+    staleLockedIssueNumbers.add(issue.number);
+  }
 
   if (candidates.length === 0) {
     return null;
@@ -278,13 +340,21 @@ export async function selectNextAutoShipIssue(
       candidate.stageIndex === winningCandidate.stageIndex
   );
 
+  async function returnWinningIssue(issue: ListIssueItem): Promise<ListIssueItem> {
+    if (staleLockedIssueNumbers.has(issue.number)) {
+      await unlockIssueBestEffort(repo, issue.number, unlockIssue);
+    }
+
+    return issue;
+  }
+
   if (bucketCandidates.length < 2) {
-    return winningCandidate.issue;
+    return returnWinningIssue(winningCandidate.issue);
   }
 
   const currentStageLabel = AUTO_SHIP_PRIORITY_LABELS[winningCandidate.stageIndex];
   if (!currentStageLabel) {
-    return winningCandidate.issue;
+    return returnWinningIssue(winningCandidate.issue);
   }
 
   const bucketIssues = bucketCandidates.map((candidate) => candidate.issue);
@@ -296,7 +366,12 @@ export async function selectNextAutoShipIssue(
       )
   );
 
-  return sortIssuesByLabelTime(bucketIssues, timelinesByIssue, currentStageLabel)[0] ?? null;
+  const selectedIssue = sortIssuesByLabelTime(bucketIssues, timelinesByIssue, currentStageLabel)[0];
+  if (!selectedIssue) {
+    return null;
+  }
+
+  return returnWinningIssue(selectedIssue);
 }
 
 export function sortBlockedIssuesByStagePriority(issues: ListIssueItem[]): ListIssueItem[] {
@@ -319,10 +394,66 @@ export function sortBlockedIssuesByStagePriority(issues: ListIssueItem[]): ListI
     .map(({ issue }) => issue);
 }
 
-export function selectNextAutoUnblockIssue(
+export async function selectInitialAutoUnblockIssue(
+  repo: string,
   issues: ListIssueItem[],
-  queuedIssueNumbers: number[]
-): SelectNextAutoUnblockIssueResult {
+  checkLockStale: CheckLockStaleFn = (currentRepo, issueNumber) =>
+    getShipperApi().checkLockStale(currentRepo, issueNumber),
+  unlockIssue: UnlockIssueFn = (currentRepo, issueNumber) =>
+    getShipperApi().unlockIssue(currentRepo, issueNumber)
+): Promise<SelectNextAutoUnblockIssueResult> {
+  const blockedIssues = sortBlockedIssuesByStagePriority(
+    issues.filter((issue) => issue.labels.includes(BLOCKED_LABEL))
+  );
+  const skippedLockedIssueNumbers: number[] = [];
+
+  for (let index = 0; index < blockedIssues.length; index += 1) {
+    const issue = blockedIssues[index];
+    if (!issue) {
+      continue;
+    }
+
+    if (!issue.labels.includes(LOCKED_LABEL)) {
+      return {
+        issue,
+        remainingIssueNumbers: [
+          ...skippedLockedIssueNumbers,
+          ...blockedIssues.slice(index + 1).map((candidate) => candidate.number),
+        ],
+      };
+    }
+
+    const isStale = await isLockStaleForSelection(repo, issue.number, checkLockStale);
+    if (!isStale) {
+      skippedLockedIssueNumbers.push(issue.number);
+      continue;
+    }
+
+    await unlockIssueBestEffort(repo, issue.number, unlockIssue);
+    return {
+      issue,
+      remainingIssueNumbers: [
+        ...skippedLockedIssueNumbers,
+        ...blockedIssues.slice(index + 1).map((candidate) => candidate.number),
+      ],
+    };
+  }
+
+  return {
+    issue: null,
+    remainingIssueNumbers: [],
+  };
+}
+
+export async function selectNextAutoUnblockIssue(
+  repo: string,
+  issues: ListIssueItem[],
+  queuedIssueNumbers: number[],
+  checkLockStale: CheckLockStaleFn = (currentRepo, issueNumber) =>
+    getShipperApi().checkLockStale(currentRepo, issueNumber),
+  unlockIssue: UnlockIssueFn = (currentRepo, issueNumber) =>
+    getShipperApi().unlockIssue(currentRepo, issueNumber)
+): Promise<SelectNextAutoUnblockIssueResult> {
   const remainingIssueNumbers = [...queuedIssueNumbers];
 
   while (remainingIssueNumbers.length > 0) {
@@ -332,8 +463,17 @@ export function selectNextAutoUnblockIssue(
     }
 
     const issue = issues.find((currentIssue) => currentIssue.number === nextIssueNumber);
-    if (!issue || !issue.labels.includes(BLOCKED_LABEL) || issue.labels.includes(LOCKED_LABEL)) {
+    if (!issue || !issue.labels.includes(BLOCKED_LABEL)) {
       continue;
+    }
+
+    if (issue.labels.includes(LOCKED_LABEL)) {
+      const isStale = await isLockStaleForSelection(repo, issue.number, checkLockStale);
+      if (!isStale) {
+        continue;
+      }
+
+      await unlockIssueBestEffort(repo, issue.number, unlockIssue);
     }
 
     return {
