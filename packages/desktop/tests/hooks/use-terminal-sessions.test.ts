@@ -60,6 +60,103 @@ describe('useTerminalSessions', () => {
     expect(result.current.activeSessionId).toBe('pty-1');
   });
 
+  it('re-focuses an existing running setup session for the active repo', async () => {
+    const shipper = createMockShipperApi();
+    shipper.install();
+    const { result } = renderHook(() =>
+      useTerminalSessions({ activeRepo: 'owner/repo', setFetchError: vi.fn() })
+    );
+
+    act(() => {
+      result.current.openRunningSession('pty-setup-1', 'setup — owner/repo', {
+        repo: 'owner/repo',
+      });
+      result.current.openRunningSession('pty-groom-1', 'groom — #11', {
+        repo: 'owner/repo',
+        issueNumber: 11,
+      });
+      result.current.handleSelectSession('pty-groom-1');
+    });
+    await flushHookEffects();
+
+    let focusedExisting = false;
+    act(() => {
+      focusedExisting = result.current.focusExistingSetupSession('owner/repo');
+    });
+
+    expect(focusedExisting).toBe(true);
+    expect(result.current.activeSessionId).toBe('pty-setup-1');
+  });
+
+  it('does not re-focus an exited setup session for the active repo', async () => {
+    const shipper = createMockShipperApi();
+    shipper.install();
+    const { result } = renderHook(() =>
+      useTerminalSessions({ activeRepo: 'owner/repo', setFetchError: vi.fn() })
+    );
+
+    act(() => {
+      result.current.openRunningSession('pty-setup-1', 'setup — owner/repo', {
+        repo: 'owner/repo',
+      });
+    });
+    await flushHookEffects();
+
+    shipper.emitPtyExit({ sessionId: 'pty-setup-1', exitCode: 0 });
+
+    let focusedExited = true;
+    act(() => {
+      focusedExited = result.current.focusExistingSetupSession('owner/repo');
+    });
+
+    expect(focusedExited).toBe(false);
+  });
+
+  it('does not re-focus a setup session for a different repo', async () => {
+    const shipper = createMockShipperApi();
+    shipper.install();
+    const { result } = renderHook(() =>
+      useTerminalSessions({ activeRepo: 'owner/repo', setFetchError: vi.fn() })
+    );
+
+    act(() => {
+      result.current.openRunningSession('pty-setup-2', 'setup — owner/other', {
+        repo: 'owner/other',
+      });
+    });
+    await flushHookEffects();
+
+    let focusedOtherRepo = true;
+    act(() => {
+      focusedOtherRepo = result.current.focusExistingSetupSession('owner/repo');
+    });
+
+    expect(focusedOtherRepo).toBe(false);
+  });
+
+  it('does not treat groom sessions as setup sessions for the same repo', async () => {
+    const shipper = createMockShipperApi();
+    shipper.install();
+    const { result } = renderHook(() =>
+      useTerminalSessions({ activeRepo: 'owner/repo', setFetchError: vi.fn() })
+    );
+
+    act(() => {
+      result.current.openRunningSession('pty-groom-1', 'groom — #11', {
+        repo: 'owner/repo',
+        issueNumber: 11,
+      });
+    });
+    await flushHookEffects();
+
+    let focusedGroomOnly = true;
+    act(() => {
+      focusedGroomOnly = result.current.focusExistingSetupSession('owner/repo');
+    });
+
+    expect(focusedGroomOnly).toBe(false);
+  });
+
   it('marks idle running sessions as waiting and resumes them on PTY output', async () => {
     const shipper = createMockShipperApi();
     shipper.install();

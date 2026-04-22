@@ -98,6 +98,7 @@ export function createMockShipperApi(): MockShipperApiController {
     closeNotPlanned: vi.fn(() => Promise.resolve({ ok: true })),
     setPriority: vi.fn(() => Promise.resolve({ ok: true })),
     spawnShipperGroom: vi.fn(() => Promise.resolve({ sessionId: 'pty-session-1' })),
+    spawnShipperSetup: vi.fn(() => Promise.resolve({ sessionId: 'pty-setup-1' })),
     spawnBackgroundNew: vi.fn(() => Promise.resolve({ sessionId: 'bg-new-1' })),
     spawnBackgroundShip: vi.fn(() => Promise.resolve({ sessionId: 'bg-ship-1' })),
     spawnBackgroundInit: vi.fn(() => Promise.resolve({ sessionId: 'bg-init-1' })),

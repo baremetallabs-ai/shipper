@@ -103,6 +103,7 @@ export interface ShipperApi {
     cols: number,
     rows: number
   ) => Promise<{ sessionId: string }>;
+  spawnShipperSetup: (repo: string, cols: number, rows: number) => Promise<{ sessionId: string }>;
   spawnBackgroundNew: (request: string, repo: string) => Promise<{ sessionId: string }>;
   spawnBackgroundShip: (
     issueNumber: number,

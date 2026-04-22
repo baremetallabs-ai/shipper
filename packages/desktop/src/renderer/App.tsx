@@ -111,6 +111,21 @@ export default function App(): JSX.Element {
     }
   }
 
+  async function handleShipperSetup(): Promise<void> {
+    if (terminalState.focusExistingSetupSession(activeRepo)) {
+      return;
+    }
+
+    try {
+      const result = await getShipperApi().spawnShipperSetup(activeRepo, 120, 30);
+      terminalState.openRunningSession(result.sessionId, `setup — ${activeRepo}`, {
+        repo: activeRepo,
+      });
+    } catch (error) {
+      pipelineState.setFetchError(`Failed to launch shipper setup: ${toErrorMessage(error)}`);
+    }
+  }
+
   async function handleShipperShip(issueNumber: number, repo = activeRepo): Promise<void> {
     try {
       await getShipperApi().spawnBackgroundShip(
@@ -309,13 +324,17 @@ export default function App(): JSX.Element {
                 </Alert>
               ) : null}
 
-              {hasActiveRepo && repoInitialized === true ? (
+              {hasActiveRepo ? (
                 <PipelineToolbar
                   lastUpdated={pipelineState.lastUpdated}
                   canFetch={canFetch}
                   isLoading={pipelineState.isLoading}
+                  setupEnabled={hasActiveRepo}
                   onNewIssue={pipelineState.handleOpenNewIssue}
                   onAdopt={pipelineState.handleOpenAdopt}
+                  onSetup={() => {
+                    void handleShipperSetup();
+                  }}
                   onRefresh={() => {
                     void pipelineState.handleRefresh();
                   }}
