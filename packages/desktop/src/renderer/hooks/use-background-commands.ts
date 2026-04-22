@@ -512,6 +512,7 @@ export function useBackgroundCommands({
     const cancelled = event.meta?.cancelled ?? previousCommand?.cancelled ?? false;
     const origin = event.meta?.origin ?? previousCommand?.origin;
     const autoShipHalted = event.meta?.autoShipHalted ?? previousCommand?.autoShipHalted ?? false;
+    const retriable = event.meta?.retriable ?? previousCommand?.retriable ?? false;
     const pausePending =
       event.command === 'ship' && event.status === 'running'
         ? (event.meta?.pausePending ?? previousCommand?.pausePending ?? false)
@@ -535,6 +536,8 @@ export function useBackgroundCommands({
         latestOutput,
         cancelled,
         pausePending,
+        retriable,
+        origin,
       }),
       output,
       request,
@@ -547,6 +550,7 @@ export function useBackgroundCommands({
       pausePending,
       origin,
       autoShipHalted,
+      retriable,
     };
     const currentCommands = backgroundCommandsRef.current;
     const existingIndex = currentCommands.findIndex((command) => command.id === event.sessionId);
@@ -785,19 +789,35 @@ export function useBackgroundCommands({
           origin
         );
 
-        pushToast({
-          id: event.sessionId,
-          sessionId: event.sessionId,
-          variant: 'error',
-          title: `${nextCommand.title} failed`,
-          description:
-            latestOutput ??
-            (event.exitCode === null || event.exitCode === undefined
-              ? 'The background command exited unsuccessfully.'
-              : `The command exited with code ${event.exitCode}.`),
-          retryable: retryPayload !== undefined,
-          retryPayload,
-        });
+        if (
+          event.command === 'ship' &&
+          origin === 'auto' &&
+          autoShipRepos.has(event.repo) &&
+          retriable
+        ) {
+          pushToast({
+            id: event.sessionId,
+            sessionId: event.sessionId,
+            variant: 'info',
+            title: `Auto-ship: #${issueNumber} will retry later`,
+            description:
+              'A transient merge conflict occurred. The issue remains eligible in this session.',
+          });
+        } else {
+          pushToast({
+            id: event.sessionId,
+            sessionId: event.sessionId,
+            variant: 'error',
+            title: `${nextCommand.title} failed`,
+            description:
+              latestOutput ??
+              (event.exitCode === null || event.exitCode === undefined
+                ? 'The background command exited unsuccessfully.'
+                : `The command exited with code ${event.exitCode}.`),
+            retryable: retryPayload !== undefined,
+            retryPayload,
+          });
+        }
       }
 
       await refreshRepoAfterBackground(event.repo, event.command, event.status);
@@ -815,6 +835,7 @@ export function useBackgroundCommands({
         const nextFailureState = getNextAutoShipFailureState(
           event.status,
           issueNumber,
+          retriable,
           currentFailures,
           currentSkipped
         );

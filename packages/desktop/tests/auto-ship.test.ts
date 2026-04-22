@@ -455,6 +455,42 @@ describe('merge-aware background helpers', () => {
     ).toBe('Command failed');
   });
 
+  it('uses retry detail copy only for auto-origin retriable ship failures', () => {
+    expect(
+      getBackgroundDetail({
+        command: 'ship',
+        status: 'failed',
+        repo: 'owner/repo',
+        issueNumber: 70,
+        latestOutput: 'fatal: merge conflict',
+        retriable: true,
+        origin: 'auto',
+      })
+    ).toBe('Will retry later in this session');
+    expect(
+      getBackgroundDetail({
+        command: 'ship',
+        status: 'failed',
+        repo: 'owner/repo',
+        issueNumber: 70,
+        latestOutput: 'fatal: merge conflict',
+        retriable: true,
+        origin: 'manual',
+      })
+    ).toBe('fatal: merge conflict');
+    expect(
+      getBackgroundDetail({
+        command: 'ship',
+        status: 'failed',
+        repo: 'owner/repo',
+        issueNumber: 70,
+        latestOutput: 'fatal: merge conflict',
+        retriable: false,
+        origin: 'auto',
+      })
+    ).toBe('fatal: merge conflict');
+  });
+
   it('uses pausing and paused detail copy for ship sessions', () => {
     expect(
       getBackgroundDetail({
@@ -570,7 +606,7 @@ describe('merge-aware background helpers', () => {
 
 describe('getNextAutoShipFailureState', () => {
   it('increments consecutive failures and records skipped issues on failure', () => {
-    const result = getNextAutoShipFailureState('failed', 61, 0, new Set());
+    const result = getNextAutoShipFailureState('failed', 61, false, 0, new Set());
 
     expect(result.consecutiveFailures).toBe(1);
     expect(result.skippedIssueNumbers).toEqual(new Set([61]));
@@ -578,7 +614,7 @@ describe('getNextAutoShipFailureState', () => {
   });
 
   it('resets consecutive failures on success while preserving skipped issues', () => {
-    const result = getNextAutoShipFailureState('complete', 62, 2, new Set([60]));
+    const result = getNextAutoShipFailureState('complete', 62, false, 2, new Set([60]));
 
     expect(result.consecutiveFailures).toBe(0);
     expect(result.skippedIssueNumbers).toEqual(new Set([60]));
@@ -586,19 +622,39 @@ describe('getNextAutoShipFailureState', () => {
   });
 
   it('pauses auto-ship after the third consecutive failure', () => {
-    const result = getNextAutoShipFailureState('failed', 63, 2, new Set([61, 62]));
+    const result = getNextAutoShipFailureState('failed', 63, false, 2, new Set([61, 62]));
 
     expect(result.consecutiveFailures).toBe(3);
     expect(result.skippedIssueNumbers).toEqual(new Set([61, 62, 63]));
     expect(result.pauseAutoShip).toBe(true);
   });
 
+  it('leaves retries neutral for failures marked retriable', () => {
+    const result = getNextAutoShipFailureState('failed', 63, true, 2, new Set([61, 62]));
+
+    expect(result.consecutiveFailures).toBe(2);
+    expect(result.skippedIssueNumbers).toEqual(new Set([61, 62]));
+    expect(result.pauseAutoShip).toBe(false);
+  });
+
   it('increments failures without adding a skipped issue when the failed command has no issue number', () => {
-    const result = getNextAutoShipFailureState('failed', undefined, 1, new Set([61]));
+    const result = getNextAutoShipFailureState('failed', undefined, false, 1, new Set([61]));
 
     expect(result.consecutiveFailures).toBe(2);
     expect(result.skippedIssueNumbers).toEqual(new Set([61]));
     expect(result.pauseAutoShip).toBe(false);
+  });
+
+  it('allows the same highest-priority issue to be selected again after a retriable failure', async () => {
+    const issues = [
+      createIssue(90, [PLANNED_LABEL, PRIORITY_HIGH_LABEL]),
+      createIssue(91, [PLANNED_LABEL]),
+    ];
+    const failureState = getNextAutoShipFailureState('failed', 90, true, 0, new Set());
+
+    await expect(selectIssue(issues, new Set(), failureState.skippedIssueNumbers)).resolves.toEqual(
+      issues[0]
+    );
   });
 });
 

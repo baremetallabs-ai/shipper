@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { logger, PAUSED_EXIT_CODE } from '@dnsquared/shipper-core';
+import { logger, PAUSED_EXIT_CODE, RETRIABLE_FAILURE_EXIT_CODE } from '@dnsquared/shipper-core';
 import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
 import { shipAutoParallel, shipAutoSequential } from './ship-auto.js';
 import { formatLogDisplayPath, formatLogTimestamp, shipOneIssue } from './ship-execute.js';
@@ -53,6 +53,8 @@ export async function shipCommand(
   logger.log(`\nLog file: ${formatLogDisplayPath(logFile, homeDir)}`);
   if (result.paused) {
     process.exitCode = PAUSED_EXIT_CODE;
+  } else if (result.retriable) {
+    process.exitCode = RETRIABLE_FAILURE_EXIT_CODE;
   } else if (!result.success) {
     process.exitCode = 1;
   }
