@@ -15,18 +15,16 @@ import {
   withIssueLock,
   STAGE_NAME_MAP,
   NEW_LABEL,
-  PR_REVIEWED_LABEL,
-  PRIORITY_LABEL_NAMES,
-  READY_LABEL,
-  BLOCKED_LABEL,
-  LOCKED_LABEL,
   FAILED_LABEL,
+  PR_REVIEWED_LABEL,
+  READY_LABEL,
   type QueuedPR,
 } from '@dnsquared/shipper-core';
 import type { AgentName, CommandMode, Logger } from '@dnsquared/shipper-core';
 import { buildReadyCheck } from './pr-remediate.js';
 import { isRetriableMergeFailure, mergePr, resolvePrForIssue } from './ship-merge.js';
 import { runStageForLabel } from './stage-dispatch.js';
+import { getCurrentWorkflowLabel } from './workflow-label.js';
 
 const MAX_TRANSITIONS = 15;
 
@@ -124,49 +122,6 @@ export function closeLogStream(logStream: WriteStream | undefined): Promise<void
   });
 }
 
-export async function getCurrentLabel(repo: string, issueStr: string): Promise<string | undefined> {
-  let output: string;
-  try {
-    const result = await gh([
-      'issue',
-      'view',
-      issueStr,
-      '-R',
-      repo,
-      '--json',
-      'labels',
-      '--jq',
-      '.labels[].name',
-    ]);
-    output = result.stdout.trim();
-  } catch {
-    logger.warn(`Failed to fetch labels for issue #${issueStr}`);
-    return undefined;
-  }
-
-  if (!output) return undefined;
-
-  const shipperLabels = output
-    .split(/\r?\n/)
-    .filter(
-      (name) =>
-        name.startsWith('shipper:') &&
-        name !== BLOCKED_LABEL &&
-        name !== LOCKED_LABEL &&
-        !PRIORITY_LABEL_NAMES.includes(name)
-    );
-
-  if (shipperLabels.includes(FAILED_LABEL)) {
-    return FAILED_LABEL;
-  }
-
-  const stageLabels = shipperLabels.filter((name) => name !== FAILED_LABEL);
-
-  if (stageLabels.length !== 1) return undefined;
-
-  return stageLabels[0];
-}
-
 function printSummary(results: StageResult[], issueLogger: Logger): void {
   issueLogger.log('\nStage summary:');
   for (const r of results) {
@@ -214,7 +169,7 @@ export async function shipOneIssue(options: ShipOneIssueOptions): Promise<ShipIs
       logStream,
       async () =>
         await withIssueLock(repo, issueStr, async () => {
-          let label = await getCurrentLabel(repo, issueStr);
+          let label = await getCurrentWorkflowLabel(repo, issueStr);
 
           if (label === FAILED_LABEL) {
             const msg = `Issue #${issueStr} is marked ${FAILED_LABEL} and requires manual intervention before it can re-enter the pipeline.`;
@@ -324,7 +279,7 @@ export async function shipOneIssue(options: ShipOneIssueOptions): Promise<ShipIs
                 };
               }
 
-              label = await getCurrentLabel(repo, issueStr);
+              label = await getCurrentWorkflowLabel(repo, issueStr);
               const stageSummary: StageResult =
                 stageResult.verdict === 'reject'
                   ? { stage: stageName, status: 'reject', rolledBackTo: label }
