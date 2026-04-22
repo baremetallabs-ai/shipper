@@ -276,6 +276,7 @@ export interface BackgroundDetailInput {
   pausePending?: boolean;
   retriable?: boolean;
   origin?: 'auto' | 'manual';
+  autoShipEnabled?: boolean;
 }
 
 export interface AutoShipCandidate {

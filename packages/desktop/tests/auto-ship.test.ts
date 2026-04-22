@@ -465,6 +465,7 @@ describe('merge-aware background helpers', () => {
         latestOutput: 'fatal: merge conflict',
         retriable: true,
         origin: 'auto',
+        autoShipEnabled: true,
       })
     ).toBe('Will retry later in this session');
     expect(
@@ -476,6 +477,18 @@ describe('merge-aware background helpers', () => {
         latestOutput: 'fatal: merge conflict',
         retriable: true,
         origin: 'manual',
+      })
+    ).toBe('fatal: merge conflict');
+    expect(
+      getBackgroundDetail({
+        command: 'ship',
+        status: 'failed',
+        repo: 'owner/repo',
+        issueNumber: 70,
+        latestOutput: 'fatal: merge conflict',
+        retriable: true,
+        origin: 'auto',
+        autoShipEnabled: false,
       })
     ).toBe('fatal: merge conflict');
     expect(
