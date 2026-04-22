@@ -19,7 +19,7 @@ const {
         issue: string;
         merge: boolean;
         pauseProbe?: () => boolean | Promise<boolean>;
-      }) => Promise<{ success: boolean; paused?: boolean; error?: string }>
+      }) => Promise<{ success: boolean; paused?: boolean; retriable?: boolean; error?: string }>
     >(),
   loggerLogMock: vi.fn(),
 }));
@@ -140,5 +140,14 @@ describe('shipCommand', () => {
     await shipCommand('owner/repo', '42', { merge: false, auto: false });
 
     expect(process.exitCode).toBe(1);
+  });
+
+  it('maps retriable failures to the shared retriable exit code', async () => {
+    shipOneIssueMock.mockResolvedValue({ success: false, retriable: true, error: 'merge failed' });
+    const { shipCommand } = await import('../../src/commands/ship.js');
+
+    await shipCommand('owner/repo', '42', { merge: false, auto: false });
+
+    expect(process.exitCode).toBe(76);
   });
 });

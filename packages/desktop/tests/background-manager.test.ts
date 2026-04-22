@@ -26,7 +26,7 @@ vi.mock('electron', () => ({
 }));
 
 import { BackgroundManager } from '../src/main/background-manager.js';
-import { PAUSED_EXIT_CODE } from '@dnsquared/shipper-core';
+import { PAUSED_EXIT_CODE, RETRIABLE_FAILURE_EXIT_CODE } from '@dnsquared/shipper-core';
 
 class MockStream extends EventEmitter {
   emitData(chunk: string): void {
@@ -577,6 +577,41 @@ describe('BackgroundManager', () => {
       })
     );
     expect(existsSync(pauseSentinelPath)).toBe(false);
+  });
+
+  it('maps retriable failure exit codes to failed status with retriable metadata', () => {
+    const manager = createManager();
+
+    manager.spawn({
+      sessionId: 'ship-retriable',
+      command: 'ship',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['ship', '41', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+      meta: { issueNumber: 41, issueUrl: 'https://example.com/issues/41' },
+    });
+
+    latestChild().close(RETRIABLE_FAILURE_EXIT_CODE);
+
+    const retriableEvent = statusEvents().find(
+      (event) => event.sessionId === 'ship-retriable' && event.status === 'failed'
+    );
+
+    expect(retriableEvent).toEqual(
+      expect.objectContaining({
+        sessionId: 'ship-retriable',
+        status: 'failed',
+        exitCode: RETRIABLE_FAILURE_EXIT_CODE,
+      })
+    );
+    expect(isRecord(retriableEvent?.meta) ? retriableEvent.meta : undefined).toEqual(
+      expect.objectContaining({
+        issueNumber: 41,
+        issueUrl: 'https://example.com/issues/41',
+        retriable: true,
+      })
+    );
   });
 
   it('maps auto-ship halts to complete while preserving paused status for user pauses', () => {

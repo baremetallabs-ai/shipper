@@ -202,6 +202,7 @@ export interface BackgroundStatusMeta {
   pausePending?: boolean;
   origin?: 'auto' | 'manual';
   autoShipHalted?: boolean;
+  retriable?: boolean;
 }
 
 export interface BackgroundStatusPayload {
@@ -236,6 +237,7 @@ export interface BackgroundCommandState {
   pausePending?: boolean;
   origin?: 'auto' | 'manual';
   autoShipHalted?: boolean;
+  retriable?: boolean;
 }
 
 export type ActiveShippingCommand = BackgroundCommandState & {
@@ -247,7 +249,7 @@ export type ActiveShippingCommand = BackgroundCommandState & {
 export interface BackgroundToastItem {
   id: string;
   sessionId: string;
-  variant: 'success' | 'error' | 'cancelled';
+  variant: 'success' | 'error' | 'cancelled' | 'info';
   title: string;
   description: string;
   issueUrl?: string;
@@ -272,6 +274,8 @@ export interface BackgroundDetailInput {
   latestOutput?: string | null;
   cancelled?: boolean;
   pausePending?: boolean;
+  retriable?: boolean;
+  origin?: 'auto' | 'manual';
 }
 
 export interface AutoShipCandidate {

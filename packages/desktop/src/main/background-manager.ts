@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Readable } from 'node:stream';
 import { app, type BrowserWindow } from 'electron';
-import { PAUSED_EXIT_CODE } from '@dnsquared/shipper-core';
+import { PAUSED_EXIT_CODE, RETRIABLE_FAILURE_EXIT_CODE } from '@dnsquared/shipper-core';
 
 type BackgroundChildProcess = ChildProcessByStdio<null, Readable, Readable>;
 
@@ -22,6 +22,7 @@ export interface BackgroundSessionMeta {
   pausePending?: boolean;
   origin?: ShipOrigin;
   autoShipHalted?: boolean;
+  retriable?: boolean;
 }
 
 export interface BackgroundStatusEvent {
@@ -358,6 +359,9 @@ export class BackgroundManager {
       if (session.haltReason === 'auto-ship-off') {
         session.meta = { ...session.meta, autoShipHalted: true };
       }
+    } else if (exitCode === RETRIABLE_FAILURE_EXIT_CODE && !session.cancelRequested) {
+      session.status = 'failed';
+      session.meta = { ...session.meta, retriable: true };
     } else {
       session.status = exitCode === 0 ? 'complete' : 'failed';
     }

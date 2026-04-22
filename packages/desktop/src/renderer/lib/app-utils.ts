@@ -133,6 +133,8 @@ export function getBackgroundDetail({
   latestOutput,
   cancelled,
   pausePending,
+  retriable,
+  origin,
 }: BackgroundDetailInput): string {
   if (cancelled) {
     return 'Cancelled';
@@ -151,6 +153,9 @@ export function getBackgroundDetail({
   }
 
   if (status === 'failed') {
+    if (command === 'ship' && retriable && origin === 'auto') {
+      return 'Will retry later in this session';
+    }
     return latestOutput ?? 'Command failed';
   }
 
@@ -517,12 +522,21 @@ export async function selectNextAutoUnblockIssue(
 export function getNextAutoShipFailureState(
   status: 'complete' | 'failed',
   issueNumber: number | undefined,
+  retriable: boolean,
   currentFailures: number,
   currentSkipped: Set<number>
 ): AutoShipFailureState {
   if (status === 'complete') {
     return {
       consecutiveFailures: 0,
+      skippedIssueNumbers: new Set(currentSkipped),
+      pauseAutoShip: false,
+    };
+  }
+
+  if (retriable) {
+    return {
+      consecutiveFailures: currentFailures,
       skippedIssueNumbers: new Set(currentSkipped),
       pauseAutoShip: false,
     };

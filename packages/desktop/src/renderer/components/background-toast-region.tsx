@@ -6,7 +6,7 @@ import { Alert, AlertDescription, AlertTitle } from './ui/alert.js';
 import { Button } from './ui/button.js';
 import { cn } from '../lib/utils.js';
 
-export type BackgroundToastVariant = 'success' | 'error' | 'cancelled';
+export type BackgroundToastVariant = 'success' | 'error' | 'cancelled' | 'info';
 
 export interface BackgroundToast {
   id: string;
@@ -31,6 +31,7 @@ function ToastIcon({ variant }: { variant: BackgroundToastVariant }): JSX.Elemen
     case 'error':
       return <CircleX className="size-4" aria-hidden="true" />;
     case 'cancelled':
+    case 'info':
       return <Info className="size-4" aria-hidden="true" />;
   }
 }
@@ -47,7 +48,7 @@ function ToastItem({
   const [isRetrying, setIsRetrying] = useState(false);
 
   useEffect(() => {
-    if (toast.variant !== 'success') {
+    if (toast.variant !== 'success' && toast.variant !== 'info') {
       return;
     }
 
@@ -79,7 +80,8 @@ function ToastItem({
       className={cn(
         'background-toast shadow-lg',
         toast.variant === 'success' && 'border-success/40 bg-success/10 text-foreground',
-        toast.variant === 'cancelled' && 'border-warning/40 bg-warning/10 text-foreground'
+        toast.variant === 'cancelled' && 'border-warning/40 bg-warning/10 text-foreground',
+        toast.variant === 'info' && 'border-accent-foreground/20 bg-accent text-accent-foreground'
       )}
     >
       <ToastIcon variant={toast.variant} />

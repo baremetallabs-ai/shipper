@@ -79,6 +79,7 @@ interface BackgroundStatusMeta {
   pausePending?: boolean;
   origin?: 'auto' | 'manual';
   autoShipHalted?: boolean;
+  retriable?: boolean;
 }
 
 interface BackgroundStatusEvent {
