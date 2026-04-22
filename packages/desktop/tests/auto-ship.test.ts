@@ -12,6 +12,7 @@ import {
   PR_REVIEWED_LABEL,
   PRIORITY_HIGH_LABEL,
   PRIORITY_LOW_LABEL,
+  READY_LABEL,
   type ListIssueItem,
 } from '@dnsquared/shipper-core';
 import {
@@ -522,10 +523,10 @@ describe('selectNextAutoUnblockIssue', () => {
 });
 
 describe('sortBlockedIssuesByStagePriority', () => {
-  it('prefers blocked issues at higher-priority workflow stages', () => {
+  it('matches CLI stage ordering, including ready-stage issues', () => {
     const issues = [
       createIssue(100, [PLANNED_LABEL, BLOCKED_LABEL]),
-      createIssue(101, [IMPLEMENTED_LABEL, BLOCKED_LABEL]),
+      createIssue(101, [READY_LABEL, BLOCKED_LABEL]),
       createIssue(102, [DESIGNED_LABEL, BLOCKED_LABEL]),
     ];
 

@@ -33,7 +33,7 @@ interface ListIssuesFailure {
 interface TimelineLabelEvent {
   event: string;
   label?: {
-    name?: string;
+    name: string;
   } | null;
   created_at?: string;
 }
