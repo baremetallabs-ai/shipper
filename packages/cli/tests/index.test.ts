@@ -353,7 +353,7 @@ describe('shipper-cli', () => {
 
       await importEntrypoint();
 
-      expect(mockNewCommand).toHaveBeenCalledWith(['request'], {
+      expect(mockNewCommand).toHaveBeenCalledWith('owner/repo', ['request'], {
         mode: 'headless',
         agent: 'claude',
         model: 'sonnet',
@@ -366,7 +366,7 @@ describe('shipper-cli', () => {
 
       await importEntrypoint();
 
-      expect(mockNewCommand).toHaveBeenCalledWith([], {
+      expect(mockNewCommand).toHaveBeenCalledWith('owner/repo', [], {
         mode: 'default',
         agent: 'copilot',
         model: undefined,

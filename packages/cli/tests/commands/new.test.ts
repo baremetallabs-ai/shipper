@@ -6,10 +6,70 @@ import { createFakeCore } from '../_harness/fake-core.js';
 
 type FakeCore = ReturnType<typeof createFakeCore>;
 
+const repo = 'owner/repo';
+const { execFileMock, randomBytesMock } = vi.hoisted(() => ({
+  execFileMock: vi.fn(),
+  randomBytesMock: vi.fn<(size: number) => Buffer>(),
+}));
+
+vi.mock('node:child_process', async () => {
+  const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+  const execFile = Object.assign(
+    (...args: unknown[]) => {
+      execFileMock(...args);
+    },
+    {
+      [Symbol.for('nodejs.util.promisify.custom')]: (...args: unknown[]) =>
+        new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+          execFileMock(
+            ...args,
+            (err: unknown, stdout: string | Buffer = '', stderr: string | Buffer = '') => {
+              if (err) {
+                reject(err instanceof Error ? err : new Error('execFile mock rejected'));
+                return;
+              }
+              resolve({ stdout: String(stdout), stderr: String(stderr) });
+            }
+          );
+        }),
+    }
+  );
+  return {
+    ...actual,
+    execFile,
+  };
+});
+
+vi.mock('node:crypto', async () => {
+  const actual = await vi.importActual<typeof import('node:crypto')>('node:crypto');
+  return {
+    ...actual,
+    randomBytes: randomBytesMock,
+  };
+});
+
 describe('newCommand', () => {
   let fake: FakeCore;
   let promptCalls: Array<{ name: string; opts: RunPromptOpts }>;
   let errorSpy: ReturnType<typeof vi.spyOn>;
+
+  const importCommand = async () => await import('../../src/commands/new.js');
+
+  const stubDefaultBranch = (branch = 'main'): void => {
+    fake.stubGh((args) => {
+      if (
+        args[0] === 'repo' &&
+        args[1] === 'view' &&
+        args[2] === repo &&
+        args[3] === '--json' &&
+        args[4] === 'defaultBranchRef'
+      ) {
+        return { stdout: `${branch}\n`, stderr: '' };
+      }
+
+      return undefined;
+    });
+  };
 
   beforeEach(() => {
     fake = createFakeCore();
@@ -17,79 +77,115 @@ describe('newCommand', () => {
     promptCalls = [];
     delete process.env.SHIPPER_HEADLESS;
     process.exitCode = undefined;
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-22T02:38:36Z'));
+    execFileMock.mockReset();
+    execFileMock.mockImplementation((_cmd: string, _args: string[], ...rest: unknown[]) => {
+      const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
+      cb(null, '', '');
+    });
+    randomBytesMock.mockReset();
+    randomBytesMock.mockReturnValue(Buffer.from('a3f91c', 'hex'));
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     fake.scriptRunPrompt((name, opts) => {
       promptCalls.push({ name, opts });
       return 0;
     });
+    stubDefaultBranch();
   });
 
   afterEach(async () => {
     process.exitCode = undefined;
     errorSpy.mockRestore();
+    vi.useRealTimers();
     vi.restoreAllMocks();
     await fake.dispose();
   });
 
-  it('passes the selected mode through to runPrompt', async () => {
-    const { newCommand } = await import('../../src/commands/new.js');
+  it('resolves the base branch, runs in a worktree, and forwards prompt options', async () => {
+    const resolveBaseBranchSpy = vi.spyOn(core, 'resolveBaseBranch');
+    const withStageHooksSpy = vi.spyOn(core, 'withStageHooks');
+    const withWorktreeSpy = vi.spyOn(core, 'withWorktree');
+    const runPromptSpy = vi.spyOn(core, 'runPrompt');
+    const { newCommand } = await importCommand();
 
-    await expect(newCommand(['my', 'request'], { mode: 'headless' })).resolves.toBeUndefined();
+    await expect(
+      newCommand(repo, ['my', 'request'], {
+        mode: 'headless',
+        agent: 'codex',
+        model: 'gpt-5.4',
+        logFile: '/tmp/example.jsonl',
+      })
+    ).resolves.toBeUndefined();
 
+    const branchName = withStageHooksSpy.mock.calls[0]?.[1].branchName;
+    expect(branchName).toMatch(/^shipper\/new-\d{8}-\d{6}-[a-f0-9]{6}$/);
+    expect(resolveBaseBranchSpy).toHaveBeenCalledWith(repo, core.getSettings().defaultBaseBranch);
+    expect(withStageHooksSpy).toHaveBeenCalledWith('new', { branchName }, expect.any(Function));
+    expect(withWorktreeSpy).toHaveBeenCalledWith(
+      {
+        repoRoot: fake.repoRoot(),
+        branch: branchName,
+        createBranch: true,
+        baseBranch: 'main',
+        stage: 'new',
+      },
+      expect.any(Function)
+    );
     expect(promptCalls).toEqual([
       {
         name: 'new',
         opts: {
           userInput: 'my request',
+          cwd: fake.wtPath(),
           mode: 'headless',
-          agent: undefined,
-          model: undefined,
-          logFile: undefined,
+          agent: 'codex',
+          model: 'gpt-5.4',
+          logFile: '/tmp/example.jsonl',
         },
       },
     ]);
-    expect(process.env.SHIPPER_HEADLESS).toBeUndefined();
+    expect(withStageHooksSpy.mock.invocationCallOrder[0]).toBeLessThan(
+      withWorktreeSpy.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER
+    );
+    expect(withWorktreeSpy.mock.invocationCallOrder[0]).toBeLessThan(
+      runPromptSpy.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER
+    );
+    expect(execFileMock).toHaveBeenCalledWith(
+      'git',
+      ['branch', '-D', branchName],
+      { cwd: fake.repoRoot() },
+      expect.any(Function)
+    );
     expect(process.exitCode).toBe(0);
   });
 
   it('uses runPrompt without a mode override when none is provided', async () => {
-    const { newCommand } = await import('../../src/commands/new.js');
+    vi.spyOn(core, 'resolveBaseBranch').mockResolvedValueOnce('main');
+    const { newCommand } = await importCommand();
 
-    await expect(newCommand(['my', 'request'])).resolves.toBeUndefined();
+    await expect(newCommand(repo, ['my', 'request'])).resolves.toBeUndefined();
 
     expect(promptCalls[0]?.opts).toEqual(
       expect.objectContaining({
         userInput: 'my request',
+        cwd: fake.wtPath(),
         mode: undefined,
       })
     );
     expect(process.exitCode).toBe(0);
   });
 
-  it('forwards a log file path to runPrompt unchanged', async () => {
-    const { newCommand } = await import('../../src/commands/new.js');
-
-    await expect(
-      newCommand(['my', 'request'], { logFile: '/tmp/example.jsonl', mode: 'headless' })
-    ).resolves.toBeUndefined();
-
-    expect(promptCalls[0]?.opts).toEqual(
-      expect.objectContaining({
-        userInput: 'my request',
-        mode: 'headless',
-        logFile: '/tmp/example.jsonl',
-      })
-    );
-  });
-
   it('runs interactively with no user input when no mode override is provided', async () => {
-    const { newCommand } = await import('../../src/commands/new.js');
+    vi.spyOn(core, 'resolveBaseBranch').mockResolvedValueOnce('main');
+    const { newCommand } = await importCommand();
 
-    await expect(newCommand([])).resolves.toBeUndefined();
+    await expect(newCommand(repo, [])).resolves.toBeUndefined();
 
     expect(promptCalls[0]?.opts).toEqual(
       expect.objectContaining({
         userInput: undefined,
+        cwd: fake.wtPath(),
         mode: undefined,
       })
     );
@@ -97,23 +193,27 @@ describe('newCommand', () => {
   });
 
   it('runs interactively with no user input when mode is interactive', async () => {
-    const { newCommand } = await import('../../src/commands/new.js');
+    vi.spyOn(core, 'resolveBaseBranch').mockResolvedValueOnce('main');
+    const { newCommand } = await importCommand();
 
-    await expect(newCommand([], { mode: 'interactive' })).resolves.toBeUndefined();
+    await expect(newCommand(repo, [], { mode: 'interactive' })).resolves.toBeUndefined();
 
     expect(promptCalls[0]?.opts).toEqual(
       expect.objectContaining({
         userInput: undefined,
+        cwd: fake.wtPath(),
         mode: 'interactive',
       })
     );
     expect(process.exitCode).toBe(0);
   });
 
-  it('throws when no request is provided in explicit headless mode', async () => {
-    const { newCommand } = await import('../../src/commands/new.js');
+  it('throws when no request is provided in explicit headless mode before worktree setup', async () => {
+    const withStageHooksSpy = vi.spyOn(core, 'withStageHooks');
+    const withWorktreeSpy = vi.spyOn(core, 'withWorktree');
+    const { newCommand } = await importCommand();
 
-    await expect(newCommand([], { mode: 'headless' })).rejects.toThrow(
+    await expect(newCommand(repo, [], { mode: 'headless' })).rejects.toThrow(
       'Error: A request is required when running in headless mode.'
     );
 
@@ -121,14 +221,17 @@ describe('newCommand', () => {
       '[shipper] Usage: shipper new <request...> --mode headless'
     );
     expect(promptCalls).toEqual([]);
+    expect(withStageHooksSpy).not.toHaveBeenCalled();
+    expect(withWorktreeSpy).not.toHaveBeenCalled();
   });
 
-  it('throws when settings resolve bare invocation to headless mode', async () => {
-    // resolveMode depends on settings/module state and is not covered by fake transports.
+  it('throws when settings resolve bare invocation to headless mode before worktree setup', async () => {
+    const withStageHooksSpy = vi.spyOn(core, 'withStageHooks');
+    const withWorktreeSpy = vi.spyOn(core, 'withWorktree');
     vi.spyOn(core, 'resolveMode').mockReturnValueOnce('headless');
-    const { newCommand } = await import('../../src/commands/new.js');
+    const { newCommand } = await importCommand();
 
-    await expect(newCommand([])).rejects.toThrow(
+    await expect(newCommand(repo, [])).rejects.toThrow(
       'Error: A request is required when running in headless mode.'
     );
 
@@ -136,19 +239,90 @@ describe('newCommand', () => {
       '[shipper] Usage: shipper new <request...> --mode headless'
     );
     expect(promptCalls).toEqual([]);
+    expect(withStageHooksSpy).not.toHaveBeenCalled();
+    expect(withWorktreeSpy).not.toHaveBeenCalled();
   });
 
   it('forwards codex without injecting a starter user message', async () => {
-    const { newCommand } = await import('../../src/commands/new.js');
+    vi.spyOn(core, 'resolveBaseBranch').mockResolvedValueOnce('main');
+    const { newCommand } = await importCommand();
 
-    await expect(newCommand([], { agent: 'codex' })).resolves.toBeUndefined();
+    await expect(newCommand(repo, [], { agent: 'codex' })).resolves.toBeUndefined();
 
     expect(promptCalls[0]?.opts).toEqual(
       expect.objectContaining({
         userInput: undefined,
+        cwd: fake.wtPath(),
         agent: 'codex',
       })
     );
     expect(process.exitCode).toBe(0);
+  });
+
+  it('surfaces base-branch resolution failures without falling back to the caller checkout', async () => {
+    const withWorktreeSpy = vi.spyOn(core, 'withWorktree');
+    vi.spyOn(core, 'resolveBaseBranch').mockRejectedValueOnce(new Error('offline'));
+    const { newCommand } = await importCommand();
+
+    await expect(newCommand(repo, ['my', 'request'])).rejects.toThrow('offline');
+
+    expect(withWorktreeSpy).not.toHaveBeenCalled();
+    expect(promptCalls).toEqual([]);
+  });
+
+  it('attempts branch cleanup after a successful prompt run', async () => {
+    vi.spyOn(core, 'resolveBaseBranch').mockResolvedValueOnce('main');
+    const withStageHooksSpy = vi.spyOn(core, 'withStageHooks');
+    const { newCommand } = await importCommand();
+
+    await expect(newCommand(repo, ['my', 'request'])).resolves.toBeUndefined();
+
+    const branchName = withStageHooksSpy.mock.calls[0]?.[1].branchName;
+    expect(execFileMock).toHaveBeenCalledWith(
+      'git',
+      ['branch', '-D', branchName],
+      { cwd: fake.repoRoot() },
+      expect.any(Function)
+    );
+  });
+
+  it('attempts branch cleanup after a failing prompt run', async () => {
+    vi.spyOn(core, 'resolveBaseBranch').mockResolvedValueOnce('main');
+    const withStageHooksSpy = vi.spyOn(core, 'withStageHooks');
+    fake.scriptRunPrompt(() => {
+      throw new Error('prompt failed');
+    });
+    const { newCommand } = await importCommand();
+
+    await expect(newCommand(repo, ['my', 'request'])).rejects.toThrow('prompt failed');
+
+    const branchName = withStageHooksSpy.mock.calls[0]?.[1].branchName;
+    expect(execFileMock).toHaveBeenCalledWith(
+      'git',
+      ['branch', '-D', branchName],
+      { cwd: fake.repoRoot() },
+      expect.any(Function)
+    );
+  });
+
+  it('generates distinct branch names for back-to-back runs in the same second', async () => {
+    vi.spyOn(core, 'resolveBaseBranch').mockResolvedValue('main');
+    const withStageHooksSpy = vi.spyOn(core, 'withStageHooks');
+    randomBytesMock
+      .mockReturnValueOnce(Buffer.from('a3f91c', 'hex'))
+      .mockReturnValueOnce(Buffer.from('b4e2d0', 'hex'));
+    const { newCommand } = await importCommand();
+
+    await expect(newCommand(repo, ['first'])).resolves.toBeUndefined();
+    await expect(newCommand(repo, ['second'])).resolves.toBeUndefined();
+
+    const firstBranch = withStageHooksSpy.mock.calls[0]?.[1].branchName;
+    const secondBranch = withStageHooksSpy.mock.calls[1]?.[1].branchName;
+    expect(firstBranch).toMatch(/^shipper\/new-\d{8}-\d{6}-[a-f0-9]{6}$/);
+    expect(secondBranch).toMatch(/^shipper\/new-\d{8}-\d{6}-[a-f0-9]{6}$/);
+    expect(firstBranch).not.toBe(secondBranch);
+    expect(firstBranch?.slice(0, 'shipper/new-YYYYMMDD-HHMMSS'.length)).toBe(
+      secondBranch?.slice(0, 'shipper/new-YYYYMMDD-HHMMSS'.length)
+    );
   });
 });
