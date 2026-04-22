@@ -32,6 +32,7 @@ import type { BackgroundCommandsBridge, IssuePipelineBridge } from './types.js';
 export default function App(): JSX.Element {
   const pipelineBridgeRef = useRef<IssuePipelineBridge | null>(null);
   const backgroundBridgeRef = useRef<BackgroundCommandsBridge | null>(null);
+  const launchingSetupReposRef = useRef<Set<string>>(new Set());
 
   const reposState = useRepos({
     pipelineBridgeRef,
@@ -112,17 +113,26 @@ export default function App(): JSX.Element {
   }
 
   async function handleShipperSetup(): Promise<void> {
-    if (terminalState.focusExistingSetupSession(activeRepo)) {
+    const repo = activeRepo;
+    if (!repo || terminalState.focusExistingSetupSession(repo)) {
       return;
     }
 
+    if (launchingSetupReposRef.current.has(repo)) {
+      return;
+    }
+
+    launchingSetupReposRef.current.add(repo);
+
     try {
-      const result = await getShipperApi().spawnShipperSetup(activeRepo, 120, 30);
-      terminalState.openRunningSession(result.sessionId, `setup — ${activeRepo}`, {
-        repo: activeRepo,
+      const result = await getShipperApi().spawnShipperSetup(repo, 120, 30);
+      terminalState.openRunningSession(result.sessionId, `setup — ${repo}`, {
+        repo,
       });
     } catch (error) {
       pipelineState.setFetchError(`Failed to launch shipper setup: ${toErrorMessage(error)}`);
+    } finally {
+      launchingSetupReposRef.current.delete(repo);
     }
   }
 

@@ -1,6 +1,6 @@
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 type IpcHandler = (event: unknown, payload: unknown) => unknown;
@@ -726,7 +726,7 @@ describe('desktop IPC locking', () => {
     expect(result.sessionId).toEqual(expect.any(String));
     expect(state.ensureRepoCloneMock).toHaveBeenCalledWith('owner/repo');
     expect(state.buildPromptCommandMock).toHaveBeenCalledWith('setup', {
-      userInput: `Run setup for ${repoPath.split('/').pop()}. This is a fresh setup — no .shipper/ directory found.`,
+      userInput: `Run setup for ${basename(repoPath)}. This is a fresh setup — no .shipper/ directory found.`,
       repo: 'owner/repo',
       cwd: repoPath,
       mode: 'interactive',
@@ -750,6 +750,12 @@ describe('desktop IPC locking', () => {
     const repoPath = mkdtempSync(join(tmpdir(), 'shipper-desktop-setup-existing-'));
     mkdirSync(join(repoPath, '.shipper'));
     state.ensureRepoCloneMock.mockResolvedValueOnce(repoPath);
+    state.buildPromptCommandMock.mockResolvedValueOnce({
+      command: 'copilot',
+      args: ['setup'],
+      cwd: repoPath,
+      initialInput: 'seed prompt',
+    });
     const handler = getHandler('pty-spawn-shipper-setup');
 
     const result = parseSessionResult(
@@ -758,22 +764,17 @@ describe('desktop IPC locking', () => {
 
     expect(result.sessionId).toEqual(expect.any(String));
     expect(state.buildPromptCommandMock).toHaveBeenCalledWith('setup', {
-      userInput: `Run setup for ${repoPath.split('/').pop()}. .shipper/ directory already exists.`,
+      userInput: `Run setup for ${basename(repoPath)}. .shipper/ directory already exists.`,
       repo: 'owner/repo',
       cwd: repoPath,
       mode: 'interactive',
     });
-    expect(state.ptySpawnMock).toHaveBeenCalledWith(
-      result.sessionId,
-      'codex',
-      ['groom', '42'],
-      expect.objectContaining({
-        cols: 120,
-        rows: 40,
-        cwd: '/tmp/repo',
-        initialInput: undefined,
-      })
-    );
+    expect(state.ptySpawnMock).toHaveBeenCalledWith(result.sessionId, 'copilot', ['setup'], {
+      cols: 120,
+      rows: 40,
+      cwd: repoPath,
+      initialInput: 'seed prompt',
+    });
     expect(state.acquireIssueLockMock).not.toHaveBeenCalled();
     expect(state.renewIssueLockMock).not.toHaveBeenCalled();
     expect(state.releaseIssueLockMock).not.toHaveBeenCalled();
