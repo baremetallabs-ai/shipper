@@ -1,4 +1,6 @@
+import { existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 
 import { ipcMain } from 'electron';
 import {
@@ -120,6 +122,36 @@ export function registerPtyHandlers(ptyManager: PtyManager): void {
       await releaseLock();
       throw error;
     }
+  });
+
+  ipcMain.handle('pty-spawn-shipper-setup', async (_event, payload: unknown) => {
+    const parsedPayload = parseSpawnPtyPayload(payload);
+    if (parsedPayload === null) {
+      throw new Error('Invalid pty-spawn-shipper-setup payload.');
+    }
+
+    const repoPath = await ensureRepoClone(parsedPayload.repo);
+    const repoName = path.basename(repoPath);
+    const hasShipperDir = existsSync(path.join(repoPath, '.shipper'));
+    const userInput = hasShipperDir
+      ? `Run setup for ${repoName}. .shipper/ directory already exists.`
+      : `Run setup for ${repoName}. This is a fresh setup — no .shipper/ directory found.`;
+    const cmd = await buildPromptCommand('setup', {
+      userInput,
+      repo: parsedPayload.repo,
+      cwd: repoPath,
+      mode: 'interactive',
+    });
+
+    const sessionId = randomUUID();
+    ptyManager.spawn(sessionId, cmd.command, cmd.args, {
+      cols: parsedPayload.cols,
+      rows: parsedPayload.rows,
+      cwd: cmd.cwd ?? repoPath,
+      initialInput: cmd.initialInput,
+    });
+
+    return { sessionId };
   });
 
   ipcMain.handle('pty-write', (_event, payload: unknown) => {

@@ -707,6 +707,81 @@ describe('desktop IPC locking', () => {
     );
   });
 
+  it('spawns a setup PTY with the fresh-setup opening input when .shipper is absent', async () => {
+    await loadHandlers();
+    const repoPath = mkdtempSync(join(tmpdir(), 'shipper-desktop-setup-fresh-'));
+    state.ensureRepoCloneMock.mockResolvedValueOnce(repoPath);
+    state.buildPromptCommandMock.mockResolvedValueOnce({
+      command: 'copilot',
+      args: ['setup'],
+      cwd: repoPath,
+      initialInput: 'seed prompt',
+    });
+    const handler = getHandler('pty-spawn-shipper-setup');
+
+    const result = parseSessionResult(
+      await handler({}, { repo: 'owner/repo', cols: 120, rows: 40 })
+    );
+
+    expect(result.sessionId).toEqual(expect.any(String));
+    expect(state.ensureRepoCloneMock).toHaveBeenCalledWith('owner/repo');
+    expect(state.buildPromptCommandMock).toHaveBeenCalledWith('setup', {
+      userInput: `Run setup for ${repoPath.split('/').pop()}. This is a fresh setup — no .shipper/ directory found.`,
+      repo: 'owner/repo',
+      cwd: repoPath,
+      mode: 'interactive',
+    });
+    expect(state.ptySpawnMock).toHaveBeenCalledWith(result.sessionId, 'copilot', ['setup'], {
+      cols: 120,
+      rows: 40,
+      cwd: repoPath,
+      initialInput: 'seed prompt',
+    });
+    expect(state.acquireIssueLockMock).not.toHaveBeenCalled();
+    expect(state.renewIssueLockMock).not.toHaveBeenCalled();
+    expect(state.releaseIssueLockMock).not.toHaveBeenCalled();
+    expect(state.ptyOnSessionExitMock).not.toHaveBeenCalled();
+
+    rmSync(repoPath, { recursive: true, force: true });
+  });
+
+  it('spawns a setup PTY with the rerun opening input when .shipper exists', async () => {
+    await loadHandlers();
+    const repoPath = mkdtempSync(join(tmpdir(), 'shipper-desktop-setup-existing-'));
+    mkdirSync(join(repoPath, '.shipper'));
+    state.ensureRepoCloneMock.mockResolvedValueOnce(repoPath);
+    const handler = getHandler('pty-spawn-shipper-setup');
+
+    const result = parseSessionResult(
+      await handler({}, { repo: 'owner/repo', cols: 120, rows: 40 })
+    );
+
+    expect(result.sessionId).toEqual(expect.any(String));
+    expect(state.buildPromptCommandMock).toHaveBeenCalledWith('setup', {
+      userInput: `Run setup for ${repoPath.split('/').pop()}. .shipper/ directory already exists.`,
+      repo: 'owner/repo',
+      cwd: repoPath,
+      mode: 'interactive',
+    });
+    expect(state.ptySpawnMock).toHaveBeenCalledWith(
+      result.sessionId,
+      'codex',
+      ['groom', '42'],
+      expect.objectContaining({
+        cols: 120,
+        rows: 40,
+        cwd: '/tmp/repo',
+        initialInput: undefined,
+      })
+    );
+    expect(state.acquireIssueLockMock).not.toHaveBeenCalled();
+    expect(state.renewIssueLockMock).not.toHaveBeenCalled();
+    expect(state.releaseIssueLockMock).not.toHaveBeenCalled();
+    expect(state.ptyOnSessionExitMock).not.toHaveBeenCalled();
+
+    rmSync(repoPath, { recursive: true, force: true });
+  });
+
   it('does not start groom when lock acquisition fails', async () => {
     await loadHandlers();
     const handler = getHandler('pty-spawn-shipper-groom');
@@ -1241,6 +1316,7 @@ describe('desktop IPC locking', () => {
         'list-repos',
         'set-config',
         'pty-spawn-shipper-groom',
+        'pty-spawn-shipper-setup',
         'pty-write',
         'pty-resize',
         'pty-kill',
