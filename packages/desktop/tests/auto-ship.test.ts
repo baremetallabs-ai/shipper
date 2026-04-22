@@ -21,6 +21,7 @@ import {
   getBackgroundRetryPayload,
   getBackgroundTitle,
   getNextAutoShipFailureState,
+  selectInitialAutoUnblockIssue,
   getWorkflowStageCacheKey,
   getWorkflowStageDisplayName,
   selectNextAutoShipIssue,
@@ -53,10 +54,22 @@ function createTimelineEvent(label: string, createdAt: string): TimelineLabelEve
 const mockedFetchIssueTimelines =
   vi.fn<(repo: string, issueNumbers: number[]) => Promise<Map<number, TimelineLabelEvent[]>>>();
 mockedFetchIssueTimelines.mockResolvedValue(new Map<number, TimelineLabelEvent[]>());
+const mockedCheckLockStale =
+  vi.fn<(repo: string, issueNumber: number) => Promise<{ stale: boolean }>>();
+mockedCheckLockStale.mockResolvedValue({ stale: false });
+const mockedUnlockIssue =
+  vi.fn<
+    (repo: string, issueNumber: number) => Promise<{ ok: true } | { ok: false; error: string }>
+  >();
+mockedUnlockIssue.mockResolvedValue({ ok: true });
 
 afterEach(() => {
   mockedFetchIssueTimelines.mockReset();
   mockedFetchIssueTimelines.mockResolvedValue(new Map<number, TimelineLabelEvent[]>());
+  mockedCheckLockStale.mockReset();
+  mockedCheckLockStale.mockResolvedValue({ stale: false });
+  mockedUnlockIssue.mockReset();
+  mockedUnlockIssue.mockResolvedValue({ ok: true });
 });
 
 async function selectIssue(
@@ -71,7 +84,28 @@ async function selectIssue(
     activeIssueNumbers,
     skippedIssueNumbers,
     pausedIssueNumbers,
-    mockedFetchIssueTimelines
+    mockedFetchIssueTimelines,
+    mockedCheckLockStale,
+    mockedUnlockIssue
+  );
+}
+
+async function selectQueuedAutoUnblockIssue(issues: ListIssueItem[], queuedIssueNumbers: number[]) {
+  return selectNextAutoUnblockIssue(
+    'owner/repo',
+    issues,
+    queuedIssueNumbers,
+    mockedCheckLockStale,
+    mockedUnlockIssue
+  );
+}
+
+async function selectInitialAutoUnblock(issues: ListIssueItem[]) {
+  return selectInitialAutoUnblockIssue(
+    'owner/repo',
+    issues,
+    mockedCheckLockStale,
+    mockedUnlockIssue
   );
 }
 
@@ -109,7 +143,7 @@ describe('selectNextAutoShipIssue', () => {
     expect(mockedFetchIssueTimelines).toHaveBeenCalledWith('owner/repo', [12, 13]);
   });
 
-  it('excludes blocked, failed, locked, active, and skipped issues', async () => {
+  it('excludes blocked, failed, active-locked, active, and skipped issues', async () => {
     const issues = [
       createIssue(30, [PR_OPEN_LABEL, BLOCKED_LABEL]),
       createIssue(31, [PR_REVIEWED_LABEL, FAILED_LABEL]),
@@ -124,6 +158,8 @@ describe('selectNextAutoShipIssue', () => {
 
     expect((await selectIssue(issues, activeIssueNumbers, skippedIssueNumbers))?.number).toBe(35);
     expect(mockedFetchIssueTimelines).not.toHaveBeenCalled();
+    expect(mockedCheckLockStale).toHaveBeenCalledWith('owner/repo', 32);
+    expect(mockedUnlockIssue).not.toHaveBeenCalled();
   });
 
   it('skips timeline fetches when exactly one candidate is in the winning bucket', async () => {
@@ -167,6 +203,44 @@ describe('selectNextAutoShipIssue', () => {
     expect(mockedFetchIssueTimelines).not.toHaveBeenCalled();
   });
 
+  it('selects and unlocks a stale-locked auto-ship winner', async () => {
+    const issues = [
+      createIssue(69, [GROOMED_LABEL]),
+      createIssue(70, [PLANNED_LABEL, PRIORITY_HIGH_LABEL, LOCKED_LABEL]),
+    ];
+    mockedCheckLockStale.mockResolvedValueOnce({ stale: true });
+
+    expect((await selectIssue(issues))?.number).toBe(70);
+    expect(mockedCheckLockStale).toHaveBeenCalledWith('owner/repo', 70);
+    expect(mockedUnlockIssue).toHaveBeenCalledWith('owner/repo', 70);
+  });
+
+  it('unlocks only the selected stale-locked auto-ship winner', async () => {
+    const issues = [
+      createIssue(71, [PLANNED_LABEL, PRIORITY_HIGH_LABEL, LOCKED_LABEL]),
+      createIssue(72, [GROOMED_LABEL, PRIORITY_HIGH_LABEL, LOCKED_LABEL]),
+      createIssue(73, [DESIGNED_LABEL]),
+    ];
+    mockedCheckLockStale
+      .mockResolvedValueOnce({ stale: true })
+      .mockResolvedValueOnce({ stale: true });
+
+    expect((await selectIssue(issues))?.number).toBe(71);
+    expect(mockedUnlockIssue).toHaveBeenCalledTimes(1);
+    expect(mockedUnlockIssue).toHaveBeenCalledWith('owner/repo', 71);
+  });
+
+  it('fails closed when stale-lock checks reject during auto-ship selection', async () => {
+    const issues = [
+      createIssue(74, [PLANNED_LABEL, LOCKED_LABEL]),
+      createIssue(75, [GROOMED_LABEL]),
+    ];
+    mockedCheckLockStale.mockRejectedValueOnce(new Error('timeline failed'));
+
+    expect((await selectIssue(issues))?.number).toBe(75);
+    expect(mockedUnlockIssue).not.toHaveBeenCalled();
+  });
+
   it('uses the current stage label when breaking ties', async () => {
     const issues = [createIssue(67, [DESIGNED_LABEL]), createIssue(68, [DESIGNED_LABEL])];
     mockedFetchIssueTimelines.mockResolvedValue(
@@ -183,6 +257,23 @@ describe('selectNextAutoShipIssue', () => {
     );
 
     expect((await selectIssue(issues))?.number).toBe(68);
+  });
+
+  it('keeps the timeline tiebreaker when a stale-locked issue is in the winning bucket', async () => {
+    const issues = [
+      createIssue(76, [PLANNED_LABEL, LOCKED_LABEL]),
+      createIssue(77, [PLANNED_LABEL]),
+    ];
+    mockedCheckLockStale.mockResolvedValueOnce({ stale: true });
+    mockedFetchIssueTimelines.mockResolvedValue(
+      new Map([
+        [76, [createTimelineEvent(PLANNED_LABEL, '2026-04-01T00:00:00Z')]],
+        [77, [createTimelineEvent(PLANNED_LABEL, '2026-04-02T00:00:00Z')]],
+      ])
+    );
+
+    expect((await selectIssue(issues))?.number).toBe(76);
+    expect(mockedUnlockIssue).toHaveBeenCalledWith('owner/repo', 76);
   });
 
   it('returns null when no eligible issues remain', async () => {
@@ -500,22 +591,106 @@ describe('getNextAutoShipFailureState', () => {
 });
 
 describe('selectNextAutoUnblockIssue', () => {
-  it('skips queued issues that are locked by the time they are retried', () => {
+  it('selects and unlocks queued stale-locked blocked issues', async () => {
+    const issues = [
+      createIssue(80, [PLANNED_LABEL, BLOCKED_LABEL, LOCKED_LABEL]),
+      createIssue(81, [PLANNED_LABEL, BLOCKED_LABEL]),
+    ];
+    mockedCheckLockStale.mockResolvedValueOnce({ stale: true });
+
+    await expect(selectQueuedAutoUnblockIssue(issues, [80, 81])).resolves.toEqual({
+      issue: issues[0],
+      remainingIssueNumbers: [81],
+    });
+    expect(mockedUnlockIssue).toHaveBeenCalledWith('owner/repo', 80);
+  });
+
+  it('skips queued issues that are still actively locked by the time they are retried', async () => {
     const issues = [
       createIssue(80, [PLANNED_LABEL, BLOCKED_LABEL, LOCKED_LABEL]),
       createIssue(81, [PLANNED_LABEL, BLOCKED_LABEL]),
     ];
 
-    expect(selectNextAutoUnblockIssue(issues, [80, 81])).toEqual({
+    await expect(selectQueuedAutoUnblockIssue(issues, [80, 81])).resolves.toEqual({
       issue: issues[1],
       remainingIssueNumbers: [],
     });
+    expect(mockedUnlockIssue).not.toHaveBeenCalled();
   });
 
-  it('drops queue entries that are no longer blocked or no longer present', () => {
+  it('fails closed for queued auto-unblock stale-check errors', async () => {
+    const issues = [
+      createIssue(82, [PLANNED_LABEL, BLOCKED_LABEL, LOCKED_LABEL]),
+      createIssue(83, [PLANNED_LABEL, BLOCKED_LABEL]),
+    ];
+    mockedCheckLockStale.mockRejectedValueOnce(new Error('timeline failed'));
+
+    await expect(selectQueuedAutoUnblockIssue(issues, [82, 83])).resolves.toEqual({
+      issue: issues[1],
+      remainingIssueNumbers: [],
+    });
+    expect(mockedUnlockIssue).not.toHaveBeenCalled();
+  });
+
+  it('drops queue entries that are no longer blocked or no longer present', async () => {
     const issues = [createIssue(91, [PLANNED_LABEL, BLOCKED_LABEL])];
 
-    expect(selectNextAutoUnblockIssue(issues, [90, 92])).toEqual({
+    await expect(selectQueuedAutoUnblockIssue(issues, [90, 92])).resolves.toEqual({
+      issue: null,
+      remainingIssueNumbers: [],
+    });
+  });
+});
+
+describe('selectInitialAutoUnblockIssue', () => {
+  it('selects and unlocks the highest-priority stale-locked blocked issue', async () => {
+    const issues = [
+      createIssue(120, [PLANNED_LABEL, BLOCKED_LABEL]),
+      createIssue(121, [READY_LABEL, BLOCKED_LABEL, LOCKED_LABEL]),
+    ];
+    mockedCheckLockStale.mockResolvedValueOnce({ stale: true });
+
+    await expect(selectInitialAutoUnblock(issues)).resolves.toEqual({
+      issue: issues[1],
+      remainingIssueNumbers: [120],
+    });
+    expect(mockedUnlockIssue).toHaveBeenCalledWith('owner/repo', 121);
+  });
+
+  it('keeps active locked initial candidates in the remaining queue when a later issue wins', async () => {
+    const issues = [
+      createIssue(122, [READY_LABEL, BLOCKED_LABEL, LOCKED_LABEL]),
+      createIssue(123, [PLANNED_LABEL, BLOCKED_LABEL]),
+    ];
+
+    await expect(selectInitialAutoUnblock(issues)).resolves.toEqual({
+      issue: issues[1],
+      remainingIssueNumbers: [122],
+    });
+    expect(mockedUnlockIssue).not.toHaveBeenCalled();
+  });
+
+  it('fails closed for initial auto-unblock stale-check errors and falls through to later candidates', async () => {
+    const issues = [
+      createIssue(124, [READY_LABEL, BLOCKED_LABEL, LOCKED_LABEL]),
+      createIssue(125, [PLANNED_LABEL, BLOCKED_LABEL]),
+    ];
+    mockedCheckLockStale.mockRejectedValueOnce(new Error('timeline failed'));
+
+    await expect(selectInitialAutoUnblock(issues)).resolves.toEqual({
+      issue: issues[1],
+      remainingIssueNumbers: [124],
+    });
+    expect(mockedUnlockIssue).not.toHaveBeenCalled();
+  });
+
+  it('returns no initial auto-unblock issue when all blocked candidates remain actively locked', async () => {
+    const issues = [
+      createIssue(126, [READY_LABEL, BLOCKED_LABEL, LOCKED_LABEL]),
+      createIssue(127, [PLANNED_LABEL, BLOCKED_LABEL, LOCKED_LABEL]),
+    ];
+
+    await expect(selectInitialAutoUnblock(issues)).resolves.toEqual({
       issue: null,
       remainingIssueNumbers: [],
     });

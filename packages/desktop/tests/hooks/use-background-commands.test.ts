@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   BLOCKED_LABEL,
+  LOCKED_LABEL,
   PLANNED_LABEL,
   PR_REVIEWED_LABEL,
   READY_LABEL,
@@ -260,6 +261,104 @@ describe('useBackgroundCommands', () => {
       expect(result.current.toasts).toContainEqual(
         expect.objectContaining({
           title: 'Auto-ship: attempting unblock of #43',
+        })
+      );
+    });
+  });
+
+  it('self-heals a stale locked initial auto-unblock candidate without extra UI', async () => {
+    const shipper = createMockShipperApi();
+    shipper.install();
+    vi.mocked(shipper.api.listIssues).mockResolvedValue({
+      ok: true,
+      issues: [
+        createIssue(44, [PLANNED_LABEL, BLOCKED_LABEL]),
+        createIssue(45, [READY_LABEL, BLOCKED_LABEL, LOCKED_LABEL]),
+      ],
+    });
+    vi.mocked(shipper.api.checkLockStale).mockResolvedValueOnce({ stale: true });
+    const pipelineBridge = createPipelineBridge();
+    const { result } = renderHook(() =>
+      useBackgroundCommands({
+        activeRepo: 'owner/repo',
+        autoMergeRepos: new Set(),
+        checkInitState: vi.fn(() => Promise.resolve(undefined)),
+        pipelineBridgeRef: { current: pipelineBridge },
+      })
+    );
+    await flushHookEffects();
+
+    act(() => {
+      result.current.enableAutoShipForRepo('owner/repo');
+    });
+    shipper.emitBackgroundStatus({
+      sessionId: 'ship-stale-unblock',
+      command: 'ship',
+      repo: 'owner/repo',
+      status: 'complete',
+      meta: { issueNumber: 43, merge: false },
+    });
+    await flushHookEffects();
+
+    await waitFor(() => {
+      expect(shipper.api.checkLockStale).toHaveBeenCalledWith('owner/repo', 45);
+      expect(shipper.api.unlockIssue).toHaveBeenCalledWith('owner/repo', 45);
+      expect(shipper.api.spawnBackgroundUnblock).toHaveBeenCalledWith(45, 'owner/repo');
+      expect(pipelineBridge.trackUnblockIssue).toHaveBeenCalledWith(45);
+    });
+
+    const unblockToasts = result.current.toasts.filter((toast) =>
+      toast.title.startsWith('Auto-ship: attempting unblock of #')
+    );
+    expect(unblockToasts).toEqual([
+      expect.objectContaining({
+        title: 'Auto-ship: attempting unblock of #45',
+      }),
+    ]);
+  });
+
+  it('skips active locked initial auto-unblock candidates and picks the next eligible issue', async () => {
+    const shipper = createMockShipperApi();
+    shipper.install();
+    vi.mocked(shipper.api.listIssues).mockResolvedValue({
+      ok: true,
+      issues: [
+        createIssue(46, [PLANNED_LABEL, BLOCKED_LABEL]),
+        createIssue(47, [READY_LABEL, BLOCKED_LABEL, LOCKED_LABEL]),
+      ],
+    });
+    vi.mocked(shipper.api.checkLockStale).mockResolvedValueOnce({ stale: false });
+    const pipelineBridge = createPipelineBridge();
+    const { result } = renderHook(() =>
+      useBackgroundCommands({
+        activeRepo: 'owner/repo',
+        autoMergeRepos: new Set(),
+        checkInitState: vi.fn(() => Promise.resolve(undefined)),
+        pipelineBridgeRef: { current: pipelineBridge },
+      })
+    );
+    await flushHookEffects();
+
+    act(() => {
+      result.current.enableAutoShipForRepo('owner/repo');
+    });
+    shipper.emitBackgroundStatus({
+      sessionId: 'ship-active-unblock',
+      command: 'ship',
+      repo: 'owner/repo',
+      status: 'complete',
+      meta: { issueNumber: 45, merge: false },
+    });
+    await flushHookEffects();
+
+    await waitFor(() => {
+      expect(shipper.api.checkLockStale).toHaveBeenCalledWith('owner/repo', 47);
+      expect(shipper.api.unlockIssue).not.toHaveBeenCalledWith('owner/repo', 47);
+      expect(shipper.api.spawnBackgroundUnblock).toHaveBeenCalledWith(46, 'owner/repo');
+      expect(pipelineBridge.trackUnblockIssue).toHaveBeenCalledWith(46);
+      expect(result.current.toasts).toContainEqual(
+        expect.objectContaining({
+          title: 'Auto-ship: attempting unblock of #46',
         })
       );
     });

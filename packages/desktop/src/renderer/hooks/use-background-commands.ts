@@ -3,7 +3,6 @@ import type { RefObject, SetStateAction } from 'react';
 
 import {
   BLOCKED_LABEL,
-  LOCKED_LABEL,
   PR_REVIEWED_LABEL,
   toErrorMessage,
   type ListIssueItem,
@@ -15,9 +14,9 @@ import {
   getBackgroundRetryPayload,
   getBackgroundTitle,
   getNextAutoShipFailureState,
+  selectInitialAutoUnblockIssue,
   selectNextAutoShipIssue,
   selectNextAutoUnblockIssue,
-  sortBlockedIssuesByStagePriority,
 } from '../lib/app-utils.js';
 import { getShipperApi } from '../lib/shipper-api.js';
 import { MAX_AUTO_SHIP_CONSECUTIVE_FAILURES } from '../lib/constants.js';
@@ -717,7 +716,11 @@ export function useBackgroundCommands({
           }
 
           const queue = autoUnblockQueueRef.current.get(event.repo) ?? [];
-          const nextQueuedIssue = selectNextAutoUnblockIssue(issueResult.issues, queue);
+          const nextQueuedIssue = await selectNextAutoUnblockIssue(
+            event.repo,
+            issueResult.issues,
+            queue
+          );
           if (!nextQueuedIssue.issue) {
             autoUnblockQueueRef.current.delete(event.repo);
             return;
@@ -853,45 +856,41 @@ export function useBackgroundCommands({
         );
 
         if (!nextIssue) {
-          const blockedIssues = sortBlockedIssuesByStagePriority(
-            issueResult.issues.filter(
-              (issue) =>
-                issue.labels.includes(BLOCKED_LABEL) && !issue.labels.includes(LOCKED_LABEL)
-            )
+          const initialAutoUnblockIssue = await selectInitialAutoUnblockIssue(
+            event.repo,
+            issueResult.issues
           );
-
-          if (blockedIssues.length === 0) {
+          if (!initialAutoUnblockIssue.issue) {
             autoUnblockQueueRef.current.delete(event.repo);
             return;
           }
 
-          const firstBlocked = blockedIssues[0];
-          if (!firstBlocked) {
-            autoUnblockQueueRef.current.delete(event.repo);
-            return;
-          }
-
-          const remainingIssueNumbers = blockedIssues.slice(1).map((issue) => issue.number);
-          trackAutoUnblockIssue(event.repo, firstBlocked.number);
+          trackAutoUnblockIssue(event.repo, initialAutoUnblockIssue.issue.number);
           try {
-            await getShipperApi().spawnBackgroundUnblock(firstBlocked.number, event.repo);
+            await getShipperApi().spawnBackgroundUnblock(
+              initialAutoUnblockIssue.issue.number,
+              event.repo
+            );
           } catch {
             console.warn(
-              `[shipper] Failed to spawn background unblock for #${firstBlocked.number}`
+              `[shipper] Failed to spawn background unblock for #${initialAutoUnblockIssue.issue.number}`
             );
-            pipelineBridgeRef.current?.clearUnblockIssue(firstBlocked.number);
-            clearAutoUnblockIssue(event.repo, firstBlocked.number);
+            pipelineBridgeRef.current?.clearUnblockIssue(initialAutoUnblockIssue.issue.number);
+            clearAutoUnblockIssue(event.repo, initialAutoUnblockIssue.issue.number);
             autoUnblockQueueRef.current.delete(event.repo);
             return;
           }
 
-          autoUnblockQueueRef.current.set(event.repo, remainingIssueNumbers);
+          autoUnblockQueueRef.current.set(
+            event.repo,
+            initialAutoUnblockIssue.remainingIssueNumbers
+          );
           pushToast({
-            id: `auto-unblock-${event.repo}-${firstBlocked.number}-${Date.now()}`,
+            id: `auto-unblock-${event.repo}-${initialAutoUnblockIssue.issue.number}-${Date.now()}`,
             sessionId: event.sessionId,
             variant: 'success',
-            title: `Auto-ship: attempting unblock of #${firstBlocked.number}`,
-            description: firstBlocked.title,
+            title: `Auto-ship: attempting unblock of #${initialAutoUnblockIssue.issue.number}`,
+            description: initialAutoUnblockIssue.issue.title,
           });
           return;
         }
@@ -961,7 +960,11 @@ export function useBackgroundCommands({
       }
 
       const queue = autoUnblockQueueRef.current.get(event.repo) ?? [];
-      const nextQueuedIssue = selectNextAutoUnblockIssue(issueResult.issues, queue);
+      const nextQueuedIssue = await selectNextAutoUnblockIssue(
+        event.repo,
+        issueResult.issues,
+        queue
+      );
       if (!nextQueuedIssue.issue) {
         autoUnblockQueueRef.current.delete(event.repo);
         return;
