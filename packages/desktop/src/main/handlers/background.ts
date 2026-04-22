@@ -67,11 +67,18 @@ function parseSpawnBackgroundShipPayload(value: unknown): SpawnBackgroundShipPay
     return null;
   }
 
+  const parsedOrigin =
+    'origin' in value && (value.origin === 'auto' || value.origin === 'manual')
+      ? value.origin
+      : undefined;
   const payload = parseSpawnBackgroundCommandPayload(value);
   if (
     payload === null ||
     !isPositiveInteger(value.issueNumber) ||
-    ('origin' in value && value.origin !== 'auto' && value.origin !== 'manual')
+    ('origin' in value &&
+      value.origin !== undefined &&
+      value.origin !== 'auto' &&
+      value.origin !== 'manual')
   ) {
     return null;
   }
@@ -80,7 +87,7 @@ function parseSpawnBackgroundShipPayload(value: unknown): SpawnBackgroundShipPay
     ...payload,
     issueNumber: value.issueNumber,
     merge: 'merge' in value && typeof value.merge === 'boolean' ? value.merge : false,
-    origin: 'origin' in value ? (value.origin as 'auto' | 'manual') : undefined,
+    origin: parsedOrigin,
   };
 }
 

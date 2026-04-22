@@ -403,6 +403,26 @@ describe('desktop IPC locking', () => {
     expect(state.ptySpawnMock).not.toHaveBeenCalled();
   });
 
+  it('accepts preload-shaped ship payloads with origin set to undefined', async () => {
+    await loadHandlers();
+    const handler = getHandler('bg-spawn-ship');
+
+    const result = parseSessionResult(
+      await handler({}, { repo: 'owner/repo', issueNumber: 42, merge: false, origin: undefined })
+    );
+    const spawnCall = parseBackgroundSpawnCall();
+
+    expect(result.sessionId).toEqual(expect.any(String));
+    expect(spawnCall.sessionId).toBe(result.sessionId);
+    expect(spawnCall.command).toBe('ship');
+    expect(spawnCall.repo).toBe('owner/repo');
+    expect(spawnCall.commandName).toBe('shipper');
+    expect(spawnCall.cwd).toBe('/tmp/repo');
+    expect(spawnCall.args).toEqual(['ship', '42', '--mode', 'headless']);
+    expect(spawnCall.meta).toEqual({ issueNumber: 42, merge: false, origin: undefined });
+    expect(state.ptySpawnMock).not.toHaveBeenCalled();
+  });
+
   it('spawns `unblock` through the background manager in headless mode', async () => {
     await loadHandlers();
     const handler = getHandler('bg-spawn-unblock');
