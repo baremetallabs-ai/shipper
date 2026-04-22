@@ -40,7 +40,8 @@ const STAGE_MODE_KEY: Record<string, string> = {
 
 interface StageResult {
   stage: string;
-  status: 'pass' | 'fail';
+  status: 'pass' | 'fail' | 'reject';
+  rolledBackTo?: string;
 }
 
 export interface ShipOneIssueOptions {
@@ -123,7 +124,7 @@ export function closeLogStream(logStream: WriteStream | undefined): Promise<void
   });
 }
 
-async function getCurrentLabel(repo: string, issueStr: string): Promise<string | undefined> {
+export async function getCurrentLabel(repo: string, issueStr: string): Promise<string | undefined> {
   let output: string;
   try {
     const result = await gh([
@@ -169,8 +170,13 @@ async function getCurrentLabel(repo: string, issueStr: string): Promise<string |
 function printSummary(results: StageResult[], issueLogger: Logger): void {
   issueLogger.log('\nStage summary:');
   for (const r of results) {
-    const icon = r.status === 'pass' ? '✓' : '✗';
-    const suffix = r.status === 'fail' ? ' — failed' : '';
+    const icon = r.status === 'pass' ? '✓' : r.status === 'reject' ? '↻' : '✗';
+    const suffix =
+      r.status === 'fail'
+        ? ' — failed'
+        : r.status === 'reject'
+          ? ` — rejected${r.rolledBackTo ? ` to ${r.rolledBackTo}` : ''}`
+          : '';
     issueLogger.log(`  ${icon} ${r.stage}${suffix}`);
   }
 }
@@ -309,7 +315,7 @@ export async function shipOneIssue(options: ShipOneIssueOptions): Promise<ShipIs
                 return failCurrentStage(stageName, logStreamError);
               }
 
-              if (!stageResult.success) {
+              if (!stageResult.success && stageResult.verdict !== 'reject') {
                 results.push({ stage: stageName, status: 'fail' });
                 printSummary(results, issueLogger);
                 return {
@@ -318,9 +324,12 @@ export async function shipOneIssue(options: ShipOneIssueOptions): Promise<ShipIs
                 };
               }
 
-              results.push({ stage: stageName, status: 'pass' });
-
               label = await getCurrentLabel(repo, issueStr);
+              const stageSummary: StageResult =
+                stageResult.verdict === 'reject'
+                  ? { stage: stageName, status: 'reject', rolledBackTo: label }
+                  : { stage: stageName, status: 'pass' };
+              results.push(stageSummary);
 
               if (!label || (label !== READY_LABEL && !(label in STAGE_NAME))) {
                 if (!label) {
@@ -340,15 +349,17 @@ export async function shipOneIssue(options: ShipOneIssueOptions): Promise<ShipIs
                 return { success: false, error: `unexpected label after stage "${stageName}"` };
               }
 
-              if (
-                label === NEW_LABEL &&
-                previousLabel !== NEW_LABEL &&
-                (parkHooks || skipInteractiveStages)
-              ) {
-                const msg = `Issue #${issueStr} was reset to ${NEW_LABEL} by stage "${stageName}" - stopping to avoid interactive groom stage.`;
-                issueLogger.error(msg);
+              if (label === NEW_LABEL && previousLabel !== NEW_LABEL) {
                 printSummary(results, issueLogger);
-                return { success: false, error: msg };
+                if (parkHooks || skipInteractiveStages) {
+                  const msg = `Issue #${issueStr} rolled back to ${NEW_LABEL} after stage "${stageName}" - stopping to avoid interactive groom stage.`;
+                  issueLogger.error(msg);
+                  return { success: false, error: msg };
+                }
+                issueLogger.log(
+                  `Issue #${issueStr} rolled back to ${NEW_LABEL} after stage "${stageName}". Re-invoke after grooming.`
+                );
+                return { success: true };
               }
 
               if (label === previousLabel) {
