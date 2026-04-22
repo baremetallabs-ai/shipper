@@ -135,6 +135,7 @@ export function getBackgroundDetail({
   pausePending,
   retriable,
   origin,
+  autoShipEnabled,
 }: BackgroundDetailInput): string {
   if (cancelled) {
     return 'Cancelled';
@@ -153,7 +154,7 @@ export function getBackgroundDetail({
   }
 
   if (status === 'failed') {
-    if (command === 'ship' && retriable && origin === 'auto') {
+    if (command === 'ship' && retriable && origin === 'auto' && autoShipEnabled) {
       return 'Will retry later in this session';
     }
     return latestOutput ?? 'Command failed';

@@ -513,6 +513,7 @@ export function useBackgroundCommands({
     const origin = event.meta?.origin ?? previousCommand?.origin;
     const autoShipHalted = event.meta?.autoShipHalted ?? previousCommand?.autoShipHalted ?? false;
     const retriable = event.meta?.retriable ?? previousCommand?.retriable ?? false;
+    const autoShipEnabled = autoShipRepos.has(event.repo);
     const pausePending =
       event.command === 'ship' && event.status === 'running'
         ? (event.meta?.pausePending ?? previousCommand?.pausePending ?? false)
@@ -538,6 +539,7 @@ export function useBackgroundCommands({
         pausePending,
         retriable,
         origin,
+        autoShipEnabled,
       }),
       output,
       request,
@@ -789,17 +791,14 @@ export function useBackgroundCommands({
           origin
         );
 
-        if (
-          event.command === 'ship' &&
-          origin === 'auto' &&
-          autoShipRepos.has(event.repo) &&
-          retriable
-        ) {
+        if (event.command === 'ship' && origin === 'auto' && autoShipEnabled && retriable) {
           pushToast({
             id: event.sessionId,
             sessionId: event.sessionId,
             variant: 'info',
-            title: `Auto-ship: #${issueNumber} will retry later`,
+            title: issueNumber
+              ? `Auto-ship: #${issueNumber} will retry later`
+              : 'Auto-ship will retry later',
             description:
               'A transient merge conflict occurred. The issue remains eligible in this session.',
           });
@@ -827,7 +826,7 @@ export function useBackgroundCommands({
       event.command === 'ship' &&
       (event.status === 'complete' || event.status === 'failed' || event.status === 'paused') &&
       !cancelled &&
-      autoShipRepos.has(event.repo)
+      autoShipEnabled
     ) {
       if (event.status !== 'paused') {
         const currentFailures = autoShipFailuresRef.current.get(event.repo) ?? 0;

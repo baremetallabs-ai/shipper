@@ -219,6 +219,50 @@ describe('useBackgroundCommands', () => {
     });
   });
 
+  it('falls back to the existing failure UX when auto-ship is disabled before a retriable failure completes', async () => {
+    const shipper = createMockShipperApi();
+    shipper.install();
+    const { result } = renderHook(() =>
+      useBackgroundCommands({
+        activeRepo: 'owner/repo',
+        autoMergeRepos: new Set(),
+        checkInitState: vi.fn(() => Promise.resolve(undefined)),
+        pipelineBridgeRef: { current: createPipelineBridge() },
+      })
+    );
+    await flushHookEffects();
+
+    act(() => {
+      result.current.enableAutoShipForRepo('owner/repo');
+      result.current.clearAutoShipStateForRepo('owner/repo');
+    });
+
+    shipper.emitBackgroundStatus({
+      sessionId: 'ship-retriable-auto-disabled',
+      command: 'ship',
+      repo: 'owner/repo',
+      status: 'failed',
+      exitCode: 76,
+      meta: { issueNumber: 31, merge: false, origin: 'auto', retriable: true },
+    });
+    await flushHookEffects();
+
+    expect(result.current.backgroundCommands).toContainEqual(
+      expect.objectContaining({
+        id: 'ship-retriable-auto-disabled',
+        retriable: true,
+        detail: 'Command failed',
+      })
+    );
+    expect(result.current.toasts).toContainEqual(
+      expect.objectContaining({
+        sessionId: 'ship-retriable-auto-disabled',
+        variant: 'error',
+        title: 'Ship #31 failed',
+      })
+    );
+  });
+
   it('auto-unblocks blocked work and pauses auto-ship after repeated failures', async () => {
     const shipper = createMockShipperApi();
     shipper.install();
@@ -961,6 +1005,42 @@ describe('useBackgroundCommands', () => {
         sessionId: 'ship-retriable-manual',
         variant: 'error',
         title: 'Ship #84 failed',
+      })
+    );
+  });
+
+  it('omits the issue number in retry-later toast titles when a retriable auto-ship failure lacks one', async () => {
+    const shipper = createMockShipperApi();
+    shipper.install();
+    const { result } = renderHook(() =>
+      useBackgroundCommands({
+        activeRepo: 'owner/repo',
+        autoMergeRepos: new Set(),
+        checkInitState: vi.fn(() => Promise.resolve(undefined)),
+        pipelineBridgeRef: { current: createPipelineBridge() },
+      })
+    );
+    await flushHookEffects();
+
+    act(() => {
+      result.current.enableAutoShipForRepo('owner/repo');
+    });
+
+    shipper.emitBackgroundStatus({
+      sessionId: 'ship-retriable-no-issue',
+      command: 'ship',
+      repo: 'owner/repo',
+      status: 'failed',
+      exitCode: 76,
+      meta: { merge: false, origin: 'auto', retriable: true },
+    });
+    await flushHookEffects();
+
+    expect(result.current.toasts).toContainEqual(
+      expect.objectContaining({
+        sessionId: 'ship-retriable-no-issue',
+        variant: 'info',
+        title: 'Auto-ship will retry later',
       })
     );
   });
