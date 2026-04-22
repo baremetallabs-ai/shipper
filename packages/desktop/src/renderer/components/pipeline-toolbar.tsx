@@ -7,8 +7,10 @@ interface PipelineToolbarProps {
   lastUpdated: Date | null;
   canFetch: boolean;
   isLoading: boolean;
+  setupEnabled: boolean;
   onNewIssue: () => void;
   onAdopt: () => void;
+  onSetup: () => void;
   onRefresh: () => void;
 }
 
@@ -16,8 +18,10 @@ export function PipelineToolbar({
   lastUpdated,
   canFetch,
   isLoading,
+  setupEnabled,
   onNewIssue,
   onAdopt,
+  onSetup,
   onRefresh,
 }: PipelineToolbarProps): JSX.Element {
   return (
@@ -32,6 +36,9 @@ export function PipelineToolbar({
       </Button>
       <Button variant="outline" onClick={onAdopt} disabled={!canFetch}>
         Adopt
+      </Button>
+      <Button variant="outline" onClick={onSetup} disabled={!setupEnabled}>
+        Setup
       </Button>
       <Button variant="outline" onClick={onRefresh} disabled={!canFetch || isLoading}>
         {isLoading ? 'Refreshing...' : 'Refresh'}

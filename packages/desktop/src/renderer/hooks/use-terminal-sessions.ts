@@ -35,6 +35,16 @@ function findActiveIssueSession(
   );
 }
 
+function findActiveSetupSession(
+  sessions: TerminalSession[],
+  repo: string
+): TerminalSession | undefined {
+  return sessions.find(
+    (session) =>
+      session.repo === repo && session.issueNumber === undefined && session.status !== 'exited'
+  );
+}
+
 interface UseTerminalSessionsOptions {
   activeRepo: string;
   setFetchError: Dispatch<SetStateAction<string | null>>;
@@ -52,9 +62,10 @@ export interface UseTerminalSessionsResult {
   openRunningSession: (
     sessionId: string,
     label: string,
-    metadata?: { repo: string; issueNumber: number }
+    metadata?: { repo: string; issueNumber?: number }
   ) => void;
   focusExistingGroomSession: (issueNumber: number) => boolean;
+  focusExistingSetupSession: (repo: string) => boolean;
   handlePendingCloseOpenChange: (open: boolean) => void;
   handleToggleDrawer: () => void;
   handleSelectSession: (sessionId: string) => void;
@@ -238,7 +249,7 @@ export function useTerminalSessions({
   function openRunningSession(
     sessionId: string,
     label: string,
-    metadata?: { repo: string; issueNumber: number }
+    metadata?: { repo: string; issueNumber?: number }
   ): void {
     const session: TerminalSession = {
       id: sessionId,
@@ -260,6 +271,17 @@ export function useTerminalSessions({
       setDrawerOpen(true);
       return true;
     }
+    return false;
+  }
+
+  function focusExistingSetupSession(repo: string): boolean {
+    const existing = findActiveSetupSession(sessionsRef.current, repo);
+    if (existing) {
+      setActiveSessionId(existing.id);
+      setDrawerOpen(true);
+      return true;
+    }
+
     return false;
   }
 
@@ -358,6 +380,7 @@ export function useTerminalSessions({
     drawerPanelRef,
     openRunningSession,
     focusExistingGroomSession,
+    focusExistingSetupSession,
     handlePendingCloseOpenChange,
     handleToggleDrawer,
     handleSelectSession,

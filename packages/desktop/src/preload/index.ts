@@ -69,6 +69,8 @@ const shipperAPI = {
 
   spawnShipperGroom: (issueNumber: number, repo: string, cols: number, rows: number) =>
     ipcRenderer.invoke('pty-spawn-shipper-groom', { issueNumber, repo, cols, rows }),
+  spawnShipperSetup: (repo: string, cols: number, rows: number) =>
+    ipcRenderer.invoke('pty-spawn-shipper-setup', { repo, cols, rows }),
   spawnBackgroundNew: (request: string, repo: string) =>
     ipcRenderer.invoke('bg-spawn-new', { request, repo }),
   spawnBackgroundShip: (issueNumber: number, repo: string, merge: boolean) =>
