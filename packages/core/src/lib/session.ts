@@ -128,6 +128,55 @@ export async function aggregateAllIssueUsage(repo: string): Promise<Map<string, 
   return totals;
 }
 
+export async function findLatestSessionMeta(opts: {
+  repoSlug: string;
+  issue: string;
+  stage: string;
+  since: Date;
+}): Promise<SessionMeta | undefined> {
+  const sessionDir = getSessionDir(opts.repoSlug);
+  let entries: string[];
+  try {
+    entries = await readdir(sessionDir);
+  } catch (error) {
+    if (!hasErrorCode(error, 'ENOENT')) {
+      logger.warn(`Failed to read session directory for ${opts.repoSlug}/${opts.issue}`);
+    }
+    return undefined;
+  }
+
+  let latest: SessionMeta | undefined;
+  let latestTimestamp = Number.NEGATIVE_INFINITY;
+
+  for (const entry of entries) {
+    if (!entry.endsWith('.meta.json')) {
+      continue;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(await readFile(path.join(sessionDir, entry), 'utf-8'));
+    } catch {
+      continue;
+    }
+
+    if (!isSessionMeta(parsed) || parsed.issue !== opts.issue || parsed.stage !== opts.stage) {
+      continue;
+    }
+
+    const timestamp = new Date(parsed.timestamp);
+    const time = timestamp.getTime();
+    if (Number.isNaN(time) || timestamp < opts.since || time <= latestTimestamp) {
+      continue;
+    }
+
+    latest = parsed;
+    latestTimestamp = time;
+  }
+
+  return latest;
+}
+
 async function aggregateSessionUsageDefault(
   repo: string,
   issue: string,

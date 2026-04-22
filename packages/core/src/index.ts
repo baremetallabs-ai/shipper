@@ -127,8 +127,14 @@ export {
   scanArtifacts,
 } from './lib/reset.js';
 export type { ResultJson } from './lib/result-schema.js';
+export { readResultFile } from './lib/result-schema.js';
 export { scripts } from './lib/scripts.js';
-export { aggregateAllIssueUsage, aggregateSessionUsage } from './lib/session.js';
+export {
+  aggregateAllIssueUsage,
+  aggregateSessionUsage,
+  findLatestSessionMeta,
+  resolveSessionRepo,
+} from './lib/session.js';
 export type {
   GitStatusEntry,
   GitStatusSnapshot,
@@ -151,6 +157,7 @@ export { resolveTransition } from './lib/stage-transitions.js';
 export { isPlainObject } from './lib/type-guards.js';
 export type { TokenUsage } from './lib/token-usage.js';
 export { totalTokens } from './lib/usage.js';
+export { extractFinalMessage } from './lib/transcript.js';
 export { CLI_VERSION, checkVersionFreshness } from './lib/version.js';
 export {
   formatConflictContext,
