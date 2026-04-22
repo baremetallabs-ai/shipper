@@ -1,5 +1,5 @@
 import type { DragEvent, JSX } from 'react';
-import { Check, EllipsisVertical, LoaderCircle, Square } from 'lucide-react';
+import { Check, EllipsisVertical, LoaderCircle, Pause, Square } from 'lucide-react';
 
 import {
   BLOCKED_LABEL,
@@ -95,6 +95,10 @@ export interface IssueCardProps {
   shipDisabled?: boolean;
   shippingStatus?: 'queued' | 'running';
   onStopShip?: () => void;
+  isPaused?: boolean;
+  isPausePending?: boolean;
+  onPause?: () => void;
+  onResume?: () => void;
   draggable?: boolean;
   onDragStart?: (e: DragEvent) => void;
   onDragEnd?: () => void;
@@ -132,6 +136,10 @@ export function IssueCard({
   shipDisabled = false,
   shippingStatus,
   onStopShip,
+  isPaused = false,
+  isPausePending = false,
+  onPause,
+  onResume,
   draggable,
   onDragStart,
   onDragEnd,
@@ -156,7 +164,9 @@ export function IssueCard({
   const canCloseNotPlanned = !!onCloseNotPlanned && !isLocked && !isShipping;
   const hasResetMenu = onResetSelect !== undefined && resetTargets.length > 0 && !isShipping;
   const hasPriorityMenu = onSetPriority !== undefined;
-  const hasFlatActions = canCloseNotPlanned || canUnlock || canUnblock;
+  const canPause = !isPaused && onPause !== undefined;
+  const canResume = isPaused && onResume !== undefined;
+  const hasFlatActions = canPause || canResume || canCloseNotPlanned || canUnlock || canUnblock;
   const showOverflowMenu = hasResetMenu || hasFlatActions || hasPriorityMenu;
   const showStopShipButton = isShipping && onStopShip !== undefined;
   const isShipDisabled = shipDisabled || isBlocked || isLocked || isFailed || isShipping;
@@ -177,24 +187,33 @@ export function IssueCard({
         'relative space-y-3 rounded-sm border border-border bg-background px-4 py-4 transition-opacity',
         isBusy && 'opacity-70',
         shippingStatus === 'running' && 'shipping-active',
+        isPaused && 'border-orange-500 bg-orange-500/5',
         isFailed && 'border-destructive/50 bg-destructive/10',
         draggable && 'cursor-grab'
       )}
     >
       <div className="flex items-start justify-between gap-3">
-        <a
-          href={issue.url}
-          target="_blank"
-          rel="noreferrer"
-          draggable
-          onDragStart={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-          }}
-          className="text-sm font-medium text-muted-foreground no-underline hover:underline"
-        >
-          #{issue.number}
-        </a>
+        <div className="flex items-center gap-1.5">
+          <a
+            href={issue.url}
+            target="_blank"
+            rel="noreferrer"
+            draggable
+            onDragStart={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            className="text-sm font-medium text-muted-foreground no-underline hover:underline"
+          >
+            #{issue.number}
+          </a>
+          {isPaused ? (
+            <Pause
+              className="size-3.5 text-orange-600"
+              aria-label={`Issue #${issue.number} is paused`}
+            />
+          ) : null}
+        </div>
         <div className="flex items-center gap-1">
           {showOverflowMenu ? (
             <DropdownMenu>
@@ -261,6 +280,24 @@ export function IssueCard({
                 {hasFlatActions && (hasResetMenu || hasPriorityMenu) ? (
                   <DropdownMenuSeparator />
                 ) : null}
+                {canPause ? (
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      onPause();
+                    }}
+                  >
+                    Pause
+                  </DropdownMenuItem>
+                ) : null}
+                {canResume ? (
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      onResume();
+                    }}
+                  >
+                    Resume
+                  </DropdownMenuItem>
+                ) : null}
                 {canCloseNotPlanned ? (
                   <DropdownMenuItem
                     onSelect={() => {
@@ -301,6 +338,12 @@ export function IssueCard({
         </div>
       </div>
       <h4 className="text-sm font-semibold leading-snug text-foreground">{issue.title}</h4>
+      {isPausePending ? (
+        <div className="flex items-center gap-2 text-sm text-orange-600">
+          <LoaderCircle className="size-4 animate-spin" />
+          Pausing...
+        </div>
+      ) : null}
       {priorityTier !== 1 || isFailed || isBlocked || isLocked ? (
         <div className="flex flex-wrap gap-2">
           {priorityTier === 0 ? (

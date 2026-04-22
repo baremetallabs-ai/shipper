@@ -1,15 +1,32 @@
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as childProcess from 'node:child_process';
 
-vi.mock('node:child_process', () => ({
-  spawn: vi.fn(),
+vi.mock('node:child_process', async () => {
+  const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+  return {
+    ...actual,
+    spawn: vi.fn(),
+  };
+});
+
+vi.mock('electron', () => ({
+  app: {
+    getPath: (name: string) => {
+      if (name !== 'userData') {
+        throw new Error(`Unexpected app.getPath(${name}) in test.`);
+      }
+
+      return tempDir;
+    },
+  },
 }));
 
 import { BackgroundManager } from '../src/main/background-manager.js';
+import { PAUSED_EXIT_CODE } from '@dnsquared/shipper-core';
 
 class MockStream extends EventEmitter {
   emitData(chunk: string): void {
@@ -315,6 +332,228 @@ describe('BackgroundManager', () => {
     vi.advanceTimersByTime(5_000);
 
     expect(killSpy).toHaveBeenCalledWith(latestChild().pid, 'SIGKILL');
+  });
+
+  it('passes a per-session pause sentinel path into spawned ship environments', () => {
+    const manager = createManager();
+
+    manager.spawn({
+      sessionId: 'ship-1',
+      command: 'ship',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['ship', '41', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+      meta: { issueNumber: 41 },
+    });
+
+    const spawnOptions = mockSpawn.mock.calls[0]?.[2];
+    if (!spawnOptions || typeof spawnOptions !== 'object' || !('env' in spawnOptions)) {
+      throw new Error('Expected spawn options with an env object.');
+    }
+
+    expect(spawnOptions.env).toEqual(
+      expect.objectContaining({
+        SHIPPER_PAUSE_SENTINEL_FILE: join(tempDir, 'pause-sentinels', 'ship-1'),
+      })
+    );
+  });
+
+  it('writes the pause sentinel and emits pausePending for a running ship session', () => {
+    const manager = createManager();
+
+    manager.spawn({
+      sessionId: 'ship-1',
+      command: 'ship',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['ship', '41', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+      meta: { issueNumber: 41 },
+    });
+
+    manager.requestPause('ship-1');
+
+    const pauseSentinelPath = join(tempDir, 'pause-sentinels', 'ship-1');
+    expect(existsSync(pauseSentinelPath)).toBe(true);
+    expect(readFileSync(pauseSentinelPath, 'utf8')).toBe('');
+    const pendingEvent = statusEvents().find(
+      (event) =>
+        event.sessionId === 'ship-1' &&
+        event.status === 'running' &&
+        isRecord(event.meta) &&
+        event.meta.pausePending === true
+    );
+    expect(pendingEvent).toEqual(
+      expect.objectContaining({
+        sessionId: 'ship-1',
+        status: 'running',
+      })
+    );
+    expect(pendingEvent?.meta).toEqual(
+      expect.objectContaining({
+        issueNumber: 41,
+        pausePending: true,
+      })
+    );
+  });
+
+  it('marks a queued ship session as paused without setting cancelled metadata', () => {
+    const manager = createManager();
+
+    manager.spawn({
+      sessionId: 'ship-1',
+      command: 'ship',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['ship', '41', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+      meta: { issueNumber: 41 },
+    });
+    manager.spawn({
+      sessionId: 'ship-2',
+      command: 'ship',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['ship', '42', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+      meta: { issueNumber: 42 },
+    });
+
+    manager.removeQueuedSession('ship-2');
+    latestChild().close(0);
+
+    expect(mockSpawn).toHaveBeenCalledTimes(1);
+    const pausedEvent = statusEvents().find(
+      (event) => event.sessionId === 'ship-2' && event.status === 'paused'
+    );
+    expect(pausedEvent).toEqual(
+      expect.objectContaining({
+        sessionId: 'ship-2',
+        status: 'paused',
+      })
+    );
+    expect(pausedEvent?.meta).toEqual(
+      expect.objectContaining({
+        issueNumber: 42,
+      })
+    );
+    expect(
+      statusEvents().some(
+        (event) =>
+          event.sessionId === 'ship-2' && isRecord(event.meta) && event.meta.cancelled === true
+      )
+    ).toBe(false);
+  });
+
+  it('classifies paused exit codes as paused and removes the sentinel file', () => {
+    const manager = createManager();
+
+    manager.spawn({
+      sessionId: 'ship-1',
+      command: 'ship',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['ship', '41', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+      meta: { issueNumber: 41 },
+    });
+    manager.requestPause('ship-1');
+
+    const pauseSentinelPath = join(tempDir, 'pause-sentinels', 'ship-1');
+    latestChild().close(PAUSED_EXIT_CODE);
+
+    expect(statusEvents()).toContainEqual(
+      expect.objectContaining({
+        sessionId: 'ship-1',
+        status: 'paused',
+        exitCode: PAUSED_EXIT_CODE,
+      })
+    );
+    expect(existsSync(pauseSentinelPath)).toBe(false);
+  });
+
+  it('keeps cancelled failure semantics when stop wins during a pending pause', () => {
+    const manager = createManager();
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+
+    manager.spawn({
+      sessionId: 'ship-1',
+      command: 'ship',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['ship', '41', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+      meta: { issueNumber: 41 },
+    });
+    manager.requestPause('ship-1');
+    manager.kill('ship-1');
+    latestChild().close(PAUSED_EXIT_CODE);
+
+    expect(killSpy).toHaveBeenCalledWith(latestChild().pid, 'SIGTERM');
+    const failedEvent = statusEvents().find(
+      (event) => event.sessionId === 'ship-1' && event.status === 'failed'
+    );
+    expect(failedEvent).toEqual(
+      expect.objectContaining({
+        sessionId: 'ship-1',
+        status: 'failed',
+        exitCode: PAUSED_EXIT_CODE,
+      })
+    );
+    expect(failedEvent?.meta).toEqual(
+      expect.objectContaining({
+        cancelled: true,
+      })
+    );
+  });
+
+  it('cleans up pause sentinels on complete, failed, and destroyAll', () => {
+    const completedManager = createManager();
+    completedManager.spawn({
+      sessionId: 'ship-complete',
+      command: 'ship',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['ship', '41', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+    });
+    completedManager.requestPause('ship-complete');
+    const completePath = join(tempDir, 'pause-sentinels', 'ship-complete');
+    latestChild().close(0);
+    expect(existsSync(completePath)).toBe(false);
+
+    const failedManager = createManager();
+    failedManager.spawn({
+      sessionId: 'ship-failed',
+      command: 'ship',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['ship', '42', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+    });
+    failedManager.requestPause('ship-failed');
+    const failedPath = join(tempDir, 'pause-sentinels', 'ship-failed');
+    latestChild().close(1);
+    expect(existsSync(failedPath)).toBe(false);
+
+    const destroyManager = createManager();
+    destroyManager.spawn({
+      sessionId: 'ship-destroy',
+      command: 'ship',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['ship', '43', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+    });
+    destroyManager.requestPause('ship-destroy');
+    const destroyPath = join(tempDir, 'pause-sentinels', 'ship-destroy');
+    expect(existsSync(destroyPath)).toBe(true);
+
+    destroyManager.destroyAll();
+
+    expect(existsSync(destroyPath)).toBe(false);
+    expect(existsSync(join(tempDir, 'pause-sentinels'))).toBe(false);
   });
 
   it('removes a queued ship session without spawning it when cancelled', () => {

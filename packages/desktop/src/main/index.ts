@@ -9,6 +9,7 @@ import { registerBackgroundHandlers } from './handlers/background.js';
 import { registerConfigHandlers } from './handlers/config.js';
 import { registerIssueHandlers } from './handlers/issues.js';
 import { registerLockHandlers } from './handlers/lock.js';
+import { registerPauseStateHandlers } from './handlers/pause-state.js';
 import { registerPrerequisiteHandlers } from './handlers/prerequisites.js';
 import { registerPtyHandlers } from './handlers/pty.js';
 import { registerResetHandlers } from './handlers/reset.js';
@@ -60,6 +61,7 @@ function registerIpcHandlers(): void {
   registerPrerequisiteHandlers();
   registerIssueHandlers();
   registerLockHandlers();
+  registerPauseStateHandlers();
   registerResetHandlers();
   registerPtyHandlers(ptyManager);
   registerBackgroundHandlers(backgroundManager);

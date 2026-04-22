@@ -10,6 +10,7 @@ const state = vi.hoisted(() => ({
   pipelineState: {} as Record<string, unknown>,
   terminalState: {} as Record<string, unknown>,
   spawnShipperSetupMock: vi.fn(),
+  spawnBackgroundShipMock: vi.fn(),
 }));
 
 vi.mock('../../src/renderer/hooks/use-repos.js', () => ({
@@ -33,7 +34,7 @@ vi.mock('../../src/renderer/lib/shipper-api.js', () => ({
     spawnShipperSetup: state.spawnShipperSetupMock,
     spawnShipperGroom: vi.fn(),
     spawnBackgroundNew: vi.fn(),
-    spawnBackgroundShip: vi.fn(),
+    spawnBackgroundShip: state.spawnBackgroundShipMock,
     spawnBackgroundInit: vi.fn(),
   }),
 }));
@@ -67,7 +68,16 @@ vi.mock('../../src/renderer/components/new-issue-dialog.js', () => ({
 }));
 
 vi.mock('../../src/renderer/components/pipeline-board.js', () => ({
-  PipelineBoard: () => null,
+  PipelineBoard: ({ onShip }: { onShip: (issueNumber: number) => void }) => (
+    <button
+      type="button"
+      onClick={() => {
+        onShip(42);
+      }}
+    >
+      Ship issue
+    </button>
+  ),
 }));
 
 vi.mock('../../src/renderer/components/pipeline-empty-state.js', () => ({
@@ -80,6 +90,34 @@ vi.mock('../../src/renderer/components/repo-picker-dialog.js', () => ({
 
 vi.mock('../../src/renderer/components/reset-confirm-dialog.js', () => ({
   ResetConfirmDialog: () => null,
+}));
+
+vi.mock('../../src/renderer/components/resume-ship-dialog.js', () => ({
+  ResumeShipDialog: ({
+    open,
+    onOpenChange,
+    onConfirm,
+  }: {
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+    onConfirm: () => void;
+  }) =>
+    open ? (
+      <div>
+        <p>This issue is paused. Resume and ship anyway?</p>
+        <button type="button" onClick={onConfirm}>
+          Resume and ship
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            onOpenChange(false);
+          }}
+        >
+          Cancel
+        </button>
+      </div>
+    ) : null,
 }));
 
 vi.mock('../../src/renderer/components/session-close-dialog.js', () => ({
@@ -102,6 +140,7 @@ import App from '../../src/renderer/App.js';
 
 function resetMockState(): void {
   state.spawnShipperSetupMock.mockReset();
+  state.spawnBackgroundShipMock.mockReset();
   state.reposState = {
     activeRepo: 'owner/repo',
     autoMergeRepos: new Set<string>(),
@@ -132,6 +171,8 @@ function resetMockState(): void {
     handleCancelBackground: vi.fn(),
     handleClearFinishedBackground: vi.fn(),
     handleDismissBackground: vi.fn(),
+    handlePauseIssue: vi.fn(),
+    handleResumeIssue: vi.fn(() => Promise.resolve()),
     handleRetryToast: vi.fn(),
     handleShowBackgroundLogs: vi.fn(),
     handleToggleActionQueue: vi.fn(),
@@ -141,6 +182,7 @@ function resetMockState(): void {
       open: false,
       title: '',
     },
+    pausePendingIssues: new Set<number>(),
     pushToast: vi.fn(),
     shippingCommands: new Map<number, unknown>(),
     toasts: [],
@@ -151,6 +193,7 @@ function resetMockState(): void {
       new: [],
     },
     clearIssueState: vi.fn(),
+    clearPausedIssue: vi.fn(),
     clearResetIssue: vi.fn(),
     clearStageCacheForRepo: vi.fn(),
     clearUnblockIssue: vi.fn(),
@@ -172,6 +215,8 @@ function resetMockState(): void {
     issues: [],
     lastUpdated: null,
     loadIssues: vi.fn(),
+    getIssueByNumber: vi.fn(),
+    pausedIssues: new Set<number>(),
     resetSelection: null,
     resettingIssues: new Set<number>(),
     setCloseNotPlannedIssue: vi.fn(),
@@ -181,6 +226,7 @@ function resetMockState(): void {
     setResetSelection: vi.fn(),
     settingPriorityIssues: new Set<number>(),
     stageCache: new Map<string, unknown>(),
+    trackPausedIssue: vi.fn(),
     trackResetIssue: vi.fn(),
     trackUnblockIssue: vi.fn(),
     unblockIssues: new Set<number>(),
@@ -265,5 +311,36 @@ describe('App setup launch', () => {
     expect(state.pipelineState.setFetchError).toHaveBeenCalledWith(
       'Failed to launch shipper setup: clone failed'
     );
+  });
+
+  it('prompts before shipping a paused issue and resumes only on confirm', async () => {
+    state.pipelineState.pausedIssues = new Set<number>([42]);
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ship issue' }));
+    expect(screen.getByText('This issue is paused. Resume and ship anyway?')).toBeTruthy();
+    expect(state.spawnBackgroundShipMock).not.toHaveBeenCalled();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Resume and ship' }));
+      await Promise.resolve();
+    });
+
+    expect(state.backgroundState.handleResumeIssue).toHaveBeenCalledWith(42, 'owner/repo');
+    expect(state.spawnBackgroundShipMock).toHaveBeenCalledWith(42, 'owner/repo', false);
+  });
+
+  it('leaves a paused issue untouched when the resume-and-ship dialog is cancelled', () => {
+    state.pipelineState.pausedIssues = new Set<number>([42]);
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ship issue' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(state.backgroundState.handleResumeIssue).not.toHaveBeenCalled();
+    expect(state.spawnBackgroundShipMock).not.toHaveBeenCalled();
+    expect(screen.queryByText('This issue is paused. Resume and ship anyway?')).toBeNull();
   });
 });

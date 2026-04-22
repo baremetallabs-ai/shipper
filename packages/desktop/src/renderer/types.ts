@@ -67,6 +67,7 @@ export interface ShipperApi {
   listRepos: () => Promise<string[]>;
   listAdoptableIssues: (repo: string) => Promise<ListAdoptableIssuesSuccess | ListIssuesFailure>;
   listIssues: (repo: string) => Promise<ListIssuesSuccess | ListIssuesFailure>;
+  listPausedIssues: (repo: string) => Promise<number[]>;
   setConfig: (config: AppConfig) => Promise<void>;
   adoptIssue: (
     repo: string,
@@ -88,6 +89,8 @@ export interface ShipperApi {
     repo: string,
     issueNumber: number
   ) => Promise<{ ok: true } | { ok: false; error: string }>;
+  pauseIssue: (repo: string, issueNumber: number) => Promise<void>;
+  resumeIssue: (repo: string, issueNumber: number) => Promise<void>;
   closeNotPlanned: (
     repo: string,
     issueNumber: number
@@ -113,6 +116,8 @@ export interface ShipperApi {
   spawnBackgroundInit: (repo: string) => Promise<{ sessionId: string }>;
   spawnBackgroundUnblock: (issueNumber: number, repo: string) => Promise<{ sessionId: string }>;
   killBackground: (sessionId: string) => Promise<void>;
+  requestPauseActive: (sessionId: string) => Promise<void>;
+  removeQueuedSession: (sessionId: string) => Promise<void>;
   getBackgroundOutput: (sessionId: string) => Promise<string>;
   ptyWrite: (sessionId: string, data: string) => Promise<void>;
   ptyResize: (sessionId: string, cols: number, rows: number) => Promise<void>;
@@ -130,6 +135,10 @@ export interface IssuePipelineBridge {
   clearIssueState: () => void;
   clearStageCacheForRepo: (repo: string) => void;
   setFetchError: (message: string | null) => void;
+  getIssueByNumber: (issueNumber: number) => ListIssueItem | undefined;
+  getPausedIssues: () => ReadonlySet<number>;
+  trackPausedIssue: (issueNumber: number) => void;
+  clearPausedIssue: (issueNumber: number) => void;
   trackUnblockIssue: (issueNumber: number) => void;
   clearUnblockIssue: (issueNumber: number) => void;
 }
@@ -155,7 +164,7 @@ export interface ResetSelection {
 
 export type BackgroundCommandKind = 'new' | 'ship' | 'init' | 'unblock';
 
-export type BackgroundCommandStatus = 'queued' | 'running' | 'complete' | 'failed';
+export type BackgroundCommandStatus = 'queued' | 'running' | 'complete' | 'failed' | 'paused';
 
 export type BackgroundRetryPayload =
   | { command: 'new'; repo: string; request: string }
@@ -170,6 +179,7 @@ export interface BackgroundStatusMeta {
   logFile?: string;
   request?: string;
   cancelled?: boolean;
+  pausePending?: boolean;
 }
 
 export interface BackgroundStatusPayload {
@@ -201,6 +211,7 @@ export interface BackgroundCommandState {
   logFile?: string;
   exitCode?: number | null;
   cancelled: boolean;
+  pausePending?: boolean;
 }
 
 export type ActiveShippingCommand = BackgroundCommandState & {
@@ -236,6 +247,7 @@ export interface BackgroundDetailInput {
   merge?: boolean;
   latestOutput?: string | null;
   cancelled?: boolean;
+  pausePending?: boolean;
 }
 
 export interface AutoShipCandidate {

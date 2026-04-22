@@ -1,12 +1,14 @@
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Readable } from 'node:stream';
-import type { BrowserWindow } from 'electron';
+import { app, type BrowserWindow } from 'electron';
+import { PAUSED_EXIT_CODE } from '@dnsquared/shipper-core';
 
 type BackgroundChildProcess = ChildProcessByStdio<null, Readable, Readable>;
 
 export type BackgroundCommand = 'new' | 'ship' | 'init' | 'unblock';
-export type BackgroundStatus = 'queued' | 'running' | 'complete' | 'failed';
+export type BackgroundStatus = 'queued' | 'running' | 'complete' | 'failed' | 'paused';
 
 export interface BackgroundSessionMeta {
   issueNumber?: number;
@@ -15,6 +17,7 @@ export interface BackgroundSessionMeta {
   logFile?: string;
   request?: string;
   cancelled?: boolean;
+  pausePending?: boolean;
 }
 
 export interface BackgroundStatusEvent {
@@ -74,6 +77,7 @@ interface BackgroundSession {
   meta: BackgroundSessionMeta;
   onComplete?: SpawnBackgroundSessionOptions['onComplete'];
   cancelRequested: boolean;
+  pauseSentinelPath?: string;
 }
 
 interface ShipQueueEntry {
@@ -198,9 +202,52 @@ export class BackgroundManager {
     }, GRACE_TIMEOUT_MS);
   }
 
+  requestPause(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session || session.command !== 'ship' || session.status !== 'running') {
+      return;
+    }
+
+    const pauseSentinelPath = session.pauseSentinelPath;
+    if (!pauseSentinelPath) {
+      return;
+    }
+
+    try {
+      writeFileSync(pauseSentinelPath, '');
+    } catch {
+      // Best-effort signal file creation.
+    }
+
+    session.meta = { ...session.meta, pausePending: true };
+    this.emitStatus(session);
+  }
+
+  removeQueuedSession(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session || session.command !== 'ship' || session.status !== 'queued') {
+      return;
+    }
+
+    this.removeQueuedShip(session);
+    session.exitCode = null;
+    session.status = 'paused';
+    this.emitStatus(session);
+  }
+
   destroyAll(): void {
     for (const sessionId of this.sessions.keys()) {
       this.kill(sessionId);
+    }
+
+    for (const session of this.sessions.values()) {
+      this.cleanupPauseSentinel(session.pauseSentinelPath);
+    }
+
+    try {
+      rmSync(join(app.getPath('userData'), 'pause-sentinels'), { recursive: true, force: true });
+    } catch {
+      // Best-effort runtime cleanup on shutdown.
     }
   }
 
@@ -210,12 +257,16 @@ export class BackgroundManager {
 
     if (session.command === 'ship') {
       this.shipActive.set(session.repo, session.id);
+      session.pauseSentinelPath = this.createPauseSentinelPath(session.id);
     }
 
+    const env = session.pauseSentinelPath
+      ? { ...process.env, SHIPPER_PAUSE_SENTINEL_FILE: session.pauseSentinelPath }
+      : process.env;
     const child = spawn(session.commandName, session.args, {
       cwd: session.cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: process.env,
+      env,
     });
     session.child = child;
     this.emitStatus(session);
@@ -261,7 +312,12 @@ export class BackgroundManager {
   private async finishSession(session: BackgroundSession, exitCode: number | null): Promise<void> {
     session.child = undefined;
     session.exitCode = exitCode;
-    session.status = exitCode === 0 ? 'complete' : 'failed';
+    session.status =
+      exitCode === PAUSED_EXIT_CODE && !session.cancelRequested
+        ? 'paused'
+        : exitCode === 0
+          ? 'complete'
+          : 'failed';
 
     if (session.cancelRequested) {
       session.status = 'failed';
@@ -277,6 +333,7 @@ export class BackgroundManager {
       }
     }
 
+    this.cleanupPauseSentinel(session.pauseSentinelPath);
     this.emitStatus(session);
     this.maybeAdvanceShipQueue(session);
   }
@@ -353,6 +410,24 @@ export class BackgroundManager {
     }
 
     this.shipQueue.set(session.repo, nextQueue);
+  }
+
+  private createPauseSentinelPath(sessionId: string): string {
+    const pauseSentinelDir = join(app.getPath('userData'), 'pause-sentinels');
+    mkdirSync(pauseSentinelDir, { recursive: true });
+    return join(pauseSentinelDir, sessionId);
+  }
+
+  private cleanupPauseSentinel(pauseSentinelPath?: string): void {
+    if (!pauseSentinelPath) {
+      return;
+    }
+
+    try {
+      rmSync(pauseSentinelPath, { force: true });
+    } catch {
+      // Best-effort runtime cleanup.
+    }
   }
 }
 

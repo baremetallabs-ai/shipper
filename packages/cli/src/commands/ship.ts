@@ -1,7 +1,7 @@
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { logger } from '@dnsquared/shipper-core';
+import { logger, PAUSED_EXIT_CODE } from '@dnsquared/shipper-core';
 import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
 import { shipAutoParallel, shipAutoSequential } from './ship-auto.js';
 import { formatLogDisplayPath, formatLogTimestamp, shipOneIssue } from './ship-execute.js';
@@ -39,6 +39,7 @@ export async function shipCommand(
   const logsDir = path.join(homeDir, '.shipper', 'logs');
   mkdirSync(logsDir, { recursive: true, mode: 0o700 });
   const logFile = path.join(logsDir, `ship-${issue.replace(/^#/, '')}-${formatLogTimestamp()}.log`);
+  const pauseSentinelPath = process.env.SHIPPER_PAUSE_SENTINEL_FILE;
   const result = await shipOneIssue({
     repo,
     issue,
@@ -46,10 +47,13 @@ export async function shipCommand(
     mode: options.mode,
     agent: options.agent,
     model: options.model,
+    pauseProbe: pauseSentinelPath ? () => existsSync(pauseSentinelPath) : undefined,
     logFile,
   });
   logger.log(`\nLog file: ${formatLogDisplayPath(logFile, homeDir)}`);
-  if (!result.success) {
+  if (result.paused) {
+    process.exitCode = PAUSED_EXIT_CODE;
+  } else if (!result.success) {
     process.exitCode = 1;
   }
 }

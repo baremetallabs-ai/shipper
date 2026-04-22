@@ -125,10 +125,14 @@ function renderBoard({
     ],
   },
   shippingCommands = new Map<number, ActiveShippingCommand>(),
+  pausedIssues = new Set<number>(),
+  pausePendingIssues = new Set<number>(),
   resettingIssues = new Set<number>(),
   onResetSelect = vi.fn<(selection: ResetSelection) => void>(),
   onToggleAutoMerge = vi.fn(),
   onToggleAutoShip = vi.fn(),
+  onPauseIssue = vi.fn(),
+  onResumeIssue = vi.fn(),
 } = {}) {
   const props = {
     repo: 'owner/repo',
@@ -139,6 +143,8 @@ function renderBoard({
     unlockingIssues: new Set<number>(),
     unblockingIssues: new Set<number>(),
     settingPriorityIssues: new Set<number>(),
+    pausedIssues,
+    pausePendingIssues,
     shippingCommands,
     autoMergeEnabled: false,
     autoShipEnabled: false,
@@ -153,6 +159,8 @@ function renderBoard({
     onSetPriority: vi.fn(),
     onUnlockClick: vi.fn(),
     onUnblockClick: vi.fn(),
+    onPauseIssue,
+    onResumeIssue,
     onGroom: vi.fn(),
     onShip: vi.fn(),
     onCancelShip: vi.fn(),
@@ -196,6 +204,57 @@ describe('PipelineBoard', () => {
     const [selection] = onResetSelect.mock.calls[0] ?? [];
     expect(selection?.issue.number).toBe(22);
     expect(selection?.targetStage).toBe('planned');
+  });
+
+  it('threads pause and resume actions through to issue cards', () => {
+    const onPauseIssue = vi.fn();
+    const onResumeIssue = vi.fn();
+
+    const { rerender } = renderBoard({
+      attentionIssues: { failed: [], new: [] },
+      onPauseIssue,
+      onResumeIssue,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }));
+    expect(onPauseIssue).toHaveBeenCalledWith(expect.objectContaining({ number: 22 }));
+
+    rerender(
+      <PipelineBoard
+        repo="owner/repo"
+        issues={[createIssue()]}
+        columnMap={createColumnMap({ [IMPLEMENTED_LABEL]: [createIssue()] })}
+        attentionIssues={{ failed: [], new: [] }}
+        resettingIssues={new Set<number>()}
+        unlockingIssues={new Set<number>()}
+        unblockingIssues={new Set<number>()}
+        settingPriorityIssues={new Set<number>()}
+        pausedIssues={new Set([22])}
+        pausePendingIssues={new Set<number>()}
+        shippingCommands={new Map<number, ActiveShippingCommand>()}
+        autoMergeEnabled={false}
+        autoShipEnabled={false}
+        isLoading={false}
+        canFetch
+        hasActiveRepo
+        isSavingAutoMerge={false}
+        onToggleAutoMerge={vi.fn()}
+        onToggleAutoShip={vi.fn()}
+        onResetSelect={vi.fn()}
+        onCloseNotPlanned={vi.fn()}
+        onSetPriority={vi.fn()}
+        onUnlockClick={vi.fn()}
+        onUnblockClick={vi.fn()}
+        onPauseIssue={vi.fn()}
+        onResumeIssue={onResumeIssue}
+        onGroom={vi.fn()}
+        onShip={vi.fn()}
+        onCancelShip={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Resume' }));
+    expect(onResumeIssue).toHaveBeenCalledWith(22);
   });
 
   it('shows a primary Reset action on failed attention cards and keeps overflow Reset available', () => {

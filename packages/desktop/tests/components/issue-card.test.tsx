@@ -139,6 +139,55 @@ describe('IssueCard', () => {
     expect(screen.getByText('Failed')).toBeTruthy();
   });
 
+  it('renders paused styling, the pause icon, and a Resume menu action', () => {
+    const onResume = vi.fn();
+
+    render(
+      <IssueCard
+        issue={createIssue()}
+        tokenUsage={createTokenUsage()}
+        isPaused
+        onResume={onResume}
+      />
+    );
+
+    const card = screen.getByTestId('issue-card-12');
+    expect(card.className).toContain('border-orange-500');
+    expect(card.className).toContain('bg-orange-500/5');
+    expect(screen.getByLabelText('Issue #12 is paused')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Resume' }));
+    expect(onResume).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders paused and blocked indicators together', () => {
+    render(
+      <IssueCard
+        issue={createIssue({ labels: [PLANNED_LABEL, BLOCKED_LABEL] })}
+        tokenUsage={createTokenUsage()}
+        isPaused
+      />
+    );
+
+    expect(screen.getByLabelText('Issue #12 is paused')).toBeTruthy();
+    expect(screen.getByText('Blocked')).toBeTruthy();
+  });
+
+  it('renders a non-blocking pausing indicator while leaving stop available', () => {
+    render(
+      <IssueCard
+        issue={createIssue()}
+        tokenUsage={createTokenUsage()}
+        isPausePending
+        shippingStatus="running"
+        onStopShip={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('Pausing...')).toBeTruthy();
+    expect(screen.getByLabelText('Stop shipping #12')).toBeTruthy();
+  });
+
   it('renders failed and blocked indicators together', () => {
     render(
       <IssueCard
@@ -277,6 +326,15 @@ describe('IssueCard', () => {
 
     expect(onResetSelect).toHaveBeenCalledWith('groomed');
     expect(onSetPriority).toHaveBeenCalledWith('high');
+  });
+
+  it('renders a Pause menu action when the issue is not paused', () => {
+    const onPause = vi.fn();
+
+    render(<IssueCard issue={createIssue()} tokenUsage={createTokenUsage()} onPause={onPause} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }));
+    expect(onPause).toHaveBeenCalledTimes(1);
   });
 
   it('derives reset targets for failed-only and failed-plus-stage issues', () => {

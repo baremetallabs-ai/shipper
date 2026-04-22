@@ -46,7 +46,7 @@ describe('selectNextAutoShipIssue', () => {
       createIssue(11, [PLANNED_LABEL, PRIORITY_HIGH_LABEL]),
     ];
 
-    expect(selectNextAutoShipIssue(issues, new Set(), new Set())?.number).toBe(11);
+    expect(selectNextAutoShipIssue(issues, new Set(), new Set(), new Set())?.number).toBe(11);
   });
 
   it('prefers high-priority earlier-stage work over normal-priority later-stage work', () => {
@@ -55,7 +55,7 @@ describe('selectNextAutoShipIssue', () => {
       createIssue(21, [GROOMED_LABEL, PRIORITY_HIGH_LABEL]),
     ];
 
-    expect(selectNextAutoShipIssue(issues, new Set(), new Set())?.number).toBe(21);
+    expect(selectNextAutoShipIssue(issues, new Set(), new Set(), new Set())?.number).toBe(21);
   });
 
   it('excludes blocked, failed, locked, active, and skipped issues', () => {
@@ -71,9 +71,15 @@ describe('selectNextAutoShipIssue', () => {
     const activeIssueNumbers = new Set([33]);
     const skippedIssueNumbers = new Set([34]);
 
-    expect(selectNextAutoShipIssue(issues, activeIssueNumbers, skippedIssueNumbers)?.number).toBe(
-      35
-    );
+    expect(
+      selectNextAutoShipIssue(issues, activeIssueNumbers, skippedIssueNumbers, new Set())?.number
+    ).toBe(35);
+  });
+
+  it('excludes paused issues from auto-ship selection', () => {
+    const issues = [createIssue(60, [PLANNED_LABEL]), createIssue(61, [IMPLEMENTED_LABEL])];
+
+    expect(selectNextAutoShipIssue(issues, new Set(), new Set(), new Set([61]))?.number).toBe(60);
   });
 
   it('returns null when no eligible issues remain', () => {
@@ -84,7 +90,7 @@ describe('selectNextAutoShipIssue', () => {
       createIssue(43, [IMPLEMENTED_LABEL]),
     ];
 
-    expect(selectNextAutoShipIssue(issues, new Set([43]), new Set())).toBeNull();
+    expect(selectNextAutoShipIssue(issues, new Set([43]), new Set(), new Set())).toBeNull();
   });
 });
 
@@ -240,6 +246,26 @@ describe('merge-aware background helpers', () => {
         repo: 'owner/repo',
       })
     ).toBe('Command failed');
+  });
+
+  it('uses pausing and paused detail copy for ship sessions', () => {
+    expect(
+      getBackgroundDetail({
+        command: 'ship',
+        status: 'running',
+        repo: 'owner/repo',
+        issueNumber: 70,
+        pausePending: true,
+      })
+    ).toBe('Pausing...');
+    expect(
+      getBackgroundDetail({
+        command: 'ship',
+        status: 'paused',
+        repo: 'owner/repo',
+        issueNumber: 70,
+      })
+    ).toBe('Paused at stage boundary');
   });
 
   it('adds the merge suffix to ship titles only when merge is enabled', () => {

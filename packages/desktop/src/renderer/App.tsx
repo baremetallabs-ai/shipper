@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { JSX } from 'react';
 
 import { toErrorMessage } from '@dnsquared/shipper-core';
@@ -15,6 +15,7 @@ import { PipelineEmptyState } from './components/pipeline-empty-state.js';
 import { PipelineToolbar } from './components/pipeline-toolbar.js';
 import { RepoPickerDialog } from './components/repo-picker-dialog.js';
 import { ResetConfirmDialog } from './components/reset-confirm-dialog.js';
+import { ResumeShipDialog } from './components/resume-ship-dialog.js';
 import { SessionCloseDialog } from './components/session-close-dialog.js';
 import { TerminalDrawer } from './components/terminal-drawer.js';
 import { UnlockConfirmDialog } from './components/unlock-confirm-dialog.js';
@@ -33,6 +34,7 @@ export default function App(): JSX.Element {
   const pipelineBridgeRef = useRef<IssuePipelineBridge | null>(null);
   const backgroundBridgeRef = useRef<BackgroundCommandsBridge | null>(null);
   const launchingSetupReposRef = useRef<Set<string>>(new Set());
+  const [resumeShipIssueNumber, setResumeShipIssueNumber] = useState<number | null>(null);
 
   const reposState = useRepos({
     pipelineBridgeRef,
@@ -148,6 +150,20 @@ export default function App(): JSX.Element {
     }
   }
 
+  async function handleResumeAndShipConfirm(): Promise<void> {
+    if (resumeShipIssueNumber === null) {
+      return;
+    }
+
+    try {
+      await backgroundState.handleResumeIssue(resumeShipIssueNumber, activeRepo);
+      await handleShipperShip(resumeShipIssueNumber, activeRepo);
+      setResumeShipIssueNumber(null);
+    } catch (error) {
+      pipelineState.setFetchError(`Failed to resume and ship: ${toErrorMessage(error)}`);
+    }
+  }
+
   async function handleShipperInit(repo = activeRepo): Promise<void> {
     try {
       await getShipperApi().spawnBackgroundInit(repo);
@@ -186,6 +202,10 @@ export default function App(): JSX.Element {
     clearIssueState: pipelineState.clearIssueState,
     clearStageCacheForRepo: pipelineState.clearStageCacheForRepo,
     setFetchError: pipelineState.setFetchError,
+    getIssueByNumber: pipelineState.getIssueByNumber,
+    getPausedIssues: () => pipelineState.pausedIssues,
+    trackPausedIssue: pipelineState.trackPausedIssue,
+    clearPausedIssue: pipelineState.clearPausedIssue,
     trackUnblockIssue: pipelineState.trackUnblockIssue,
     clearUnblockIssue: pipelineState.clearUnblockIssue,
   };
@@ -271,6 +291,18 @@ export default function App(): JSX.Element {
           onOpenChange={terminalState.handlePendingCloseOpenChange}
           onConfirm={() => {
             void terminalState.handleConfirmCloseSession();
+          }}
+        />
+        <ResumeShipDialog
+          issueNumber={resumeShipIssueNumber}
+          open={resumeShipIssueNumber !== null}
+          onOpenChange={(open) => {
+            if (!open) {
+              setResumeShipIssueNumber(null);
+            }
+          }}
+          onConfirm={() => {
+            void handleResumeAndShipConfirm();
           }}
         />
 
@@ -361,6 +393,8 @@ export default function App(): JSX.Element {
                   unlockingIssues={pipelineState.unlockingIssues}
                   unblockingIssues={pipelineState.unblockingIssues}
                   settingPriorityIssues={pipelineState.settingPriorityIssues}
+                  pausedIssues={pipelineState.pausedIssues}
+                  pausePendingIssues={backgroundState.pausePendingIssues}
                   shippingCommands={backgroundState.shippingCommands}
                   autoMergeEnabled={autoMergeEnabled}
                   autoShipEnabled={autoShipEnabled}
@@ -381,10 +415,21 @@ export default function App(): JSX.Element {
                   onUnblockClick={(issue) => {
                     void pipelineState.handleUnblockClick(issue);
                   }}
+                  onPauseIssue={(issue) => {
+                    void backgroundState.handlePauseIssue(issue);
+                  }}
+                  onResumeIssue={(issueNumber) => {
+                    void backgroundState.handleResumeIssue(issueNumber);
+                  }}
                   onGroom={(issueNumber) => {
                     void handleShipperGroom(issueNumber);
                   }}
                   onShip={(issueNumber) => {
+                    if (pipelineState.pausedIssues.has(issueNumber)) {
+                      setResumeShipIssueNumber(issueNumber);
+                      return;
+                    }
+
                     void handleShipperShip(issueNumber);
                   }}
                   onCancelShip={(sessionId) => {

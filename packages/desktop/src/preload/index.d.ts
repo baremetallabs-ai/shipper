@@ -59,7 +59,7 @@ interface PtyExitEvent {
 }
 
 type BackgroundCommand = 'new' | 'ship' | 'init' | 'unblock';
-type BackgroundStatus = 'queued' | 'running' | 'complete' | 'failed';
+type BackgroundStatus = 'queued' | 'running' | 'complete' | 'failed' | 'paused';
 
 interface BackgroundStatusMeta {
   issueNumber?: number;
@@ -68,6 +68,7 @@ interface BackgroundStatusMeta {
   logFile?: string;
   request?: string;
   cancelled?: boolean;
+  pausePending?: boolean;
 }
 
 interface BackgroundStatusEvent {
@@ -93,6 +94,7 @@ interface ShipperAPI {
   listAdoptableIssues: (repo: string) => Promise<ListAdoptableIssuesSuccess | ListIssuesFailure>;
   listRepos: () => Promise<string[]>;
   listIssues: (repo: string) => Promise<ListIssuesSuccess | ListIssuesFailure>;
+  listPausedIssues: (repo: string) => Promise<number[]>;
   setConfig: (config: ConfigPayload) => Promise<void>;
   adoptIssue: (
     repo: string,
@@ -114,6 +116,8 @@ interface ShipperAPI {
     repo: string,
     issueNumber: number
   ) => Promise<{ ok: true } | { ok: false; error: string }>;
+  pauseIssue: (repo: string, issueNumber: number) => Promise<void>;
+  resumeIssue: (repo: string, issueNumber: number) => Promise<void>;
   closeNotPlanned: (
     repo: string,
     issueNumber: number
@@ -146,6 +150,8 @@ interface ShipperAPI {
   spawnBackgroundInit: (repo: string) => Promise<{ sessionId: string }>;
   spawnBackgroundUnblock: (issueNumber: number, repo: string) => Promise<{ sessionId: string }>;
   killBackground: (sessionId: string) => Promise<void>;
+  requestPauseActive: (sessionId: string) => Promise<void>;
+  removeQueuedSession: (sessionId: string) => Promise<void>;
   getBackgroundOutput: (sessionId: string) => Promise<string>;
   ptyWrite: (sessionId: string, data: string) => Promise<void>;
   ptyResize: (sessionId: string, cols: number, rows: number) => Promise<void>;

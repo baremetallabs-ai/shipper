@@ -28,6 +28,8 @@ export interface PipelineBoardProps {
   unlockingIssues: ReadonlySet<number>;
   unblockingIssues: ReadonlySet<number>;
   settingPriorityIssues: ReadonlySet<number>;
+  pausedIssues: ReadonlySet<number>;
+  pausePendingIssues: ReadonlySet<number>;
   shippingCommands: ReadonlyMap<number, ActiveShippingCommand>;
   autoMergeEnabled: boolean;
   autoShipEnabled: boolean;
@@ -42,6 +44,8 @@ export interface PipelineBoardProps {
   onSetPriority: (issue: ListIssueItem, level: 'high' | 'normal' | 'low') => void;
   onUnlockClick: (issue: ListIssueItem) => void;
   onUnblockClick: (issue: ListIssueItem) => void;
+  onPauseIssue: (issue: ListIssueItem) => void;
+  onResumeIssue: (issueNumber: number) => void;
   onGroom: (issueNumber: number) => void;
   onShip: (issueNumber: number) => void;
   onCancelShip: (sessionId: string) => void;
@@ -56,6 +60,8 @@ export function PipelineBoard({
   unlockingIssues,
   unblockingIssues,
   settingPriorityIssues,
+  pausedIssues,
+  pausePendingIssues,
   shippingCommands,
   autoMergeEnabled,
   autoShipEnabled,
@@ -70,6 +76,8 @@ export function PipelineBoard({
   onSetPriority,
   onUnlockClick,
   onUnblockClick,
+  onPauseIssue,
+  onResumeIssue,
   onGroom,
   onShip,
   onCancelShip,
@@ -186,6 +194,14 @@ export function PipelineBoard({
                 }}
                 onUnblock={() => {
                   onUnblockClick(issue);
+                }}
+                isPaused={pausedIssues.has(issue.number)}
+                isPausePending={pausePendingIssues.has(issue.number)}
+                onPause={() => {
+                  onPauseIssue(issue);
+                }}
+                onResume={() => {
+                  onResumeIssue(issue.number);
                 }}
                 resetTargets={resetTargets}
                 groomDisabled={options.allowGroom ? !canFetch : undefined}
@@ -399,6 +415,14 @@ export function PipelineBoard({
                               }}
                               onUnblock={() => {
                                 onUnblockClick(issue);
+                              }}
+                              isPaused={pausedIssues.has(issue.number)}
+                              isPausePending={pausePendingIssues.has(issue.number)}
+                              onPause={() => {
+                                onPauseIssue(issue);
+                              }}
+                              onResume={() => {
+                                onResumeIssue(issue.number);
                               }}
                               resetTargets={resetTargets}
                               isResetting={resettingIssues.has(issue.number)}

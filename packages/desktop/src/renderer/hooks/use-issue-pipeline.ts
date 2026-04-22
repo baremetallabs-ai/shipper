@@ -33,6 +33,7 @@ export interface UseIssuePipelineResult {
   isLoading: boolean;
   fetchError: string | null;
   lastUpdated: Date | null;
+  pausedIssues: Set<number>;
   resettingIssues: Set<number>;
   unlockingIssues: Set<number>;
   unblockingIssues: Set<number>;
@@ -57,7 +58,10 @@ export interface UseIssuePipelineResult {
   refreshIssuesForActiveRepo: (repo: string) => Promise<void>;
   clearIssueState: () => void;
   clearStageCacheForRepo: (repo: string) => void;
+  getIssueByNumber: (issueNumber: number) => ListIssueItem | undefined;
   handleRefresh: () => Promise<void>;
+  trackPausedIssue: (issueNumber: number) => void;
+  clearPausedIssue: (issueNumber: number) => void;
   trackResetIssue: (issueNumber: number) => void;
   clearResetIssue: (issueNumber: number) => void;
   trackUnlockIssue: (issueNumber: number) => void;
@@ -96,6 +100,7 @@ export function useIssuePipeline({
   const [unblockingIssues, setUnblockingIssues] = useState<Set<number>>(new Set());
   const [settingPriorityIssues, setSettingPriorityIssues] = useState<Set<number>>(new Set());
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [pausedIssues, setPausedIssues] = useState<Set<number>>(new Set());
   const [isNewIssueOpen, setIsNewIssueOpen] = useState(false);
   const [isAdoptOpen, setIsAdoptOpen] = useState(false);
   const requestVersionRef = useRef(0);
@@ -153,6 +158,7 @@ export function useIssuePipeline({
     setLastUpdated(null);
     setFetchError(null);
     setIsLoading(false);
+    setPausedIssues(new Set());
     setResetSelection(null);
     setCloseNotPlannedIssue(null);
     setUnlockConfirmIssue(null);
@@ -165,6 +171,11 @@ export function useIssuePipeline({
   const clearStageCacheForRepo = useCallback((repo: string) => {
     setStageCache((current) => syncWorkflowStageCacheForRepo(current, repo, []));
   }, []);
+
+  const getIssueByNumber = useCallback(
+    (issueNumber: number) => issues.find((issue) => issue.number === issueNumber),
+    [issues]
+  );
 
   const loadIssues = useCallback(async (repo: string) => {
     const requestVersion = requestVersionRef.current + 1;
@@ -220,6 +231,31 @@ export function useIssuePipeline({
 
   useEffect(() => {
     if (!canFetch || !hasActiveRepo) {
+      setPausedIssues(new Set());
+      return;
+    }
+
+    let cancelled = false;
+    void getShipperApi()
+      .listPausedIssues(activeRepo)
+      .then((issueNumbers) => {
+        if (!cancelled) {
+          setPausedIssues(new Set(issueNumbers));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPausedIssues(new Set());
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeRepo, canFetch, hasActiveRepo]);
+
+  useEffect(() => {
+    if (!canFetch || !hasActiveRepo) {
       return;
     }
 
@@ -243,6 +279,18 @@ export function useIssuePipeline({
 
   const trackResetIssue = useCallback((issueNumber: number) => {
     setResettingIssues((current) => new Set(current).add(issueNumber));
+  }, []);
+
+  const trackPausedIssue = useCallback((issueNumber: number) => {
+    setPausedIssues((current) => new Set(current).add(issueNumber));
+  }, []);
+
+  const clearPausedIssue = useCallback((issueNumber: number) => {
+    setPausedIssues((current) => {
+      const next = new Set(current);
+      next.delete(issueNumber);
+      return next;
+    });
   }, []);
 
   const clearResetIssue = useCallback((issueNumber: number) => {
@@ -512,6 +560,7 @@ export function useIssuePipeline({
     isLoading,
     fetchError,
     lastUpdated,
+    pausedIssues,
     resettingIssues,
     unlockingIssues,
     unblockingIssues,
@@ -533,7 +582,10 @@ export function useIssuePipeline({
     refreshIssuesForActiveRepo,
     clearIssueState,
     clearStageCacheForRepo,
+    getIssueByNumber,
     handleRefresh,
+    trackPausedIssue,
+    clearPausedIssue,
     trackResetIssue,
     clearResetIssue,
     trackUnlockIssue,

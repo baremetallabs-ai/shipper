@@ -45,13 +45,22 @@ export function getBackgroundDetail({
   merge,
   latestOutput,
   cancelled,
+  pausePending,
 }: BackgroundDetailInput): string {
   if (cancelled) {
     return 'Cancelled';
   }
 
+  if (pausePending) {
+    return 'Pausing...';
+  }
+
   if (status === 'queued' && command === 'ship' && issueNumber) {
     return `Ship #${issueNumber} queued`;
+  }
+
+  if (status === 'paused') {
+    return command === 'ship' ? 'Paused at stage boundary' : 'Paused';
   }
 
   if (status === 'failed') {
@@ -170,7 +179,8 @@ export function syncWorkflowStageCacheForRepo(
 export function selectNextAutoShipIssue(
   issues: ListIssueItem[],
   activeIssueNumbers: Set<number>,
-  skippedIssueNumbers: Set<number>
+  skippedIssueNumbers: Set<number>,
+  pausedIssueNumbers: Set<number>
 ): ListIssueItem | null {
   const candidates: AutoShipCandidate[] = [];
 
@@ -178,6 +188,7 @@ export function selectNextAutoShipIssue(
     if (
       activeIssueNumbers.has(issue.number) ||
       skippedIssueNumbers.has(issue.number) ||
+      pausedIssueNumbers.has(issue.number) ||
       issue.labels.includes(BLOCKED_LABEL) ||
       issue.labels.includes(FAILED_LABEL) ||
       issue.labels.includes(LOCKED_LABEL)

@@ -50,6 +50,7 @@ export interface ShipOneIssueOptions {
   agent?: AgentName;
   model?: string;
   parkHooks?: ParkHooks;
+  pauseProbe?: () => boolean | Promise<boolean>;
   logFile?: string;
   skipInteractiveStages?: boolean;
   collectTokens?: boolean;
@@ -59,6 +60,7 @@ export interface ShipIssueResult {
   success: boolean;
   error?: string;
   retriable?: boolean;
+  paused?: boolean;
   totalTokens?: number;
 }
 
@@ -145,6 +147,7 @@ export async function shipOneIssue(options: ShipOneIssueOptions): Promise<ShipIs
     agent,
     model,
     parkHooks,
+    pauseProbe,
     logFile,
     skipInteractiveStages = false,
     collectTokens = true,
@@ -218,6 +221,13 @@ export async function shipOneIssue(options: ShipOneIssueOptions): Promise<ShipIs
                 printSummary(results, issueLogger);
                 return { success: false, error: msg };
               }
+
+              if (await pauseProbe?.()) {
+                issueLogger.log(`Paused at stage boundary before "${stageName}"`);
+                printSummary(results, issueLogger);
+                return { success: true, paused: true };
+              }
+
               const previousLabel: string | undefined = label;
 
               if (label === PR_REVIEWED_LABEL && parkHooks) {

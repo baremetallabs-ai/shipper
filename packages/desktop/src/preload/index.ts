@@ -19,7 +19,7 @@ interface PtyExitEvent {
 }
 
 type BackgroundCommand = 'new' | 'ship' | 'init' | 'unblock';
-type BackgroundStatus = 'queued' | 'running' | 'complete' | 'failed';
+type BackgroundStatus = 'queued' | 'running' | 'complete' | 'failed' | 'paused';
 
 interface BackgroundStatusMeta {
   issueNumber?: number;
@@ -28,6 +28,7 @@ interface BackgroundStatusMeta {
   logFile?: string;
   request?: string;
   cancelled?: boolean;
+  pausePending?: boolean;
 }
 
 interface BackgroundStatusEvent {
@@ -50,6 +51,7 @@ const shipperAPI = {
   listRepos: () => ipcRenderer.invoke('list-repos'),
   listAdoptableIssues: (repo: string) => ipcRenderer.invoke('list-adoptable-issues', { repo }),
   listIssues: (repo: string) => ipcRenderer.invoke('list-issues', { repo }),
+  listPausedIssues: (repo: string) => ipcRenderer.invoke('pause-state:list', repo),
   setConfig: (config: ConfigPayload) => ipcRenderer.invoke('set-config', config),
   adoptIssue: (repo: string, issueNumber: number) =>
     ipcRenderer.invoke('adopt-issue', { repo, issueNumber }),
@@ -62,6 +64,10 @@ const shipperAPI = {
     ipcRenderer.invoke('check-lock-stale', { repo, issueNumber }),
   unlockIssue: (repo: string, issueNumber: number) =>
     ipcRenderer.invoke('unlock-issue', { repo, issueNumber }),
+  pauseIssue: (repo: string, issueNumber: number) =>
+    ipcRenderer.invoke('pause-state:add', { repo, issueNumber }),
+  resumeIssue: (repo: string, issueNumber: number) =>
+    ipcRenderer.invoke('pause-state:remove', { repo, issueNumber }),
   closeNotPlanned: (repo: string, issueNumber: number) =>
     ipcRenderer.invoke('close-not-planned', { repo, issueNumber }),
   setPriority: (repo: string, issueNumber: number, level: 'high' | 'normal' | 'low') =>
@@ -79,6 +85,9 @@ const shipperAPI = {
   spawnBackgroundUnblock: (issueNumber: number, repo: string) =>
     ipcRenderer.invoke('bg-spawn-unblock', { issueNumber, repo }),
   killBackground: (sessionId: string) => ipcRenderer.invoke('bg-kill', { sessionId }),
+  requestPauseActive: (sessionId: string) => ipcRenderer.invoke('bg-request-pause', { sessionId }),
+  removeQueuedSession: (sessionId: string) =>
+    ipcRenderer.invoke('bg-remove-queued-session', { sessionId }),
   getBackgroundOutput: (sessionId: string) => ipcRenderer.invoke('bg-get-output', { sessionId }),
   ptyWrite: (sessionId: string, data: string) =>
     ipcRenderer.invoke('pty-write', { sessionId, data }),
