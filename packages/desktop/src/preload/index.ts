@@ -29,6 +29,8 @@ interface BackgroundStatusMeta {
   request?: string;
   cancelled?: boolean;
   pausePending?: boolean;
+  origin?: 'auto' | 'manual';
+  autoShipHalted?: boolean;
 }
 
 interface BackgroundStatusEvent {
@@ -79,13 +81,18 @@ const shipperAPI = {
     ipcRenderer.invoke('pty-spawn-shipper-setup', { repo, cols, rows }),
   spawnBackgroundNew: (request: string, repo: string) =>
     ipcRenderer.invoke('bg-spawn-new', { request, repo }),
-  spawnBackgroundShip: (issueNumber: number, repo: string, merge: boolean) =>
-    ipcRenderer.invoke('bg-spawn-ship', { issueNumber, repo, merge }),
+  spawnBackgroundShip: (
+    issueNumber: number,
+    repo: string,
+    merge: boolean,
+    origin?: 'auto' | 'manual'
+  ) => ipcRenderer.invoke('bg-spawn-ship', { issueNumber, repo, merge, origin }),
   spawnBackgroundInit: (repo: string) => ipcRenderer.invoke('bg-spawn-init', { repo }),
   spawnBackgroundUnblock: (issueNumber: number, repo: string) =>
     ipcRenderer.invoke('bg-spawn-unblock', { issueNumber, repo }),
   killBackground: (sessionId: string) => ipcRenderer.invoke('bg-kill', { sessionId }),
   requestPauseActive: (sessionId: string) => ipcRenderer.invoke('bg-request-pause', { sessionId }),
+  requestAutoShipHalt: (repo: string) => ipcRenderer.invoke('bg-request-auto-ship-halt', { repo }),
   removeQueuedSession: (sessionId: string) =>
     ipcRenderer.invoke('bg-remove-queued-session', { sessionId }),
   getBackgroundOutput: (sessionId: string) => ipcRenderer.invoke('bg-get-output', { sessionId }),

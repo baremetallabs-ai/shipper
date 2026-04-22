@@ -9,6 +9,8 @@ type BackgroundChildProcess = ChildProcessByStdio<null, Readable, Readable>;
 
 export type BackgroundCommand = 'new' | 'ship' | 'init' | 'unblock';
 export type BackgroundStatus = 'queued' | 'running' | 'complete' | 'failed' | 'paused';
+type ShipOrigin = 'auto' | 'manual';
+type HaltReason = 'user-pause' | 'auto-ship-off';
 
 export interface BackgroundSessionMeta {
   issueNumber?: number;
@@ -18,6 +20,8 @@ export interface BackgroundSessionMeta {
   request?: string;
   cancelled?: boolean;
   pausePending?: boolean;
+  origin?: ShipOrigin;
+  autoShipHalted?: boolean;
 }
 
 export interface BackgroundStatusEvent {
@@ -80,6 +84,7 @@ interface BackgroundSession {
   onComplete?: SpawnBackgroundSessionOptions['onComplete'];
   cancelRequested: boolean;
   pauseSentinelPath?: string;
+  haltReason?: HaltReason;
 }
 
 interface ShipQueueEntry {
@@ -215,15 +220,39 @@ export class BackgroundManager {
       return false;
     }
 
-    try {
-      writeFileSync(pauseSentinelPath, '');
-    } catch {
-      // Best-effort signal file creation.
-    }
+    session.haltReason = 'user-pause';
+    this.writeHaltSentinel(pauseSentinelPath);
 
     session.meta = { ...session.meta, pausePending: true };
     this.emitStatus(session);
     return true;
+  }
+
+  requestAutoShipHalt(repo: string): number {
+    let haltedCount = 0;
+
+    for (const session of this.sessions.values()) {
+      if (
+        session.command !== 'ship' ||
+        session.repo !== repo ||
+        session.status !== 'running' ||
+        session.meta.origin !== 'auto' ||
+        session.haltReason
+      ) {
+        continue;
+      }
+
+      const pauseSentinelPath = session.pauseSentinelPath;
+      if (!pauseSentinelPath) {
+        continue;
+      }
+
+      session.haltReason = 'auto-ship-off';
+      this.writeHaltSentinel(pauseSentinelPath);
+      haltedCount += 1;
+    }
+
+    return haltedCount;
   }
 
   removeQueuedSession(sessionId: string): RemoveQueuedSessionResult {
@@ -324,12 +353,14 @@ export class BackgroundManager {
   private async finishSession(session: BackgroundSession, exitCode: number | null): Promise<void> {
     session.child = undefined;
     session.exitCode = exitCode;
-    session.status =
-      exitCode === PAUSED_EXIT_CODE && !session.cancelRequested
-        ? 'paused'
-        : exitCode === 0
-          ? 'complete'
-          : 'failed';
+    if (exitCode === PAUSED_EXIT_CODE && !session.cancelRequested) {
+      session.status = session.haltReason === 'auto-ship-off' ? 'complete' : 'paused';
+      if (session.haltReason === 'auto-ship-off') {
+        session.meta = { ...session.meta, autoShipHalted: true };
+      }
+    } else {
+      session.status = exitCode === 0 ? 'complete' : 'failed';
+    }
 
     if (session.cancelRequested) {
       session.status = 'failed';
@@ -428,6 +459,14 @@ export class BackgroundManager {
     const pauseSentinelDir = join(app.getPath('userData'), 'pause-sentinels');
     mkdirSync(pauseSentinelDir, { recursive: true });
     return join(pauseSentinelDir, sessionId);
+  }
+
+  private writeHaltSentinel(pauseSentinelPath: string): void {
+    try {
+      writeFileSync(pauseSentinelPath, '');
+    } catch {
+      // Best-effort signal file creation.
+    }
   }
 
   private cleanupPauseSentinel(pauseSentinelPath?: string): void {

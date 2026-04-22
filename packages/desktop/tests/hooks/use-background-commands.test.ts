@@ -46,6 +46,10 @@ describe('useBackgroundCommands', () => {
     shipper.install();
     vi.mocked(shipper.api.getBackgroundOutput).mockResolvedValue('complete log output');
     const pipelineBridge = createPipelineBridge();
+    vi.mocked(pipelineBridge.loadIssues).mockResolvedValue({
+      ok: true,
+      issues: [createIssue(42)],
+    });
     const { result } = renderHook(() =>
       useBackgroundCommands({
         activeRepo: 'owner/repo',
@@ -105,14 +109,14 @@ describe('useBackgroundCommands', () => {
       repo: 'owner/repo',
       status: 'failed',
       exitCode: 1,
-      meta: { issueNumber: 22, merge: true },
+      meta: { issueNumber: 22, merge: true, origin: 'auto' },
     });
 
     await act(async () => {
       await result.current.handleRetryToast('ship-2');
     });
 
-    expect(shipper.api.spawnBackgroundShip).toHaveBeenCalledWith(22, 'owner/repo', true);
+    expect(shipper.api.spawnBackgroundShip).toHaveBeenCalledWith(22, 'owner/repo', true, 'auto');
     expect(result.current.toasts).toHaveLength(0);
     expect(result.current.backgroundCommands).toHaveLength(0);
   });
@@ -147,7 +151,7 @@ describe('useBackgroundCommands', () => {
     await flushHookEffects();
 
     await waitFor(() => {
-      expect(shipper.api.spawnBackgroundShip).toHaveBeenCalledWith(31, 'owner/repo', true);
+      expect(shipper.api.spawnBackgroundShip).toHaveBeenCalledWith(31, 'owner/repo', true, 'auto');
       expect(result.current.toasts).toContainEqual(
         expect.objectContaining({
           title: 'Auto-ship: starting #31',
@@ -209,6 +213,61 @@ describe('useBackgroundCommands', () => {
       expect(result.current.toasts).toContainEqual(
         expect.objectContaining({ title: 'Auto-ship paused' })
       );
+    });
+  });
+
+  it('marks auto-unblock retry ship launches as auto-origin', async () => {
+    const shipper = createMockShipperApi();
+    shipper.install();
+    vi.mocked(shipper.api.listIssues)
+      .mockResolvedValueOnce({
+        ok: true,
+        issues: [createIssue(42, [PLANNED_LABEL, BLOCKED_LABEL])],
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        issues: [createIssue(42)],
+      });
+    const pipelineBridge = createPipelineBridge();
+    const { result } = renderHook(() =>
+      useBackgroundCommands({
+        activeRepo: 'owner/repo',
+        autoMergeRepos: new Set(['owner/repo']),
+        checkInitState: vi.fn(() => Promise.resolve(undefined)),
+        pipelineBridgeRef: { current: pipelineBridge },
+      })
+    );
+    await flushHookEffects();
+
+    act(() => {
+      result.current.enableAutoShipForRepo('owner/repo');
+    });
+
+    shipper.emitBackgroundStatus({
+      sessionId: 'ship-before-unblock',
+      command: 'ship',
+      repo: 'owner/repo',
+      status: 'complete',
+      meta: { issueNumber: 41, merge: true },
+    });
+    await flushHookEffects();
+
+    await waitFor(() => {
+      expect(shipper.api.spawnBackgroundUnblock).toHaveBeenCalledWith(42, 'owner/repo');
+    });
+
+    shipper.emitBackgroundStatus({
+      sessionId: 'unblock-1',
+      command: 'unblock',
+      repo: 'owner/repo',
+      status: 'failed',
+      exitCode: 1,
+      meta: { issueNumber: 42 },
+    });
+    await flushHookEffects();
+
+    await waitFor(() => {
+      expect(shipper.api.spawnBackgroundShip).toHaveBeenCalledWith(42, 'owner/repo', true, 'auto');
     });
   });
 
@@ -365,7 +424,7 @@ describe('useBackgroundCommands', () => {
       expect(shipper.api.pauseIssue).toHaveBeenCalledWith('owner/repo', 72);
       expect(pipelineBridge.trackPausedIssue).toHaveBeenCalledWith(72);
       expect(result.current.pausePendingIssues.has(72)).toBe(false);
-      expect(shipper.api.spawnBackgroundShip).toHaveBeenCalledWith(73, 'owner/repo', true);
+      expect(shipper.api.spawnBackgroundShip).toHaveBeenCalledWith(73, 'owner/repo', true, 'auto');
     });
   });
 
@@ -505,8 +564,44 @@ describe('useBackgroundCommands', () => {
 
     await waitFor(() => {
       expect(shipper.api.listPausedIssues).toHaveBeenCalledWith('other/repo');
-      expect(shipper.api.spawnBackgroundShip).toHaveBeenCalledWith(82, 'other/repo', true);
+      expect(shipper.api.spawnBackgroundShip).toHaveBeenCalledWith(82, 'other/repo', true, 'auto');
     });
+  });
+
+  it('refreshes quietly for auto-ship halts without success toast or paused persistence', async () => {
+    const shipper = createMockShipperApi();
+    shipper.install();
+    const pipelineBridge = createPipelineBridge();
+    const { result } = renderHook(() =>
+      useBackgroundCommands({
+        activeRepo: 'owner/repo',
+        autoMergeRepos: new Set(),
+        checkInitState: vi.fn(() => Promise.resolve(undefined)),
+        pipelineBridgeRef: { current: pipelineBridge },
+      })
+    );
+    await flushHookEffects();
+
+    shipper.emitBackgroundStatus({
+      sessionId: 'ship-auto-halt',
+      command: 'ship',
+      repo: 'owner/repo',
+      status: 'complete',
+      exitCode: 75,
+      meta: { issueNumber: 83, merge: false, autoShipHalted: true, origin: 'auto' },
+    });
+    await flushHookEffects();
+
+    await waitFor(() => {
+      expect(pipelineBridge.loadIssues).toHaveBeenCalledWith('owner/repo');
+    });
+    expect(shipper.api.pauseIssue).not.toHaveBeenCalledWith('owner/repo', 83);
+    expect(pipelineBridge.trackPausedIssue).not.toHaveBeenCalledWith(83);
+    expect(
+      result.current.toasts.some(
+        (toast) => toast.sessionId === 'ship-auto-halt' && toast.variant === 'success'
+      )
+    ).toBe(false);
   });
 
   it('surfaces resume failures without clearing paused state optimistically', async () => {

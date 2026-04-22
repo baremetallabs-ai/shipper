@@ -1361,6 +1361,7 @@ describe('desktop IPC locking', () => {
         'bg-spawn-unblock',
         'bg-kill',
         'bg-request-pause',
+        'bg-request-auto-ship-halt',
         'bg-remove-queued-session',
         'bg-get-output',
       ].sort()
