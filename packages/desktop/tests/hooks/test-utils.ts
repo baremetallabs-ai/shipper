@@ -6,6 +6,7 @@ import type {
   BackgroundStatusPayload,
   Prerequisites,
   ShipperApi,
+  TimelineLabelEvent,
 } from '../../src/renderer/types.js';
 
 interface PtyOutputPayload {
@@ -73,6 +74,7 @@ export function createMockShipperApi(): MockShipperApiController {
     listAdoptableIssues: vi.fn(() => Promise.resolve({ ok: true, issues: [] })),
     listRepos: vi.fn(() => Promise.resolve([])),
     listIssues: vi.fn(() => Promise.resolve({ ok: true, issues: [] })),
+    fetchIssueTimelines: vi.fn(() => Promise.resolve(new Map<number, TimelineLabelEvent[]>())),
     listPausedIssues: vi.fn(() => Promise.resolve([])),
     setConfig: vi.fn(() => Promise.resolve()),
     adoptIssue: vi.fn(() => Promise.resolve({ ok: true })),

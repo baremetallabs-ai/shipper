@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
 import {
   BLOCKED_LABEL,
   DESIGNED_LABEL,
@@ -23,9 +24,10 @@ import {
   getWorkflowStageDisplayName,
   selectNextAutoShipIssue,
   selectNextAutoUnblockIssue,
+  sortBlockedIssuesByStagePriority,
   syncWorkflowStageCacheForRepo,
 } from '../src/renderer/lib/app-utils.js';
-import type { BackgroundCommandState } from '../src/renderer/types.js';
+import type { BackgroundCommandState, TimelineLabelEvent } from '../src/renderer/types.js';
 
 function createIssue(number: number, labels: string[]): ListIssueItem {
   return {
@@ -39,26 +41,74 @@ function createIssue(number: number, labels: string[]): ListIssueItem {
   };
 }
 
+function createTimelineEvent(label: string, createdAt: string): TimelineLabelEvent {
+  return {
+    event: 'labeled' as const,
+    label: { name: label },
+    created_at: createdAt,
+  };
+}
+
+const mockedFetchIssueTimelines =
+  vi.fn<(repo: string, issueNumbers: number[]) => Promise<Map<number, TimelineLabelEvent[]>>>();
+mockedFetchIssueTimelines.mockResolvedValue(new Map<number, TimelineLabelEvent[]>());
+
+afterEach(() => {
+  mockedFetchIssueTimelines.mockReset();
+  mockedFetchIssueTimelines.mockResolvedValue(new Map<number, TimelineLabelEvent[]>());
+});
+
+async function selectIssue(
+  issues: ListIssueItem[],
+  activeIssueNumbers = new Set<number>(),
+  skippedIssueNumbers = new Set<number>(),
+  pausedIssueNumbers = new Set<number>()
+) {
+  return selectNextAutoShipIssue(
+    'owner/repo',
+    issues,
+    activeIssueNumbers,
+    skippedIssueNumbers,
+    pausedIssueNumbers,
+    mockedFetchIssueTimelines
+  );
+}
+
 describe('selectNextAutoShipIssue', () => {
-  it('prefers higher priority over lower priority within the same stage', () => {
+  it('prefers higher priority over lower priority within the same stage', async () => {
     const issues = [
       createIssue(10, [PLANNED_LABEL, PRIORITY_LOW_LABEL]),
       createIssue(11, [PLANNED_LABEL, PRIORITY_HIGH_LABEL]),
     ];
 
-    expect(selectNextAutoShipIssue(issues, new Set(), new Set(), new Set())?.number).toBe(11);
+    expect((await selectIssue(issues))?.number).toBe(11);
+    expect(mockedFetchIssueTimelines).not.toHaveBeenCalled();
   });
 
-  it('prefers high-priority earlier-stage work over normal-priority later-stage work', () => {
+  it('prefers high-priority earlier-stage work over normal-priority later-stage work', async () => {
     const issues = [
       createIssue(20, [PR_REVIEWED_LABEL]),
       createIssue(21, [GROOMED_LABEL, PRIORITY_HIGH_LABEL]),
     ];
 
-    expect(selectNextAutoShipIssue(issues, new Set(), new Set(), new Set())?.number).toBe(21);
+    expect((await selectIssue(issues))?.number).toBe(21);
+    expect(mockedFetchIssueTimelines).not.toHaveBeenCalled();
   });
 
-  it('excludes blocked, failed, locked, active, and skipped issues', () => {
+  it('breaks same-priority same-stage ties by the oldest current-stage label time', async () => {
+    const issues = [createIssue(12, [PLANNED_LABEL]), createIssue(13, [PLANNED_LABEL])];
+    mockedFetchIssueTimelines.mockResolvedValue(
+      new Map([
+        [12, [createTimelineEvent(PLANNED_LABEL, '2026-04-01T00:00:00Z')]],
+        [13, [createTimelineEvent(PLANNED_LABEL, '2026-04-02T00:00:00Z')]],
+      ])
+    );
+
+    expect((await selectIssue(issues))?.number).toBe(12);
+    expect(mockedFetchIssueTimelines).toHaveBeenCalledWith('owner/repo', [12, 13]);
+  });
+
+  it('excludes blocked, failed, locked, active, and skipped issues', async () => {
     const issues = [
       createIssue(30, [PR_OPEN_LABEL, BLOCKED_LABEL]),
       createIssue(31, [PR_REVIEWED_LABEL, FAILED_LABEL]),
@@ -71,18 +121,70 @@ describe('selectNextAutoShipIssue', () => {
     const activeIssueNumbers = new Set([33]);
     const skippedIssueNumbers = new Set([34]);
 
-    expect(
-      selectNextAutoShipIssue(issues, activeIssueNumbers, skippedIssueNumbers, new Set())?.number
-    ).toBe(35);
+    expect((await selectIssue(issues, activeIssueNumbers, skippedIssueNumbers))?.number).toBe(35);
+    expect(mockedFetchIssueTimelines).not.toHaveBeenCalled();
   });
 
-  it('excludes paused issues from auto-ship selection', () => {
+  it('skips timeline fetches when exactly one candidate is in the winning bucket', async () => {
+    const issues = [
+      createIssue(36, [PLANNED_LABEL, PRIORITY_HIGH_LABEL]),
+      createIssue(37, [IMPLEMENTED_LABEL]),
+      createIssue(38, [PLANNED_LABEL]),
+    ];
+
+    expect((await selectIssue(issues))?.number).toBe(36);
+    expect(mockedFetchIssueTimelines).not.toHaveBeenCalled();
+  });
+
+  it('excludes paused issues from auto-ship selection', async () => {
     const issues = [createIssue(60, [PLANNED_LABEL]), createIssue(61, [IMPLEMENTED_LABEL])];
 
-    expect(selectNextAutoShipIssue(issues, new Set(), new Set(), new Set([61]))?.number).toBe(60);
+    expect((await selectIssue(issues, new Set(), new Set(), new Set([61])))?.number).toBe(60);
+    expect(mockedFetchIssueTimelines).not.toHaveBeenCalled();
   });
 
-  it('returns null when no eligible issues remain', () => {
+  it('places issues with unresolved current-stage label times after resolvable candidates', async () => {
+    const issues = [createIssue(62, [PLANNED_LABEL]), createIssue(63, [PLANNED_LABEL])];
+    mockedFetchIssueTimelines.mockResolvedValue(
+      new Map([
+        [62, [createTimelineEvent(PLANNED_LABEL, '2026-04-03T00:00:00Z')]],
+        [63, []],
+      ])
+    );
+
+    expect((await selectIssue(issues))?.number).toBe(62);
+  });
+
+  it('does not fetch timelines across different priority or stage buckets', async () => {
+    const issues = [
+      createIssue(64, [IMPLEMENTED_LABEL]),
+      createIssue(65, [PLANNED_LABEL]),
+      createIssue(66, [DESIGNED_LABEL, PRIORITY_HIGH_LABEL]),
+    ];
+
+    expect((await selectIssue(issues))?.number).toBe(66);
+    expect(mockedFetchIssueTimelines).not.toHaveBeenCalled();
+  });
+
+  it('uses the current stage label when breaking ties', async () => {
+    const issues = [createIssue(67, [DESIGNED_LABEL]), createIssue(68, [DESIGNED_LABEL])];
+    mockedFetchIssueTimelines.mockResolvedValue(
+      new Map([
+        [
+          67,
+          [
+            createTimelineEvent(GROOMED_LABEL, '2026-04-01T00:00:00Z'),
+            createTimelineEvent(DESIGNED_LABEL, '2026-04-10T00:00:00Z'),
+          ],
+        ],
+        [68, [createTimelineEvent(DESIGNED_LABEL, '2026-04-05T00:00:00Z')]],
+      ])
+    );
+
+    expect((await selectIssue(issues))?.number).toBe(68);
+  });
+
+  it('returns null when no eligible issues remain', async () => {
     const issues = [
       createIssue(40, [PR_REVIEWED_LABEL, BLOCKED_LABEL]),
       createIssue(41, [PR_OPEN_LABEL, FAILED_LABEL]),
@@ -90,7 +192,8 @@ describe('selectNextAutoShipIssue', () => {
       createIssue(43, [IMPLEMENTED_LABEL]),
     ];
 
-    expect(selectNextAutoShipIssue(issues, new Set([43]), new Set(), new Set())).toBeNull();
+    await expect(selectIssue(issues, new Set([43]))).resolves.toBeNull();
+    expect(mockedFetchIssueTimelines).not.toHaveBeenCalled();
   });
 });
 
@@ -415,6 +518,32 @@ describe('selectNextAutoUnblockIssue', () => {
       issue: null,
       remainingIssueNumbers: [],
     });
+  });
+});
+
+describe('sortBlockedIssuesByStagePriority', () => {
+  it('prefers blocked issues at higher-priority workflow stages', () => {
+    const issues = [
+      createIssue(100, [PLANNED_LABEL, BLOCKED_LABEL]),
+      createIssue(101, [IMPLEMENTED_LABEL, BLOCKED_LABEL]),
+      createIssue(102, [DESIGNED_LABEL, BLOCKED_LABEL]),
+    ];
+
+    expect(sortBlockedIssuesByStagePriority(issues).map((issue) => issue.number)).toEqual([
+      101, 100, 102,
+    ]);
+  });
+
+  it('preserves raw order within the same workflow stage bucket', () => {
+    const issues = [
+      createIssue(110, [PLANNED_LABEL, BLOCKED_LABEL]),
+      createIssue(111, [PLANNED_LABEL, BLOCKED_LABEL]),
+      createIssue(112, [PLANNED_LABEL, BLOCKED_LABEL]),
+    ];
+
+    expect(sortBlockedIssuesByStagePriority(issues).map((issue) => issue.number)).toEqual([
+      110, 111, 112,
+    ]);
   });
 });
 

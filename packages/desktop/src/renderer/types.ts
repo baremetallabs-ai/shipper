@@ -35,6 +35,14 @@ export interface ListIssuesFailure {
   error: string;
 }
 
+export interface TimelineLabelEvent {
+  event: string;
+  label?: {
+    name?: string;
+  } | null;
+  created_at?: string;
+}
+
 export interface ArtifactScanSummary {
   targetStage: WorkflowStage;
   targetLabel: string;
@@ -67,6 +75,10 @@ export interface ShipperApi {
   listRepos: () => Promise<string[]>;
   listAdoptableIssues: (repo: string) => Promise<ListAdoptableIssuesSuccess | ListIssuesFailure>;
   listIssues: (repo: string) => Promise<ListIssuesSuccess | ListIssuesFailure>;
+  fetchIssueTimelines: (
+    repo: string,
+    issueNumbers: number[]
+  ) => Promise<Map<number, TimelineLabelEvent[]>>;
   listPausedIssues: (repo: string) => Promise<number[]>;
   setConfig: (config: AppConfig) => Promise<void>;
   adoptIssue: (

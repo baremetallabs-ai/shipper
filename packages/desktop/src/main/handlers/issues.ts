@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron';
 import {
   aggregateAllIssueUsage,
+  fetchIssueTimelines,
   gh,
   listIssues,
   LOCKED_LABEL,
@@ -11,7 +12,12 @@ import {
   type TokenUsage,
 } from '@dnsquared/shipper-core';
 
-import { loadResetIssue, parseAdoptIssuePayload, parseRepoPayload } from './shared.js';
+import {
+  isPositiveInteger,
+  loadResetIssue,
+  parseAdoptIssuePayload,
+  parseRepoPayload,
+} from './shared.js';
 
 interface PipelineIssue extends ListIssueItem {
   tokenUsage: TokenUsage;
@@ -136,6 +142,24 @@ export function registerIssueHandlers(): void {
       const response: ListIssuesFailure = { ok: false, error: message };
       return response;
     }
+  });
+
+  ipcMain.handle('fetch-issue-timelines', async (_event, payload: unknown) => {
+    const repo = parseRepoPayload(payload);
+    const issueNumbers =
+      typeof payload === 'object' && payload !== null && 'issueNumbers' in payload
+        ? payload.issueNumbers
+        : null;
+
+    if (
+      repo === null ||
+      !Array.isArray(issueNumbers) ||
+      !issueNumbers.every((issueNumber) => isPositiveInteger(issueNumber))
+    ) {
+      throw new Error('Enter a repository in owner/repo format and positive issue numbers.');
+    }
+
+    return fetchIssueTimelines(repo, issueNumbers);
   });
 
   ipcMain.handle('close-not-planned', async (_event, payload: unknown) => {
