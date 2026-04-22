@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import {
@@ -8,20 +10,27 @@ import {
   NEW_LABEL,
   STAGE_LABEL_NAMES,
   classifyChecks,
+  extractFinalMessage,
   fetchChecks,
   fetchIssue,
+  findLatestSessionMeta,
   getSettings,
   gh,
   isLockStale,
   listIssues,
   parseIssueLabelsState,
   parseIssueTitleLabelsList,
+  readResultFile,
   releaseIssueLock,
+  resolveSessionRepo,
   tryResolvePrForIssue,
 } from '@dnsquared/shipper-core';
 import {
+  formatAdvanceResult,
+  formatCreateIssueResult,
   formatSpawnResult,
   formatToolError,
+  formatUnblockResult,
   spawnShipper,
   type ToolTextResult,
 } from './helpers.js';
@@ -30,6 +39,19 @@ const STAGE_SHORT_NAMES = STAGE_LABEL_NAMES.map((l) => l.replace(/^shipper:/, ''
 const STATUS_FILTER_VALUES = [...STAGE_SHORT_NAMES, 'blocked', 'failed'] as const;
 
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
+const STAGE_FOR_LABEL = {
+  'shipper:groomed': 'design',
+  'shipper:designed': 'plan',
+  'shipper:planned': 'implement',
+  'shipper:implemented': 'pr_open',
+  'shipper:pr-open': 'pr_review',
+  'shipper:pr-reviewed': 'pr_remediate',
+} as const;
+const ISSUE_URL_RE = /https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/issues\/(\d+)/;
+
+type AdvanceStageName = (typeof STAGE_FOR_LABEL)[keyof typeof STAGE_FOR_LABEL];
+type AdvanceVerdict = 'accept' | 'reject' | 'fail';
+type GhIssueCandidate = { number: number; title?: string; url?: string; createdAt?: string };
 
 function textOk(text: string): ToolTextResult {
   return { content: [{ type: 'text', text }] };
@@ -173,12 +195,236 @@ async function fetchIssueLabels(repo: string, issue: number): Promise<GhIssueLab
 const GROOM_MANUAL_MESSAGE =
   'Grooming must be done interactively by a human (it asks clarifying questions and edits the issue body). Ask the user to run `shipper groom <issue>` in their terminal; once the issue moves past `shipper:new`, you can retry this tool.';
 
-async function assertNotAtNew(repo: string, issue: number): Promise<void> {
-  const data = await fetchIssueLabels(repo, issue);
-  const names = data.labels.map((l) => l.name);
-  if (names.includes(NEW_LABEL)) {
-    throw new Error(`Issue #${issue} is at ${NEW_LABEL}. ${GROOM_MANUAL_MESSAGE}`);
+function findCurrentStageLabel(labels: string[]): string | undefined {
+  return STAGE_LABEL_NAMES.findLast((label) => labels.includes(label));
+}
+
+function parseAdvanceStage(stageLabel: string | undefined): AdvanceStageName | undefined {
+  return stageLabel ? STAGE_FOR_LABEL[stageLabel as keyof typeof STAGE_FOR_LABEL] : undefined;
+}
+
+async function resolveSessionContext(opts: {
+  repoSlug: string;
+  issue: string;
+  stage: string;
+  since: Date;
+}): Promise<{ finalMessage?: string; sessionLogPath?: string }> {
+  const meta = await findLatestSessionMeta(opts);
+  if (!meta?.logFile) {
+    return {};
   }
+
+  const agent = toAgentName(meta.agent);
+  const finalMessage = agent ? await extractFinalMessage(agent, meta.logFile) : undefined;
+  return {
+    finalMessage,
+    sessionLogPath: meta.logFile,
+  };
+}
+
+function toAgentName(agent: string): 'claude' | 'codex' | 'copilot' | undefined {
+  return agent === 'claude' || agent === 'codex' || agent === 'copilot' ? agent : undefined;
+}
+
+function summarizeCommentBody(body: string): string {
+  const beforeFeedback = body.split(/\n## Agent Feedback\b/, 1)[0] ?? body;
+  const cleanedLines = beforeFeedback
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith('#'));
+  const firstParagraph = cleanedLines
+    .join('\n')
+    .split(/\n\s*\n/, 1)[0]
+    ?.trim();
+  return firstParagraph ? firstParagraph.replace(/\s+/g, ' ') : '<not recorded>';
+}
+
+async function readUnblockReason(commentPath: string | undefined): Promise<string> {
+  if (!commentPath) {
+    return '<not recorded>';
+  }
+
+  try {
+    const content = await readFile(path.resolve(process.cwd(), commentPath), 'utf-8');
+    return summarizeCommentBody(content);
+  } catch {
+    return '<not recorded>';
+  }
+}
+
+function resolveAdvanceOutcome(
+  preStageLabel: string | undefined,
+  postLabels: string[]
+): { from: string; to: string; verdict: AdvanceVerdict } | undefined {
+  if (!preStageLabel) {
+    return undefined;
+  }
+
+  const stage = parseAdvanceStage(preStageLabel);
+  if (!stage) {
+    return undefined;
+  }
+
+  const transitionTargets = {
+    design: { accept: 'shipper:designed', reject: 'shipper:new' },
+    plan: { accept: 'shipper:planned', reject: 'shipper:groomed' },
+    implement: { accept: 'shipper:implemented', reject: 'shipper:designed' },
+    pr_open: { accept: 'shipper:pr-open', reject: 'shipper:planned' },
+    pr_review: { accept: 'shipper:pr-reviewed', reject: 'shipper:implemented' },
+    pr_remediate: { accept: 'shipper:ready', reject: 'shipper:pr-open' },
+  } as const;
+  const transition = transitionTargets[stage];
+
+  if (postLabels.includes(transition.accept)) {
+    return { from: preStageLabel, to: transition.accept, verdict: 'accept' };
+  }
+
+  if (postLabels.includes(transition.reject)) {
+    return { from: preStageLabel, to: transition.reject, verdict: 'reject' };
+  }
+
+  if (postLabels.includes(FAILED_LABEL)) {
+    return { from: preStageLabel, to: FAILED_LABEL, verdict: 'fail' };
+  }
+
+  return undefined;
+}
+
+function findIssueUrl(
+  message: string | undefined
+): { issueNumber: number; url: string } | undefined {
+  if (!message) {
+    return undefined;
+  }
+
+  const match = message.match(ISSUE_URL_RE);
+  if (!match?.[0] || !match[1]) {
+    return undefined;
+  }
+
+  const issueNumber = Number.parseInt(match[1], 10);
+  if (!Number.isFinite(issueNumber)) {
+    return undefined;
+  }
+
+  return { issueNumber, url: match[0] };
+}
+
+async function listRecentNewIssues(repo: string, since: Date): Promise<GhIssueCandidate[]> {
+  const { stdout } = await gh([
+    'issue',
+    'list',
+    '-R',
+    repo,
+    '--search',
+    `label:shipper:new created:>=${since.toISOString()}`,
+    '--json',
+    'number,title,url,createdAt',
+    '--limit',
+    '5',
+  ]);
+
+  const parsed: unknown = JSON.parse(stdout);
+  if (!Array.isArray(parsed)) {
+    return [];
+  }
+
+  return parsed
+    .map((entry) =>
+      typeof entry === 'object' && entry !== null ? (entry as GhIssueCandidate) : undefined
+    )
+    .filter(
+      (entry): entry is GhIssueCandidate =>
+        !!entry && typeof entry.number === 'number' && typeof entry.url === 'string'
+    );
+}
+
+async function fetchIssueDetails(
+  repo: string,
+  issueNumber: number
+): Promise<{ issueNumber: number; title: string; url: string } | undefined> {
+  const { stdout } = await gh([
+    'issue',
+    'view',
+    String(issueNumber),
+    '-R',
+    repo,
+    '--json',
+    'number,title,url',
+  ]);
+
+  const parsed: unknown = JSON.parse(stdout);
+  if (
+    typeof parsed !== 'object' ||
+    parsed === null ||
+    typeof (parsed as { number?: unknown }).number !== 'number' ||
+    typeof (parsed as { title?: unknown }).title !== 'string' ||
+    typeof (parsed as { url?: unknown }).url !== 'string'
+  ) {
+    return undefined;
+  }
+
+  return {
+    issueNumber: (parsed as { number: number }).number,
+    title: (parsed as { title: string }).title,
+    url: (parsed as { url: string }).url,
+  };
+}
+
+async function resolveCreatedIssuePayload(
+  repo: string,
+  startedAt: Date,
+  finalMessage: string | undefined
+): Promise<{ issueNumber: number; title: string; url: string } | undefined> {
+  const fromMessage = findIssueUrl(finalMessage);
+  if (fromMessage) {
+    return fetchIssueDetails(repo, fromMessage.issueNumber);
+  }
+
+  const issues = await listRecentNewIssues(repo, startedAt);
+  if (issues.length === 0) {
+    return undefined;
+  }
+
+  const newest = [...issues].sort((a, b) => {
+    const aTime = a.createdAt ? Date.parse(a.createdAt) : Number.NEGATIVE_INFINITY;
+    const bTime = b.createdAt ? Date.parse(b.createdAt) : Number.NEGATIVE_INFINITY;
+    return bTime - aTime;
+  })[0];
+
+  return newest ? fetchIssueDetails(repo, newest.number) : undefined;
+}
+
+function mapUnblockVerdict(
+  verdict: 'accept' | 'reject' | 'fail'
+): 'unblocked' | 'still-blocked' | 'failed' {
+  switch (verdict) {
+    case 'accept':
+      return 'unblocked';
+    case 'reject':
+      return 'still-blocked';
+    case 'fail':
+      return 'failed';
+  }
+}
+
+function resolveUnblockVerdict(
+  preLabels: string[],
+  postLabels: string[]
+): 'unblocked' | 'still-blocked' | 'failed' | undefined {
+  if (postLabels.includes(FAILED_LABEL)) {
+    return 'failed';
+  }
+
+  if (preLabels.includes(BLOCKED_LABEL) && !postLabels.includes(BLOCKED_LABEL)) {
+    return 'unblocked';
+  }
+
+  if (postLabels.includes(BLOCKED_LABEL)) {
+    return 'still-blocked';
+  }
+
+  return undefined;
 }
 
 async function isPullRequest(repo: string, ref: number): Promise<boolean> {
@@ -271,10 +517,43 @@ export function registerTools(server: McpServer, repo: string): void {
     },
     async ({ issue }) => {
       try {
-        await assertNotAtNew(repo, issue);
+        const sessionRepo = await resolveSessionRepo({ repo });
+        const preIssue = await fetchIssueLabels(repo, issue);
+        const preLabels = preIssue.labels.map((label) => label.name);
+        if (preLabels.includes(NEW_LABEL)) {
+          throw new Error(`Issue #${issue} is at ${NEW_LABEL}. ${GROOM_MANUAL_MESSAGE}`);
+        }
+
+        const preStageLabel = findCurrentStageLabel(preLabels);
+        const startedAt = new Date();
         const args = ['next', String(issue), '--mode', 'headless'];
         const result = await spawnShipper(args, { timeoutMs: agentTimeoutMs() });
-        return formatSpawnResult(result, `shipper ${args.join(' ')}`);
+        const postIssue = await fetchIssueLabels(repo, issue);
+        const postLabels = postIssue.labels.map((label) => label.name);
+        const outcome = resolveAdvanceOutcome(preStageLabel, postLabels);
+        const sessionContext = preStageLabel
+          ? await resolveSessionContext({
+              repoSlug: sessionRepo.repoSlug,
+              issue: String(issue),
+              stage: parseAdvanceStage(preStageLabel) ?? 'implement',
+              since: startedAt,
+            })
+          : {};
+        const prNumber = await tryResolvePrForIssue(repo, issue);
+        return formatAdvanceResult(
+          result,
+          outcome
+            ? {
+                ...outcome,
+                prUrl: prNumber ? `https://github.com/${repo}/pull/${prNumber}` : undefined,
+              }
+            : undefined,
+          {
+            command: `shipper ${args.join(' ')}`,
+            finalMessage: sessionContext.finalMessage,
+            sessionLogPath: sessionContext.sessionLogPath,
+          }
+        );
       } catch (err) {
         return formatToolError(err);
       }
@@ -290,9 +569,26 @@ export function registerTools(server: McpServer, repo: string): void {
     },
     async ({ request }) => {
       try {
+        const sessionRepo = await resolveSessionRepo({ repo });
+        const startedAt = new Date();
         const args = ['new', request, '--mode', 'headless'];
         const result = await spawnShipper(args, { timeoutMs: agentTimeoutMs() });
-        return formatSpawnResult(result, `shipper new <request> --mode headless`);
+        const sessionContext = await resolveSessionContext({
+          repoSlug: sessionRepo.repoSlug,
+          issue: 'unlinked',
+          stage: 'new',
+          since: startedAt,
+        });
+        const payload = await resolveCreatedIssuePayload(
+          repo,
+          startedAt,
+          sessionContext.finalMessage
+        );
+        return formatCreateIssueResult(result, payload, {
+          command: 'shipper new <request> --mode headless',
+          finalMessage: sessionContext.finalMessage,
+          sessionLogPath: sessionContext.sessionLogPath,
+        });
       } catch (err) {
         return formatToolError(err);
       }
@@ -308,9 +604,38 @@ export function registerTools(server: McpServer, repo: string): void {
     },
     async ({ issue }) => {
       try {
+        const sessionRepo = await resolveSessionRepo({ repo });
+        const preIssue = await fetchIssueLabels(repo, issue);
+        const preLabels = preIssue.labels.map((label) => label.name);
+        const startedAt = new Date();
         const args = ['unblock', String(issue), '--mode', 'headless'];
         const result = await spawnShipper(args, { timeoutMs: agentTimeoutMs() });
-        return formatSpawnResult(result, `shipper ${args.join(' ')}`);
+        const postIssue = await fetchIssueLabels(repo, issue);
+        const postLabels = postIssue.labels.map((label) => label.name);
+        const sessionContext = await resolveSessionContext({
+          repoSlug: sessionRepo.repoSlug,
+          issue: String(issue),
+          stage: 'unblock',
+          since: startedAt,
+        });
+
+        let verdict = resolveUnblockVerdict(preLabels, postLabels);
+        let reason = '<not recorded>';
+        try {
+          const output = await readResultFile(path.resolve(process.cwd(), '.shipper', 'output'));
+          verdict = mapUnblockVerdict(output.verdict);
+          reason = await readUnblockReason(output.comment);
+        } catch {
+          if (result.timedOut || result.exitCode !== 0) {
+            verdict = undefined;
+          }
+        }
+
+        return formatUnblockResult(result, verdict ? { verdict, reason } : undefined, {
+          command: `shipper ${args.join(' ')}`,
+          finalMessage: sessionContext.finalMessage,
+          sessionLogPath: sessionContext.sessionLogPath,
+        });
       } catch (err) {
         return formatToolError(err);
       }

@@ -33,6 +33,7 @@ vi.mock('node:os', async () => {
 const {
   aggregateAllIssueUsage,
   aggregateSessionUsage,
+  findLatestSessionMeta,
   getSessionDir,
   getSessionPaths,
   resolveSessionRepo,
@@ -569,6 +570,138 @@ describe('aggregateAllIssueUsage', () => {
   });
 });
 
+describe('findLatestSessionMeta', () => {
+  it('returns undefined when the session directory does not exist', async () => {
+    mockHomeDir.value = mkdtempSync(path.join(tmpdir(), 'session-home-'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      await expect(
+        findLatestSessionMeta({
+          repoSlug: 'owner-repo',
+          issue: '308',
+          stage: 'implement',
+          since: new Date('2026-03-15T00:00:00.000Z'),
+        })
+      ).resolves.toBeUndefined();
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+      rmSync(mockHomeDir.value, { recursive: true, force: true });
+    }
+  });
+
+  it('filters by issue, stage, and since, returning the newest valid match', async () => {
+    const tempHome = mkdtempSync(path.join(tmpdir(), 'session-home-'));
+    mockHomeDir.value = tempHome;
+    const sessionDir = getSessionDir('owner-repo');
+
+    try {
+      writeSessionMetaSync(
+        path.join(sessionDir, '307-implement.meta.json'),
+        buildMeta({
+          issue: '307',
+          stage: 'implement',
+          timestamp: '2026-03-15T03:00:00.000Z',
+        })
+      );
+      writeSessionMetaSync(
+        path.join(sessionDir, '308-plan.meta.json'),
+        buildMeta({
+          issue: '308',
+          stage: 'plan',
+          timestamp: '2026-03-15T03:30:00.000Z',
+        })
+      );
+      writeSessionMetaSync(
+        path.join(sessionDir, '308-implement-old.meta.json'),
+        buildMeta({
+          issue: '308',
+          stage: 'implement',
+          timestamp: '2026-03-14T23:59:59.000Z',
+        })
+      );
+      writeSessionMetaSync(
+        path.join(sessionDir, '308-implement-current.meta.json'),
+        buildMeta({
+          issue: '308',
+          stage: 'implement',
+          timestamp: '2026-03-15T04:00:00.000Z',
+          logFile: '/tmp/current.jsonl',
+        })
+      );
+      writeSessionMetaSync(
+        path.join(sessionDir, '308-implement-latest.meta.json'),
+        buildMeta({
+          issue: '308',
+          stage: 'implement',
+          timestamp: '2026-03-15T05:00:00.000Z',
+          logFile: '/tmp/latest.jsonl',
+        })
+      );
+
+      await expect(
+        findLatestSessionMeta({
+          repoSlug: 'owner-repo',
+          issue: '308',
+          stage: 'implement',
+          since: new Date('2026-03-15T00:00:00.000Z'),
+        })
+      ).resolves.toMatchObject({
+        issue: '308',
+        stage: 'implement',
+        timestamp: '2026-03-15T05:00:00.000Z',
+        logFile: '/tmp/latest.jsonl',
+      });
+    } finally {
+      rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it('ignores malformed sidecars and invalid timestamps', async () => {
+    const tempHome = mkdtempSync(path.join(tmpdir(), 'session-home-'));
+    mockHomeDir.value = tempHome;
+    const sessionDir = getSessionDir('owner-repo');
+
+    try {
+      mkdirSync(sessionDir, { recursive: true });
+      writeFileSync(path.join(sessionDir, '308-bad.meta.json'), '{bad json', 'utf-8');
+      writeSessionMetaSync(path.join(sessionDir, '308-invalid-timestamp.meta.json'), {
+        ...buildMeta({
+          issue: '308',
+          stage: 'implement',
+          timestamp: '2026-03-15T02:00:00.000Z',
+        }),
+        timestamp: 'not-a-date',
+      });
+      writeSessionMetaSync(
+        path.join(sessionDir, '308-valid.meta.json'),
+        buildMeta({
+          issue: '308',
+          stage: 'implement',
+          timestamp: '2026-03-15T03:00:00.000Z',
+          logFile: '/tmp/valid.jsonl',
+        })
+      );
+
+      await expect(
+        findLatestSessionMeta({
+          repoSlug: 'owner-repo',
+          issue: '308',
+          stage: 'implement',
+          since: new Date('2026-03-15T00:00:00.000Z'),
+        })
+      ).resolves.toMatchObject({
+        issue: '308',
+        stage: 'implement',
+        logFile: '/tmp/valid.jsonl',
+      });
+    } finally {
+      rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+});
+
 function writeSessionMetaSync(metaFile: string, meta: Record<string, unknown>): void {
   mkdirSync(path.dirname(metaFile), { recursive: true });
   writeFileSync(metaFile, `${JSON.stringify(meta, null, 2)}\n`, 'utf-8');
@@ -579,6 +712,7 @@ function buildMeta(overrides: {
   timestamp: string;
   stage?: string;
   exitCode?: number;
+  logFile?: string;
   usage?: Record<string, unknown>;
 }): Record<string, unknown> {
   return {
@@ -589,6 +723,7 @@ function buildMeta(overrides: {
     model: 'opus',
     timestamp: overrides.timestamp,
     exitCode: overrides.exitCode ?? 0,
+    ...(overrides.logFile ? { logFile: overrides.logFile } : {}),
     ...(overrides.usage ? { usage: overrides.usage } : {}),
   };
 }

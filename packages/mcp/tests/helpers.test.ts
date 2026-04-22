@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { formatSpawnResult, formatToolError } from '../src/helpers.js';
+import {
+  formatAdvanceResult,
+  formatCreateIssueResult,
+  formatSpawnResult,
+  formatToolError,
+  formatUnblockResult,
+} from '../src/helpers.js';
 
 describe('formatToolError', () => {
   it('returns isError with Error message', () => {
@@ -43,5 +49,106 @@ describe('formatSpawnResult', () => {
     );
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toContain('[timed out]');
+  });
+});
+
+describe('tool-specific result formatters', () => {
+  it('formats create-issue success with structured payload, final message, and session log', () => {
+    const result = formatCreateIssueResult(
+      { exitCode: 0, stdout: 'ignored transcript', stderr: '', timedOut: false },
+      {
+        issueNumber: 42,
+        title: 'Improve MCP results',
+        url: 'https://github.com/owner/repo/issues/42',
+      },
+      {
+        command: 'shipper new <request> --mode headless',
+        finalMessage: 'Created issue #42 and verified the labels.',
+        sessionLogPath: '/tmp/session.jsonl',
+      }
+    );
+
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0]?.text).toContain('Created issue: #42 Improve MCP results');
+    expect(result.content[0]?.text).toContain('URL: https://github.com/owner/repo/issues/42');
+    expect(result.content[0]?.text).toContain('Created issue #42 and verified the labels.');
+    expect(result.content[0]?.text).toContain('Session log: /tmp/session.jsonl');
+    expect(result.content[0]?.text).not.toContain('ignored transcript');
+  });
+
+  it('renders the missing-final-message fallback line verbatim', () => {
+    const result = formatAdvanceResult(
+      { exitCode: 0, stdout: '', stderr: '', timedOut: false },
+      { from: 'shipper:planned', to: 'shipper:implemented', verdict: 'accept' },
+      {
+        command: 'shipper next 42 --mode headless',
+        sessionLogPath: '/tmp/advance.jsonl',
+      }
+    );
+
+    expect(result.content[0]?.text).toContain(
+      'No final message was captured in this run. See session log for details.'
+    );
+  });
+
+  it('formats failure summaries with a bounded stderr tail and session-log fallback', () => {
+    const result = formatUnblockResult(
+      {
+        exitCode: 1,
+        stdout: 'full transcript',
+        stderr: 'line 1\nline 2\nfatal detail',
+        timedOut: false,
+      },
+      undefined,
+      {
+        command: 'shipper unblock 42 --mode headless',
+      }
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain('[exit 1] shipper unblock 42 --mode headless');
+    expect(result.content[0]?.text).toContain('--- stderr (tail) ---');
+    expect(result.content[0]?.text).toContain('fatal detail');
+    expect(result.content[0]?.text).toContain('Session log: <not found>');
+    expect(result.content[0]?.text).not.toContain('full transcript');
+  });
+
+  it('renders session-log-missing markers on structured success paths', () => {
+    const result = formatUnblockResult(
+      { exitCode: 0, stdout: '', stderr: '', timedOut: false },
+      { verdict: 'still-blocked', reason: 'Waiting on upstream dependency.' },
+      {
+        command: 'shipper unblock 42 --mode headless',
+        finalMessage: 'The issue remains blocked.',
+      }
+    );
+
+    expect(result.content[0]?.text).toContain('Verdict: still-blocked');
+    expect(result.content[0]?.text).toContain('Reason: Waiting on upstream dependency.');
+    expect(result.content[0]?.text).toContain('Session log: <not found>');
+  });
+
+  it('keeps isError true for structured advance payloads recovered from non-zero exits', () => {
+    const result = formatAdvanceResult(
+      { exitCode: 1, stdout: '', stderr: 'rejecting', timedOut: false },
+      {
+        from: 'shipper:planned',
+        to: 'shipper:designed',
+        verdict: 'reject',
+        prUrl: 'https://github.com/owner/repo/pull/7',
+      },
+      {
+        command: 'shipper next 42 --mode headless',
+        finalMessage: 'Rejected the implementation step.',
+        sessionLogPath: '/tmp/reject.jsonl',
+      }
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain(
+      'Stage: shipper:planned -> shipper:designed (reject)'
+    );
+    expect(result.content[0]?.text).toContain('PR: https://github.com/owner/repo/pull/7');
+    expect(result.content[0]?.text).toContain('Rejected the implementation step.');
   });
 });
