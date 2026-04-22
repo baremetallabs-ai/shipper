@@ -420,7 +420,7 @@ describe('BackgroundManager', () => {
       meta: { issueNumber: 42 },
     });
 
-    manager.removeQueuedSession('ship-2');
+    expect(manager.removeQueuedSession('ship-2')).toBe('paused');
     latestChild().close(0);
 
     expect(mockSpawn).toHaveBeenCalledTimes(1);
@@ -444,6 +444,45 @@ describe('BackgroundManager', () => {
           event.sessionId === 'ship-2' && isRecord(event.meta) && event.meta.cancelled === true
       )
     ).toBe(false);
+  });
+
+  it('converts a queued pause request into a running pause request if the session already advanced', () => {
+    const manager = createManager();
+
+    manager.spawn({
+      sessionId: 'ship-1',
+      command: 'ship',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['ship', '41', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+      meta: { issueNumber: 41 },
+    });
+    manager.spawn({
+      sessionId: 'ship-2',
+      command: 'ship',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['ship', '42', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+      meta: { issueNumber: 42 },
+    });
+
+    children[0]?.close(0);
+
+    expect(manager.removeQueuedSession('ship-2')).toBe('pause-requested');
+
+    const pauseSentinelPath = join(tempDir, 'pause-sentinels', 'ship-2');
+    expect(existsSync(pauseSentinelPath)).toBe(true);
+    expect(
+      statusEvents().some(
+        (event) =>
+          event.sessionId === 'ship-2' &&
+          event.status === 'running' &&
+          isRecord(event.meta) &&
+          event.meta.pausePending === true
+      )
+    ).toBe(true);
   });
 
   it('classifies paused exit codes as paused and removes the sentinel file', () => {

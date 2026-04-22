@@ -127,11 +127,12 @@ function addPausedIssue(repo: string, issueNumber: number): void {
 function removePausedIssue(repo: string, issueNumber: number): void {
   const state = readPauseState();
   const issueNumbers = (state[repo] ?? []).filter((value) => value !== issueNumber);
-  const nextState =
-    issueNumbers.length === 0
-      ? Object.fromEntries(Object.entries(state).filter(([currentRepo]) => currentRepo !== repo))
-      : { ...state, [repo]: issueNumbers };
+  if (issueNumbers.length > 0) {
+    writePauseState({ ...state, [repo]: issueNumbers });
+    return;
+  }
 
+  const { [repo]: _removedRepo, ...nextState } = state;
   writePauseState(nextState);
 }
 

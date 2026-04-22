@@ -271,6 +271,39 @@ describe('useBackgroundCommands', () => {
     expect(shipper.api.pauseIssue).toHaveBeenCalledWith('owner/repo', 71);
   });
 
+  it('treats a queued pause request that already advanced to running as pause-pending', async () => {
+    const shipper = createMockShipperApi();
+    shipper.install();
+    vi.mocked(shipper.api.removeQueuedSession).mockResolvedValue('pause-requested');
+    const pipelineBridge = createPipelineBridge();
+    const { result } = renderHook(() =>
+      useBackgroundCommands({
+        activeRepo: 'owner/repo',
+        autoMergeRepos: new Set(),
+        checkInitState: vi.fn(() => Promise.resolve(undefined)),
+        pipelineBridgeRef: { current: pipelineBridge },
+      })
+    );
+    await flushHookEffects();
+
+    shipper.emitBackgroundStatus({
+      sessionId: 'ship-queued',
+      command: 'ship',
+      repo: 'owner/repo',
+      status: 'queued',
+      meta: { issueNumber: 71, merge: false },
+    });
+    await flushHookEffects();
+
+    await act(async () => {
+      await result.current.handlePauseIssue(createIssue(71));
+    });
+
+    expect(result.current.pausePendingIssues.has(71)).toBe(true);
+    expect(shipper.api.pauseIssue).not.toHaveBeenCalledWith('owner/repo', 71);
+    expect(pipelineBridge.trackPausedIssue).not.toHaveBeenCalledWith(71);
+  });
+
   it('requests pause for active ships, tracks pausePending, persists on paused exit, and continues auto-ship', async () => {
     const shipper = createMockShipperApi();
     shipper.install();
@@ -373,6 +406,170 @@ describe('useBackgroundCommands', () => {
 
     expect(result.current.pausePendingIssues.has(74)).toBe(false);
     expect(shipper.api.pauseIssue).not.toHaveBeenCalledWith('owner/repo', 74);
+  });
+
+  it('clears pause-pending state when a paused ship completes instead of pausing', async () => {
+    const shipper = createMockShipperApi();
+    shipper.install();
+    const { result } = renderHook(() =>
+      useBackgroundCommands({
+        activeRepo: 'owner/repo',
+        autoMergeRepos: new Set(),
+        checkInitState: vi.fn(() => Promise.resolve(undefined)),
+        pipelineBridgeRef: { current: createPipelineBridge() },
+      })
+    );
+    await flushHookEffects();
+
+    shipper.emitBackgroundStatus({
+      sessionId: 'ship-completing',
+      command: 'ship',
+      repo: 'owner/repo',
+      status: 'running',
+      meta: { issueNumber: 76, merge: false, pausePending: true },
+    });
+    await flushHookEffects();
+    expect(result.current.pausePendingIssues.has(76)).toBe(true);
+
+    shipper.emitBackgroundStatus({
+      sessionId: 'ship-completing',
+      command: 'ship',
+      repo: 'owner/repo',
+      status: 'complete',
+      meta: { issueNumber: 76, merge: false },
+    });
+    await flushHookEffects();
+
+    expect(result.current.pausePendingIssues.has(76)).toBe(false);
+  });
+
+  it('keeps pause-pending state scoped to the active repository', async () => {
+    const shipper = createMockShipperApi();
+    shipper.install();
+    const { result } = renderHook(() =>
+      useBackgroundCommands({
+        activeRepo: 'owner/repo',
+        autoMergeRepos: new Set(),
+        checkInitState: vi.fn(() => Promise.resolve(undefined)),
+        pipelineBridgeRef: { current: createPipelineBridge() },
+      })
+    );
+    await flushHookEffects();
+
+    shipper.emitBackgroundStatus({
+      sessionId: 'ship-other-repo',
+      command: 'ship',
+      repo: 'other/repo',
+      status: 'running',
+      meta: { issueNumber: 123, merge: false, pausePending: true },
+    });
+    await flushHookEffects();
+
+    expect(result.current.pausePendingIssues.has(123)).toBe(false);
+  });
+
+  it('uses paused issues from the event repo when auto-ship selects the next issue', async () => {
+    const shipper = createMockShipperApi();
+    shipper.install();
+    vi.mocked(shipper.api.listIssues).mockResolvedValue({
+      ok: true,
+      issues: [createIssue(81), createIssue(82)],
+    });
+    vi.mocked(shipper.api.listPausedIssues).mockImplementation((repo: string) =>
+      Promise.resolve(repo === 'other/repo' ? [81] : [])
+    );
+    const pipelineBridge = createPipelineBridge();
+    vi.mocked(pipelineBridge.getPausedIssues).mockReturnValue(new Set([82]));
+    const { result } = renderHook(() =>
+      useBackgroundCommands({
+        activeRepo: 'owner/repo',
+        autoMergeRepos: new Set(['other/repo']),
+        checkInitState: vi.fn(() => Promise.resolve(undefined)),
+        pipelineBridgeRef: { current: pipelineBridge },
+      })
+    );
+    await flushHookEffects();
+
+    act(() => {
+      result.current.enableAutoShipForRepo('other/repo');
+    });
+
+    shipper.emitBackgroundStatus({
+      sessionId: 'ship-other-complete',
+      command: 'ship',
+      repo: 'other/repo',
+      status: 'complete',
+      meta: { issueNumber: 80, merge: true },
+    });
+    await flushHookEffects();
+
+    await waitFor(() => {
+      expect(shipper.api.listPausedIssues).toHaveBeenCalledWith('other/repo');
+      expect(shipper.api.spawnBackgroundShip).toHaveBeenCalledWith(82, 'other/repo', true);
+    });
+  });
+
+  it('surfaces resume failures without clearing paused state optimistically', async () => {
+    const shipper = createMockShipperApi();
+    shipper.install();
+    vi.mocked(shipper.api.resumeIssue).mockRejectedValue(new Error('resume failed'));
+    const pipelineBridge = createPipelineBridge();
+    const { result } = renderHook(() =>
+      useBackgroundCommands({
+        activeRepo: 'owner/repo',
+        autoMergeRepos: new Set(),
+        checkInitState: vi.fn(() => Promise.resolve(undefined)),
+        pipelineBridgeRef: { current: pipelineBridge },
+      })
+    );
+    await flushHookEffects();
+
+    await act(async () => {
+      await result.current.handleResumeIssue(77);
+    });
+
+    expect(pipelineBridge.clearPausedIssue).not.toHaveBeenCalledWith(77);
+    expect(result.current.toasts).toContainEqual(
+      expect.objectContaining({
+        title: 'Could not resume #77',
+        description: 'resume failed',
+      })
+    );
+  });
+
+  it('catches paused-state persistence failures from background events', async () => {
+    const shipper = createMockShipperApi();
+    shipper.install();
+    vi.mocked(shipper.api.pauseIssue).mockRejectedValue(new Error('disk full'));
+    const pipelineBridge = createPipelineBridge();
+    const { result } = renderHook(() =>
+      useBackgroundCommands({
+        activeRepo: 'owner/repo',
+        autoMergeRepos: new Set(),
+        checkInitState: vi.fn(() => Promise.resolve(undefined)),
+        pipelineBridgeRef: { current: pipelineBridge },
+      })
+    );
+    await flushHookEffects();
+
+    shipper.emitBackgroundStatus({
+      sessionId: 'ship-paused',
+      command: 'ship',
+      repo: 'owner/repo',
+      status: 'paused',
+      meta: { issueNumber: 78, merge: false },
+    });
+    await flushHookEffects();
+
+    await waitFor(() => {
+      expect(result.current.toasts).toContainEqual(
+        expect.objectContaining({
+          title: 'Failed to pause #78',
+          description: 'disk full',
+        })
+      );
+    });
+    expect(pipelineBridge.trackPausedIssue).not.toHaveBeenCalledWith(78);
   });
 
   it('shows the final-stage pause no-op message instead of persisting pause', async () => {

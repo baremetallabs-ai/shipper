@@ -151,7 +151,7 @@ interface ShipperAPI {
   spawnBackgroundUnblock: (issueNumber: number, repo: string) => Promise<{ sessionId: string }>;
   killBackground: (sessionId: string) => Promise<void>;
   requestPauseActive: (sessionId: string) => Promise<void>;
-  removeQueuedSession: (sessionId: string) => Promise<void>;
+  removeQueuedSession: (sessionId: string) => Promise<'ignored' | 'pause-requested' | 'paused'>;
   getBackgroundOutput: (sessionId: string) => Promise<string>;
   ptyWrite: (sessionId: string, data: string) => Promise<void>;
   ptyResize: (sessionId: string, cols: number, rows: number) => Promise<void>;
