@@ -173,6 +173,18 @@ describe('selectNextAutoShipIssue', () => {
     expect(mockedFetchIssueTimelines).not.toHaveBeenCalled();
   });
 
+  it('skips stale-lock checks for locked candidates that cannot beat the current winner', async () => {
+    const issues = [
+      createIssue(39, [PLANNED_LABEL, PRIORITY_HIGH_LABEL]),
+      createIssue(40, [PLANNED_LABEL, LOCKED_LABEL]),
+      createIssue(41, [GROOMED_LABEL, LOCKED_LABEL]),
+    ];
+
+    expect((await selectIssue(issues))?.number).toBe(39);
+    expect(mockedCheckLockStale).not.toHaveBeenCalled();
+    expect(mockedUnlockIssue).not.toHaveBeenCalled();
+  });
+
   it('excludes paused issues from auto-ship selection', async () => {
     const issues = [createIssue(60, [PLANNED_LABEL]), createIssue(61, [IMPLEMENTED_LABEL])];
 
