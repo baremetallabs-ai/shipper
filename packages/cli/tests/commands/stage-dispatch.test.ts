@@ -10,7 +10,8 @@ const runGroomStageMock =
       issue: string,
       mode?: string,
       agent?: string,
-      model?: string
+      model?: string,
+      disableMcp?: boolean
     ) => Promise<StageRunResult>
   >();
 const runDesignStageMock =
@@ -20,7 +21,8 @@ const runDesignStageMock =
       issue: string,
       mode?: string,
       agent?: string,
-      model?: string
+      model?: string,
+      disableMcp?: boolean
     ) => Promise<StageRunResult>
   >();
 const runPlanStageMock =
@@ -30,7 +32,8 @@ const runPlanStageMock =
       issue: string,
       mode?: string,
       agent?: string,
-      model?: string
+      model?: string,
+      disableMcp?: boolean
     ) => Promise<StageRunResult>
   >();
 const runImplementStageMock =
@@ -40,7 +43,8 @@ const runImplementStageMock =
       issue: string,
       mode?: string,
       agent?: string,
-      model?: string
+      model?: string,
+      disableMcp?: boolean
     ) => Promise<StageRunResult>
   >();
 const runPrOpenStageMock =
@@ -50,7 +54,8 @@ const runPrOpenStageMock =
       issue: string,
       mode?: string,
       agent?: string,
-      model?: string
+      model?: string,
+      disableMcp?: boolean
     ) => Promise<StageRunResult>
   >();
 const runPrReviewStageMock =
@@ -61,18 +66,24 @@ const runPrReviewStageMock =
       pr: string,
       mode?: string,
       agent?: string,
-      model?: string
+      model?: string,
+      disableMcp?: boolean
     ) => Promise<StageRunResult>
   >();
-const runPrRemediateStageMock =
-  vi.fn<
-    (
-      repo: string,
-      issue: string,
-      pr: string,
-      options?: { mode?: string; agent?: string; model?: string; skipInitialWait?: boolean }
-    ) => Promise<StageRunResult>
-  >();
+const runPrRemediateStageMock = vi.fn<
+  (
+    repo: string,
+    issue: string,
+    pr: string,
+    options?: {
+      mode?: string;
+      agent?: string;
+      model?: string;
+      disableMcp?: boolean;
+      skipInitialWait?: boolean;
+    }
+  ) => Promise<StageRunResult>
+>();
 
 const successResult: StageRunResult = { success: true, exitCode: 0, verdict: 'accept' };
 
@@ -169,7 +180,8 @@ describe('runStageForLabel', () => {
       '159',
       'interactive',
       'codex',
-      'gpt-5'
+      'gpt-5',
+      undefined
     );
 
     await expect(
@@ -184,7 +196,8 @@ describe('runStageForLabel', () => {
       '159',
       'headless',
       'codex',
-      'gpt-5'
+      'gpt-5',
+      undefined
     );
   });
 
@@ -206,7 +219,8 @@ describe('runStageForLabel', () => {
       '200',
       'headless',
       'codex',
-      'gpt-5'
+      'gpt-5',
+      undefined
     );
   });
 
@@ -227,8 +241,28 @@ describe('runStageForLabel', () => {
       mode: 'headless',
       agent: 'codex',
       model: 'gpt-5',
+      disableMcp: undefined,
       skipInitialWait: true,
     });
+  });
+
+  it('forwards disableMcp to stage runners', async () => {
+    const { runStageForLabel } = await import('../../src/commands/stage-dispatch.js');
+
+    await expect(
+      runStageForLabel('owner/repo', '159', 'shipper:new', {
+        disableMcp: true,
+      })
+    ).resolves.toEqual(successResult);
+
+    expect(runGroomStageMock).toHaveBeenCalledWith(
+      'owner/repo',
+      '159',
+      undefined,
+      undefined,
+      undefined,
+      true
+    );
   });
 
   it('treats ready as a no-op success', async () => {

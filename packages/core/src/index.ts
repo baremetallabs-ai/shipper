@@ -149,6 +149,7 @@ export {
   SETTING_DESCRIPTIONS,
   getSettings,
   loadSettings,
+  resolveDisableMcp,
   resolveMode,
 } from './lib/settings.js';
 export { sleepMs } from './lib/sleep.js';

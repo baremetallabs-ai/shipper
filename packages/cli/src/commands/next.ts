@@ -19,7 +19,8 @@ export async function nextCommand(
   ref: string,
   mode?: CommandMode,
   agent?: AgentName,
-  model?: string
+  model?: string,
+  disableMcp?: boolean
 ): Promise<void> {
   if (!ref) {
     logger.error('Usage: shipper next <issue-or-pr>');
@@ -87,7 +88,7 @@ export async function nextCommand(
   const result = await withIssueLock(
     repo,
     issueStr,
-    async () => await runStageForLabel(repo, issueStr, label, { mode, agent, model })
+    async () => await runStageForLabel(repo, issueStr, label, { mode, agent, model, disableMcp })
   );
   if (result.verdict === 'reject') {
     const rolledBackLabel = (await getCurrentWorkflowLabel(repo, issueStr)) ?? '(unknown)';

@@ -18,7 +18,8 @@ export async function runPrOpenStage(
   issue: string,
   mode?: CommandMode,
   agent?: AgentName,
-  model?: string
+  model?: string,
+  disableMcp?: boolean
 ): Promise<StageRunResult> {
   const existingPrNumber = await tryResolvePrForIssue(repo, Number(issue));
 
@@ -41,7 +42,7 @@ export async function runPrOpenStage(
     invoker: transportInvoker({
       promptName: 'pr_open',
       pushMode: 'force-with-lease',
-      baseRunPromptOpts: { repo, issueRef: issue, baseBranch, mode, agent, model },
+      baseRunPromptOpts: { repo, issueRef: issue, baseBranch, mode, agent, model, disableMcp },
     }),
   });
 }
@@ -51,7 +52,8 @@ export async function prOpenCommand(
   issue?: string,
   mode?: CommandMode,
   agent?: AgentName,
-  model?: string
+  model?: string,
+  disableMcp?: boolean
 ): Promise<void> {
   if (!issue) {
     const selected = await autoSelectIssue(repo, 'shipper:implemented');
@@ -65,5 +67,5 @@ export async function prOpenCommand(
     issue = resolved.issueNumber;
   }
 
-  process.exitCode = (await runPrOpenStage(repo, issue, mode, agent, model)).exitCode;
+  process.exitCode = (await runPrOpenStage(repo, issue, mode, agent, model, disableMcp)).exitCode;
 }

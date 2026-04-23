@@ -231,4 +231,83 @@ describe('shipAutoSequential', () => {
     );
     expect(logs.some((line) => line.includes('rolled back to shipper:new'))).toBe(true);
   });
+
+  it('forwards disableMcp into sequential auto issue runs', async () => {
+    selectNextCandidateMock
+      .mockResolvedValueOnce({ number: 1, title: 'First issue' })
+      .mockResolvedValue(null);
+    shipOneIssueMock.mockResolvedValueOnce({ success: true });
+
+    const { shipAutoSequential } = await import('../../src/commands/ship-auto.js');
+    await shipAutoSequential('owner/repo', 'codex', 'gpt-5', true);
+
+    expect(shipOneIssueMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repo: 'owner/repo',
+        issue: '1',
+        agent: 'codex',
+        model: 'gpt-5',
+        disableMcp: true,
+      })
+    );
+  });
+});
+
+describe('shipAutoParallel', () => {
+  let fake: FakeCore;
+
+  beforeEach(() => {
+    fake = createFakeCore();
+    fake.install();
+    vi.clearAllMocks();
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    process.exitCode = undefined;
+    selectBlockedIssuesMock.mockResolvedValue([]);
+  });
+
+  afterEach(async () => {
+    process.exitCode = undefined;
+    vi.restoreAllMocks();
+    await fake.dispose();
+  });
+
+  it('forwards disableMcp through the parallel worker IPC payload', async () => {
+    selectNextCandidateMock
+      .mockResolvedValueOnce({ number: 1, title: 'First issue' })
+      .mockResolvedValue(null);
+
+    const messageHandlers = new Map<string, (value: unknown) => void>();
+    let sentMessage: unknown;
+    forkMock.mockImplementation(() => {
+      return {
+        stdout: { on: vi.fn() },
+        stderr: { on: vi.fn() },
+        on: vi.fn((event: string, handler: (value: unknown) => void) => {
+          messageHandlers.set(event, handler);
+        }),
+        send: vi.fn((message: unknown) => {
+          sentMessage = message;
+          messageHandlers.get('message')?.({ type: 'result', success: true });
+          return true;
+        }),
+        kill: vi.fn(),
+        exitCode: null,
+        signalCode: null,
+      };
+    });
+
+    const { shipAutoParallel } = await import('../../src/commands/ship-auto.js');
+    await shipAutoParallel('owner/repo', 2, 'codex', 'gpt-5', true);
+
+    expect(sentMessage).toEqual(
+      expect.objectContaining({
+        type: 'run',
+        repo: 'owner/repo',
+        issue: '1',
+        agent: 'codex',
+        model: 'gpt-5',
+        disableMcp: true,
+      })
+    );
+  });
 });

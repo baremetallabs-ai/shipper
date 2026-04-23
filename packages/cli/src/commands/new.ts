@@ -54,7 +54,13 @@ async function generateUniqueNewBranch(repoRoot: string): Promise<string> {
 export async function newCommand(
   repo: string,
   requestWords: string[],
-  options: { mode?: CommandMode; agent?: AgentName; model?: string; logFile?: string } = {}
+  options: {
+    mode?: CommandMode;
+    agent?: AgentName;
+    model?: string;
+    disableMcp?: boolean;
+    logFile?: string;
+  } = {}
 ): Promise<void> {
   const request = requestWords.join(' ').trim();
   if (!request) {
@@ -89,6 +95,7 @@ export async function newCommand(
             mode: options.mode,
             agent: options.agent,
             model: options.model,
+            disableMcp: options.disableMcp,
             logFile: options.logFile,
           })
       );

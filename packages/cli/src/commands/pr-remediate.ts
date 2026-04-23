@@ -50,6 +50,7 @@ export interface PrRemediateStageOptions {
   mode?: CommandMode;
   agent?: AgentName;
   model?: string;
+  disableMcp?: boolean;
   skipInitialWait?: boolean;
 }
 
@@ -312,7 +313,7 @@ export async function runPrRemediateStage(
   prRef: string,
   options: PrRemediateStageOptions = {}
 ): Promise<StageRunResult> {
-  const { mode, agent, model, skipInitialWait = false } = options;
+  const { mode, agent, model, disableMcp, skipInitialWait = false } = options;
   let failureError: string | undefined;
   let verdict: StageRunResult['verdict'];
 
@@ -399,6 +400,7 @@ export async function runPrRemediateStage(
                     mode,
                     agent,
                     model,
+                    disableMcp,
                     userInput: await truncateLargeInput(
                       wtPath,
                       formatConflictContext(conflictContext),
@@ -415,6 +417,7 @@ export async function runPrRemediateStage(
                     mode,
                     agent,
                     model,
+                    disableMcp,
                     userInput: await truncateLargeInput(wtPath, installError, 'install-error.txt'),
                   });
                 }
@@ -463,6 +466,7 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
               mode,
               agent,
               model,
+              disableMcp,
             });
             if (exitCode !== 0) {
               const detail = `Agent exited with code ${exitCode}`;
@@ -492,6 +496,7 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
                     mode,
                     agent,
                     model,
+                    disableMcp,
                     userInput,
                   }),
               });
@@ -551,6 +556,7 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
                     mode,
                     agent,
                     model,
+                    disableMcp,
                     userInput: conflictContext
                       ? formatConflictContext(conflictContext)
                       : (pushError ?? installError ?? undefined),
@@ -680,7 +686,8 @@ export async function prRemediateCommand(
   pr?: string,
   mode?: CommandMode,
   agent?: AgentName,
-  model?: string
+  model?: string,
+  disableMcp?: boolean
 ): Promise<void> {
   let issueNumber: string;
 
@@ -706,6 +713,6 @@ export async function prRemediateCommand(
   }
 
   process.exitCode = (
-    await runPrRemediateStage(repo, issueNumber, pr, { mode, agent, model })
+    await runPrRemediateStage(repo, issueNumber, pr, { mode, agent, model, disableMcp })
   ).exitCode;
 }

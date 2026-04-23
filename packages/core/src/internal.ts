@@ -155,7 +155,7 @@ export {
   writeSessionMeta,
 } from './lib/session.js';
 export type { CommandConfig, MergeSettings, Settings } from './lib/settings.js';
-export { resolveAgent } from './lib/settings.js';
+export { resolveAgent, resolveDisableMcp } from './lib/settings.js';
 export type {
   ScaffoldResultStage,
   ScaffoldStage,

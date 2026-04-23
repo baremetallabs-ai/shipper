@@ -13,6 +13,7 @@ interface ShipOptions {
   mode?: CommandMode;
   agent?: AgentName;
   model?: string;
+  disableMcp?: boolean;
 }
 
 export async function shipCommand(
@@ -23,11 +24,11 @@ export async function shipCommand(
   if (options.auto) {
     const parallel = options.parallel ?? 0;
     if (parallel >= 2) {
-      await shipAutoParallel(repo, parallel, options.agent, options.model);
+      await shipAutoParallel(repo, parallel, options.agent, options.model, options.disableMcp);
       return;
     }
 
-    await shipAutoSequential(repo, options.agent, options.model);
+    await shipAutoSequential(repo, options.agent, options.model, options.disableMcp);
     return;
   }
 
@@ -47,6 +48,7 @@ export async function shipCommand(
     mode: options.mode,
     agent: options.agent,
     model: options.model,
+    disableMcp: options.disableMcp,
     pauseProbe: pauseSentinelPath ? () => existsSync(pauseSentinelPath) : undefined,
     logFile,
   });

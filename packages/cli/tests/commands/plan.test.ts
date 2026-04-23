@@ -98,6 +98,7 @@ describe('planCommand', () => {
           mode: undefined,
           agent: undefined,
           model: undefined,
+          disableMcp: undefined,
         },
       },
     ]);
@@ -151,5 +152,25 @@ describe('planCommand', () => {
     expect(process.exitCode).toBe(1);
     expect(fake.state.postedComments.at(-1)?.body).toContain('The `plan` agent run exited');
     expect(fake.state.issues.get('123')?.labels).toEqual(new Set(['shipper:designed']));
+  });
+
+  it('forwards disableMcp into the planning prompt invocation', async () => {
+    fake.setIssue('123', { labels: ['shipper:designed'], title: 'Planning issue' });
+    fake.scriptRunPrompt(async (name, opts) => {
+      promptCalls.push({ name, opts });
+      await fake.writeStageOutput({
+        result: { verdict: 'accept', comment: '.shipper/output/comment-123.md' },
+        commentBody: 'Plan accepted.',
+      });
+      return 0;
+    });
+
+    const { planCommand } = await import('../../src/commands/plan.js');
+
+    await expect(
+      planCommand(repo, '123', undefined, undefined, undefined, true)
+    ).resolves.toBeUndefined();
+
+    expect(promptCalls[0]?.opts.disableMcp).toBe(true);
   });
 });

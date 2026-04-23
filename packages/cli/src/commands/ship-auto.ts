@@ -44,6 +44,7 @@ interface WorkerRunMessage {
   issue: string;
   agent?: AgentName;
   model?: string;
+  disableMcp?: boolean;
   logFile?: string;
 }
 
@@ -141,7 +142,8 @@ function shipOneIssueAsync(
   repo: string,
   logFile?: string,
   agent?: AgentName,
-  model?: string
+  model?: string,
+  disableMcp?: boolean
 ): AsyncIssueRun {
   const child = fork(resolveWorkerPath(), [], {
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
@@ -197,6 +199,7 @@ function shipOneIssueAsync(
       issue,
       ...(agent !== undefined ? { agent } : {}),
       ...(model !== undefined ? { model } : {}),
+      ...(disableMcp !== undefined ? { disableMcp } : {}),
       ...(logFile !== undefined ? { logFile } : {}),
     };
     child.send(message);
@@ -261,7 +264,8 @@ function startSequentialIssueRun(
   shouldPark: () => Promise<boolean>,
   logFile?: string,
   agent?: AgentName,
-  model?: string
+  model?: string,
+  disableMcp?: boolean
 ): SequentialIssueRun {
   const parkObserver = createParkObserver(shouldPark);
   const completion = shipOneIssue({
@@ -270,6 +274,7 @@ function startSequentialIssueRun(
     merge: true,
     agent,
     model,
+    disableMcp,
     parkHooks: parkObserver.hooks,
     logFile,
   }).finally(() => {
@@ -386,7 +391,8 @@ async function resumeParkedIssue(
 export async function shipAutoSequential(
   repo: string,
   agent?: AgentName,
-  model?: string
+  model?: string,
+  disableMcp?: boolean
 ): Promise<void> {
   const skippedIssues = new Set<number>();
   const results: AutoResult[] = [];
@@ -456,7 +462,8 @@ export async function shipAutoSequential(
           shouldParkCurrentIssue,
           logFile,
           agent,
-          model
+          model,
+          disableMcp
         );
         const outcome = await waitForCompletionOrPark(run);
         if (outcome.type === 'parked') {
@@ -500,6 +507,7 @@ export async function shipAutoSequential(
           String(issue.number),
           agent,
           model,
+          disableMcp,
           unblockLogFile
         );
         allUnblockAttempts.push({
@@ -551,7 +559,8 @@ export async function shipAutoParallel(
   repo: string,
   parallel: number,
   agent?: AgentName,
-  model?: string
+  model?: string,
+  disableMcp?: boolean
 ): Promise<void> {
   const skippedIssues = new Set<number>();
   const results: AutoResult[] = [];
@@ -625,7 +634,14 @@ export async function shipAutoParallel(
         logger.log(
           `\n[#${candidate.number}] Auto: advancing issue #${candidate.number} — ${candidate.title}`
         );
-        const run = shipOneIssueAsync(String(candidate.number), repo, logFile, agent, model);
+        const run = shipOneIssueAsync(
+          String(candidate.number),
+          repo,
+          logFile,
+          agent,
+          model,
+          disableMcp
+        );
         issueStartTimes.set(candidate.number, new Date());
         logFiles.set(candidate.number, logFile);
         activeRuns.set(candidate.number, {
@@ -655,6 +671,7 @@ export async function shipAutoParallel(
             String(issue.number),
             agent,
             model,
+            disableMcp,
             unblockLogFile
           );
           allUnblockAttempts.push({

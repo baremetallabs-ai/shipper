@@ -1,6 +1,7 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { createWriteStream, readFileSync, statSync } from 'node:fs';
 import { mkdir, readFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import path from 'node:path';
 import { toError, toErrorMessage } from './errors.js';
 import { parseFrontmatter } from './frontmatter.js';
@@ -15,6 +16,7 @@ import { getSessionPaths, resolveSessionRepo, writeSessionMeta } from './session
 import {
   getSettings,
   resolveAgent,
+  resolveDisableMcp,
   resolveModel,
   resolveMode,
   type AgentName,
@@ -34,6 +36,7 @@ export interface RunPromptOpts {
   mode?: CommandMode;
   agent?: AgentName;
   model?: string;
+  disableMcp?: boolean;
   logFile?: string;
 }
 
@@ -268,7 +271,7 @@ async function resolvePromptCommand(
   name: string,
   opts: RunPromptOpts,
   effectiveMode: CommandMode
-): Promise<{ agent: AgentName; args: string[]; promptBody: string }> {
+): Promise<{ agent: AgentName; args: string[]; promptBody: string; disableMcp: boolean }> {
   const agent = resolveAgent(name, opts.agent);
   if (agent === 'copilot') {
     try {
@@ -286,6 +289,7 @@ async function resolvePromptCommand(
     }
   }
   const model = resolveModel(name, opts.model);
+  const disableMcp = resolveDisableMcp(name, opts.disableMcp);
   const promptPath = path.resolve('.shipper', 'prompts', agent, `${name}.md`);
 
   let raw: string;
@@ -380,6 +384,8 @@ async function resolvePromptCommand(
     }
   }
 
+  await applyMcpPolicy(agent, args, disableMcp, opts.cwd ?? process.cwd());
+
   if (model) {
     if (agent === 'codex') {
       const execIdx = args.indexOf('exec');
@@ -469,7 +475,7 @@ async function resolvePromptCommand(
     );
   }
 
-  return { agent, args, promptBody };
+  return { agent, args, promptBody, disableMcp };
 }
 
 export async function buildPromptCommand(
@@ -535,6 +541,9 @@ async function runPromptDefault(name: string, opts: RunPromptOpts): Promise<numb
       opts.logFile ?? (trackUsage || effectiveMode === 'headless' ? logFile : undefined);
     const initialInput =
       agent === 'copilot' && effectiveMode !== 'headless' ? resolved.promptBody : undefined;
+    if (resolved.disableMcp) {
+      logger.log(`MCP loading disabled for stage ${name}.`);
+    }
     const exitCode = await spawnAsync(agent, args, {
       cwd: opts.cwd,
       timeoutMs,
@@ -587,6 +596,172 @@ export function __setRunPromptImpl(next?: typeof runPromptDefault): typeof runPr
   const previous = runPromptImpl;
   runPromptImpl = next ?? runPromptDefault;
   return previous;
+}
+
+async function applyMcpPolicy(
+  agent: AgentName,
+  args: string[],
+  disableMcp: boolean,
+  cwd: string
+): Promise<void> {
+  switch (agent) {
+    case 'claude':
+      stripClaudeMcpArgs(args);
+      if (disableMcp) {
+        args.push('--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}');
+      }
+      return;
+    case 'codex':
+      stripCodexMcpArgs(args);
+      if (disableMcp) {
+        args.push('-c', 'mcp_servers={}');
+      }
+      return;
+    case 'copilot':
+      stripCopilotMcpArgs(args);
+      if (disableMcp) {
+        args.push('--disable-builtin-mcps');
+        for (const serverName of await discoverCopilotMcpServerNames(args, cwd)) {
+          args.push('--disable-mcp-server', serverName);
+        }
+      }
+      return;
+    default: {
+      const exhaustiveCheck: never = agent;
+      throw new Error(`Unsupported agent: ${String(exhaustiveCheck)}`);
+    }
+  }
+}
+
+function stripClaudeMcpArgs(args: string[]): void {
+  stripFlag(args, '--strict-mcp-config');
+  stripFlagWithValue(args, '--mcp-config');
+}
+
+function stripCodexMcpArgs(args: string[]): void {
+  for (let i = args.length - 1; i >= 0; i--) {
+    const arg = args[i];
+    if (!arg) {
+      continue;
+    }
+    if ((arg === '-c' || arg === '--config') && isCodexMcpConfigValue(args[i + 1])) {
+      args.splice(i, 2);
+      continue;
+    }
+    if (arg.startsWith('--config=') && isCodexMcpConfigValue(arg.slice('--config='.length))) {
+      args.splice(i, 1);
+    }
+  }
+}
+
+function isCodexMcpConfigValue(value: string | undefined): boolean {
+  return typeof value === 'string' && value.trim().startsWith('mcp_servers=');
+}
+
+function stripCopilotMcpArgs(args: string[]): void {
+  stripFlag(args, '--disable-builtin-mcps');
+  stripFlagWithValue(args, '--disable-mcp-server');
+  stripFlagWithValue(args, '--additional-mcp-config');
+}
+
+function stripFlag(args: string[], flag: string): void {
+  for (let i = args.length - 1; i >= 0; i--) {
+    if (args[i] === flag) {
+      args.splice(i, 1);
+    }
+  }
+}
+
+function stripFlagWithValue(args: string[], flag: string): void {
+  for (let i = args.length - 1; i >= 0; i--) {
+    const arg = args[i];
+    if (!arg) {
+      continue;
+    }
+    if (arg === flag) {
+      args.splice(i, args[i + 1] === undefined ? 1 : 2);
+      continue;
+    }
+    if (arg.startsWith(`${flag}=`)) {
+      args.splice(i, 1);
+    }
+  }
+}
+
+async function discoverCopilotMcpServerNames(args: string[], cwd: string): Promise<string[]> {
+  const serverNames = new Set<string>();
+  const configDir = resolveCopilotConfigDir(args, cwd);
+
+  await Promise.all([
+    addCopilotServerNames(serverNames, path.join(cwd, '.mcp.json')),
+    addCopilotServerNames(serverNames, path.join(cwd, '.github', 'mcp.json')),
+    addCopilotServerNames(serverNames, path.join(configDir, 'mcp-config.json')),
+  ]);
+
+  return [...serverNames];
+}
+
+function resolveCopilotConfigDir(args: string[], cwd: string): string {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (!arg) {
+      continue;
+    }
+    if (arg === '--config-dir') {
+      return path.resolve(cwd, args[i + 1] ?? path.join(homedir(), '.copilot'));
+    }
+    if (arg.startsWith('--config-dir=')) {
+      return path.resolve(cwd, arg.slice('--config-dir='.length));
+    }
+  }
+
+  return path.join(homedir(), '.copilot');
+}
+
+async function addCopilotServerNames(serverNames: Set<string>, configPath: string): Promise<void> {
+  let raw: string;
+  try {
+    raw = await readFile(configPath, 'utf-8');
+  } catch (err) {
+    const error = toError(err) as Error & { code?: string };
+    if (error.code === 'ENOENT') {
+      return;
+    }
+    logger.warn(
+      `Warning: Failed to read Copilot MCP config at ${configPath}: ${toErrorMessage(error)}`
+    );
+    return;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    logger.warn(
+      `Warning: Failed to parse Copilot MCP config at ${configPath}: ${toErrorMessage(err)}`
+    );
+    return;
+  }
+
+  const mcpServers =
+    parsed &&
+    typeof parsed === 'object' &&
+    !Array.isArray(parsed) &&
+    Reflect.get(parsed, 'mcpServers') &&
+    typeof Reflect.get(parsed, 'mcpServers') === 'object' &&
+    !Array.isArray(Reflect.get(parsed, 'mcpServers'))
+      ? (Reflect.get(parsed, 'mcpServers') as Record<string, unknown>)
+      : undefined;
+
+  if (!mcpServers) {
+    return;
+  }
+
+  for (const serverName of Object.keys(mcpServers)) {
+    if (serverName) {
+      serverNames.add(serverName);
+    }
+  }
 }
 
 function normalizeCodexHeadlessArgs(args: string[]): void {

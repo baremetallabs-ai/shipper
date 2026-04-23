@@ -46,12 +46,15 @@ type RawPromptOptions = {
   mode: string;
   agent?: string;
   model?: string;
+  disableMcp?: boolean;
+  enableMcp?: boolean;
 };
 
 type PromptOptions = {
   mode: CommandMode;
   agent: AgentName | undefined;
   model: string | undefined;
+  disableMcp: boolean | undefined;
 };
 
 function addPromptOptions(command: Command): Command {
@@ -68,14 +71,21 @@ function addPromptOptions(command: Command): Command {
         'copilot',
       ])
     )
-    .addOption(new Option('--model <model>', 'model to use for the agent CLI'));
+    .addOption(new Option('--model <model>', 'model to use for the agent CLI'))
+    .addOption(new Option('--disable-mcp', 'disable MCP server loading for this run'))
+    .addOption(new Option('--enable-mcp', 'enable MCP server loading for this run'));
 }
 
 function normalizePromptOptions(raw: RawPromptOptions): PromptOptions {
+  if (raw.disableMcp && raw.enableMcp) {
+    throw new Error('Error: --disable-mcp and --enable-mcp are mutually exclusive.');
+  }
+
   return {
     mode: raw.mode as CommandMode,
     agent: raw.agent as AgentName | undefined,
     model: raw.model,
+    disableMcp: raw.disableMcp ? true : raw.enableMcp ? false : undefined,
   };
 }
 
@@ -214,8 +224,8 @@ addPromptOptions(
     .argument('<ref>', 'issue or PR number/URL')
     .action(
       wrapAction(async (ref: string, options: RawPromptOptions) => {
-        const { mode, agent, model } = normalizePromptOptions(options);
-        await nextCommand(requireResolvedRepo(), ref, mode, agent, model);
+        const { mode, agent, model, disableMcp } = normalizePromptOptions(options);
+        await nextCommand(requireResolvedRepo(), ref, mode, agent, model, disableMcp);
       })
     )
 );
@@ -302,8 +312,8 @@ addPromptOptions(
     .argument('[issue]', 'issue number or URL')
     .action(
       wrapAction(async (issue: string | undefined, options: RawPromptOptions) => {
-        const { mode, agent, model } = normalizePromptOptions(options);
-        await designCommand(requireResolvedRepo(), issue, mode, agent, model);
+        const { mode, agent, model, disableMcp } = normalizePromptOptions(options);
+        await designCommand(requireResolvedRepo(), issue, mode, agent, model, disableMcp);
       })
     )
 );
@@ -315,8 +325,8 @@ addPromptOptions(
     .argument('[issue]', 'issue number or URL')
     .action(
       wrapAction(async (issue: string | undefined, options: RawPromptOptions) => {
-        const { mode, agent, model } = normalizePromptOptions(options);
-        await planCommand(requireResolvedRepo(), issue, mode, agent, model);
+        const { mode, agent, model, disableMcp } = normalizePromptOptions(options);
+        await planCommand(requireResolvedRepo(), issue, mode, agent, model, disableMcp);
       })
     )
 );
@@ -328,8 +338,8 @@ addPromptOptions(
     .argument('[issue]', 'issue number or URL')
     .action(
       wrapAction(async (issue: string | undefined, options: RawPromptOptions) => {
-        const { mode, agent, model } = normalizePromptOptions(options);
-        await implementCommand(requireResolvedRepo(), issue, mode, agent, model);
+        const { mode, agent, model, disableMcp } = normalizePromptOptions(options);
+        await implementCommand(requireResolvedRepo(), issue, mode, agent, model, disableMcp);
       })
     )
 );
@@ -363,8 +373,8 @@ addPromptOptions(
     .argument('<issue>', 'issue number')
     .action(
       wrapAction(async (issue: string, options: RawPromptOptions) => {
-        const { mode, agent, model } = normalizePromptOptions(options);
-        await unblockCommand(requireResolvedRepo(), issue, mode, agent, model);
+        const { mode, agent, model, disableMcp } = normalizePromptOptions(options);
+        await unblockCommand(requireResolvedRepo(), issue, mode, agent, model, disableMcp);
       })
     )
 );
@@ -401,8 +411,8 @@ addPromptOptions(
     .argument('[pr]', 'PR number or URL')
     .action(
       wrapAction(async (prArg: string | undefined, options: RawPromptOptions) => {
-        const { mode, agent, model } = normalizePromptOptions(options);
-        await prReviewCommand(requireResolvedRepo(), prArg, mode, agent, model);
+        const { mode, agent, model, disableMcp } = normalizePromptOptions(options);
+        await prReviewCommand(requireResolvedRepo(), prArg, mode, agent, model, disableMcp);
       })
     )
 );
@@ -414,8 +424,8 @@ addPromptOptions(
     .argument('[issue]', 'issue number or URL')
     .action(
       wrapAction(async (issue: string | undefined, options: RawPromptOptions) => {
-        const { mode, agent, model } = normalizePromptOptions(options);
-        await prOpenCommand(requireResolvedRepo(), issue, mode, agent, model);
+        const { mode, agent, model, disableMcp } = normalizePromptOptions(options);
+        await prOpenCommand(requireResolvedRepo(), issue, mode, agent, model, disableMcp);
       })
     )
 );
@@ -427,8 +437,8 @@ addPromptOptions(
     .argument('[pr]', 'PR number or URL')
     .action(
       wrapAction(async (prArg: string | undefined, options: RawPromptOptions) => {
-        const { mode, agent, model } = normalizePromptOptions(options);
-        await prRemediateCommand(requireResolvedRepo(), prArg, mode, agent, model);
+        const { mode, agent, model, disableMcp } = normalizePromptOptions(options);
+        await prRemediateCommand(requireResolvedRepo(), prArg, mode, agent, model, disableMcp);
       })
     )
 );

@@ -162,7 +162,7 @@ describe('shipper-cli', () => {
       expect(mockRunPreflight).not.toHaveBeenCalled();
     });
 
-    it('shows --mode, --model, and --log-file on new help and removes --headless from new', async () => {
+    it('shows shared prompt flags on new/setup help and removes --headless from new', async () => {
       const newHelp = await renderHelp(['new', '--help']);
       const initHelp = await renderHelp(['init', '--help']);
       const setupHelp = await renderHelp(['setup', '--help']);
@@ -173,6 +173,8 @@ describe('shipper-cli', () => {
       expect(newHelp).toContain('--agent <name>');
       expect(newHelp).toContain('agent to use: claude, codex, or copilot');
       expect(newHelp).toContain('--model <model>');
+      expect(newHelp).toContain('--disable-mcp');
+      expect(newHelp).toContain('--enable-mcp');
       expect(newHelp).toContain('--log-file <path>');
       expect(newHelp).not.toContain('--headless');
       expect(initHelp).toContain('--autocommit');
@@ -182,6 +184,8 @@ describe('shipper-cli', () => {
       expect(setupHelp).toContain('--mode <mode>');
       expect(setupHelp).toContain('agent to use: claude, codex, or copilot');
       expect(setupHelp).toContain('--model <model>');
+      expect(setupHelp).toContain('--disable-mcp');
+      expect(setupHelp).toContain('--enable-mcp');
       expect(mockNewCommand).not.toHaveBeenCalled();
       expect(mockSetupCommand).not.toHaveBeenCalled();
     });
@@ -357,6 +361,7 @@ describe('shipper-cli', () => {
         mode: 'headless',
         agent: 'claude',
         model: 'sonnet',
+        disableMcp: undefined,
         logFile: '/tmp/example.jsonl',
       });
     });
@@ -370,6 +375,7 @@ describe('shipper-cli', () => {
         mode: 'default',
         agent: 'copilot',
         model: undefined,
+        disableMcp: undefined,
         logFile: undefined,
       });
     });
@@ -396,6 +402,7 @@ describe('shipper-cli', () => {
         mode: 'interactive',
         agent: 'codex',
         model: 'gpt-5',
+        disableMcp: undefined,
       });
     });
 
@@ -421,6 +428,7 @@ describe('shipper-cli', () => {
         mode: 'headless',
         agent: 'copilot',
         model: 'gpt-5',
+        disableMcp: undefined,
       });
     });
 
@@ -445,7 +453,8 @@ describe('shipper-cli', () => {
         '42',
         'interactive',
         'claude',
-        'sonnet'
+        'sonnet',
+        undefined
       );
     });
 
@@ -470,7 +479,8 @@ describe('shipper-cli', () => {
         '42',
         'headless',
         'codex',
-        'gpt-5'
+        'gpt-5',
+        undefined
       );
     });
 
@@ -495,7 +505,8 @@ describe('shipper-cli', () => {
         '42',
         'interactive',
         'claude',
-        'gpt-5.4'
+        'gpt-5.4',
+        undefined
       );
     });
 
@@ -520,7 +531,8 @@ describe('shipper-cli', () => {
         '42',
         'headless',
         'copilot',
-        'sonnet'
+        'sonnet',
+        undefined
       );
     });
 
@@ -546,7 +558,8 @@ describe('shipper-cli', () => {
         '7',
         'interactive',
         'claude',
-        'gpt-5'
+        'gpt-5',
+        undefined
       );
     });
 
@@ -572,7 +585,8 @@ describe('shipper-cli', () => {
         '42',
         'interactive',
         'codex',
-        'gpt-5'
+        'gpt-5',
+        undefined
       );
     });
 
@@ -598,7 +612,8 @@ describe('shipper-cli', () => {
         '7',
         'headless',
         'copilot',
-        'sonnet'
+        'sonnet',
+        undefined
       );
     });
 
@@ -616,6 +631,18 @@ describe('shipper-cli', () => {
       await expect(importEntrypoint()).rejects.toThrow('process.exit:1');
 
       expect(errorSpy).toHaveBeenCalledWith('[shipper] boom');
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    });
+
+    it('rejects mutually exclusive MCP override flags', async () => {
+      process.argv = ['node', 'src/index.ts', 'groom', '42', '--disable-mcp', '--enable-mcp'];
+
+      await expect(importEntrypoint()).rejects.toThrow('process.exit:1');
+
+      expect(mockGroomCommand).not.toHaveBeenCalled();
+      expect(errorSpy).toHaveBeenCalledWith(
+        '[shipper] Error: --disable-mcp and --enable-mcp are mutually exclusive.'
+      );
       expect(exitSpy).toHaveBeenCalledWith(1);
     });
   });
@@ -784,6 +811,7 @@ describe('shipper-cli', () => {
         mode: 'default',
         agent: undefined,
         model: undefined,
+        disableMcp: undefined,
       });
     });
 
@@ -799,10 +827,11 @@ describe('shipper-cli', () => {
         mode: 'default',
         agent: undefined,
         model: undefined,
+        disableMcp: undefined,
       });
     });
 
-    it('passes mode, agent, and model through next', async () => {
+    it('passes mode, agent, model, and disableMcp through next', async () => {
       process.argv = [
         'node',
         'src/index.ts',
@@ -814,6 +843,7 @@ describe('shipper-cli', () => {
         'codex',
         '--model',
         'gpt-5',
+        '--disable-mcp',
       ];
 
       await importEntrypoint();
@@ -823,11 +853,12 @@ describe('shipper-cli', () => {
         '42',
         'interactive',
         'codex',
-        'gpt-5'
+        'gpt-5',
+        true
       );
     });
 
-    it('passes mode, agent, and model through ship', async () => {
+    it('passes mode, agent, model, and disableMcp through ship', async () => {
       process.argv = [
         'node',
         'src/index.ts',
@@ -839,6 +870,7 @@ describe('shipper-cli', () => {
         'codex',
         '--model',
         'sonnet',
+        '--enable-mcp',
       ];
 
       await importEntrypoint();
@@ -850,6 +882,7 @@ describe('shipper-cli', () => {
         mode: 'headless',
         agent: 'codex',
         model: 'sonnet',
+        disableMcp: false,
       });
     });
 
