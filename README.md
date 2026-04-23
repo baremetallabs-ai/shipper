@@ -88,6 +88,8 @@ Priority labels:
 
 Stage commands that operate on issues (`groom`, `design`, `plan`, `implement`) accept an optional issue argument and, when omitted, auto-select the first eligible issue. Stage commands that operate on pull requests (`pr open`, `pr review`, `pr remediate`) accept an optional PR argument and, when omitted, auto-select the first eligible PR.
 
+All prompt-running commands also accept `--disable-mcp` and `--enable-mcp` for one-run MCP policy overrides. When MCP loading is actually suppressed for a run, Shipper prints exactly one line before agent output begins: `MCP loading disabled for stage <name>.` When MCP remains enabled, Shipper prints no extra MCP-related line.
+
 ## 1) `shipper setup [words...]` (alias: `shipper agent`)
 
 Purpose: configure repository settings with an agent.
@@ -97,7 +99,7 @@ Behavior:
 - Runs the setup prompt before the rest of the workflow is used.
 - Accepts optional freeform instructions, for example `shipper setup "change agent to codex"`.
 - If no instructions are provided, seeds the prompt with repo-aware setup text.
-- Shared flags: `--mode <headless|interactive|default>`, `--agent <claude|codex>`, and `--model <model>`.
+- Shared flags: `--mode <headless|interactive|default>`, `--agent <claude|codex|copilot>`, `--model <model>`, `--disable-mcp`, and `--enable-mcp`.
 
 Output:
 
@@ -113,7 +115,7 @@ Behavior:
 - Agent drafts a concise issue with title, summary, acceptance criteria, out of scope, and notes.
 - Runs inside a fresh ephemeral git worktree created from the configured base branch, so the agent drafts against the same clean view every downstream stage sees. Uncommitted or in-progress files in your checkout are not visible to the agent; commit and push them first or describe them in the request if they matter.
 - Agent creates the issue via `gh issue create --body-file ...` and applies label `shipper:new`.
-- Shared flags: `--mode <headless|interactive|default>`, `--agent <claude|codex>`, and `--model <model>`.
+- Shared flags: `--mode <headless|interactive|default>`, `--agent <claude|codex|copilot>`, `--model <model>`, `--disable-mcp`, and `--enable-mcp`.
 
 Output:
 
@@ -130,7 +132,7 @@ Behavior:
 - Agent interviews the product owner to resolve missing product decisions.
 - Agent updates the issue body, posts a grooming summary comment, and transitions the issue to `shipper:groomed`.
 - `--auto` grooms all eligible `shipper:new` issues in sequence. It is mutually exclusive with an explicit issue number.
-- Shared flags: `--mode <headless|interactive|default>`, `--agent <claude|codex>`, and `--model <model>`.
+- Shared flags: `--mode <headless|interactive|default>`, `--agent <claude|codex|copilot>`, `--model <model>`, `--disable-mcp`, and `--enable-mcp`.
 
 Output:
 
@@ -147,7 +149,7 @@ Behavior:
 - Agent reads the issue plus grooming outputs.
 - Agent explores the codebase to understand architecture and constraints.
 - Agent posts a technical design comment and transitions the issue to `shipper:designed`.
-- Shared flags: `--mode <headless|interactive|default>`, `--agent <claude|codex>`, and `--model <model>`.
+- Shared flags: `--mode <headless|interactive|default>`, `--agent <claude|codex|copilot>`, `--model <model>`, `--disable-mcp`, and `--enable-mcp`.
 
 Output:
 
@@ -163,7 +165,7 @@ Behavior:
 - Agent reads the issue and design.
 - Agent identifies specific files and areas to change.
 - Agent writes an implementation plan comment and transitions the issue to `shipper:planned`.
-- Shared flags: `--mode <headless|interactive|default>`, `--agent <claude|codex>`, and `--model <model>`.
+- Shared flags: `--mode <headless|interactive|default>`, `--agent <claude|codex|copilot>`, `--model <model>`, `--disable-mcp`, and `--enable-mcp`.
 
 Output:
 
@@ -179,7 +181,7 @@ Behavior:
 - Shipper creates an ephemeral git worktree for the issue.
 - Advisory install and worktree hooks may run on worktree creation.
 - Agent implements according to the plan, runs checks, commits, pushes, and posts an implementation summary.
-- Shared flags: `--mode <headless|interactive|default>`, `--agent <claude|codex>`, and `--model <model>`.
+- Shared flags: `--mode <headless|interactive|default>`, `--agent <claude|codex|copilot>`, `--model <model>`, `--disable-mcp`, and `--enable-mcp`.
 
 Output:
 
@@ -195,7 +197,7 @@ Behavior:
 
 - Shipper creates a fresh ephemeral worktree tracking the pushed branch.
 - Agent runs quality checks, validates requirements, remediates if needed, and creates a PR.
-- Shared flags: `--mode <headless|interactive|default>`, `--agent <claude|codex>`, and `--model <model>`.
+- Shared flags: `--mode <headless|interactive|default>`, `--agent <claude|codex|copilot>`, `--model <model>`, `--disable-mcp`, and `--enable-mcp`.
 
 Output:
 
@@ -210,7 +212,7 @@ Behavior:
 
 - Agent reviews the PR diff against acceptance criteria and plan.
 - Agent posts a GitHub review with actionable feedback.
-- Shared flags: `--mode <headless|interactive|default>`, `--agent <claude|codex>`, and `--model <model>`.
+- Shared flags: `--mode <headless|interactive|default>`, `--agent <claude|codex|copilot>`, `--model <model>`, `--disable-mcp`, and `--enable-mcp`.
 
 Output:
 
@@ -224,7 +226,7 @@ Behavior:
 
 - Shipper creates an ephemeral worktree on the PR branch.
 - Agent pulls review feedback, applies accepted changes, runs checks, pushes updates, and replies to reviewers.
-- Shared flags: `--mode <headless|interactive|default>`, `--agent <claude|codex>`, and `--model <model>`.
+- Shared flags: `--mode <headless|interactive|default>`, `--agent <claude|codex|copilot>`, `--model <model>`, `--disable-mcp`, and `--enable-mcp`.
 
 Output:
 
@@ -240,7 +242,7 @@ Behavior:
 
 - Reads the issue to determine what it is blocked on.
 - If the dependency is resolved, removes `shipper:blocked` and instructs the user to continue with `shipper next`.
-- Shared flags: `--mode <headless|interactive|default>`, `--agent <claude|codex>`, and `--model <model>`.
+- Shared flags: `--mode <headless|interactive|default>`, `--agent <claude|codex|copilot>`, `--model <model>`, `--disable-mcp`, and `--enable-mcp`.
 
 Output:
 
@@ -261,8 +263,9 @@ Behavior:
 - If the stage rejects, logs the rolled-back workflow label and exits zero. Crashes and explicit
   `fail` verdicts still exit non-zero.
 - Works with both issue numbers and PR numbers.
-- `--agent <claude|codex>` overrides the agent used for the dispatched step.
+- `--agent <claude|codex|copilot>` overrides the agent used for the dispatched step.
 - `--model <model>` overrides the model used for the dispatched step.
+- `--disable-mcp` and `--enable-mcp` override MCP loading for the dispatched step.
 
 Output:
 
@@ -289,8 +292,9 @@ Behavior:
 - `--parallel <n>` sets the number of parallel slots in auto-ship mode and requires `--auto`.
   Sequential auto runs stay in-process; parallel auto uses one worker process per active issue over
   a small IPC protocol.
-- `--agent <claude|codex>` overrides the agent used by dispatched steps.
+- `--agent <claude|codex|copilot>` overrides the agent used by dispatched steps.
 - `--model <model>` overrides the model used by dispatched steps.
+- `--disable-mcp` and `--enable-mcp` override MCP loading for every dispatched prompt-running stage in that ship invocation.
 
 Output:
 
@@ -425,17 +429,19 @@ Implementation and PR-affecting commands run in ephemeral worktrees that are cre
 
 Settings are stored in `.shipper/settings.json` (created by `shipper init`). Local overrides can be placed in `.shipper/settings.local.json`, which is gitignored.
 
-| Setting                      | Default                                          | Description                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| ---------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `prReviewWait`               | `{ "mode": "checks", "maxDurationMinutes": 30 }` | PR review wait strategy. Timer mode uses `{ "mode": "timer", "durationMinutes": 30 }` measured from PR creation time. Checks mode uses a JSON object such as `{ "mode": "checks", "minDurationMinutes": 10, "maxDurationMinutes": 30 }`; `minDurationMinutes` and `maxDurationMinutes` are both optional, `minDurationMinutes` enforces a minimum review window from PR creation time, and omitting `maxDurationMinutes` waits indefinitely for checks. |
-| `lockTimeoutMinutes`         | `30`                                             | Stale lock timeout in minutes before `shipper:locked` is considered stale.                                                                                                                                                                                                                                                                                                                                                                              |
-| `agentTimeoutMinutes`        | `60`                                             | Agent process timeout for headless runs in minutes. Set to `0` to disable the timeout.                                                                                                                                                                                                                                                                                                                                                                  |
-| `commands`                   | `{ "default": { "agent": "claude" } }`           | Per-command settings map. `default` is required. Optional per-step overrides may set `agent`, `mode`, or `model` for `new`, `groom`, `design`, `plan`, `implement`, `pr_open`, `pr_review`, `pr_remediate`, `unblock`, and `setup`. CLI names with hyphens use underscores here, so `pr-open`, `pr-review`, and `pr-remediate` become `pr_open`, `pr_review`, and `pr_remediate`.                                                                       |
-| `commands.default.model`     | unset                                            | Default model override for all supported prompt-running steps.                                                                                                                                                                                                                                                                                                                                                                                          |
-| `defaultBaseBranch`          | auto-detected                                    | Target branch for PRs if you do not set one explicitly.                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `installCommand`             | unset                                            | Shell command used for the advisory dependency-install step in new worktrees.                                                                                                                                                                                                                                                                                                                                                                           |
-| `worktreeEnv`                | unset                                            | Environment variables applied inside worktree execution. Values are merged with built-in cache directory defaults.                                                                                                                                                                                                                                                                                                                                      |
-| `merge.requirePassingChecks` | `true`                                           | Require all CI checks to pass before auto-merging.                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Setting                       | Default                                                                 | Description                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ----------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `prReviewWait`                | `{ "mode": "checks", "maxDurationMinutes": 30 }`                        | PR review wait strategy. Timer mode uses `{ "mode": "timer", "durationMinutes": 30 }` measured from PR creation time. Checks mode uses a JSON object such as `{ "mode": "checks", "minDurationMinutes": 10, "maxDurationMinutes": 30 }`; `minDurationMinutes` and `maxDurationMinutes` are both optional, `minDurationMinutes` enforces a minimum review window from PR creation time, and omitting `maxDurationMinutes` waits indefinitely for checks. |
+| `lockTimeoutMinutes`          | `30`                                                                    | Stale lock timeout in minutes before `shipper:locked` is considered stale.                                                                                                                                                                                                                                                                                                                                                                              |
+| `agentTimeoutMinutes`         | `60`                                                                    | Agent process timeout for headless runs in minutes. Set to `0` to disable the timeout.                                                                                                                                                                                                                                                                                                                                                                  |
+| `commands`                    | `{ "default": { "agent": "claude" }, "groom": { "disableMcp": true } }` | Per-command settings map. `default` is required. Optional per-step overrides may set `agent`, `mode`, `model`, or `disableMcp` for `new`, `groom`, `design`, `plan`, `implement`, `pr_open`, `pr_review`, `pr_remediate`, `unblock`, and `setup`. CLI names with hyphens use underscores here, so `pr-open`, `pr-review`, and `pr-remediate` become `pr_open`, `pr_review`, and `pr_remediate`.                                                         |
+| `commands.default.model`      | unset                                                                   | Default model override for all supported prompt-running steps.                                                                                                                                                                                                                                                                                                                                                                                          |
+| `commands.default.disableMcp` | `false`                                                                 | Default MCP loading policy for prompt-running steps. A per-step override can still flip any individual stage.                                                                                                                                                                                                                                                                                                                                           |
+| `commands.<stage>.disableMcp` | `groom: true`; all other prompt-running stages unset/false              | Per-stage MCP loading toggle. `groom` defaults to disabled MCP loading out of the box; every other prompt-running stage inherits normal MCP loading unless you opt in.                                                                                                                                                                                                                                                                                  |
+| `defaultBaseBranch`           | auto-detected                                                           | Target branch for PRs if you do not set one explicitly.                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `installCommand`              | unset                                                                   | Shell command used for the advisory dependency-install step in new worktrees.                                                                                                                                                                                                                                                                                                                                                                           |
+| `worktreeEnv`                 | unset                                                                   | Environment variables applied inside worktree execution. Values are merged with built-in cache directory defaults.                                                                                                                                                                                                                                                                                                                                      |
+| `merge.requirePassingChecks`  | `true`                                                                  | Require all CI checks to pass before auto-merging.                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 ---
 
@@ -447,3 +453,6 @@ If the agent discovers:
 - Missing product decisions during later phases -> recommend returning to `shipper groom`.
 - Missing technical decisions during implementation -> recommend returning to `shipper design` or `shipper plan`.
 - Oversized scope -> recommend splitting into additional issues created in `shipper:new`.
+  Built-in defaults are `commands.default.agent = "claude"` and `commands.groom.disableMcp = true`. Every other prompt-running stage defaults to normal MCP loading unless `commands.default.disableMcp`, a per-stage setting, `.shipper/settings.local.json`, or a one-run CLI flag overrides it.
+
+Override precedence for MCP loading is: built-in defaults -> `.shipper/settings.json` -> `.shipper/settings.local.json` -> one-run CLI flags (`--disable-mcp` / `--enable-mcp`).

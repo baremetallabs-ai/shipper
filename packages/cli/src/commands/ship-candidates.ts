@@ -174,6 +174,7 @@ export async function attemptUnblock(
   issueStr: string,
   agent?: AgentName,
   model?: string,
+  disableMcp?: boolean,
   logFile?: string
 ): Promise<boolean> {
   const cwd = process.cwd();
@@ -186,6 +187,7 @@ export async function attemptUnblock(
       issueRef: issueStr,
       agent,
       model,
+      disableMcp,
       logFile,
     });
     if (exitCode !== 0) {
@@ -205,7 +207,15 @@ export async function attemptUnblock(
         cwd,
         stage: 'unblock',
         retry: (userInput) =>
-          runPrompt('unblock', { repo, issueRef: issueStr, agent, model, logFile, userInput }),
+          runPrompt('unblock', {
+            repo,
+            issueRef: issueStr,
+            agent,
+            model,
+            disableMcp,
+            logFile,
+            userInput,
+          }),
       });
       const result = await processResult({
         repo,

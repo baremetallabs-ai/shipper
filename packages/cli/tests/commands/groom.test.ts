@@ -113,6 +113,7 @@ describe('groomCommand', () => {
           mode: undefined,
           agent: undefined,
           model: undefined,
+          disableMcp: undefined,
         },
       },
     ]);
@@ -146,6 +147,22 @@ describe('groomCommand', () => {
       { issue: 102, title: 'Second issue', outcome: 'pass', error: undefined },
     ]);
     expect(process.exitCode).toBe(0);
+  });
+
+  it('forwards disableMcp into the groom prompt invocation', async () => {
+    fake.setIssue('123', { labels: ['shipper:new'], title: 'Single issue' });
+    fake.scriptRunPrompt((name, opts) => {
+      promptCalls.push({ name, opts });
+      return 0;
+    });
+
+    const { groomCommand } = await import('../../src/commands/groom.js');
+
+    await expect(
+      groomCommand(repo, '123', { auto: false, disableMcp: true })
+    ).resolves.toBeUndefined();
+
+    expect(promptCalls[0]?.opts.disableMcp).toBe(true);
   });
 
   it('throws explicitly headless grooming before doing any work', async () => {

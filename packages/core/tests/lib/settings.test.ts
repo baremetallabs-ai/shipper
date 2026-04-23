@@ -48,7 +48,7 @@ describe('loadSettings', () => {
       prReviewWait: { mode: 'checks', maxDurationMinutes: 30 },
       lockTimeoutMinutes: 30,
       agentTimeoutMinutes: 60,
-      commands: { default: { agent: 'claude' } },
+      commands: { default: { agent: 'claude' }, groom: { disableMcp: true } },
       merge: { requirePassingChecks: true },
     });
   });
@@ -69,7 +69,7 @@ describe('loadSettings', () => {
 
     expect(getSettings().commands).toEqual({
       default: { agent: 'claude' },
-      groom: { agent: 'codex' },
+      groom: { agent: 'codex', disableMcp: true },
       new: { mode: 'headless' },
     });
   });
@@ -89,6 +89,7 @@ describe('loadSettings', () => {
 
     expect(getSettings().commands).toEqual({
       default: { agent: 'claude', mode: 'headless' },
+      groom: { disableMcp: true },
       new: { mode: 'headless' },
     });
   });
@@ -119,7 +120,37 @@ describe('loadSettings', () => {
 
     expect(getSettings().commands).toEqual({
       default: { agent: 'claude', model: 'opus', mode: 'interactive' },
-      groom: { agent: 'codex', model: 'haiku', mode: 'headless' },
+      groom: { agent: 'codex', model: 'haiku', mode: 'headless', disableMcp: true },
+    });
+  });
+
+  it('deep-merges disableMcp from base and local settings', async () => {
+    readFileMock.mockImplementation((p: string) => {
+      if (p === settingsPath) {
+        return JSON.stringify({
+          commands: {
+            default: { agent: 'claude', disableMcp: true },
+            implement: { mode: 'headless', disableMcp: false },
+          },
+        });
+      }
+      if (p === localPath) {
+        return JSON.stringify({
+          commands: {
+            implement: { disableMcp: true },
+          },
+        });
+      }
+      throw enoent(p);
+    });
+
+    const { loadSettings, getSettings } = await loadModule();
+    await loadSettings();
+
+    expect(getSettings().commands).toEqual({
+      default: { agent: 'claude', disableMcp: true },
+      groom: { disableMcp: true },
+      implement: { mode: 'headless', disableMcp: true },
     });
   });
 
@@ -224,7 +255,7 @@ describe('loadSettings', () => {
       prReviewWait: { mode: 'checks', maxDurationMinutes: 30 },
       lockTimeoutMinutes: 30,
       agentTimeoutMinutes: 60,
-      commands: { default: { agent: 'claude' } },
+      commands: { default: { agent: 'claude' }, groom: { disableMcp: true } },
       merge: { requirePassingChecks: true },
     });
     expect(warnMock).not.toHaveBeenCalledWith(
@@ -251,6 +282,25 @@ describe('loadSettings', () => {
     );
   });
 
+  it('throws on a non-boolean disableMcp value', async () => {
+    readFileMock.mockImplementation((p: string) => {
+      if (p === settingsPath) {
+        return JSON.stringify({
+          commands: {
+            default: { agent: 'claude' },
+            implement: { disableMcp: 'yes' },
+          },
+        });
+      }
+      throw enoent(p);
+    });
+
+    const { loadSettings } = await loadModule();
+    await expect(loadSettings()).rejects.toThrow(
+      'Invalid disableMcp for step "implement". Must be a boolean.'
+    );
+  });
+
   it('ignores unsafe command keys while loading settings', async () => {
     readFileMock.mockImplementation((p: string) => {
       if (p === settingsPath) {
@@ -270,7 +320,7 @@ describe('loadSettings', () => {
 
     expect(getSettings().commands).toEqual({
       default: { agent: 'claude' },
-      groom: { mode: 'interactive' },
+      groom: { mode: 'interactive', disableMcp: true },
     });
     expect((Object.prototype as Record<string, unknown>).mode).toBeUndefined();
   });
@@ -304,7 +354,7 @@ describe('getSettings', () => {
       prReviewWait: { mode: 'checks', maxDurationMinutes: 30 },
       lockTimeoutMinutes: 30,
       agentTimeoutMinutes: 60,
-      commands: { default: { agent: 'claude' } },
+      commands: { default: { agent: 'claude' }, groom: { disableMcp: true } },
       merge: { requirePassingChecks: true },
     });
   });
@@ -654,6 +704,85 @@ describe('resolveModel', () => {
 
     expect(resolveModel('groom', 'haiku')).toBe('haiku');
     expect(resolveModel('groom')).toBe('sonnet');
+  });
+});
+
+describe('resolveDisableMcp', () => {
+  it('defaults groom to true and other steps to false', async () => {
+    readFileMock.mockImplementation((p: string) => {
+      throw enoent(p);
+    });
+
+    const { loadSettings, resolveDisableMcp } = await loadModule();
+    await loadSettings();
+
+    expect(resolveDisableMcp('groom')).toBe(true);
+    expect(resolveDisableMcp('implement')).toBe(false);
+  });
+
+  it('uses explicit false on groom', async () => {
+    readFileMock.mockImplementation((p: string) => {
+      if (p === settingsPath) {
+        return JSON.stringify({
+          commands: {
+            default: { agent: 'claude' },
+            groom: { disableMcp: false },
+          },
+        });
+      }
+      throw enoent(p);
+    });
+
+    const { loadSettings, resolveDisableMcp } = await loadModule();
+    await loadSettings();
+
+    expect(resolveDisableMcp('groom')).toBe(false);
+  });
+
+  it('uses local settings over base settings', async () => {
+    readFileMock.mockImplementation((p: string) => {
+      if (p === settingsPath) {
+        return JSON.stringify({
+          commands: {
+            default: { agent: 'claude' },
+            implement: { disableMcp: false },
+          },
+        });
+      }
+      if (p === localPath) {
+        return JSON.stringify({
+          commands: {
+            implement: { disableMcp: true },
+          },
+        });
+      }
+      throw enoent(p);
+    });
+
+    const { loadSettings, resolveDisableMcp } = await loadModule();
+    await loadSettings();
+
+    expect(resolveDisableMcp('implement')).toBe(true);
+  });
+
+  it('returns the CLI override when provided', async () => {
+    readFileMock.mockImplementation((p: string) => {
+      if (p === settingsPath) {
+        return JSON.stringify({
+          commands: {
+            default: { agent: 'claude' },
+            groom: { disableMcp: true },
+          },
+        });
+      }
+      throw enoent(p);
+    });
+
+    const { loadSettings, resolveDisableMcp } = await loadModule();
+    await loadSettings();
+
+    expect(resolveDisableMcp('groom', false)).toBe(false);
+    expect(resolveDisableMcp('implement', true)).toBe(true);
   });
 });
 

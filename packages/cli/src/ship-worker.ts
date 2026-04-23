@@ -7,6 +7,7 @@ interface WorkerRunMessage {
   issue: string;
   agent?: AgentName;
   model?: string;
+  disableMcp?: boolean;
   logFile?: string;
 }
 
@@ -81,6 +82,7 @@ process.on('message', (message) => {
         merge: true,
         agent: message.agent,
         model: message.model,
+        disableMcp: message.disableMcp,
         logFile: message.logFile,
         skipInteractiveStages: true,
         collectTokens: false,

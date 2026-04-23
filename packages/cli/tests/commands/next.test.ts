@@ -8,6 +8,7 @@ type DispatchOptions = {
   mode?: 'default' | 'interactive' | 'headless';
   agent?: string;
   model?: string;
+  disableMcp?: boolean;
 };
 
 const repo = 'owner/repo';
@@ -95,6 +96,7 @@ describe('nextCommand', () => {
       mode: 'interactive',
       agent: 'codex',
       model: 'gpt-5',
+      disableMcp: undefined,
     });
     expect(fake.state.labelTransitions).toEqual([
       { target: 'issue', number: '159', add: ['shipper:locked'], remove: [] },
@@ -118,6 +120,7 @@ describe('nextCommand', () => {
       mode: undefined,
       agent: undefined,
       model: undefined,
+      disableMcp: undefined,
     });
   });
 
@@ -251,5 +254,26 @@ describe('nextCommand', () => {
     await expect(nextCommand(repo, '159')).resolves.toBeUndefined();
 
     expect(process.exitCode).toBe(9);
+  });
+
+  it('forwards disableMcp through dispatcher options', async () => {
+    fake.setIssue('159', {
+      labels: ['shipper:planned'],
+      title: 'Planned issue',
+    });
+    stubIssueRefLookup('159');
+
+    const { nextCommand } = await import('../../src/commands/next.js');
+
+    await expect(
+      nextCommand(repo, '159', undefined, undefined, undefined, true)
+    ).resolves.toBeUndefined();
+
+    expect(runStageForLabelMock).toHaveBeenCalledWith(repo, '159', 'shipper:planned', {
+      mode: undefined,
+      agent: undefined,
+      model: undefined,
+      disableMcp: true,
+    });
   });
 });

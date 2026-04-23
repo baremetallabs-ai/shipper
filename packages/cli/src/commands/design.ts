@@ -16,7 +16,8 @@ export async function runDesignStage(
   issue: string,
   mode?: CommandMode,
   agent?: AgentName,
-  model?: string
+  model?: string,
+  disableMcp?: boolean
 ): Promise<StageRunResult> {
   return await runStageScaffold({
     repo,
@@ -34,7 +35,7 @@ export async function runDesignStage(
     },
     invoker: simpleInvoker({
       promptName: 'design',
-      baseRunPromptOpts: { repo, issueRef: issue, mode, agent, model },
+      baseRunPromptOpts: { repo, issueRef: issue, mode, agent, model, disableMcp },
     }),
   });
 }
@@ -44,7 +45,8 @@ export async function designCommand(
   issue?: string,
   mode?: CommandMode,
   agent?: AgentName,
-  model?: string
+  model?: string,
+  disableMcp?: boolean
 ): Promise<void> {
   if (!issue) {
     const selected = await autoSelectIssue(repo, 'shipper:groomed');
@@ -55,5 +57,5 @@ export async function designCommand(
     issue = String(selected.number);
   }
 
-  process.exitCode = (await runDesignStage(repo, issue, mode, agent, model)).exitCode;
+  process.exitCode = (await runDesignStage(repo, issue, mode, agent, model, disableMcp)).exitCode;
 }

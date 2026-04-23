@@ -21,6 +21,7 @@ export interface GroomOptions {
   mode?: CommandMode;
   agent?: AgentName;
   model?: string;
+  disableMcp?: boolean;
 }
 
 export async function runGroomStage(
@@ -28,7 +29,8 @@ export async function runGroomStage(
   issueStr: string,
   mode?: CommandMode,
   agent?: AgentName,
-  model?: string
+  model?: string,
+  disableMcp?: boolean
 ): Promise<StageRunResult> {
   const code = await withIssueLock(repo, issueStr, async () => {
     const repoRoot = await getRepoRoot();
@@ -50,7 +52,15 @@ export async function runGroomStage(
             stage: 'groom',
           },
           async (wtPath) =>
-            await runPrompt('groom', { repo, issueRef: issueStr, cwd: wtPath, mode, agent, model })
+            await runPrompt('groom', {
+              repo,
+              issueRef: issueStr,
+              cwd: wtPath,
+              mode,
+              agent,
+              model,
+              disableMcp,
+            })
         )
     );
   });
@@ -92,7 +102,8 @@ export async function groomCommand(
         String(candidate.number),
         options.mode,
         options.agent,
-        options.model
+        options.model,
+        options.disableMcp
       );
 
       results.push({
@@ -120,6 +131,6 @@ export async function groomCommand(
   }
 
   process.exitCode = (
-    await runGroomStage(repo, issue, options.mode, options.agent, options.model)
+    await runGroomStage(repo, issue, options.mode, options.agent, options.model, options.disableMcp)
   ).exitCode;
 }

@@ -16,6 +16,7 @@ export interface CommandConfig {
   mode?: CommandMode;
   agent?: AgentName;
   model?: string;
+  disableMcp?: boolean;
 }
 
 export interface MergeSettings {
@@ -41,7 +42,10 @@ export const DEFAULTS: Settings = {
   prReviewWait: { mode: 'checks', maxDurationMinutes: 30 },
   lockTimeoutMinutes: 30,
   agentTimeoutMinutes: 60,
-  commands: { default: { agent: 'claude' as const } },
+  commands: {
+    default: { agent: 'claude' as const },
+    groom: { disableMcp: true },
+  },
   merge: { requirePassingChecks: true },
 };
 
@@ -58,6 +62,8 @@ export const SETTING_DESCRIPTIONS: Record<string, string> = {
     'default model override for all steps (supports per-step overrides via commands.<step>.model)',
   'commands.default.mode':
     'default execution mode for prompt-running commands: "headless", "interactive", or "default"',
+  'commands.default.disableMcp':
+    'default MCP loading policy for prompt-running commands; when true, suppresses all MCP servers for that invocation',
   defaultBaseBranch: 'target branch for PRs (auto-detected from GitHub if not set)',
   installCommand:
     'shell command to install project dependencies (e.g. npm ci, pnpm install --frozen-lockfile)',
@@ -97,11 +103,15 @@ export async function loadSettings(): Promise<void> {
     ? local.commands
     : {};
   const allCommandSteps = new Set([
+    ...Object.keys(DEFAULTS.commands).filter(isSafeCommandKey),
     ...Object.keys(baseCommands).filter(isSafeCommandKey),
     ...Object.keys(localCommands).filter(isSafeCommandKey),
     'default',
   ]);
   const mergedCommands = {
+    ...Object.fromEntries(
+      Object.entries(DEFAULTS.commands).map(([step, config]) => [step, { ...config }])
+    ),
     default: { ...DEFAULTS.commands.default },
   } as Settings['commands'];
 
@@ -118,6 +128,7 @@ export async function loadSettings(): Promise<void> {
     }
 
     mergedCommands[step] = {
+      ...DEFAULTS.commands[step],
       ...baseConfig,
       ...localConfig,
     } as CommandConfig;
@@ -139,6 +150,7 @@ export async function loadSettings(): Promise<void> {
 
   for (const [command, config] of Object.entries(settings.commands)) {
     validateModel(config?.model, command);
+    validateDisableMcp(config?.disableMcp, command);
   }
 
   for (const command of Object.keys(settings.commands)) {
@@ -152,7 +164,9 @@ export function getSettings(): Settings {
   return (
     settings ?? {
       ...DEFAULTS,
-      commands: { default: { ...DEFAULTS.commands.default } },
+      commands: Object.fromEntries(
+        Object.entries(DEFAULTS.commands).map(([step, config]) => [step, { ...config }])
+      ) as Settings['commands'],
       merge: { ...DEFAULTS.merge },
     }
   );
@@ -198,6 +212,18 @@ export function resolveModel(step: string, override?: string): string | undefine
   return validateModel(s.commands[step]?.model ?? s.commands.default.model, step);
 }
 
+export function resolveDisableMcp(step: string, override?: boolean): boolean {
+  if (override !== undefined) {
+    return validateDisableMcp(override, step);
+  }
+
+  const s = getSettings();
+  return validateDisableMcp(
+    s.commands[step]?.disableMcp ?? s.commands.default.disableMcp ?? false,
+    step
+  );
+}
+
 function isSafeCommandKey(key: string): boolean {
   return !UNSAFE_COMMAND_KEYS.has(key);
 }
@@ -218,6 +244,18 @@ function validateModel(model: unknown, step: string): string | undefined {
   }
 
   throw new Error(`Invalid model for step "${step}". Must be a string.`);
+}
+
+function validateDisableMcp(disableMcp: unknown, step: string): boolean {
+  if (disableMcp === undefined) {
+    return false;
+  }
+
+  if (typeof disableMcp === 'boolean') {
+    return disableMcp;
+  }
+
+  throw new Error(`Invalid disableMcp for step "${step}". Must be a boolean.`);
 }
 
 async function readSettingsFile(filepath: string): Promise<Partial<Settings>> {

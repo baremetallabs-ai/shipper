@@ -24,6 +24,7 @@ export interface StageDispatchOptions {
   mode?: CommandMode;
   agent?: AgentName;
   model?: string;
+  disableMcp?: boolean;
   skipInitialPrRemediateWait?: boolean;
 }
 
@@ -47,19 +48,54 @@ export async function runStageForLabel(
   switch (label) {
     case NEW_LABEL:
       logger.log(`Running: shipper groom ${issueNumber}`);
-      return await runGroomStage(repo, issueNumber, options.mode, options.agent, options.model);
+      return await runGroomStage(
+        repo,
+        issueNumber,
+        options.mode,
+        options.agent,
+        options.model,
+        options.disableMcp
+      );
     case GROOMED_LABEL:
       logger.log(`Running: shipper design ${issueNumber}`);
-      return await runDesignStage(repo, issueNumber, options.mode, options.agent, options.model);
+      return await runDesignStage(
+        repo,
+        issueNumber,
+        options.mode,
+        options.agent,
+        options.model,
+        options.disableMcp
+      );
     case DESIGNED_LABEL:
       logger.log(`Running: shipper plan ${issueNumber}`);
-      return await runPlanStage(repo, issueNumber, options.mode, options.agent, options.model);
+      return await runPlanStage(
+        repo,
+        issueNumber,
+        options.mode,
+        options.agent,
+        options.model,
+        options.disableMcp
+      );
     case PLANNED_LABEL:
       logger.log(`Running: shipper implement ${issueNumber}`);
-      return await runImplementStage(repo, issueNumber, options.mode, options.agent, options.model);
+      return await runImplementStage(
+        repo,
+        issueNumber,
+        options.mode,
+        options.agent,
+        options.model,
+        options.disableMcp
+      );
     case IMPLEMENTED_LABEL:
       logger.log(`Running: shipper pr open ${issueNumber}`);
-      return await runPrOpenStage(repo, issueNumber, options.mode, options.agent, options.model);
+      return await runPrOpenStage(
+        repo,
+        issueNumber,
+        options.mode,
+        options.agent,
+        options.model,
+        options.disableMcp
+      );
     case PR_OPEN_LABEL: {
       const prNumber = await resolvePrForIssue(repo, Number(issueNumber));
       logger.log(`Running: shipper pr review ${prNumber}`);
@@ -69,7 +105,8 @@ export async function runStageForLabel(
         prNumber,
         options.mode,
         options.agent,
-        options.model
+        options.model,
+        options.disableMcp
       );
     }
     case PR_REVIEWED_LABEL: {
@@ -79,6 +116,7 @@ export async function runStageForLabel(
         mode: options.mode,
         agent: options.agent,
         model: options.model,
+        disableMcp: options.disableMcp,
         skipInitialWait: options.skipInitialPrRemediateWait,
       });
     }

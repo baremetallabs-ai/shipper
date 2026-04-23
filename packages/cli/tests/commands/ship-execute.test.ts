@@ -128,6 +128,7 @@ describe('shipOneIssue', () => {
       mode: 'default',
       agent: undefined,
       model: undefined,
+      disableMcp: undefined,
       skipInitialPrRemediateWait: false,
     });
     expect(fake.state.labelTransitions).toEqual(
@@ -189,6 +190,7 @@ describe('shipOneIssue', () => {
       mode: 'default',
       agent: undefined,
       model: undefined,
+      disableMcp: undefined,
       skipInitialPrRemediateWait: true,
     });
   });
@@ -213,6 +215,30 @@ describe('shipOneIssue', () => {
       mode: 'default',
       agent: undefined,
       model: undefined,
+      disableMcp: undefined,
+      skipInitialPrRemediateWait: false,
+    });
+  });
+
+  it('forwards disableMcp into stage dispatch during ship loops', async () => {
+    scriptLabels(['shipper:planned', 'shipper:ready']);
+    const { shipOneIssue } = await import('../../src/commands/ship-execute.js');
+
+    await expect(
+      shipOneIssue({
+        repo: 'owner/repo',
+        issue: '42',
+        merge: false,
+        disableMcp: true,
+        collectTokens: false,
+      })
+    ).resolves.toEqual({ success: true });
+
+    expect(runStageForLabelMock).toHaveBeenCalledWith('owner/repo', '42', 'shipper:planned', {
+      mode: 'default',
+      agent: undefined,
+      model: undefined,
+      disableMcp: true,
       skipInitialPrRemediateWait: false,
     });
   });

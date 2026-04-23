@@ -8,6 +8,7 @@ const shipOneIssueMock =
       merge: boolean;
       agent?: string;
       model?: string;
+      disableMcp?: boolean;
       logFile?: string;
       skipInteractiveStages: boolean;
       collectTokens: boolean;
@@ -88,6 +89,7 @@ describe('ship-worker', () => {
       merge: true,
       agent: 'codex',
       model: 'gpt-5',
+      disableMcp: undefined,
       logFile: '/tmp/ship.log',
       skipInteractiveStages: true,
       collectTokens: false,
@@ -144,5 +146,29 @@ describe('ship-worker', () => {
     await Promise.resolve();
 
     expect(processExitMock).toHaveBeenCalledWith(0);
+  });
+
+  it('forwards disableMcp from worker payloads', async () => {
+    await import('../src/ship-worker.js');
+    if (!messageHandler) {
+      throw new Error('Expected worker message handler to be registered');
+    }
+
+    messageHandler({
+      type: 'run',
+      repo: 'owner/repo',
+      issue: '42',
+      disableMcp: true,
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(shipOneIssueMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repo: 'owner/repo',
+        issue: '42',
+        disableMcp: true,
+      })
+    );
   });
 });

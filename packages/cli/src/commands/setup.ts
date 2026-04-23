@@ -14,7 +14,7 @@ import { confirm } from '../lib/confirm.js';
 
 export async function setupCommand(
   words: string[],
-  options: { mode?: CommandMode; agent?: AgentName; model?: string } = {}
+  options: { mode?: CommandMode; agent?: AgentName; model?: string; disableMcp?: boolean } = {}
 ): Promise<void> {
   const effectiveMode = resolveMode('setup', options.mode);
   const settings = getSettings();
@@ -41,6 +41,7 @@ export async function setupCommand(
     mode: effectiveMode,
     agent: effectiveAgent,
     model: effectiveModel,
+    disableMcp: options.disableMcp,
   });
   process.exitCode = setupExitCode;
 

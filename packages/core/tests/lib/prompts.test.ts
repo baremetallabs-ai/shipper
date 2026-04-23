@@ -236,6 +236,10 @@ describe('setup prompts', () => {
       expect(prompt).toContain(
         'The `commands.default.agent` field matches the installed coding agent (`"claude"`, `"codex"`, or `"copilot"`).'
       );
+      expect(prompt).toContain('commands.groom.disableMcp = true');
+      expect(prompt).toContain('commands.default.disableMcp');
+      expect(prompt).toContain('`disableMcp` must be a boolean');
+      expect(prompt).toContain('Per-command agent, mode, model, and MCP-loading settings.');
       expect(prompt).toContain('Do not add a YAML parser dependency.');
       expect(prompt).toContain('pull_request_target');
       expect(prompt).toContain(

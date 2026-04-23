@@ -20,7 +20,8 @@ export async function runPrReviewStage(
   pr: string,
   mode?: CommandMode,
   agent?: AgentName,
-  model?: string
+  model?: string,
+  disableMcp?: boolean
 ): Promise<StageRunResult> {
   return await runStageScaffold({
     repo,
@@ -37,7 +38,7 @@ export async function runPrReviewStage(
     },
     invoker: simpleInvoker({
       promptName: 'pr_review',
-      baseRunPromptOpts: { repo, issueRef: issueNumber, prRef: pr, mode, agent, model },
+      baseRunPromptOpts: { repo, issueRef: issueNumber, prRef: pr, mode, agent, model, disableMcp },
       setup: async (wtPath) => {
         const { stdout: diff } = await gh(['pr', 'diff', pr, '-R', repo]);
         const diffHunks = parseDiffHunks(diff);
@@ -76,7 +77,8 @@ export async function prReviewCommand(
   pr?: string,
   mode?: CommandMode,
   agent?: AgentName,
-  model?: string
+  model?: string,
+  disableMcp?: boolean
 ): Promise<void> {
   let issueNumber: string;
 
@@ -97,5 +99,7 @@ export async function prReviewCommand(
     issueNumber = resolved.issueNumber;
   }
 
-  process.exitCode = (await runPrReviewStage(repo, issueNumber, pr, mode, agent, model)).exitCode;
+  process.exitCode = (
+    await runPrReviewStage(repo, issueNumber, pr, mode, agent, model, disableMcp)
+  ).exitCode;
 }

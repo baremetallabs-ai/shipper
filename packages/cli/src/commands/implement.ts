@@ -16,7 +16,8 @@ export async function runImplementStage(
   issue: string,
   mode?: CommandMode,
   agent?: AgentName,
-  model?: string
+  model?: string,
+  disableMcp?: boolean
 ): Promise<StageRunResult> {
   return await runStageScaffold({
     repo,
@@ -35,7 +36,7 @@ export async function runImplementStage(
     invoker: transportInvoker({
       promptName: 'implement',
       pushMode: 'new-branch',
-      baseRunPromptOpts: { repo, issueRef: issue, mode, agent, model },
+      baseRunPromptOpts: { repo, issueRef: issue, mode, agent, model, disableMcp },
     }),
   });
 }
@@ -45,7 +46,8 @@ export async function implementCommand(
   issue?: string,
   mode?: CommandMode,
   agent?: AgentName,
-  model?: string
+  model?: string,
+  disableMcp?: boolean
 ): Promise<void> {
   if (!issue) {
     const selected = await autoSelectIssue(repo, 'shipper:planned');
@@ -56,5 +58,7 @@ export async function implementCommand(
     issue = String(selected.number);
   }
 
-  process.exitCode = (await runImplementStage(repo, issue, mode, agent, model)).exitCode;
+  process.exitCode = (
+    await runImplementStage(repo, issue, mode, agent, model, disableMcp)
+  ).exitCode;
 }

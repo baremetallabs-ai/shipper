@@ -295,6 +295,7 @@ describe('unblockCommand', () => {
           mode: undefined,
           agent: undefined,
           model: undefined,
+          disableMcp: undefined,
         },
       },
     ]);
@@ -350,5 +351,24 @@ describe('unblockCommand', () => {
     expect(fake.state.postedComments.at(-1)?.body).toContain('Missing result.json');
     expect(fake.state.issues.get('250')?.labels).toEqual(new Set(['shipper:blocked']));
     expect(process.exitCode).toBe(1);
+  });
+
+  it('forwards disableMcp on both initial and retry unblock runs', async () => {
+    fake.setIssue('250', { labels: ['shipper:blocked'], title: 'Blocked issue' });
+    stubFetchedIssue('250', ['Blocked by #248.']);
+    stubDependencyIssue('248', 'Core protocol infra', 'CLOSED');
+    stubDependencyPrNotFound('248');
+    fake.scriptRunPrompt((name, opts) => {
+      promptCalls.push({ name, opts });
+      return 0;
+    });
+
+    const { unblockCommand } = await import('../../src/commands/unblock.js');
+
+    await expect(
+      unblockCommand(repo, '250', undefined, undefined, undefined, true)
+    ).resolves.toBeUndefined();
+
+    expect(promptCalls.every((call) => call.opts.disableMcp === true)).toBe(true);
   });
 });

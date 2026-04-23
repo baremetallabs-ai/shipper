@@ -16,7 +16,8 @@ export async function runPlanStage(
   issue: string,
   mode?: CommandMode,
   agent?: AgentName,
-  model?: string
+  model?: string,
+  disableMcp?: boolean
 ): Promise<StageRunResult> {
   return await runStageScaffold({
     repo,
@@ -34,7 +35,7 @@ export async function runPlanStage(
     },
     invoker: simpleInvoker({
       promptName: 'plan',
-      baseRunPromptOpts: { repo, issueRef: issue, mode, agent, model },
+      baseRunPromptOpts: { repo, issueRef: issue, mode, agent, model, disableMcp },
     }),
   });
 }
@@ -44,7 +45,8 @@ export async function planCommand(
   issue?: string,
   mode?: CommandMode,
   agent?: AgentName,
-  model?: string
+  model?: string,
+  disableMcp?: boolean
 ): Promise<void> {
   if (!issue) {
     const selected = await autoSelectIssue(repo, 'shipper:designed');
@@ -55,5 +57,5 @@ export async function planCommand(
     issue = String(selected.number);
   }
 
-  process.exitCode = (await runPlanStage(repo, issue, mode, agent, model)).exitCode;
+  process.exitCode = (await runPlanStage(repo, issue, mode, agent, model, disableMcp)).exitCode;
 }

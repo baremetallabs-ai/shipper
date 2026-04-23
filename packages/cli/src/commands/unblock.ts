@@ -100,7 +100,8 @@ export async function unblockCommand(
   issue: string,
   mode?: CommandMode,
   agent?: AgentName,
-  model?: string
+  model?: string,
+  disableMcp?: boolean
 ): Promise<void> {
   if (!issue) {
     logger.error('Usage: shipper unblock <issue>');
@@ -111,7 +112,15 @@ export async function unblockCommand(
     const cwd = process.cwd();
     await scrubOutputDir(cwd);
     await prepareUnblockContext(repo, issue, cwd);
-    const exitCode = await runPrompt('unblock', { repo, issueRef: issue, cwd, mode, agent, model });
+    const exitCode = await runPrompt('unblock', {
+      repo,
+      issueRef: issue,
+      cwd,
+      mode,
+      agent,
+      model,
+      disableMcp,
+    });
     if (exitCode !== 0) {
       const detail = `Agent exited with code ${exitCode}`;
       logger.error(detail);
@@ -130,7 +139,16 @@ export async function unblockCommand(
         cwd,
         stage: 'unblock',
         retry: (userInput) =>
-          runPrompt('unblock', { repo, issueRef: issue, cwd, mode, agent, model, userInput }),
+          runPrompt('unblock', {
+            repo,
+            issueRef: issue,
+            cwd,
+            mode,
+            agent,
+            model,
+            disableMcp,
+            userInput,
+          }),
       });
       await processResult({ repo, issueNumber: issue, stage: 'unblock', cwd, result });
     } catch (error) {

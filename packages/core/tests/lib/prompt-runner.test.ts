@@ -80,6 +80,9 @@ const resolveModelMock = vi
 const resolveModeMock = vi
   .fn<(promptName: string, mode?: string) => string>()
   .mockReturnValue('default');
+const resolveDisableMcpMock = vi
+  .fn<(promptName: string, disableMcp?: boolean) => boolean>()
+  .mockReturnValue(false);
 const getSettingsMock = vi.fn<() => { agentTimeoutMinutes: number }>().mockReturnValue({
   agentTimeoutMinutes: 60,
 });
@@ -140,6 +143,7 @@ vi.mock('../../src/lib/settings.js', () => ({
   resolveAgent: (...args: unknown[]) => resolveAgentMock(...args),
   resolveModel: (...args: unknown[]) => resolveModelMock(...args),
   resolveMode: (...args: unknown[]) => resolveModeMock(...args),
+  resolveDisableMcp: (...args: unknown[]) => resolveDisableMcpMock(...args),
   getSettings: () => getSettingsMock(),
 }));
 vi.mock('../../src/lib/prompts.js', () => ({
@@ -329,6 +333,7 @@ afterEach(() => {
   resolveAgentMock.mockReturnValue('claude');
   resolveModelMock.mockReturnValue(undefined);
   resolveModeMock.mockReturnValue('default');
+  resolveDisableMcpMock.mockReturnValue(false);
   getSettingsMock.mockReturnValue({ agentTimeoutMinutes: 60 });
   fetchIssueMock.mockResolvedValue('issue body');
   fetchPRMock.mockResolvedValue('pr body');
@@ -407,6 +412,7 @@ describe('runPrompt', () => {
     );
     expect(resolveAgentMock).toHaveBeenCalledWith('test', undefined);
     expect(resolveModelMock).toHaveBeenCalledWith('test', undefined);
+    expect(resolveDisableMcpMock).toHaveBeenCalledWith('test', undefined);
     expect(resolveModeMock).toHaveBeenCalledWith('test', undefined);
   });
 
@@ -839,6 +845,164 @@ describe('runPrompt', () => {
     await runPrompt('test', { mode: 'default' });
 
     expect(spawnedArgs().slice(0, 2)).toEqual(['--model', 'opus']);
+  });
+
+  it('passes the CLI disableMcp override into the settings resolver', async () => {
+    readFileMock.mockResolvedValueOnce(makePrompt('claude'));
+    mockSpawnResult();
+
+    await runPrompt('groom', { disableMcp: true });
+
+    expect(resolveDisableMcpMock).toHaveBeenCalledWith('groom', true);
+  });
+
+  it('strips claude MCP frontmatter args and reapplies the shipper policy', async () => {
+    resolveDisableMcpMock.mockReturnValue(true);
+    readFileMock.mockResolvedValueOnce(
+      makePrompt('claude', [
+        '--strict-mcp-config',
+        '--mcp-config',
+        '{"mcpServers":{"old":{}}}',
+        '--model',
+        'opus',
+      ])
+    );
+    mockSpawnResult();
+
+    await runPrompt('test', {});
+
+    expect(spawnedArgs()).toEqual([
+      '--model',
+      'opus',
+      '--strict-mcp-config',
+      '--mcp-config',
+      '{"mcpServers":{}}',
+      '--append-system-prompt',
+      'prompt body',
+    ]);
+  });
+
+  it('strips only codex MCP config overrides and preserves unrelated -c args', async () => {
+    resolveAgentMock.mockReturnValue('codex');
+    resolveDisableMcpMock.mockReturnValue(true);
+    readFileMock.mockResolvedValueOnce(
+      makePrompt('codex', [
+        '-c',
+        'sandbox_workspace_write.network_access=true',
+        '--config',
+        'mcp_servers={"old":{}}',
+        'exec',
+      ])
+    );
+    mockSpawnResult();
+
+    await runPrompt('test', {});
+
+    expect(spawnedArgs()).toContain('-c');
+    expect(spawnedArgs()).toContain('sandbox_workspace_write.network_access=true');
+    expect(spawnedArgs().filter((arg) => arg === 'mcp_servers={}')).toHaveLength(1);
+    expect(spawnedArgs()).not.toContain('mcp_servers={"old":{}}');
+  });
+
+  it('strips copilot MCP frontmatter args and disables discovered MCP servers', async () => {
+    const promptPath = path.resolve('.shipper', 'prompts', 'copilot', 'test.md');
+    resolveAgentMock.mockReturnValue('copilot');
+    resolveDisableMcpMock.mockReturnValue(true);
+    readFileMock.mockImplementation((filepath: string) => {
+      if (filepath === promptPath) {
+        return makePrompt('copilot', [
+          '--config-dir',
+          '/tmp/copilot-config',
+          '--disable-builtin-mcps',
+          '--disable-mcp-server',
+          'frontmatter-server',
+          '--additional-mcp-config',
+          '@ignored.json',
+        ]);
+      }
+      if (filepath === path.join('/repo', '.mcp.json')) {
+        return '{"mcpServers":{"repo-one":{},"shared":{}}}';
+      }
+      if (filepath === path.join('/repo', '.github', 'mcp.json')) {
+        return '{"mcpServers":{"shared":{},"repo-two":{}}}';
+      }
+      if (filepath === path.join('/tmp/copilot-config', 'mcp-config.json')) {
+        return '{"mcpServers":{"user-one":{},"shared":{}}}';
+      }
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    });
+    mockSpawnResult();
+
+    await runPrompt('test', { cwd: '/repo' });
+
+    expect(spawnedArgs()).toContain('--config-dir');
+    expect(spawnedArgs()).toContain('/tmp/copilot-config');
+    expect(spawnedArgs()).toContain('--disable-builtin-mcps');
+    expect(spawnedArgs()).not.toContain('frontmatter-server');
+    expect(spawnedArgs()).not.toContain('--additional-mcp-config');
+    expect(spawnedArgs().filter((arg) => arg === '--disable-mcp-server')).toHaveLength(4);
+    expect(spawnedArgs()).toContain('repo-one');
+    expect(spawnedArgs()).toContain('shared');
+    expect(spawnedArgs()).toContain('repo-two');
+    expect(spawnedArgs()).toContain('user-one');
+    expect(spawnedChild().stdin?.write).toHaveBeenCalledWith('prompt body\n');
+  });
+
+  it('warns and continues when a copilot MCP config file is malformed', async () => {
+    const promptPath = path.resolve('.shipper', 'prompts', 'copilot', 'test.md');
+    const warnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    resolveAgentMock.mockReturnValue('copilot');
+    resolveDisableMcpMock.mockReturnValue(true);
+    readFileMock.mockImplementation((filepath: string) => {
+      if (filepath === promptPath) {
+        return makePrompt('copilot', ['--config-dir', '/tmp/copilot-config']);
+      }
+      if (filepath === path.join('/tmp/copilot-config', 'mcp-config.json')) {
+        return '{bad json';
+      }
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    });
+    mockSpawnResult();
+
+    await expect(runPrompt('test', { cwd: '/repo' })).resolves.toBe(0);
+
+    expect(warnMock).toHaveBeenCalledWith(
+      expect.stringContaining('[shipper] Warning: Failed to parse Copilot MCP config')
+    );
+    expect(spawnedArgs()).toContain('--disable-builtin-mcps');
+    warnMock.mockRestore();
+  });
+
+  it('prints exactly one MCP-disabled notice before spawning', async () => {
+    const logMock = vi.spyOn(console, 'log').mockImplementation(() => {});
+    resolveDisableMcpMock.mockReturnValue(true);
+    readFileMock.mockResolvedValueOnce(makePrompt('claude'));
+    mockSpawnResult();
+
+    await expect(runPrompt('groom', {})).resolves.toBe(0);
+
+    expect(logMock).toHaveBeenCalledWith('[shipper] MCP loading disabled for stage groom.');
+    expect(
+      logMock.mock.calls.filter(
+        ([line]) => String(line) === '[shipper] MCP loading disabled for stage groom.'
+      )
+    ).toHaveLength(1);
+    logMock.mockRestore();
+  });
+
+  it('does not print an MCP notice when MCP remains enabled', async () => {
+    const logMock = vi.spyOn(console, 'log').mockImplementation(() => {});
+    readFileMock.mockResolvedValueOnce(makePrompt('claude'));
+    mockSpawnResult();
+
+    await expect(runPrompt('groom', {})).resolves.toBe(0);
+
+    expect(
+      logMock.mock.calls.some(([line]) =>
+        String(line).includes('MCP loading disabled for stage groom.')
+      )
+    ).toBe(false);
+    logMock.mockRestore();
   });
 
   it('injects copilot headless flags when absent', async () => {

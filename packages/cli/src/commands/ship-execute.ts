@@ -49,6 +49,7 @@ export interface ShipOneIssueOptions {
   mode?: CommandMode;
   agent?: AgentName;
   model?: string;
+  disableMcp?: boolean;
   parkHooks?: ParkHooks;
   pauseProbe?: () => boolean | Promise<boolean>;
   logFile?: string;
@@ -146,6 +147,7 @@ export async function shipOneIssue(options: ShipOneIssueOptions): Promise<ShipIs
     mode,
     agent,
     model,
+    disableMcp,
     parkHooks,
     pauseProbe,
     logFile,
@@ -272,6 +274,7 @@ export async function shipOneIssue(options: ShipOneIssueOptions): Promise<ShipIs
                 mode: stageMode,
                 agent,
                 model,
+                disableMcp,
                 skipInitialPrRemediateWait: label === PR_REVIEWED_LABEL && skipPrRemediateWaitOnce,
               });
               skipPrRemediateWaitOnce = false;
