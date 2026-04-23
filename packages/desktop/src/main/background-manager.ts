@@ -3,7 +3,12 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Readable } from 'node:stream';
 import { app, type BrowserWindow } from 'electron';
-import { PAUSED_EXIT_CODE, RETRIABLE_FAILURE_EXIT_CODE } from '@dnsquared/shipper-core';
+import {
+  gh,
+  LOCKED_LABEL,
+  PAUSED_EXIT_CODE,
+  RETRIABLE_FAILURE_EXIT_CODE,
+} from '@dnsquared/shipper-core';
 
 type BackgroundChildProcess = ChildProcessByStdio<null, Readable, Readable>;
 
@@ -93,6 +98,8 @@ interface ShipQueueEntry {
 }
 
 const GRACE_TIMEOUT_MS = 5_000;
+const LOCK_RELEASE_ATTEMPTS = 3;
+const LOCK_RELEASE_DELAY_MS = 500;
 
 export class BackgroundManager {
   private sessions = new Map<string, BackgroundSession>();
@@ -382,7 +389,42 @@ export class BackgroundManager {
 
     this.cleanupPauseSentinel(session.pauseSentinelPath);
     this.emitStatus(session);
+    if (
+      session.command === 'ship' &&
+      session.status === 'failed' &&
+      session.meta.issueNumber !== undefined
+    ) {
+      await this.releaseShipLockWithRetry(session.repo, session.meta.issueNumber);
+    }
     this.maybeAdvanceShipQueue(session);
+  }
+
+  private async releaseShipLockWithRetry(repo: string, issueNumber: number): Promise<void> {
+    for (let attempt = 1; attempt <= LOCK_RELEASE_ATTEMPTS; attempt += 1) {
+      try {
+        await gh([
+          'issue',
+          'edit',
+          String(issueNumber),
+          '-R',
+          repo,
+          '--remove-label',
+          LOCKED_LABEL,
+        ]);
+        return;
+      } catch {
+        if (attempt === LOCK_RELEASE_ATTEMPTS) {
+          console.warn(
+            `[shipper] Failed to release lock for ${repo}#${issueNumber} after ${LOCK_RELEASE_ATTEMPTS} attempts; stale-lock self-heal will clear it.`
+          );
+          return;
+        }
+
+        await new Promise((resolve) => {
+          setTimeout(resolve, LOCK_RELEASE_DELAY_MS);
+        });
+      }
+    }
   }
 
   private snapshotSession(session: BackgroundSession): BackgroundSessionSnapshot {

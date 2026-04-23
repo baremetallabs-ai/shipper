@@ -127,6 +127,53 @@ describe('useBackgroundCommands', () => {
     expect(result.current.backgroundCommands).toHaveLength(0);
   });
 
+  it('refreshes the active repo after a failed ship without adding unlock-specific UI', async () => {
+    const shipper = createMockShipperApi();
+    shipper.install();
+    const pipelineBridge = createPipelineBridge();
+    vi.mocked(pipelineBridge.loadIssues).mockResolvedValue({
+      ok: true,
+      issues: [createIssue(23)],
+    });
+    const { result } = renderHook(() =>
+      useBackgroundCommands({
+        activeRepo: 'owner/repo',
+        autoMergeRepos: new Set(),
+        checkInitState: vi.fn(() => Promise.resolve(undefined)),
+        pipelineBridgeRef: { current: pipelineBridge },
+      })
+    );
+    await flushHookEffects();
+
+    shipper.emitBackgroundStatus({
+      sessionId: 'ship-failed-refresh',
+      command: 'ship',
+      repo: 'owner/repo',
+      status: 'failed',
+      exitCode: 1,
+      meta: { issueNumber: 23, merge: false },
+    });
+    await flushHookEffects();
+
+    await waitFor(() => {
+      expect(pipelineBridge.loadIssues).toHaveBeenCalledWith('owner/repo');
+      expect(result.current.toasts).toEqual([
+        expect.objectContaining({
+          sessionId: 'ship-failed-refresh',
+          variant: 'error',
+          title: 'Ship #23 failed',
+        }),
+      ]);
+    });
+
+    expect(result.current.toasts.some((toast) => /unlock|lock release/i.test(toast.title))).toBe(
+      false
+    );
+    expect(
+      result.current.toasts.some((toast) => /unlock|lock release/i.test(toast.description))
+    ).toBe(false);
+  });
+
   it('queues the next auto-ship candidate after a completed ship when auto-ship is enabled', async () => {
     const shipper = createMockShipperApi();
     shipper.install();
