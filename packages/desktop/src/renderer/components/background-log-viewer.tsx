@@ -24,7 +24,6 @@ export function BackgroundLogViewer({
   content,
   onOpenChange,
 }: BackgroundLogViewerProps): JSX.Element {
-  const contentRef = useRef<HTMLPreElement | null>(null);
   const resetCopiedTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const [atBottom, setAtBottom] = useState(true);
   const [copied, setCopied] = useState(false);
@@ -72,16 +71,16 @@ export function BackgroundLogViewer({
   }
 
   function handleJumpToLatest(): void {
-    if (!contentRef.current) {
+    if (!contentElement) {
       return;
     }
 
-    contentRef.current.scrollTop = contentRef.current.scrollHeight;
+    contentElement.scrollTop = contentElement.scrollHeight;
+    contentElement.focus();
     setAtBottom(true);
   }
 
   const handleContentRef = useCallback((node: HTMLPreElement | null): void => {
-    contentRef.current = node;
     setContentElement(node);
   }, []);
 
@@ -149,6 +148,7 @@ export function BackgroundLogViewer({
           <pre
             ref={handleContentRef}
             onScroll={handleScroll}
+            tabIndex={-1}
             className="background-log-viewer max-h-[70vh] overflow-auto px-6 py-5 text-sm whitespace-pre-wrap text-foreground"
             style={{ opacity: initialScrollPending ? 0 : 1 }}
             aria-busy={initialScrollPending || undefined}
