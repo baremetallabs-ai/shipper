@@ -1,10 +1,9 @@
-import { spawn, type ChildProcessByStdio } from 'node:child_process';
+import { execFile, spawn, type ChildProcessByStdio } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Readable } from 'node:stream';
 import { app, type BrowserWindow } from 'electron';
 import {
-  gh,
   LOCKED_LABEL,
   PAUSED_EXIT_CODE,
   RETRIABLE_FAILURE_EXIT_CODE,
@@ -388,7 +387,6 @@ export class BackgroundManager {
     }
 
     this.cleanupPauseSentinel(session.pauseSentinelPath);
-    this.emitStatus(session);
     if (
       session.command === 'ship' &&
       session.status === 'failed' &&
@@ -396,13 +394,14 @@ export class BackgroundManager {
     ) {
       await this.releaseShipLockWithRetry(session.repo, session.meta.issueNumber);
     }
+    this.emitStatus(session);
     this.maybeAdvanceShipQueue(session);
   }
 
   private async releaseShipLockWithRetry(repo: string, issueNumber: number): Promise<void> {
     for (let attempt = 1; attempt <= LOCK_RELEASE_ATTEMPTS; attempt += 1) {
       try {
-        await gh([
+        await this.runGhCommand([
           'issue',
           'edit',
           String(issueNumber),
@@ -413,6 +412,10 @@ export class BackgroundManager {
         ]);
         return;
       } catch {
+        if (!(await this.issueHasShipLock(repo, issueNumber))) {
+          return;
+        }
+
         if (attempt === LOCK_RELEASE_ATTEMPTS) {
           console.warn(
             `[shipper] Failed to release lock for ${repo}#${issueNumber} after ${LOCK_RELEASE_ATTEMPTS} attempts; stale-lock self-heal will clear it.`
@@ -425,6 +428,45 @@ export class BackgroundManager {
         });
       }
     }
+  }
+
+  private async issueHasShipLock(repo: string, issueNumber: number): Promise<boolean> {
+    try {
+      const { stdout } = await this.runGhCommand([
+        'issue',
+        'view',
+        String(issueNumber),
+        '-R',
+        repo,
+        '--json',
+        'labels',
+        '--jq',
+        '.labels[].name',
+      ]);
+      const labels = stdout
+        .split(/\r?\n/)
+        .map((label) => label.trim())
+        .filter((label) => label.length > 0);
+      return labels.includes(LOCKED_LABEL);
+    } catch {
+      return true;
+    }
+  }
+
+  private async runGhCommand(args: string[]): Promise<{ stdout: string; stderr: string }> {
+    return await new Promise((resolve, reject) => {
+      execFile('gh', args, { encoding: 'utf-8' }, (error, stdout, stderr) => {
+        if (error) {
+          reject(error instanceof Error ? error : new Error('gh command failed'));
+          return;
+        }
+
+        resolve({
+          stdout: typeof stdout === 'string' ? stdout : '',
+          stderr: typeof stderr === 'string' ? stderr : '',
+        });
+      });
+    });
   }
 
   private snapshotSession(session: BackgroundSession): BackgroundSessionSnapshot {

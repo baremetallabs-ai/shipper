@@ -5,14 +5,15 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as childProcess from 'node:child_process';
 
-const { ghMock } = vi.hoisted(() => ({
-  ghMock: vi.fn(),
+const { execFileMock } = vi.hoisted(() => ({
+  execFileMock: vi.fn(),
 }));
 
 vi.mock('node:child_process', async () => {
   const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
   return {
     ...actual,
+    execFile: execFileMock,
     spawn: vi.fn(),
   };
 });
@@ -28,16 +29,6 @@ vi.mock('electron', () => ({
     },
   },
 }));
-
-vi.mock('@dnsquared/shipper-core', async () => {
-  const actual =
-    await vi.importActual<typeof import('@dnsquared/shipper-core')>('@dnsquared/shipper-core');
-  return {
-    ...actual,
-    gh: ghMock,
-    LOCKED_LABEL: 'shipper:locked',
-  };
-});
 
 import { BackgroundManager } from '../src/main/background-manager.js';
 import {
@@ -68,6 +59,40 @@ class MockChildProcess extends EventEmitter {
 }
 
 const mockSpawn = vi.mocked(childProcess.spawn);
+type ExecFileCallback = (error: Error | null, stdout: string, stderr: string) => void;
+
+function getExecFileCallback(
+  optionsOrCallback: unknown,
+  callback: unknown
+): ExecFileCallback | undefined {
+  if (typeof optionsOrCallback === 'function') {
+    return optionsOrCallback as ExecFileCallback;
+  }
+
+  if (typeof callback === 'function') {
+    return callback as ExecFileCallback;
+  }
+
+  return undefined;
+}
+
+function ghCommandCalls(): string[][] {
+  return execFileMock.mock.calls
+    .filter(([file]) => file === 'gh')
+    .map(([, args]) => args as string[]);
+}
+
+function expectRemoveLabelCall(issueNumber: string, repo: string): void {
+  expect(ghCommandCalls()).toContainEqual([
+    'issue',
+    'edit',
+    issueNumber,
+    '-R',
+    repo,
+    '--remove-label',
+    LOCKED_LABEL,
+  ]);
+}
 
 let pid = 1000;
 let children: MockChildProcess[] = [];
@@ -114,8 +139,11 @@ beforeEach(() => {
   children = [];
   tempDir = mkdtempSync(join(tmpdir(), 'shipper-bg-manager-'));
   mockSpawn.mockReset();
-  ghMock.mockReset();
-  ghMock.mockResolvedValue({ stdout: '', stderr: '' });
+  execFileMock.mockReset();
+  execFileMock.mockImplementation((_file, _args, optionsOrCallback, callback) => {
+    getExecFileCallback(optionsOrCallback, callback)?.(null, '', '');
+    return {} as never;
+  });
   mockSpawn.mockImplementation(() => {
     const child = new MockChildProcess((pid += 1));
     children.push(child);
@@ -639,16 +667,8 @@ describe('BackgroundManager', () => {
         retriable: true,
       })
     );
-    expect(ghMock).toHaveBeenCalledTimes(1);
-    expect(ghMock).toHaveBeenCalledWith([
-      'issue',
-      'edit',
-      '41',
-      '-R',
-      'owner/repo',
-      '--remove-label',
-      LOCKED_LABEL,
-    ]);
+    expect(ghCommandCalls()).toHaveLength(1);
+    expectRemoveLabelCall('41', 'owner/repo');
   });
 
   it('maps auto-ship halts to complete while preserving paused status for user pauses', () => {
@@ -705,7 +725,7 @@ describe('BackgroundManager', () => {
     );
   });
 
-  it('keeps cancelled failure semantics when stop wins during a pending pause', () => {
+  it('keeps cancelled failure semantics when stop wins during a pending pause', async () => {
     const manager = createManager();
     const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
 
@@ -721,6 +741,7 @@ describe('BackgroundManager', () => {
     manager.requestPause('ship-1');
     manager.kill('ship-1');
     latestChild().close(PAUSED_EXIT_CODE);
+    await flushBackgroundCleanup();
 
     expect(killSpy).toHaveBeenCalledWith(latestChild().pid, 'SIGTERM');
     const failedEvent = statusEvents().find(
@@ -814,7 +835,7 @@ describe('BackgroundManager', () => {
     latestChild().close(0);
 
     expect(mockSpawn).toHaveBeenCalledTimes(1);
-    expect(ghMock).not.toHaveBeenCalled();
+    expect(ghCommandCalls()).toHaveLength(0);
     expect(
       statusEvents().some(
         (event) =>
@@ -842,16 +863,8 @@ describe('BackgroundManager', () => {
     latestChild().close(1);
     await flushBackgroundCleanup();
 
-    expect(ghMock).toHaveBeenCalledTimes(1);
-    expect(ghMock).toHaveBeenCalledWith([
-      'issue',
-      'edit',
-      '41',
-      '-R',
-      'owner/repo',
-      '--remove-label',
-      LOCKED_LABEL,
-    ]);
+    expect(ghCommandCalls()).toHaveLength(1);
+    expectRemoveLabelCall('41', 'owner/repo');
   });
 
   it('releases the ship lock when a running ship is cancelled', async () => {
@@ -871,16 +884,8 @@ describe('BackgroundManager', () => {
     latestChild().close(0);
     await flushBackgroundCleanup();
 
-    expect(ghMock).toHaveBeenCalledTimes(1);
-    expect(ghMock).toHaveBeenCalledWith([
-      'issue',
-      'edit',
-      '41',
-      '-R',
-      'owner/repo',
-      '--remove-label',
-      LOCKED_LABEL,
-    ]);
+    expect(ghCommandCalls()).toHaveLength(1);
+    expectRemoveLabelCall('41', 'owner/repo');
   });
 
   it('does not release the ship lock after a successful ship exit', async () => {
@@ -899,7 +904,7 @@ describe('BackgroundManager', () => {
     latestChild().close(0);
     await flushBackgroundCleanup();
 
-    expect(ghMock).not.toHaveBeenCalled();
+    expect(ghCommandCalls()).toHaveLength(0);
   });
 
   it('does not release the ship lock after a user pause', async () => {
@@ -919,7 +924,7 @@ describe('BackgroundManager', () => {
     latestChild().close(PAUSED_EXIT_CODE);
     await flushBackgroundCleanup();
 
-    expect(ghMock).not.toHaveBeenCalled();
+    expect(ghCommandCalls()).toHaveLength(0);
   });
 
   it('does not release the ship lock when the failed session lacks an issue number', async () => {
@@ -937,12 +942,26 @@ describe('BackgroundManager', () => {
     latestChild().close(1);
     await flushBackgroundCleanup();
 
-    expect(ghMock).not.toHaveBeenCalled();
+    expect(ghCommandCalls()).toHaveLength(0);
   });
 
   it('retries lock release failures, warns once, and still settles the session', async () => {
     vi.useFakeTimers();
-    ghMock.mockRejectedValue(new Error('remove-label failed'));
+    execFileMock.mockImplementation((file, args, optionsOrCallback, callback) => {
+      const cb = getExecFileCallback(optionsOrCallback, callback);
+      if (file !== 'gh') {
+        cb?.(null, '', '');
+        return {} as never;
+      }
+
+      if (Array.isArray(args) && args[0] === 'issue' && args[1] === 'view' && args[2] === '41') {
+        cb?.(null, `${LOCKED_LABEL}\n`, '');
+        return {} as never;
+      }
+
+      cb?.(new Error('remove-label failed'), '', 'remove-label failed');
+      return {} as never;
+    });
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const manager = createManager();
 
@@ -962,7 +981,11 @@ describe('BackgroundManager', () => {
     await vi.advanceTimersByTimeAsync(500);
     await flushBackgroundCleanup();
 
-    expect(ghMock).toHaveBeenCalledTimes(3);
+    expect(
+      ghCommandCalls().filter(
+        (args) => args[0] === 'issue' && args[1] === 'edit' && args[2] === '41'
+      )
+    ).toHaveLength(3);
     expect(warnSpy).toHaveBeenCalledTimes(1);
     expect(warnSpy).toHaveBeenCalledWith(
       '[shipper] Failed to release lock for owner/repo#41 after 3 attempts; stale-lock self-heal will clear it.'
@@ -972,5 +995,107 @@ describe('BackgroundManager', () => {
         (event) => event.sessionId === 'ship-retry-warning' && event.status === 'failed'
       )
     ).toHaveLength(1);
+  });
+
+  it('emits failed status only after the lock release attempt completes', async () => {
+    let releaseCallback:
+      | ((error: Error | null, stdout: string, stderr: string) => void)
+      | undefined;
+    execFileMock.mockImplementation((file, args, optionsOrCallback, callback) => {
+      const cb = getExecFileCallback(optionsOrCallback, callback);
+      if (
+        file === 'gh' &&
+        Array.isArray(args) &&
+        args[0] === 'issue' &&
+        args[1] === 'edit' &&
+        args[2] === '41'
+      ) {
+        releaseCallback = cb;
+        return {} as never;
+      }
+
+      cb?.(null, '', '');
+      return {} as never;
+    });
+    const manager = createManager();
+
+    manager.spawn({
+      sessionId: 'ship-ordered-failure',
+      command: 'ship',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['ship', '41', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+      meta: { issueNumber: 41 },
+    });
+
+    latestChild().close(1);
+    await flushBackgroundCleanup();
+
+    expect(
+      statusEvents().some(
+        (event) => event.sessionId === 'ship-ordered-failure' && event.status === 'failed'
+      )
+    ).toBe(false);
+
+    releaseCallback?.(null, '', '');
+    await flushBackgroundCleanup();
+
+    expect(
+      statusEvents().some(
+        (event) => event.sessionId === 'ship-ordered-failure' && event.status === 'failed'
+      )
+    ).toBe(true);
+  });
+
+  it('treats an already-cleared lock as a no-op without retries or warnings', async () => {
+    execFileMock.mockImplementation((file, args, optionsOrCallback, callback) => {
+      const cb = getExecFileCallback(optionsOrCallback, callback);
+      if (
+        file === 'gh' &&
+        Array.isArray(args) &&
+        args[0] === 'issue' &&
+        args[1] === 'edit' &&
+        args[2] === '41'
+      ) {
+        cb?.(new Error('remove-label failed'), '', 'remove-label failed');
+        return {} as never;
+      }
+
+      if (
+        file === 'gh' &&
+        Array.isArray(args) &&
+        args[0] === 'issue' &&
+        args[1] === 'view' &&
+        args[2] === '41'
+      ) {
+        cb?.(null, '', '');
+        return {} as never;
+      }
+
+      cb?.(null, '', '');
+      return {} as never;
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const manager = createManager();
+
+    manager.spawn({
+      sessionId: 'ship-lock-already-cleared',
+      command: 'ship',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['ship', '41', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+      meta: { issueNumber: 41 },
+    });
+
+    latestChild().close(1);
+    await flushBackgroundCleanup();
+
+    expect(ghCommandCalls()).toEqual([
+      ['issue', 'edit', '41', '-R', 'owner/repo', '--remove-label', LOCKED_LABEL],
+      ['issue', 'view', '41', '-R', 'owner/repo', '--json', 'labels', '--jq', '.labels[].name'],
+    ]);
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 });
