@@ -1,14 +1,43 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+const { mockExecFileSync } = vi.hoisted(() => ({
+  mockExecFileSync:
+    vi.fn<(command: string, args: string[], options?: Record<string, unknown>) => string>(),
+}));
+
+vi.mock('node:child_process', async () => {
+  const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+  return {
+    ...actual,
+    execFileSync: (command: string, args: string[], options?: Record<string, unknown>) =>
+      mockExecFileSync(command, args, options),
+  };
+});
 
 import {
   getCurrentStage,
   getStageIndex,
   getStageLabel,
   getValidTargets,
+  getWorktreeRepoName,
   parseStage,
 } from '../../src/lib/reset.js';
 
 describe('reset helpers', () => {
+  it('falls back to the repo root basename when git common-dir lookup fails', () => {
+    mockExecFileSync.mockImplementationOnce(() => {
+      throw new Error('git failed');
+    });
+
+    expect(getWorktreeRepoName('/repos/my-repo')).toBe('my-repo');
+  });
+
+  it('derives the canonical repo name from a git worktree common dir', () => {
+    mockExecFileSync.mockReturnValueOnce('/repos/my-repo/.git\n');
+
+    expect(getWorktreeRepoName('/repos/my-repo-feature')).toBe('my-repo');
+  });
+
   it('parses both bare stage names and shipper-prefixed stage labels', () => {
     expect(parseStage('new')).toBe('new');
     expect(parseStage('shipper:groomed')).toBe('groomed');

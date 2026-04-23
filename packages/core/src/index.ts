@@ -116,13 +116,14 @@ export { buildPromptCommand, runPrompt } from './lib/prompt-runner.js';
 export { agentPrompts } from './lib/prompts.js';
 export { ensureRepoClone } from './lib/repo-clone.js';
 export { getRepoNwo } from './lib/repo.js';
-export type { ResetResult, WorkflowStage } from './lib/reset.js';
+export type { ArtifactScan, ResetOpResult, ResetResult, WorkflowStage } from './lib/reset.js';
 export {
   executeReset,
   getCurrentStage,
   getStageIndex,
   getStageLabel,
   getValidTargets,
+  getWorktreeRepoName,
   isClean,
   parseStage,
   scanArtifacts,

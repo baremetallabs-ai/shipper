@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import type { ArtifactScan, ResetResult } from '@dnsquared/shipper-core';
 import { toErrorMessage } from '@dnsquared/shipper-core';
 
 export interface SpawnResult {
@@ -194,6 +195,48 @@ export function formatUnblockResult(
     finalMessage: opts.finalMessage,
     sessionLogPath: opts.sessionLogPath,
   });
+}
+
+export function formatResetPreview(issue: number, scan: ArtifactScan): string {
+  const lines = [`Reset preview for issue #${issue}:`, `Target: ${scan.targetLabel}`];
+
+  if (scan.labelsToRemove.length > 0) {
+    lines.push(`Labels to remove: ${scan.labelsToRemove.join(', ')}`);
+  }
+  if (scan.addTarget) {
+    lines.push(`Label to add: ${scan.targetLabel}`);
+  }
+  if (scan.commentIds.length > 0) {
+    lines.push(`Comments to delete: ${scan.commentIds.join(', ')}`);
+  }
+  if (scan.prs.length > 0) {
+    lines.push(
+      `PRs to close: ${scan.prs.map((pr) => `#${pr.number} (${pr.headRefName})`).join(', ')}`
+    );
+  }
+  if (scan.branchesToDelete.length > 0) {
+    lines.push(`Remote branches to delete: ${scan.branchesToDelete.join(', ')}`);
+  }
+  if (scan.localBranches.length > 0) {
+    lines.push(`Local branches to delete: ${scan.localBranches.join(', ')}`);
+  }
+  if (scan.localWorktrees.length > 0) {
+    lines.push(`Local worktrees to remove: ${scan.localWorktrees.join(', ')}`);
+  }
+
+  lines.push('Dry run only; no changes made.');
+  return lines.join('\n');
+}
+
+export function formatResetResult(issue: number, result: ResetResult): string {
+  const lines = [`Reset results for issue #${issue}:`];
+
+  for (const operation of result.operations) {
+    const suffix = operation.reason ? ` (${operation.reason})` : '';
+    lines.push(`${operation.status}: ${operation.description}${suffix}`);
+  }
+
+  return lines.join('\n');
 }
 
 function formatStructuredResult(opts: StructuredResultOptions): ToolTextResult {

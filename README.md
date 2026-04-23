@@ -30,6 +30,35 @@ Use `shipper eject` to scaffold editable local overrides under `./.shipper/promp
 
 Shipper also ships `packages/mcp`, an MCP server that exposes the workflow tools to AI agents.
 
+## MCP server
+
+The MCP server exposes a workflow-oriented tool surface for agents that need to inspect or operate
+on shipper-managed issues without shelling out to the CLI.
+
+Available tools:
+
+- `shipper_list_issues`: list open shipper-managed issues grouped by stage, with optional status filtering.
+- `shipper_get_issue`: fetch issue details, labels, body, state, and any linked open PR.
+- `shipper_get_pr_checks`: summarize PR check status with failed and pending details.
+- `shipper_create_issue`: create a new `shipper:new` issue from a plain-text request.
+- `shipper_advance`: advance an issue by one workflow step in headless mode.
+- `shipper_unblock`: retry a blocked issue and report the unblock verdict.
+- `shipper_merge`: run the ready-PR merge queue once.
+- `shipper_unlock`: release one issue lock or sweep stale locks.
+- `shipper_adopt`: apply `shipper:new` to an existing issue.
+- `shipper_reset`: reset an issue back to an earlier workflow stage and clean up later artifacts.
+
+`shipper_reset` inputs and behavior:
+
+- Required inputs: `issue` (positive integer) and `target` (`new`, `groomed`, `designed`, `planned`, or `implemented`).
+- Optional input: `dry_run` (boolean, defaults to `false`).
+- Rejects pull request numbers and closed issues without making any changes.
+- Rejects same-stage and forward resets; reset only works backward, with the same `implemented` exception the CLI allows for `shipper:pr-open`, `shipper:pr-reviewed`, and `shipper:ready`.
+- Rejects fresh `shipper:locked` issues and tells the caller to release the lock with `shipper_unlock` before retrying. Stale locks are treated as unlocked.
+- With `dry_run: true`, returns a preview of labels, comments, PRs, remote branches, local branches, and local worktrees that would be cleaned up, followed by `Dry run only; no changes made.`
+- If the pre-run scan finds nothing to do, returns a normal success response stating that the issue is already clean for the requested target.
+- On live runs, returns a full per-operation ledger. If any cleanup operation fails, the MCP response is marked `isError: true` but still includes every succeeded, skipped, and failed operation with reasons.
+
 ## State model
 
 Workflow state is tracked in GitHub using labels on issues and PRs. Comments and issue bodies hold the human-readable artifacts produced by each stage.
@@ -357,6 +386,7 @@ Behavior:
 
 - Without `--to`, prompts you to choose an earlier valid target stage interactively.
 - With `--to <stage>`, resets directly to the named earlier stage.
+- The same cleanup capability is available to MCP clients via `shipper_reset`. The MCP tool always requires an explicit target, never prompts for confirmation, does not expose a lock-override flag, and supports `dry_run` previews.
 - Valid targets are earlier workflow stages: `new`, `groomed`, `designed`, `planned`, and `implemented`.
 - Cleans up later-stage artifacts by closing associated PRs and, for any closed PR whose head ref starts with `shipper/`, attempting to delete that remote branch; it also removes matching local branches and worktrees, deletes later issue comments, and re-applies the target workflow label.
 - Posts a reset notice comment after cleanup.

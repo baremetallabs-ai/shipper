@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   formatAdvanceResult,
   formatCreateIssueResult,
+  formatResetPreview,
+  formatResetResult,
   formatSpawnResult,
   formatToolError,
   formatUnblockResult,
@@ -169,5 +171,55 @@ describe('tool-specific result formatters', () => {
     );
     expect(result.content[0]?.text).toContain('PR: https://github.com/owner/repo/pull/7');
     expect(result.content[0]?.text).toContain('Rejected the implementation step.');
+  });
+});
+
+describe('reset formatters', () => {
+  it('formats a dry-run preview with concrete artifacts and an explicit no-op marker', () => {
+    const text = formatResetPreview(42, {
+      labelsToRemove: ['shipper:planned', 'shipper:failed'],
+      addTarget: true,
+      targetStage: 'groomed',
+      targetLabel: 'shipper:groomed',
+      commentIds: [101, 102],
+      prs: [{ number: 7, headRefName: 'shipper/42-reset' }],
+      branchesToDelete: ['shipper/42-reset'],
+      localBranches: ['shipper/42-reset'],
+      localWorktrees: ['/tmp/worktrees/repo--wt--shipper-42-reset'],
+    });
+
+    expect(text).toContain('Reset preview for issue #42:');
+    expect(text).toContain('Labels to remove: shipper:planned, shipper:failed');
+    expect(text).toContain('Label to add: shipper:groomed');
+    expect(text).toContain('Comments to delete: 101, 102');
+    expect(text).toContain('PRs to close: #7 (shipper/42-reset)');
+    expect(text).toContain('Remote branches to delete: shipper/42-reset');
+    expect(text).toContain('Local branches to delete: shipper/42-reset');
+    expect(text).toContain('Local worktrees to remove: /tmp/worktrees/repo--wt--shipper-42-reset');
+    expect(text).toContain('Dry run only; no changes made.');
+  });
+
+  it('formats reset operation results with succeeded, skipped, and failed reasons', () => {
+    const text = formatResetResult(42, {
+      operations: [
+        { description: 'Remove local worktree /tmp/wt', status: 'succeeded' },
+        {
+          description: 'Delete local branch shipper/42-reset',
+          status: 'skipped',
+          reason: 'already deleted',
+        },
+        {
+          description: 'Post reset notice comment',
+          status: 'failed',
+          reason: 'GitHub API error',
+        },
+      ],
+      hasFailures: true,
+    });
+
+    expect(text).toContain('Reset results for issue #42:');
+    expect(text).toContain('succeeded: Remove local worktree /tmp/wt');
+    expect(text).toContain('skipped: Delete local branch shipper/42-reset (already deleted)');
+    expect(text).toContain('failed: Post reset notice comment (GitHub API error)');
   });
 });
