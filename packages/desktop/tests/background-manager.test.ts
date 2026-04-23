@@ -5,6 +5,10 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as childProcess from 'node:child_process';
 
+const { ghMock } = vi.hoisted(() => ({
+  ghMock: vi.fn(),
+}));
+
 vi.mock('node:child_process', async () => {
   const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
   return {
@@ -25,8 +29,22 @@ vi.mock('electron', () => ({
   },
 }));
 
+vi.mock('@dnsquared/shipper-core', async () => {
+  const actual =
+    await vi.importActual<typeof import('@dnsquared/shipper-core')>('@dnsquared/shipper-core');
+  return {
+    ...actual,
+    gh: ghMock,
+    LOCKED_LABEL: 'shipper:locked',
+  };
+});
+
 import { BackgroundManager } from '../src/main/background-manager.js';
-import { PAUSED_EXIT_CODE, RETRIABLE_FAILURE_EXIT_CODE } from '@dnsquared/shipper-core';
+import {
+  LOCKED_LABEL,
+  PAUSED_EXIT_CODE,
+  RETRIABLE_FAILURE_EXIT_CODE,
+} from '@dnsquared/shipper-core';
 
 class MockStream extends EventEmitter {
   emitData(chunk: string): void {
@@ -82,6 +100,11 @@ function statusEvents(): Array<Record<string, unknown>> {
     .map(([, payload]) => payload as Record<string, unknown>);
 }
 
+async function flushBackgroundCleanup(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
@@ -91,6 +114,8 @@ beforeEach(() => {
   children = [];
   tempDir = mkdtempSync(join(tmpdir(), 'shipper-bg-manager-'));
   mockSpawn.mockReset();
+  ghMock.mockReset();
+  ghMock.mockResolvedValue({ stdout: '', stderr: '' });
   mockSpawn.mockImplementation(() => {
     const child = new MockChildProcess((pid += 1));
     children.push(child);
@@ -105,7 +130,7 @@ afterEach(() => {
 });
 
 describe('BackgroundManager', () => {
-  it('queues same-repo ship sessions and promotes the next one after completion', () => {
+  it('queues same-repo ship sessions and promotes the next one after completion', async () => {
     const manager = createManager();
 
     manager.spawn({
@@ -139,6 +164,7 @@ describe('BackgroundManager', () => {
     ).toBe(true);
 
     latestChild().close(0);
+    await flushBackgroundCleanup();
 
     expect(mockSpawn).toHaveBeenCalledTimes(2);
     expect(statusEvents()).toContainEqual(
@@ -579,7 +605,7 @@ describe('BackgroundManager', () => {
     expect(existsSync(pauseSentinelPath)).toBe(false);
   });
 
-  it('maps retriable failure exit codes to failed status with retriable metadata', () => {
+  it('maps retriable failure exit codes to failed status with retriable metadata and releases the lock', async () => {
     const manager = createManager();
 
     manager.spawn({
@@ -593,6 +619,7 @@ describe('BackgroundManager', () => {
     });
 
     latestChild().close(RETRIABLE_FAILURE_EXIT_CODE);
+    await flushBackgroundCleanup();
 
     const retriableEvent = statusEvents().find(
       (event) => event.sessionId === 'ship-retriable' && event.status === 'failed'
@@ -612,6 +639,16 @@ describe('BackgroundManager', () => {
         retriable: true,
       })
     );
+    expect(ghMock).toHaveBeenCalledTimes(1);
+    expect(ghMock).toHaveBeenCalledWith([
+      'issue',
+      'edit',
+      '41',
+      '-R',
+      'owner/repo',
+      '--remove-label',
+      LOCKED_LABEL,
+    ]);
   });
 
   it('maps auto-ship halts to complete while preserving paused status for user pauses', () => {
@@ -777,6 +814,7 @@ describe('BackgroundManager', () => {
     latestChild().close(0);
 
     expect(mockSpawn).toHaveBeenCalledTimes(1);
+    expect(ghMock).not.toHaveBeenCalled();
     expect(
       statusEvents().some(
         (event) =>
@@ -786,5 +824,153 @@ describe('BackgroundManager', () => {
           event.meta.cancelled === true
       )
     ).toBe(true);
+  });
+
+  it('releases the ship lock when a running ship exits non-zero', async () => {
+    const manager = createManager();
+
+    manager.spawn({
+      sessionId: 'ship-failed',
+      command: 'ship',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['ship', '41', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+      meta: { issueNumber: 41 },
+    });
+
+    latestChild().close(1);
+    await flushBackgroundCleanup();
+
+    expect(ghMock).toHaveBeenCalledTimes(1);
+    expect(ghMock).toHaveBeenCalledWith([
+      'issue',
+      'edit',
+      '41',
+      '-R',
+      'owner/repo',
+      '--remove-label',
+      LOCKED_LABEL,
+    ]);
+  });
+
+  it('releases the ship lock when a running ship is cancelled', async () => {
+    const manager = createManager();
+
+    manager.spawn({
+      sessionId: 'ship-cancelled',
+      command: 'ship',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['ship', '41', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+      meta: { issueNumber: 41 },
+    });
+
+    manager.kill('ship-cancelled');
+    latestChild().close(0);
+    await flushBackgroundCleanup();
+
+    expect(ghMock).toHaveBeenCalledTimes(1);
+    expect(ghMock).toHaveBeenCalledWith([
+      'issue',
+      'edit',
+      '41',
+      '-R',
+      'owner/repo',
+      '--remove-label',
+      LOCKED_LABEL,
+    ]);
+  });
+
+  it('does not release the ship lock after a successful ship exit', async () => {
+    const manager = createManager();
+
+    manager.spawn({
+      sessionId: 'ship-success',
+      command: 'ship',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['ship', '41', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+      meta: { issueNumber: 41 },
+    });
+
+    latestChild().close(0);
+    await flushBackgroundCleanup();
+
+    expect(ghMock).not.toHaveBeenCalled();
+  });
+
+  it('does not release the ship lock after a user pause', async () => {
+    const manager = createManager();
+
+    manager.spawn({
+      sessionId: 'ship-paused',
+      command: 'ship',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['ship', '41', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+      meta: { issueNumber: 41 },
+    });
+    manager.requestPause('ship-paused');
+
+    latestChild().close(PAUSED_EXIT_CODE);
+    await flushBackgroundCleanup();
+
+    expect(ghMock).not.toHaveBeenCalled();
+  });
+
+  it('does not release the ship lock when the failed session lacks an issue number', async () => {
+    const manager = createManager();
+
+    manager.spawn({
+      sessionId: 'ship-no-issue',
+      command: 'ship',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['ship', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+    });
+
+    latestChild().close(1);
+    await flushBackgroundCleanup();
+
+    expect(ghMock).not.toHaveBeenCalled();
+  });
+
+  it('retries lock release failures, warns once, and still settles the session', async () => {
+    vi.useFakeTimers();
+    ghMock.mockRejectedValue(new Error('remove-label failed'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const manager = createManager();
+
+    manager.spawn({
+      sessionId: 'ship-retry-warning',
+      command: 'ship',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['ship', '41', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+      meta: { issueNumber: 41 },
+    });
+
+    latestChild().close(1);
+    await flushBackgroundCleanup();
+    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(500);
+    await flushBackgroundCleanup();
+
+    expect(ghMock).toHaveBeenCalledTimes(3);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[shipper] Failed to release lock for owner/repo#41 after 3 attempts; stale-lock self-heal will clear it.'
+    );
+    expect(
+      statusEvents().filter(
+        (event) => event.sessionId === 'ship-retry-warning' && event.status === 'failed'
+      )
+    ).toHaveLength(1);
   });
 });
