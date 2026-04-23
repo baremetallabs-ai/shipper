@@ -1,12 +1,24 @@
 import { execFile } from 'node:child_process';
-import { stat } from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
+import { access, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
+const REPO_DIR_PATH_ERROR_CODES = ['EACCES', 'ENOENT', 'ENOTDIR', 'EPERM'] as const;
 
 function getMissingPathError(subject: string, resolvedRepoDir: string): Error {
   return new Error(`${subject} path does not exist: ${resolvedRepoDir}`);
+}
+
+function hasErrorCode(error: unknown, codes: readonly string[]): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    typeof error.code === 'string' &&
+    codes.includes(error.code)
+  );
 }
 
 export async function resolveAndEnterRepoDir(): Promise<string> {
@@ -23,19 +35,17 @@ export async function resolveAndEnterRepoDir(): Promise<string> {
       throw getMissingPathError(subject, resolvedRepoDir);
     }
   } catch (error) {
-    if (
-      error instanceof Error &&
-      error.message === getMissingPathError(subject, resolvedRepoDir).message
-    ) {
-      throw error;
+    if (hasErrorCode(error, REPO_DIR_PATH_ERROR_CODES)) {
+      throw getMissingPathError(subject, resolvedRepoDir);
     }
 
-    if (
-      typeof error === 'object' &&
-      error !== null &&
-      'code' in error &&
-      (error.code === 'ENOENT' || error.code === 'EACCES' || error.code === 'ENOTDIR')
-    ) {
+    throw error;
+  }
+
+  try {
+    await access(resolvedRepoDir, fsConstants.R_OK | fsConstants.X_OK);
+  } catch (error) {
+    if (hasErrorCode(error, REPO_DIR_PATH_ERROR_CODES)) {
       throw getMissingPathError(subject, resolvedRepoDir);
     }
 
@@ -46,11 +56,24 @@ export async function resolveAndEnterRepoDir(): Promise<string> {
     await execFileAsync('git', ['rev-parse', '--show-toplevel'], {
       cwd: resolvedRepoDir,
     });
-  } catch {
+  } catch (error) {
+    if (hasErrorCode(error, ['EACCES', 'ENOTDIR', 'EPERM'])) {
+      throw getMissingPathError(subject, resolvedRepoDir);
+    }
+
     throw new Error(`${subject} is not a git repository: ${resolvedRepoDir}`);
   }
 
-  process.chdir(resolvedRepoDir);
+  try {
+    process.chdir(resolvedRepoDir);
+  } catch (error) {
+    if (hasErrorCode(error, REPO_DIR_PATH_ERROR_CODES)) {
+      throw getMissingPathError(subject, resolvedRepoDir);
+    }
+
+    throw error;
+  }
+
   process.stderr.write(`shipper mcp: repo dir = ${resolvedRepoDir}\n`);
   return resolvedRepoDir;
 }

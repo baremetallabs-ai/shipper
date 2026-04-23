@@ -37,6 +37,7 @@ const { resolveAndEnterRepoDir } = await import('../src/repo-dir.js');
 
 describe('resolveAndEnterRepoDir', () => {
   const originalCwd = process.cwd();
+  const originalChdir = process.chdir.bind(process);
   const originalRepoDir = process.env.SHIPPER_REPO_DIR;
   const tempDirs: string[] = [];
   let stderrWriteSpy: ReturnType<typeof vi.spyOn>;
@@ -175,6 +176,43 @@ describe('resolveAndEnterRepoDir', () => {
     expect(mockExecFileAsync).toHaveBeenCalledWith('git', ['rev-parse', '--show-toplevel'], {
       cwd: repoDir,
     });
+    expect(stderrWriteSpy).not.toHaveBeenCalled();
+    expect(process.cwd()).toBe(originalCwd);
+  });
+
+  it('surfaces git permission failures as missing-path errors', async () => {
+    const repoDir = await makeTempDir('repo-dir-git-eacces-');
+    process.env.SHIPPER_REPO_DIR = repoDir;
+    mockExecFileAsync.mockRejectedValue(
+      Object.assign(new Error('permission denied'), { code: 'EACCES' })
+    );
+
+    await expect(resolveAndEnterRepoDir()).rejects.toThrow(
+      `SHIPPER_REPO_DIR path does not exist: ${repoDir}`
+    );
+
+    expect(stderrWriteSpy).not.toHaveBeenCalled();
+    expect(process.cwd()).toBe(originalCwd);
+  });
+
+  it('surfaces chdir failures as missing-path errors', async () => {
+    const repoDir = await makeTempDir('repo-dir-chdir-eacces-');
+    process.env.SHIPPER_REPO_DIR = repoDir;
+    mockExecFileAsync.mockResolvedValue({ stdout: `${repoDir}\n`, stderr: '' });
+    const chdirSpy = vi.spyOn(process, 'chdir').mockImplementation((...args) => {
+      if (args[0] === repoDir) {
+        throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+      }
+
+      originalChdir(...args);
+    });
+
+    await expect(resolveAndEnterRepoDir()).rejects.toThrow(
+      `SHIPPER_REPO_DIR path does not exist: ${repoDir}`
+    );
+
+    chdirSpy.mockRestore();
+
     expect(stderrWriteSpy).not.toHaveBeenCalled();
     expect(process.cwd()).toBe(originalCwd);
   });
