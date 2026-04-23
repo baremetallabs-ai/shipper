@@ -494,6 +494,7 @@ describe('offerSetupFinalize', () => {
       mode: 'default',
       agent: 'claude',
       model: 'opus',
+      disableMcp: true,
       confirm,
     });
 
@@ -510,6 +511,7 @@ describe('offerSetupFinalize', () => {
         mode: 'default',
         agent: 'claude',
         model: 'opus',
+        disableMcp: true,
       })
     );
     expect(execAsyncMock).toHaveBeenCalledWith(

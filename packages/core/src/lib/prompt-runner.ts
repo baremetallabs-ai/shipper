@@ -604,26 +604,24 @@ async function applyMcpPolicy(
   disableMcp: boolean,
   cwd: string
 ): Promise<void> {
+  if (!disableMcp) {
+    return;
+  }
+
   switch (agent) {
     case 'claude':
       stripClaudeMcpArgs(args);
-      if (disableMcp) {
-        args.push('--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}');
-      }
+      args.push('--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}');
       return;
     case 'codex':
       stripCodexMcpArgs(args);
-      if (disableMcp) {
-        args.push('-c', 'mcp_servers={}');
-      }
+      args.push('-c', 'mcp_servers={}');
       return;
     case 'copilot':
       stripCopilotMcpArgs(args);
-      if (disableMcp) {
-        args.push('--disable-builtin-mcps');
-        for (const serverName of await discoverCopilotMcpServerNames(args, cwd)) {
-          args.push('--disable-mcp-server', serverName);
-        }
+      args.push('--disable-builtin-mcps');
+      for (const serverName of await discoverCopilotMcpServerNames(args, cwd)) {
+        args.push('--disable-mcp-server', serverName);
       }
       return;
     default: {
@@ -679,13 +677,17 @@ function stripFlagWithValue(args: string[], flag: string): void {
       continue;
     }
     if (arg === flag) {
-      args.splice(i, args[i + 1] === undefined ? 1 : 2);
+      args.splice(i, hasSeparateFlagValue(args[i + 1]) ? 2 : 1);
       continue;
     }
     if (arg.startsWith(`${flag}=`)) {
       args.splice(i, 1);
     }
   }
+}
+
+function hasSeparateFlagValue(value: string | undefined): boolean {
+  return value !== undefined && !value.startsWith('-');
 }
 
 async function discoverCopilotMcpServerNames(args: string[], cwd: string): Promise<string[]> {
@@ -708,7 +710,11 @@ function resolveCopilotConfigDir(args: string[], cwd: string): string {
       continue;
     }
     if (arg === '--config-dir') {
-      return path.resolve(cwd, args[i + 1] ?? path.join(homedir(), '.copilot'));
+      const configDir = args[i + 1];
+      if (typeof configDir === 'string' && !configDir.startsWith('-')) {
+        return path.resolve(cwd, configDir);
+      }
+      return path.join(homedir(), '.copilot');
     }
     if (arg.startsWith('--config-dir=')) {
       return path.resolve(cwd, arg.slice('--config-dir='.length));
@@ -744,14 +750,7 @@ async function addCopilotServerNames(serverNames: Set<string>, configPath: strin
   }
 
   const mcpServers =
-    parsed &&
-    typeof parsed === 'object' &&
-    !Array.isArray(parsed) &&
-    Reflect.get(parsed, 'mcpServers') &&
-    typeof Reflect.get(parsed, 'mcpServers') === 'object' &&
-    !Array.isArray(Reflect.get(parsed, 'mcpServers'))
-      ? (Reflect.get(parsed, 'mcpServers') as Record<string, unknown>)
-      : undefined;
+    isRecord(parsed) && isRecord(parsed.mcpServers) ? parsed.mcpServers : undefined;
 
   if (!mcpServers) {
     return;
@@ -762,6 +761,10 @@ async function addCopilotServerNames(serverNames: Set<string>, configPath: strin
       serverNames.add(serverName);
     }
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 function normalizeCodexHeadlessArgs(args: string[]): void {

@@ -121,6 +121,16 @@ describe('setupCommand', () => {
     expect(typeof finalizeCall?.confirm).toBe('function');
   });
 
+  it('forwards disableMcp into setup finalization', async () => {
+    const { setupCommand } = await import('../../src/commands/setup.js');
+
+    await setupCommand(['configure'], { disableMcp: true });
+
+    expect(core.offerSetupFinalize).toHaveBeenCalledWith(
+      expect.objectContaining({ disableMcp: true })
+    );
+  });
+
   it('reuses configured setup agent and model for finalization when CLI flags are absent', async () => {
     vi.spyOn(core, 'getSettings').mockReturnValue({
       ...core.DEFAULTS,

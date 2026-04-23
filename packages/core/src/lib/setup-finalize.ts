@@ -41,6 +41,7 @@ export interface SetupFinalizeOptions {
   mode: CommandMode;
   agent?: AgentName;
   model?: string;
+  disableMcp?: boolean;
   confirm: (message: string) => Promise<boolean>;
 }
 
@@ -406,6 +407,7 @@ async function runRemediationPass(args: {
   mode: CommandMode;
   agent?: AgentName;
   model?: string;
+  disableMcp?: boolean;
   failureContext: string;
 }): Promise<SetupFinalizeResult | 'committed'> {
   const exitCode = await runPrompt('setup_remediate', {
@@ -415,6 +417,7 @@ async function runRemediationPass(args: {
     mode: args.mode,
     agent: args.agent,
     model: args.model,
+    disableMcp: args.disableMcp,
     userInput: args.failureContext,
   });
 
@@ -566,6 +569,7 @@ export async function offerSetupFinalize(
         mode: options.mode,
         agent: options.agent,
         model: options.model,
+        disableMcp: options.disableMcp,
         failureContext: buildFailureContext(failedChecks),
       });
 

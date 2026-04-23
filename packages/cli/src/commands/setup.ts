@@ -59,6 +59,7 @@ export async function setupCommand(
     mode: effectiveMode,
     agent: effectiveAgent,
     model: effectiveModel,
+    disableMcp: options.disableMcp,
     confirm,
   });
 
