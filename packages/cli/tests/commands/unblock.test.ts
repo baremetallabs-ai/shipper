@@ -344,8 +344,9 @@ describe('unblockCommand', () => {
 
     await expect(unblockCommand(repo, '250')).resolves.toBeUndefined();
 
-    expect(promptCalls).toHaveLength(2);
+    expect(promptCalls).toHaveLength(3);
     expect(promptCalls[1]?.opts.userInput).toContain('Missing result.json');
+    expect(promptCalls[2]?.opts.userInput).toContain('Missing result.json');
     expect(fake.state.postedComments.at(-1)?.body).toContain('Missing result.json');
     expect(fake.state.issues.get('250')?.labels).toEqual(new Set(['shipper:blocked']));
     expect(process.exitCode).toBe(1);
