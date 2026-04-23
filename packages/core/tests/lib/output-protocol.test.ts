@@ -1590,6 +1590,8 @@ describe('output protocol helpers', () => {
           retry: retryMock,
         })
       ).resolves.toEqual(repairedResult);
+
+      expect(retryMock).toHaveBeenCalledTimes(1);
     });
 
     it('accepts valid retry output even when the retry exit code is non-zero', async () => {
@@ -1611,9 +1613,138 @@ describe('output protocol helpers', () => {
           retry: retryMock,
         })
       ).resolves.toEqual(repairedResult);
+
+      expect(retryMock).toHaveBeenCalledTimes(1);
     });
 
-    it('rethrows the second validation error when retry output is still invalid', async () => {
+    it('returns the third attempt output and refreshes correction messages for pr_open errors', async () => {
+      const repairedResult = buildResult({ pr_spec: outputRelative('pr-spec-248.json') });
+      const retryMock = vi
+        .fn<(message: string) => Promise<number>>()
+        .mockImplementation(async () => {
+          if (retryMock.mock.calls.length === 1) {
+            await writeResultFile(buildResult({ pr_spec: outputRelative('pr-spec-248.json') }));
+            const invalidSpec = buildPrSpec();
+            delete (invalidSpec as Partial<typeof invalidSpec>).title;
+            await writeOutputJson('pr-spec-248.json', invalidSpec);
+            return 0;
+          }
+
+          await writeResultFile(repairedResult);
+          await writeOutputFile('pr-body-248.md', 'body');
+          await writeOutputJson('pr-spec-248.json', buildPrSpec());
+          return 0;
+        });
+      await writeResultFile(buildResult());
+
+      await expect(
+        retryOnInvalidOutput({
+          cwd: tempDir,
+          stage: 'pr_open',
+          retry: retryMock,
+        })
+      ).resolves.toEqual(repairedResult);
+
+      expect(retryMock).toHaveBeenCalledTimes(2);
+      expect(retryMock.mock.calls[1]?.[0]).toContain("- 'title' must be a string");
+      expect(retryMock.mock.calls[1]?.[0]).not.toContain(
+        'pr_open accept requires a pr_spec in result.json'
+      );
+    });
+
+    it('returns the third attempt output and refreshes correction messages for pr_review errors', async () => {
+      const repairedResult = buildResult({
+        review_payload: outputRelative('review-payload-248.json'),
+      });
+      const diffHunks = parseDiffHunks(buildReviewDiffFixture());
+      const retryMock = vi
+        .fn<(message: string) => Promise<number>>()
+        .mockImplementation(async () => {
+          await writeResultFile(repairedResult);
+
+          if (retryMock.mock.calls.length === 1) {
+            await writeOutputJson(
+              'review-payload-248.json',
+              buildReviewPayload({
+                comments: [
+                  {
+                    path: 'src/file.ts',
+                    line: 45,
+                    side: 'RIGHT',
+                    body: 'This line is outside the diff hunks.',
+                  },
+                ],
+              })
+            );
+            return 0;
+          }
+
+          await writeOutputJson(
+            'review-payload-248.json',
+            buildReviewPayload({
+              comments: [
+                {
+                  path: 'src/file.ts',
+                  line: 12,
+                  side: 'RIGHT',
+                  body: 'Needs a test.',
+                },
+              ],
+            })
+          );
+          return 0;
+        });
+      await writeOutputFile('result.json', '{invalid');
+
+      await expect(
+        retryOnInvalidOutput({
+          cwd: tempDir,
+          stage: 'pr_review',
+          prFiles: new Set(['src/file.ts', 'src/new.ts', 'src/old.ts']),
+          diffHunks,
+          retry: retryMock,
+        })
+      ).resolves.toEqual(repairedResult);
+
+      expect(retryMock).toHaveBeenCalledTimes(2);
+      expect(retryMock.mock.calls[1]?.[0]).toContain(
+        "comments[0].line 45 (side RIGHT) is not within any diff hunk for 'src/file.ts'"
+      );
+      expect(retryMock.mock.calls[1]?.[0]).not.toContain('Failed to parse ');
+    });
+
+    it('accepts a third-attempt repair after a non-zero retry exit code', async () => {
+      const repairedResult = buildResult({ pr_spec: outputRelative('pr-spec-248.json') });
+      const retryMock = vi
+        .fn<(message: string) => Promise<number>>()
+        .mockImplementation(async () => {
+          if (retryMock.mock.calls.length === 1) {
+            await writeResultFile(buildResult({ pr_spec: outputRelative('pr-spec-248.json') }));
+            const invalidSpec = buildPrSpec();
+            delete (invalidSpec as Partial<typeof invalidSpec>).title;
+            await writeOutputJson('pr-spec-248.json', invalidSpec);
+            return 17;
+          }
+
+          await writeResultFile(repairedResult);
+          await writeOutputFile('pr-body-248.md', 'body');
+          await writeOutputJson('pr-spec-248.json', buildPrSpec());
+          return 0;
+        });
+      await writeResultFile(buildResult());
+
+      await expect(
+        retryOnInvalidOutput({
+          cwd: tempDir,
+          stage: 'pr_open',
+          retry: retryMock,
+        })
+      ).resolves.toEqual(repairedResult);
+
+      expect(retryMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('rethrows the final validation error when all retries still produce invalid output', async () => {
       const retryMock = vi
         .fn<(message: string) => Promise<number>>()
         .mockImplementation(async () => {
@@ -1633,7 +1764,7 @@ describe('output protocol helpers', () => {
         })
       ).rejects.toThrow("'title' must be a string");
 
-      expect(retryMock).toHaveBeenCalledTimes(1);
+      expect(retryMock).toHaveBeenCalledTimes(2);
     });
   });
 

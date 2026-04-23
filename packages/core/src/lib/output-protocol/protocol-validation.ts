@@ -381,6 +381,8 @@ export async function validateStageOutput(
   return result;
 }
 
+const MAX_VALIDATION_ATTEMPTS = 3;
+
 export async function retryOnInvalidOutput(opts: {
   cwd: string;
   stage: StageName;
@@ -388,13 +390,25 @@ export async function retryOnInvalidOutput(opts: {
   diffHunks?: Map<string, DiffFileHunks>;
   retry: (correctionMessage: string) => Promise<number>;
 }): Promise<ResultJson> {
-  try {
-    return await validateStageOutput(opts.cwd, opts.stage, opts.prFiles, opts.diffHunks);
-  } catch (error) {
-    const errors = error instanceof ResultValidationError ? error.errors : [toErrorMessage(error)];
-    await opts.retry(formatCorrectionMessage(errors));
-    return await validateStageOutput(opts.cwd, opts.stage, opts.prFiles, opts.diffHunks);
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= MAX_VALIDATION_ATTEMPTS; attempt++) {
+    try {
+      return await validateStageOutput(opts.cwd, opts.stage, opts.prFiles, opts.diffHunks);
+    } catch (error) {
+      lastError = error;
+
+      if (attempt === MAX_VALIDATION_ATTEMPTS) {
+        break;
+      }
+
+      const errors =
+        error instanceof ResultValidationError ? error.errors : [toErrorMessage(error)];
+      await opts.retry(formatCorrectionMessage(errors));
+    }
   }
+
+  throw lastError;
 }
 
 export function formatCorrectionMessage(errors: string[]): string {
