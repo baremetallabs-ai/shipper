@@ -19,7 +19,6 @@ import {
   getSettings,
   getStageIndex,
   getStageLabel,
-  getValidTargets,
   getWorktreeRepoName,
   gh,
   isLockStale,
@@ -31,6 +30,7 @@ import {
   releaseIssueLock,
   resolveSessionRepo,
   scanArtifacts,
+  toErrorMessage,
   tryResolvePrForIssue,
 } from '@dnsquared/shipper-core';
 import {
@@ -488,13 +488,53 @@ function resolveUnblockVerdict(
   return undefined;
 }
 
+function isPullRequestNotFoundError(error: unknown): boolean {
+  const stderr =
+    typeof error === 'object' &&
+    error !== null &&
+    'stderr' in error &&
+    typeof error.stderr === 'string'
+      ? error.stderr
+      : '';
+  const detail = `${toErrorMessage(error)}\n${stderr}`;
+  return (
+    /could not resolve to a pullrequest/i.test(detail) ||
+    /no pull requests found/i.test(detail) ||
+    /pull request.*not found/i.test(detail)
+  );
+}
+
 async function isPullRequest(repo: string, ref: number): Promise<boolean> {
   try {
     await gh(['pr', 'view', String(ref), '-R', repo, '--json', 'number,url']);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if (isPullRequestNotFoundError(error)) {
+      return false;
+    }
+
+    throw error;
   }
+}
+
+function getResetRepoRoot(): string {
+  return process.cwd();
+}
+
+function getResetScanOptions(
+  repoRoot: string,
+  repoName: string,
+  dryRun: boolean
+): {
+  repoRoot: string;
+  repoName: string;
+  refreshRemoteRefs?: boolean;
+} {
+  return dryRun ? { repoRoot, repoName, refreshRemoteRefs: false } : { repoRoot, repoName };
+}
+
+function getResetExecutionOptions(repoRoot: string): { repoRoot: string } {
+  return { repoRoot };
 }
 
 function renderChecks(repo: string, pr: number, checks: ReturnType<typeof classifyChecks>): string {
@@ -787,7 +827,7 @@ export function registerTools(server: McpServer, repo: string): void {
     },
     async ({ issue, target, dry_run }) => {
       try {
-        const repoRoot = process.cwd();
+        const repoRoot = getResetRepoRoot();
         const repoName = getWorktreeRepoName(repoRoot);
 
         if (await isPullRequest(repo, issue)) {
@@ -827,19 +867,15 @@ export function registerTools(server: McpServer, repo: string): void {
               `Error: ${getStageLabel(target)} is ahead of the current stage ${getStageLabel(currentStage.stage)}. Reset only works backward.`
             );
           }
-
-          const validTargets = getValidTargets(currentStage);
-          if (!validTargets.includes(target)) {
-            throw new Error(
-              `Error: ${getStageLabel(target)} is ahead of the current stage ${getStageLabel(currentStage.stage)}. Reset only works backward.`
-            );
-          }
         }
 
-        const scan = await scanArtifacts(issue, repo, target, labels, {
-          repoRoot,
-          repoName,
-        });
+        const scan = await scanArtifacts(
+          issue,
+          repo,
+          target,
+          labels,
+          getResetScanOptions(repoRoot, repoName, dry_run === true)
+        );
 
         if (isClean(scan)) {
           return textOk(
@@ -851,7 +887,7 @@ export function registerTools(server: McpServer, repo: string): void {
           return textOk(formatResetPreview(issue, scan));
         }
 
-        const result = await executeReset(issue, scan, repo, { repoRoot });
+        const result = await executeReset(issue, scan, repo, getResetExecutionOptions(repoRoot));
         const text = formatResetResult(issue, result);
         return result.hasFailures
           ? { content: [{ type: 'text', text }], isError: true }

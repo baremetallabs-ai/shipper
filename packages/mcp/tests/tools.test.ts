@@ -147,6 +147,20 @@ function issueLabelsStateResponse(
   };
 }
 
+function notPullRequestError(): Error & { stderr: string } {
+  const error = new Error('GraphQL: Could not resolve to a PullRequest with the number of 42.');
+  return Object.assign(error, {
+    stderr: 'GraphQL: Could not resolve to a PullRequest with the number of 42.',
+  });
+}
+
+function prProbeFailureError(): Error & { stderr: string } {
+  const error = new Error('gh pr view failed');
+  return Object.assign(error, {
+    stderr: 'HTTP 500: upstream GitHub failure',
+  });
+}
+
 function makeResetScan(
   overrides: Partial<{
     labelsToRemove: string[];
@@ -309,7 +323,7 @@ describe('shipper_reset', () => {
 
   it('rejects closed issues before scanning or executing reset', async () => {
     mockGh
-      .mockRejectedValueOnce(new Error('not a PR'))
+      .mockRejectedValueOnce(notPullRequestError())
       .mockResolvedValueOnce(issueLabelsStateResponse('CLOSED', 'shipper:groomed'));
 
     const getTool = collectTools();
@@ -325,7 +339,7 @@ describe('shipper_reset', () => {
 
   it('rejects same-stage resets while preserving backward-only wording', async () => {
     mockGh
-      .mockRejectedValueOnce(new Error('not a PR'))
+      .mockRejectedValueOnce(notPullRequestError())
       .mockResolvedValueOnce(issueLabelsResponse('shipper:groomed'));
 
     const getTool = collectTools();
@@ -340,7 +354,7 @@ describe('shipper_reset', () => {
 
   it('rejects later-stage targets while preserving backward-only wording', async () => {
     mockGh
-      .mockRejectedValueOnce(new Error('not a PR'))
+      .mockRejectedValueOnce(notPullRequestError())
       .mockResolvedValueOnce(issueLabelsResponse('shipper:groomed'));
 
     const getTool = collectTools();
@@ -355,7 +369,7 @@ describe('shipper_reset', () => {
 
   it('allows any reset target for failed-only issues without workflow-stage labels', async () => {
     mockGh
-      .mockRejectedValueOnce(new Error('not a PR'))
+      .mockRejectedValueOnce(notPullRequestError())
       .mockResolvedValueOnce(issueLabelsResponse('shipper:failed'));
     mockScanArtifacts.mockResolvedValueOnce(
       makeResetScan({
@@ -381,6 +395,7 @@ describe('shipper_reset', () => {
       {
         repoRoot: process.cwd(),
         repoName: 'shared-repo-name',
+        refreshRemoteRefs: false,
       }
     );
     expect(result.content[0]?.text).toContain('Dry run only; no changes made.');
@@ -388,7 +403,7 @@ describe('shipper_reset', () => {
 
   it('rejects fresh locks with a shipper_unlock instruction', async () => {
     mockGh
-      .mockRejectedValueOnce(new Error('not a PR'))
+      .mockRejectedValueOnce(notPullRequestError())
       .mockResolvedValueOnce(issueLabelsResponse('shipper:groomed', 'shipper:locked'));
     mockIsLockStale.mockResolvedValueOnce(false);
 
@@ -402,7 +417,7 @@ describe('shipper_reset', () => {
 
   it('allows stale locks to proceed through reset scanning', async () => {
     mockGh
-      .mockRejectedValueOnce(new Error('not a PR'))
+      .mockRejectedValueOnce(notPullRequestError())
       .mockResolvedValueOnce(issueLabelsResponse('shipper:groomed', 'shipper:locked'));
     mockIsLockStale.mockResolvedValueOnce(true);
     mockScanArtifacts.mockResolvedValueOnce(
@@ -424,7 +439,7 @@ describe('shipper_reset', () => {
 
   it('returns a full dry-run preview and never calls executeReset', async () => {
     mockGh
-      .mockRejectedValueOnce(new Error('not a PR'))
+      .mockRejectedValueOnce(notPullRequestError())
       .mockResolvedValueOnce(
         issueLabelsResponse('shipper:new', 'shipper:groomed', 'shipper:planned')
       );
@@ -455,11 +470,22 @@ describe('shipper_reset', () => {
     expect(text).toContain('Local worktrees to remove: /tmp/worktrees/repo--wt--shipper-42-reset');
     expect(text).toContain('Dry run only; no changes made.');
     expect(mockExecuteReset).not.toHaveBeenCalled();
+    expect(mockScanArtifacts).toHaveBeenCalledWith(
+      42,
+      'owner/repo',
+      'groomed',
+      ['shipper:new', 'shipper:groomed', 'shipper:planned'],
+      {
+        repoRoot: process.cwd(),
+        repoName: 'shared-repo-name',
+        refreshRemoteRefs: false,
+      }
+    );
   });
 
   it('short-circuits when the issue is already clean for the target', async () => {
     mockGh
-      .mockRejectedValueOnce(new Error('not a PR'))
+      .mockRejectedValueOnce(notPullRequestError())
       .mockResolvedValueOnce(issueLabelsResponse('shipper:implemented', 'shipper:pr-open'));
     mockScanArtifacts.mockResolvedValueOnce(
       makeResetScan({
@@ -481,7 +507,7 @@ describe('shipper_reset', () => {
 
   it('returns the live operation ledger without isError when reset succeeds', async () => {
     mockGh
-      .mockRejectedValueOnce(new Error('not a PR'))
+      .mockRejectedValueOnce(notPullRequestError())
       .mockResolvedValueOnce(issueLabelsResponse('shipper:planned'));
     mockScanArtifacts.mockResolvedValueOnce(
       makeResetScan({
@@ -519,7 +545,7 @@ describe('shipper_reset', () => {
 
   it('marks partial-failure live resets as MCP errors while keeping the full ledger', async () => {
     mockGh
-      .mockRejectedValueOnce(new Error('not a PR'))
+      .mockRejectedValueOnce(notPullRequestError())
       .mockResolvedValueOnce(issueLabelsResponse('shipper:planned'));
     mockScanArtifacts.mockResolvedValueOnce(
       makeResetScan({
@@ -548,6 +574,19 @@ describe('shipper_reset', () => {
     expect(result.content[0]?.text).toContain(
       'failed: Post reset notice comment (GitHub API error)'
     );
+  });
+
+  it('surfaces operational PR probe failures instead of treating them as not-a-PR misses', async () => {
+    mockGh.mockRejectedValueOnce(prProbeFailureError());
+
+    const getTool = collectTools();
+    const result = await getTool('shipper_reset')({ issue: 42, target: 'new' });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain('gh pr view failed');
+    expect(result.content[0]?.text).not.toContain('pull request, not an issue');
+    expect(mockScanArtifacts).not.toHaveBeenCalled();
+    expect(mockExecuteReset).not.toHaveBeenCalled();
   });
 });
 
