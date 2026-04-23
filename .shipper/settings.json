@@ -7,16 +7,10 @@
   "agentTimeoutMinutes": 60,
   "commands": {
     "default": {
+      "agent": "codex"
+    },
+    "groom": {
       "agent": "claude"
-    },
-    "implement": {
-      "agent": "codex"
-    },
-    "pr_remediate": {
-      "agent": "codex"
-    },
-    "plan": {
-      "agent": "codex"
     }
   },
   "merge": {
