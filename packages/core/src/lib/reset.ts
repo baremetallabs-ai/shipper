@@ -154,6 +154,29 @@ export function getValidTargets(currentStage: CurrentStage): WorkflowStage[] {
   return targets;
 }
 
+export function getWorktreeRepoName(repoRoot: string): string {
+  try {
+    const gitCommonDirOutput = execFileSync('git', ['rev-parse', '--git-common-dir'], {
+      cwd: repoRoot,
+      encoding: 'utf-8',
+    }).trim();
+
+    if (gitCommonDirOutput) {
+      const gitCommonDir = path.isAbsolute(gitCommonDirOutput)
+        ? gitCommonDirOutput
+        : path.resolve(repoRoot, gitCommonDirOutput);
+      const repoName = path.basename(path.dirname(gitCommonDir));
+      if (repoName) {
+        return repoName;
+      }
+    }
+  } catch {
+    // Fall back to the current repo root basename if git common-dir lookup fails.
+  }
+
+  return path.basename(repoRoot);
+}
+
 export async function scanArtifacts(
   issueNum: number,
   nwo: string,

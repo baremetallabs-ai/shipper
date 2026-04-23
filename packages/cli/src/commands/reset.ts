@@ -1,6 +1,3 @@
-import { execFileSync } from 'node:child_process';
-import path from 'node:path';
-
 import { confirm, promptChoice } from '../lib/confirm.js';
 import {
   logger,
@@ -16,6 +13,7 @@ import {
   getStageIndex,
   getStageLabel,
   getValidTargets,
+  getWorktreeRepoName,
   gh,
   isClean,
   isLockStale,
@@ -49,30 +47,6 @@ function getInvalidStageError(input: string): string {
 
   return `Error: ${input} is not a valid stage name. Valid stages: ${validStages}.`;
 }
-
-function getWorktreeRepoName(repoRoot: string): string {
-  try {
-    const gitCommonDirOutput = execFileSync('git', ['rev-parse', '--git-common-dir'], {
-      cwd: repoRoot,
-      encoding: 'utf-8',
-    }).trim();
-
-    if (gitCommonDirOutput) {
-      const gitCommonDir = path.isAbsolute(gitCommonDirOutput)
-        ? gitCommonDirOutput
-        : path.resolve(repoRoot, gitCommonDirOutput);
-      const repoName = path.basename(path.dirname(gitCommonDir));
-      if (repoName) {
-        return repoName;
-      }
-    }
-  } catch {
-    // Fall back to the current repo root basename if git common-dir lookup fails.
-  }
-
-  return path.basename(repoRoot);
-}
-
 function printDryRun(issueNum: number, scan: Awaited<ReturnType<typeof scanArtifacts>>): void {
   logger.log(`\nReset summary for issue #${issueNum}:`);
   logger.log(`  Target: ${scan.targetLabel}`);

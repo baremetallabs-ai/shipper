@@ -5,6 +5,7 @@ import { z } from 'zod';
 import {
   BLOCKED_LABEL,
   DISPLAY_NAME_MAP,
+  executeReset,
   FAILED_LABEL,
   LOCKED_LABEL,
   NEW_LABEL,
@@ -14,20 +15,29 @@ import {
   fetchChecks,
   fetchIssue,
   findLatestSessionMeta,
+  getCurrentStage,
   getSettings,
+  getStageIndex,
+  getStageLabel,
+  getValidTargets,
+  getWorktreeRepoName,
   gh,
   isLockStale,
+  isClean,
   listIssues,
   parseIssueLabelsState,
   parseIssueTitleLabelsList,
   readResultFile,
   releaseIssueLock,
   resolveSessionRepo,
+  scanArtifacts,
   tryResolvePrForIssue,
 } from '@dnsquared/shipper-core';
 import {
   formatAdvanceResult,
   formatCreateIssueResult,
+  formatResetPreview,
+  formatResetResult,
   formatSpawnResult,
   formatToolError,
   formatUnblockResult,
@@ -37,6 +47,7 @@ import {
 
 const STAGE_SHORT_NAMES = STAGE_LABEL_NAMES.map((l) => l.replace(/^shipper:/, ''));
 const STATUS_FILTER_VALUES = [...STAGE_SHORT_NAMES, 'blocked', 'failed'] as const;
+const RESET_TARGET_VALUES = ['new', 'groomed', 'designed', 'planned', 'implemented'] as const;
 
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
 const STAGE_FOR_LABEL = {
@@ -764,6 +775,94 @@ export function registerTools(server: McpServer, repo: string): void {
   );
 
   server.registerTool(
+    'shipper_reset',
+    {
+      description:
+        'Reset an issue back to an earlier workflow stage without shelling out to the CLI. Requires an explicit target stage. Supports dry-run preview mode and refuses fresh issue locks.',
+      inputSchema: {
+        issue: issueSchema(),
+        target: z.enum(RESET_TARGET_VALUES),
+        dry_run: z.boolean().optional(),
+      },
+    },
+    async ({ issue, target, dry_run }) => {
+      try {
+        const repoRoot = process.cwd();
+        const repoName = getWorktreeRepoName(repoRoot);
+
+        if (await isPullRequest(repo, issue)) {
+          throw new Error(`#${issue} is a pull request, not an issue.`);
+        }
+
+        const issueData = await fetchIssueLabels(repo, issue);
+        if (issueData.state !== 'OPEN') {
+          throw new Error(`Issue #${issue} is closed. Reset only works on open issues.`);
+        }
+
+        const labels = issueData.labels.map((label) => label.name);
+        const isFailedOnly =
+          labels.includes(FAILED_LABEL) &&
+          !labels.some((label) => STAGE_LABEL_NAMES.includes(label));
+
+        if (labels.includes(LOCKED_LABEL) && !(await isLockStale(repo, String(issue)))) {
+          throw new Error(
+            `Issue #${issue} is locked by another shipper instance. Release the lock with shipper_unlock before retrying.`
+          );
+        }
+
+        if (!isFailedOnly) {
+          const currentStage = getCurrentStage(labels);
+          const currentIndex = getStageIndex(currentStage.stage);
+          const targetIndex = getStageIndex(target);
+          const sameImplementedStage = currentStage.hasPrLabels && target === 'implemented';
+
+          if (targetIndex === currentIndex && !sameImplementedStage) {
+            throw new Error(
+              `Error: Issue #${issue} is already at ${getStageLabel(target)}. Reset only works backward.`
+            );
+          }
+
+          if (targetIndex > currentIndex) {
+            throw new Error(
+              `Error: ${getStageLabel(target)} is ahead of the current stage ${getStageLabel(currentStage.stage)}. Reset only works backward.`
+            );
+          }
+
+          const validTargets = getValidTargets(currentStage);
+          if (!validTargets.includes(target)) {
+            throw new Error(
+              `Error: ${getStageLabel(target)} is ahead of the current stage ${getStageLabel(currentStage.stage)}. Reset only works backward.`
+            );
+          }
+        }
+
+        const scan = await scanArtifacts(issue, repo, target, labels, {
+          repoRoot,
+          repoName,
+        });
+
+        if (isClean(scan)) {
+          return textOk(
+            `Issue #${issue} is already clean for target ${scan.targetLabel}. Nothing to reset.`
+          );
+        }
+
+        if (dry_run) {
+          return textOk(formatResetPreview(issue, scan));
+        }
+
+        const result = await executeReset(issue, scan, repo, { repoRoot });
+        const text = formatResetResult(issue, result);
+        return result.hasFailures
+          ? { content: [{ type: 'text', text }], isError: true }
+          : textOk(text);
+      } catch (err) {
+        return formatToolError(err);
+      }
+    }
+  );
+
+  server.registerTool(
     'shipper_adopt',
     {
       description:
@@ -803,6 +902,7 @@ export function registerInitErrorTools(server: McpServer, error: unknown): void 
     'shipper_unblock',
     'shipper_merge',
     'shipper_unlock',
+    'shipper_reset',
     'shipper_adopt',
   ];
   for (const name of names) {

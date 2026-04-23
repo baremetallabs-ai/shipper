@@ -1,29 +1,36 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 
 const {
+  mockExecuteReset,
   mockExtractFinalMessage,
   mockFetchIssue,
   mockFindLatestSessionMeta,
   mockGh,
+  mockGetWorktreeRepoName,
   mockIsLockStale,
   mockListIssues,
   mockReadFile,
   mockReadResultFile,
   mockReleaseLock,
   mockResolveSessionRepo,
+  mockScanArtifacts,
   mockSpawnShipper,
   mockTryResolvePr,
 } = vi.hoisted(() => ({
+  mockExecuteReset: vi.fn(),
   mockExtractFinalMessage: vi.fn(),
   mockFetchIssue: vi.fn(),
   mockFindLatestSessionMeta: vi.fn(),
   mockGh: vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>(),
+  mockGetWorktreeRepoName: vi.fn(),
   mockIsLockStale: vi.fn(),
   mockListIssues: vi.fn(),
   mockReadFile: vi.fn(),
   mockReadResultFile: vi.fn(),
   mockReleaseLock: vi.fn(),
   mockResolveSessionRepo: vi.fn(),
+  mockScanArtifacts: vi.fn(),
   mockSpawnShipper: vi.fn(),
   mockTryResolvePr: vi.fn(),
 }));
@@ -41,16 +48,19 @@ vi.mock('@dnsquared/shipper-core', async () => {
     await vi.importActual<typeof import('@dnsquared/shipper-core')>('@dnsquared/shipper-core');
   return {
     ...actual,
+    executeReset: mockExecuteReset,
     extractFinalMessage: mockExtractFinalMessage,
     fetchIssue: mockFetchIssue,
     findLatestSessionMeta: mockFindLatestSessionMeta,
     getSettings: () => ({ agentTimeoutMinutes: 60 }),
+    getWorktreeRepoName: mockGetWorktreeRepoName,
     gh: (args: string[]) => mockGh(args),
     isLockStale: mockIsLockStale,
     listIssues: mockListIssues,
     readResultFile: mockReadResultFile,
     releaseIssueLock: mockReleaseLock,
     resolveSessionRepo: mockResolveSessionRepo,
+    scanArtifacts: mockScanArtifacts,
     tryResolvePrForIssue: mockTryResolvePr,
   };
 });
@@ -63,45 +73,138 @@ vi.mock('../src/helpers.js', async () => {
   };
 });
 
-import { registerTools } from '../src/tools.js';
+import { registerInitErrorTools, registerTools } from '../src/tools.js';
 
 type Handler = (args: Record<string, unknown>) => Promise<{
   content: { type: string; text: string }[];
   isError?: boolean;
 }>;
 
-function collectTools(): (name: string) => Handler {
-  const handlers = new Map<string, Handler>();
+type ToolSchema = Record<string, z.ZodTypeAny> | undefined;
+type ToolGetter = ((name: string) => Handler) & {
+  getSchema: (name: string) => ToolSchema;
+  invokeValidated: (
+    name: string,
+    args: Record<string, unknown>
+  ) => Promise<Awaited<ReturnType<Handler>>>;
+  names: () => string[];
+};
+
+function collectTools(): ToolGetter {
+  const registrations = new Map<string, { handler: Handler; inputSchema: ToolSchema }>();
   const mockServer = {
-    registerTool: (name: string, _config: unknown, handler: Handler) => {
-      handlers.set(name, handler);
+    registerTool: (
+      name: string,
+      config: { inputSchema?: ToolSchema } | undefined,
+      handler: Handler
+    ) => {
+      registrations.set(name, { handler, inputSchema: config?.inputSchema });
     },
   };
   registerTools(mockServer as unknown as Parameters<typeof registerTools>[0], 'owner/repo');
-  return (name) => {
-    const handler = handlers.get(name);
-    if (!handler) {
+  const getRegistration = (name: string) => {
+    const registration = registrations.get(name);
+    if (!registration) {
       throw new Error(`Tool ${name} was not registered`);
     }
-    return handler;
+    return registration;
   };
+
+  const getTool = ((name: string) => getRegistration(name).handler) as ToolGetter;
+  getTool.getSchema = (name: string) => getRegistration(name).inputSchema;
+  getTool.invokeValidated = async (name: string, args: Record<string, unknown>) => {
+    const registration = getRegistration(name);
+    if (!registration.inputSchema) {
+      return registration.handler(args);
+    }
+
+    const parsed = z.object(registration.inputSchema).safeParse(args);
+    if (!parsed.success) {
+      throw parsed.error;
+    }
+
+    return registration.handler(parsed.data);
+  };
+  getTool.names = () => [...registrations.keys()];
+  return getTool;
 }
 
 function issueLabelsResponse(...labels: string[]): { stdout: string; stderr: string } {
+  return issueLabelsStateResponse('OPEN', ...labels);
+}
+
+function issueLabelsStateResponse(
+  state: 'OPEN' | 'CLOSED',
+  ...labels: string[]
+): { stdout: string; stderr: string } {
   return {
     stdout: JSON.stringify({
       number: 42,
-      state: 'OPEN',
+      state,
       labels: labels.map((name) => ({ name })),
     }),
     stderr: '',
   };
 }
 
+function makeResetScan(
+  overrides: Partial<{
+    labelsToRemove: string[];
+    addTarget: boolean;
+    targetStage: 'new' | 'groomed' | 'designed' | 'planned' | 'implemented';
+    targetLabel: string;
+    commentIds: number[];
+    prs: Array<{ number: number; headRefName: string }>;
+    branchesToDelete: string[];
+    localBranches: string[];
+    localWorktrees: string[];
+  }> = {}
+): {
+  labelsToRemove: string[];
+  addTarget: boolean;
+  targetStage: 'new' | 'groomed' | 'designed' | 'planned' | 'implemented';
+  targetLabel: string;
+  commentIds: number[];
+  prs: Array<{ number: number; headRefName: string }>;
+  branchesToDelete: string[];
+  localBranches: string[];
+  localWorktrees: string[];
+} {
+  return {
+    labelsToRemove: [],
+    addTarget: false,
+    targetStage: 'new',
+    targetLabel: 'shipper:new',
+    commentIds: [],
+    prs: [],
+    branchesToDelete: [],
+    localBranches: [],
+    localWorktrees: [],
+    ...overrides,
+  };
+}
+
+async function expectZodError(promise: Promise<unknown>): Promise<z.ZodError> {
+  try {
+    await promise;
+    throw new Error('Expected schema validation to fail.');
+  } catch (error: unknown) {
+    if (error instanceof z.ZodError) {
+      return error;
+    }
+
+    throw error;
+  }
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mockResolveSessionRepo.mockResolvedValue({ repo: 'owner/repo', repoSlug: 'owner-repo' });
   mockReadFile.mockResolvedValue('## Implementation Summary\n\nBlocked on upstream dependency.\n');
+  mockGetWorktreeRepoName.mockReturnValue('shared-repo-name');
+  mockIsLockStale.mockResolvedValue(false);
+  mockScanArtifacts.mockResolvedValue(makeResetScan());
+  mockExecuteReset.mockResolvedValue({ operations: [], hasFailures: false });
 });
 
 describe('shipper_list_issues', () => {
@@ -152,6 +255,299 @@ describe('shipper_unlock', () => {
 
     expect(mockReleaseLock).toHaveBeenCalledWith('owner/repo', '10');
     expect(result.content[0]?.text).toContain('Released lock on #10');
+  });
+});
+
+describe('shipper_reset', () => {
+  it('validates missing issue at the registered schema boundary', async () => {
+    const getTool = collectTools();
+
+    const error = await expectZodError(getTool.invokeValidated('shipper_reset', { target: 'new' }));
+
+    expect(error.issues[0]?.path).toEqual(['issue']);
+    expect(mockScanArtifacts).not.toHaveBeenCalled();
+  });
+
+  it('validates missing target at the registered schema boundary', async () => {
+    const getTool = collectTools();
+
+    const error = await expectZodError(getTool.invokeValidated('shipper_reset', { issue: 42 }));
+
+    expect(error.issues[0]?.path).toEqual(['target']);
+    expect(mockScanArtifacts).not.toHaveBeenCalled();
+  });
+
+  it('validates invalid target values and lists the allowed stages', async () => {
+    const getTool = collectTools();
+
+    const error = await expectZodError(
+      getTool.invokeValidated('shipper_reset', { issue: 42, target: 'ready' })
+    );
+
+    expect(JSON.stringify(error.issues)).toContain('new');
+    expect(JSON.stringify(error.issues)).toContain('groomed');
+    expect(JSON.stringify(error.issues)).toContain('designed');
+    expect(JSON.stringify(error.issues)).toContain('planned');
+    expect(JSON.stringify(error.issues)).toContain('implemented');
+    expect(mockScanArtifacts).not.toHaveBeenCalled();
+  });
+
+  it('rejects pull request numbers before scanning or executing reset', async () => {
+    mockGh.mockResolvedValueOnce({
+      stdout: JSON.stringify({ number: 42, url: 'https://github.com/owner/repo/pull/42' }),
+      stderr: '',
+    });
+
+    const getTool = collectTools();
+    const result = await getTool('shipper_reset')({ issue: 42, target: 'new' });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain('#42 is a pull request, not an issue.');
+    expect(mockScanArtifacts).not.toHaveBeenCalled();
+    expect(mockExecuteReset).not.toHaveBeenCalled();
+  });
+
+  it('rejects closed issues before scanning or executing reset', async () => {
+    mockGh
+      .mockRejectedValueOnce(new Error('not a PR'))
+      .mockResolvedValueOnce(issueLabelsStateResponse('CLOSED', 'shipper:groomed'));
+
+    const getTool = collectTools();
+    const result = await getTool('shipper_reset')({ issue: 42, target: 'new' });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain(
+      'Issue #42 is closed. Reset only works on open issues.'
+    );
+    expect(mockScanArtifacts).not.toHaveBeenCalled();
+    expect(mockExecuteReset).not.toHaveBeenCalled();
+  });
+
+  it('rejects same-stage resets while preserving backward-only wording', async () => {
+    mockGh
+      .mockRejectedValueOnce(new Error('not a PR'))
+      .mockResolvedValueOnce(issueLabelsResponse('shipper:groomed'));
+
+    const getTool = collectTools();
+    const result = await getTool('shipper_reset')({ issue: 42, target: 'groomed' });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain(
+      'Error: Issue #42 is already at shipper:groomed. Reset only works backward.'
+    );
+    expect(mockScanArtifacts).not.toHaveBeenCalled();
+  });
+
+  it('rejects later-stage targets while preserving backward-only wording', async () => {
+    mockGh
+      .mockRejectedValueOnce(new Error('not a PR'))
+      .mockResolvedValueOnce(issueLabelsResponse('shipper:groomed'));
+
+    const getTool = collectTools();
+    const result = await getTool('shipper_reset')({ issue: 42, target: 'planned' });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain(
+      'Error: shipper:planned is ahead of the current stage shipper:groomed. Reset only works backward.'
+    );
+    expect(mockScanArtifacts).not.toHaveBeenCalled();
+  });
+
+  it('allows any reset target for failed-only issues without workflow-stage labels', async () => {
+    mockGh
+      .mockRejectedValueOnce(new Error('not a PR'))
+      .mockResolvedValueOnce(issueLabelsResponse('shipper:failed'));
+    mockScanArtifacts.mockResolvedValueOnce(
+      makeResetScan({
+        addTarget: true,
+        targetStage: 'implemented',
+        targetLabel: 'shipper:implemented',
+      })
+    );
+
+    const getTool = collectTools();
+    const result = await getTool('shipper_reset')({
+      issue: 42,
+      target: 'implemented',
+      dry_run: true,
+    });
+
+    expect(result.isError).toBeUndefined();
+    expect(mockScanArtifacts).toHaveBeenCalledWith(
+      42,
+      'owner/repo',
+      'implemented',
+      ['shipper:failed'],
+      {
+        repoRoot: process.cwd(),
+        repoName: 'shared-repo-name',
+      }
+    );
+    expect(result.content[0]?.text).toContain('Dry run only; no changes made.');
+  });
+
+  it('rejects fresh locks with a shipper_unlock instruction', async () => {
+    mockGh
+      .mockRejectedValueOnce(new Error('not a PR'))
+      .mockResolvedValueOnce(issueLabelsResponse('shipper:groomed', 'shipper:locked'));
+    mockIsLockStale.mockResolvedValueOnce(false);
+
+    const getTool = collectTools();
+    const result = await getTool('shipper_reset')({ issue: 42, target: 'new' });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain('shipper_unlock');
+    expect(mockScanArtifacts).not.toHaveBeenCalled();
+  });
+
+  it('allows stale locks to proceed through reset scanning', async () => {
+    mockGh
+      .mockRejectedValueOnce(new Error('not a PR'))
+      .mockResolvedValueOnce(issueLabelsResponse('shipper:groomed', 'shipper:locked'));
+    mockIsLockStale.mockResolvedValueOnce(true);
+    mockScanArtifacts.mockResolvedValueOnce(
+      makeResetScan({
+        addTarget: true,
+        targetStage: 'new',
+        targetLabel: 'shipper:new',
+      })
+    );
+
+    const getTool = collectTools();
+    const result = await getTool('shipper_reset')({ issue: 42, target: 'new', dry_run: true });
+
+    expect(result.isError).toBeUndefined();
+    expect(mockScanArtifacts).toHaveBeenCalledOnce();
+    expect(mockExecuteReset).not.toHaveBeenCalled();
+    expect(result.content[0]?.text).toContain('Dry run only; no changes made.');
+  });
+
+  it('returns a full dry-run preview and never calls executeReset', async () => {
+    mockGh
+      .mockRejectedValueOnce(new Error('not a PR'))
+      .mockResolvedValueOnce(
+        issueLabelsResponse('shipper:new', 'shipper:groomed', 'shipper:planned')
+      );
+    mockScanArtifacts.mockResolvedValueOnce(
+      makeResetScan({
+        labelsToRemove: ['shipper:planned'],
+        addTarget: false,
+        targetStage: 'groomed',
+        targetLabel: 'shipper:groomed',
+        commentIds: [101, 102],
+        prs: [{ number: 17, headRefName: 'shipper/42-reset' }],
+        branchesToDelete: ['shipper/42-reset'],
+        localBranches: ['shipper/42-reset'],
+        localWorktrees: ['/tmp/worktrees/repo--wt--shipper-42-reset'],
+      })
+    );
+
+    const getTool = collectTools();
+    const result = await getTool('shipper_reset')({ issue: 42, target: 'groomed', dry_run: true });
+    const text = result.content[0]?.text ?? '';
+
+    expect(result.isError).toBeUndefined();
+    expect(text).toContain('Labels to remove: shipper:planned');
+    expect(text).toContain('Comments to delete: 101, 102');
+    expect(text).toContain('PRs to close: #17 (shipper/42-reset)');
+    expect(text).toContain('Remote branches to delete: shipper/42-reset');
+    expect(text).toContain('Local branches to delete: shipper/42-reset');
+    expect(text).toContain('Local worktrees to remove: /tmp/worktrees/repo--wt--shipper-42-reset');
+    expect(text).toContain('Dry run only; no changes made.');
+    expect(mockExecuteReset).not.toHaveBeenCalled();
+  });
+
+  it('short-circuits when the issue is already clean for the target', async () => {
+    mockGh
+      .mockRejectedValueOnce(new Error('not a PR'))
+      .mockResolvedValueOnce(issueLabelsResponse('shipper:implemented', 'shipper:pr-open'));
+    mockScanArtifacts.mockResolvedValueOnce(
+      makeResetScan({
+        targetStage: 'implemented',
+        targetLabel: 'shipper:implemented',
+      })
+    );
+
+    const getTool = collectTools();
+    const result = await getTool('shipper_reset')({ issue: 42, target: 'implemented' });
+
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0]?.text).toContain(
+      'Issue #42 is already clean for target shipper:implemented. Nothing to reset.'
+    );
+    expect(result.content[0]?.text).not.toContain('Reset results for issue #42:');
+    expect(mockExecuteReset).not.toHaveBeenCalled();
+  });
+
+  it('returns the live operation ledger without isError when reset succeeds', async () => {
+    mockGh
+      .mockRejectedValueOnce(new Error('not a PR'))
+      .mockResolvedValueOnce(issueLabelsResponse('shipper:planned'));
+    mockScanArtifacts.mockResolvedValueOnce(
+      makeResetScan({
+        addTarget: true,
+        targetStage: 'groomed',
+        targetLabel: 'shipper:groomed',
+      })
+    );
+    mockExecuteReset.mockResolvedValueOnce({
+      operations: [
+        { description: 'Remove labels: shipper:planned', status: 'succeeded' },
+        {
+          description: 'Delete remote branch shipper/42-reset',
+          status: 'skipped',
+          reason: 'already deleted',
+        },
+      ],
+      hasFailures: false,
+    });
+
+    const getTool = collectTools();
+    const result = await getTool('shipper_reset')({ issue: 42, target: 'groomed' });
+
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0]?.text).toContain('Reset results for issue #42:');
+    expect(result.content[0]?.text).toContain('succeeded: Remove labels: shipper:planned');
+    expect(result.content[0]?.text).toContain(
+      'skipped: Delete remote branch shipper/42-reset (already deleted)'
+    );
+    expect(mockExecuteReset).toHaveBeenCalledWith(42, expect.any(Object), 'owner/repo', {
+      repoRoot: process.cwd(),
+    });
+    expect(mockGetWorktreeRepoName).toHaveBeenCalledWith(process.cwd());
+  });
+
+  it('marks partial-failure live resets as MCP errors while keeping the full ledger', async () => {
+    mockGh
+      .mockRejectedValueOnce(new Error('not a PR'))
+      .mockResolvedValueOnce(issueLabelsResponse('shipper:planned'));
+    mockScanArtifacts.mockResolvedValueOnce(
+      makeResetScan({
+        addTarget: true,
+        targetStage: 'new',
+        targetLabel: 'shipper:new',
+      })
+    );
+    mockExecuteReset.mockResolvedValueOnce({
+      operations: [
+        { description: 'Remove labels: shipper:planned', status: 'succeeded' },
+        {
+          description: 'Post reset notice comment',
+          status: 'failed',
+          reason: 'GitHub API error',
+        },
+      ],
+      hasFailures: true,
+    });
+
+    const getTool = collectTools();
+    const result = await getTool('shipper_reset')({ issue: 42, target: 'new' });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain('succeeded: Remove labels: shipper:planned');
+    expect(result.content[0]?.text).toContain(
+      'failed: Post reset notice comment (GitHub API error)'
+    );
   });
 });
 
@@ -749,5 +1145,27 @@ describe('shipper_merge', () => {
     expect(result.content[0]?.text).toContain('[exit 0] shipper merge --once');
     expect(result.content[0]?.text).toContain('--- stdout ---');
     expect(result.content[0]?.text).toContain('merged one PR');
+  });
+});
+
+describe('registerInitErrorTools', () => {
+  it('includes shipper_reset and returns the standard init-error payload', async () => {
+    const handlers = new Map<string, Handler>();
+    const mockServer = {
+      registerTool: (name: string, _config: unknown, handler: Handler) => {
+        handlers.set(name, handler);
+      },
+    };
+
+    registerInitErrorTools(
+      mockServer as unknown as Parameters<typeof registerInitErrorTools>[0],
+      new Error('server init failed')
+    );
+
+    expect([...handlers.keys()]).toContain('shipper_reset');
+
+    const result = await handlers.get('shipper_reset')?.({});
+    expect(result?.isError).toBe(true);
+    expect(result?.content[0]?.text).toContain('server init failed');
   });
 });
