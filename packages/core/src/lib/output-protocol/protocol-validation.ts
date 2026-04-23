@@ -390,16 +390,12 @@ export async function retryOnInvalidOutput(opts: {
   diffHunks?: Map<string, DiffFileHunks>;
   retry: (correctionMessage: string) => Promise<number>;
 }): Promise<ResultJson> {
-  let lastError: unknown;
-
   for (let attempt = 1; attempt <= MAX_VALIDATION_ATTEMPTS; attempt++) {
     try {
       return await validateStageOutput(opts.cwd, opts.stage, opts.prFiles, opts.diffHunks);
     } catch (error) {
-      lastError = error;
-
       if (attempt === MAX_VALIDATION_ATTEMPTS) {
-        break;
+        throw error;
       }
 
       const errors =
@@ -408,7 +404,7 @@ export async function retryOnInvalidOutput(opts: {
     }
   }
 
-  throw lastError;
+  throw new Error('Unreachable: retryOnInvalidOutput exhausted attempts without returning.');
 }
 
 export function formatCorrectionMessage(errors: string[]): string {
