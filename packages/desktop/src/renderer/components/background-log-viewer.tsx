@@ -1,6 +1,6 @@
-import { Check, Copy } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
-import type { JSX } from 'react';
+import { ArrowDown, Check, Copy } from 'lucide-react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { JSX, UIEvent } from 'react';
 
 import { Button } from './ui/button.js';
 import {
@@ -26,7 +26,15 @@ export function BackgroundLogViewer({
 }: BackgroundLogViewerProps): JSX.Element {
   const contentRef = useRef<HTMLPreElement | null>(null);
   const resetCopiedTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const [atBottom, setAtBottom] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [contentElement, setContentElement] = useState<HTMLPreElement | null>(null);
+  const [initialScrollPending, setInitialScrollPending] = useState(true);
+
+  function isAtBottom(element: HTMLPreElement): boolean {
+    const distance = element.scrollHeight - element.scrollTop - element.clientHeight;
+    return distance <= 4;
+  }
 
   function clearCopiedTimeout(): void {
     if (resetCopiedTimeoutRef.current === null) {
@@ -58,13 +66,40 @@ export function BackgroundLogViewer({
       });
   }
 
-  useEffect(() => {
-    if (!open || !contentRef.current) {
+  function handleScroll(event: UIEvent<HTMLPreElement>): void {
+    const nextAtBottom = isAtBottom(event.currentTarget);
+    setAtBottom((current) => (current === nextAtBottom ? current : nextAtBottom));
+  }
+
+  function handleJumpToLatest(): void {
+    if (!contentRef.current) {
       return;
     }
 
     contentRef.current.scrollTop = contentRef.current.scrollHeight;
-  }, [content, open]);
+    setAtBottom(true);
+  }
+
+  const handleContentRef = useCallback((node: HTMLPreElement | null): void => {
+    contentRef.current = node;
+    setContentElement(node);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open || !contentElement) {
+      return;
+    }
+
+    if (initialScrollPending) {
+      contentElement.scrollTop = contentElement.scrollHeight;
+      setInitialScrollPending(false);
+      return;
+    }
+
+    if (atBottom) {
+      contentElement.scrollTop = contentElement.scrollHeight;
+    }
+  }, [atBottom, content, contentElement, initialScrollPending, open]);
 
   useEffect(() => {
     if (open) {
@@ -72,7 +107,9 @@ export function BackgroundLogViewer({
     }
 
     clearCopiedTimeout();
+    setAtBottom(true);
     setCopied(false);
+    setInitialScrollPending(true);
   }, [open]);
 
   useEffect(() => {
@@ -108,12 +145,30 @@ export function BackgroundLogViewer({
           </DialogDescription>
         </DialogHeader>
 
-        <pre
-          ref={contentRef}
-          className="background-log-viewer max-h-[70vh] overflow-auto px-6 py-5 text-sm whitespace-pre-wrap text-foreground"
-        >
-          {content.length > 0 ? content : 'No log output yet.'}
-        </pre>
+        <div className="relative">
+          <pre
+            ref={handleContentRef}
+            onScroll={handleScroll}
+            className="background-log-viewer max-h-[70vh] overflow-auto px-6 py-5 text-sm whitespace-pre-wrap text-foreground"
+            style={{ opacity: initialScrollPending ? 0 : 1 }}
+            aria-busy={initialScrollPending || undefined}
+          >
+            {content.length > 0 ? content : 'No log output yet.'}
+          </pre>
+
+          {!initialScrollPending && !atBottom ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              className="absolute right-4 bottom-4 gap-1 shadow-md"
+              onClick={handleJumpToLatest}
+            >
+              <ArrowDown className="size-4" aria-hidden="true" />
+              Jump to latest
+            </Button>
+          ) : null}
+        </div>
       </DialogContent>
     </Dialog>
   );
