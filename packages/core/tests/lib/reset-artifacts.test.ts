@@ -225,6 +225,34 @@ describe('scanArtifacts', () => {
     );
   });
 
+  it('skips fetch --prune when remote-ref refresh is disabled', async () => {
+    setupScanGh();
+    setupScanExecFileSync({
+      remoteOutput: '  origin/shipper/18-add-reset\n',
+    });
+
+    const scan = await scanArtifacts(18, 'owner/repo', 'new', ['shipper:implemented'], {
+      repoRoot: '/repo',
+      repoName: 'shipper',
+      refreshRemoteRefs: false,
+    });
+
+    expect(scan.branchesToDelete).toEqual(['shipper/18-add-reset']);
+    expect(mockExecFileSync).not.toHaveBeenCalledWith(
+      'git',
+      ['fetch', 'origin', '--prune'],
+      expect.anything()
+    );
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      'git',
+      ['branch', '-r', '--list', 'origin/shipper/18', 'origin/shipper/18-*'],
+      {
+        cwd: '/repo',
+        encoding: 'utf-8',
+      }
+    );
+  });
+
   it('merges PR-associated and orphaned remote branches without duplicates', async () => {
     setupScanGh({
       prs: JSON.stringify([{ number: 101, headRefName: 'shipper/18-open-pr' }]),

@@ -52,6 +52,7 @@ export interface CurrentStage {
 export interface ScanArtifactsOptions {
   repoRoot?: string;
   repoName: string;
+  refreshRemoteRefs?: boolean;
 }
 
 export interface ExecuteResetOptions {
@@ -308,15 +309,17 @@ export async function scanArtifacts(
   let remoteBranches: string[] = [];
   if (targetStage !== 'implemented') {
     if (options.repoRoot) {
-      try {
-        execFileSync('git', ['fetch', 'origin', '--prune'], {
-          cwd: options.repoRoot,
-          stdio: ['ignore', 'ignore', 'ignore'],
-        });
-      } catch (error) {
-        logger.warn(
-          `Warning: Could not fetch remote branches for issue #${issueNum}: ${toErrorMessage(error)}`
-        );
+      if (options.refreshRemoteRefs !== false) {
+        try {
+          execFileSync('git', ['fetch', 'origin', '--prune'], {
+            cwd: options.repoRoot,
+            stdio: ['ignore', 'ignore', 'ignore'],
+          });
+        } catch (error) {
+          logger.warn(
+            `Warning: Could not fetch remote branches for issue #${issueNum}: ${toErrorMessage(error)}`
+          );
+        }
       }
 
       try {
