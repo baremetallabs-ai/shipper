@@ -16,6 +16,7 @@ interface PreElementLike {
   clientHeight: number;
   scrollHeight: number;
   scrollTop: number;
+  focus: () => void;
   style: {
     opacity: string;
   };
@@ -58,7 +59,8 @@ function mockPreMetrics(initialState: PreMetricsState): PreMetricsMock {
         return state.scrollTop;
       },
       set(value: number) {
-        state.scrollTop = value;
+        const maxScrollTop = Math.max(0, state.scrollHeight - state.clientHeight);
+        state.scrollTop = Math.max(0, Math.min(value, maxScrollTop));
       },
     });
   }
@@ -108,8 +110,19 @@ function getViewerPre(): PreElementLike {
   return pre as PreElementLike;
 }
 
+function getActiveElement(): unknown {
+  const documentLike = globalThis.document as {
+    activeElement: unknown;
+  };
+  return documentLike.activeElement;
+}
+
 function scrollViewer(pre: PreElementLike): void {
   fireEvent.scroll(pre as never);
+}
+
+function getMaxScrollTop(metrics: PreMetricsState): number {
+  return Math.max(0, metrics.scrollHeight - metrics.clientHeight);
 }
 
 describe('BackgroundLogViewer', () => {
@@ -120,7 +133,7 @@ describe('BackgroundLogViewer', () => {
       const { getPre } = renderViewer();
       const pre = getPre();
 
-      expect(pre.scrollTop).toBe(800);
+      expect(pre.scrollTop).toBe(getMaxScrollTop(metrics.state));
       expect(pre.style.opacity).toBe('1');
       expect(screen.queryByRole('button', { name: 'Jump to latest' })).toBeNull();
     } finally {
@@ -135,7 +148,7 @@ describe('BackgroundLogViewer', () => {
       const { getPre } = renderViewer({ content: '' });
       const pre = getPre();
 
-      expect(pre.scrollTop).toBe(200);
+      expect(pre.scrollTop).toBe(getMaxScrollTop(metrics.state));
       expect(pre.style.opacity).toBe('1');
       expect(screen.getByText('No log output yet.')).toBeTruthy();
     } finally {
@@ -173,7 +186,8 @@ describe('BackgroundLogViewer', () => {
       scrollViewer(pre);
       fireEvent.click(screen.getByRole('button', { name: 'Jump to latest' }));
 
-      expect(metrics.state.scrollTop).toBe(800);
+      expect(metrics.state.scrollTop).toBe(getMaxScrollTop(metrics.state));
+      expect(getActiveElement()).toBe(pre as never);
       expect(screen.queryByRole('button', { name: 'Jump to latest' })).toBeNull();
     } finally {
       metrics.restore();
@@ -187,7 +201,7 @@ describe('BackgroundLogViewer', () => {
       const { getPre, rerender } = renderViewer({ content: 'line 1' });
       const pre = getPre();
 
-      expect(pre.scrollTop).toBe(400);
+      expect(pre.scrollTop).toBe(getMaxScrollTop(metrics.state));
 
       metrics.state.scrollHeight = 700;
       rerender(
@@ -199,7 +213,7 @@ describe('BackgroundLogViewer', () => {
         />
       );
 
-      expect(metrics.state.scrollTop).toBe(700);
+      expect(metrics.state.scrollTop).toBe(getMaxScrollTop(metrics.state));
     } finally {
       metrics.restore();
     }
@@ -271,7 +285,7 @@ describe('BackgroundLogViewer', () => {
       );
 
       const reopenedPre = getViewerPre();
-      expect(reopenedPre.scrollTop).toBe(900);
+      expect(reopenedPre.scrollTop).toBe(getMaxScrollTop(metrics.state));
       expect(screen.queryByRole('button', { name: 'Jump to latest' })).toBeNull();
     } finally {
       metrics.restore();
