@@ -62,6 +62,7 @@ vi.mock('node:readline/promises', () => ({
 }));
 
 const mockGh = vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string } | undefined>>();
+const mockRunAuthPreflight = vi.fn<() => Promise<void>>();
 const mockRunPrereqChecks = vi.fn<(checks: Array<() => Promise<unknown>>) => Promise<boolean>>();
 
 const settingsPath = path.resolve('.shipper', 'settings.json');
@@ -133,8 +134,11 @@ beforeEach(() => {
   });
   fake.stubGh((args) => mockGh(args));
   mockExecFileAsync.mockReset();
+  mockRunAuthPreflight.mockReset();
+  mockRunAuthPreflight.mockResolvedValue(undefined);
   mockRunPrereqChecks.mockReset();
   mockRunPrereqChecks.mockResolvedValue(true);
+  vi.spyOn(core, 'runAuthPreflight').mockImplementation(() => mockRunAuthPreflight());
   // runPrereqChecks is not part of the fake transport seam; tests override its aggregate result directly.
   vi.spyOn(core, 'runPrereqChecks').mockImplementation((checks) => mockRunPrereqChecks(checks));
   process.exitCode = undefined;
@@ -526,12 +530,28 @@ describe('initCommand agent selection', () => {
 });
 
 describe('initCommand commit and push', () => {
+  it('stops before repo prerequisite checks when auth preflight fails', async () => {
+    mockRunAuthPreflight.mockRejectedValueOnce(new Error('auth missing'));
+
+    await expect(initCommand({ agent: 'claude' })).rejects.toThrow('auth missing');
+
+    expect(mockRunPrereqChecks).not.toHaveBeenCalled();
+    expect(writeFileSyncMock).not.toHaveBeenCalled();
+    expect(mockExecFileAsync).not.toHaveBeenCalled();
+    expect(mockGh).not.toHaveBeenCalled();
+  });
+
   it('stops immediately when prerequisite checks fail', async () => {
     mockRunPrereqChecks.mockResolvedValue(false);
 
     await initCommand({ agent: 'claude' });
 
     expect(process.exitCode).toBe(1);
+    expect(mockRunAuthPreflight).toHaveBeenCalledOnce();
+    expect(mockRunPrereqChecks).toHaveBeenCalledWith([core.checkGitRepo, core.checkGitHubRemote]);
+    expect(mockRunAuthPreflight.mock.invocationCallOrder[0]).toBeLessThan(
+      mockRunPrereqChecks.mock.invocationCallOrder[0]
+    );
     expect(writeFileSyncMock).not.toHaveBeenCalled();
     expect(mockExecFileAsync).not.toHaveBeenCalled();
     expect(mockGh).not.toHaveBeenCalled();

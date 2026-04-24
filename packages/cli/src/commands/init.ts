@@ -15,9 +15,8 @@ import {
   isPlainObject,
   runPrereqChecks,
   checkGitRepo,
-  checkGhInstalled,
-  checkGhAuth,
   checkGitHubRemote,
+  runAuthPreflight,
   toErrorMessage,
 } from '@dnsquared/shipper-core';
 
@@ -94,12 +93,8 @@ export async function initCommand(options: {
   push?: boolean;
 }) {
   // Check prerequisites
-  const ok = await runPrereqChecks([
-    checkGitRepo,
-    checkGhInstalled,
-    checkGhAuth,
-    checkGitHubRemote,
-  ]);
+  await runAuthPreflight();
+  const ok = await runPrereqChecks([checkGitRepo, checkGitHubRemote]);
   if (!ok) {
     process.exitCode = 1;
     return;

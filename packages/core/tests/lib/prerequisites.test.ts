@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { mockGh, mockExecFileAsync, mockAccess, mockMkdir } = vi.hoisted(() => ({
   mockGh: vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>(),
@@ -46,6 +46,22 @@ vi.mock('node:child_process', async () => {
 });
 
 const stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+const stdoutSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+const originalGhToken = process.env.GH_TOKEN;
+const originalGithubToken = process.env.GITHUB_TOKEN;
+
+function restoreEnvVar(name: 'GH_TOKEN' | 'GITHUB_TOKEN', value: string | undefined): void {
+  if (value === undefined) {
+    if (name === 'GH_TOKEN') {
+      delete process.env.GH_TOKEN;
+    } else {
+      delete process.env.GITHUB_TOKEN;
+    }
+  } else {
+    process.env[name] = value;
+  }
+}
 
 const {
   checkGhInstalled,
@@ -54,6 +70,8 @@ const {
   checkGitHubRemote,
   checkLabels,
   checkShipperDir,
+  maybeAutoSetupGit,
+  runAuthPreflight,
   runPreflight,
   runPrereqChecks,
   warnTrackedOutputFiles,
@@ -65,6 +83,13 @@ beforeEach(() => {
   mockAccess.mockReset();
   mockMkdir.mockReset();
   stderrSpy.mockClear();
+  stdoutSpy.mockClear();
+  warnSpy.mockClear();
+});
+
+afterEach(() => {
+  restoreEnvVar('GH_TOKEN', originalGhToken);
+  restoreEnvVar('GITHUB_TOKEN', originalGithubToken);
 });
 
 describe('checkGhInstalled', () => {
@@ -106,6 +131,141 @@ describe('checkGhAuth', () => {
       ok: false,
       message: 'GitHub CLI is not authenticated. Run: gh auth login',
     });
+  });
+});
+
+describe('maybeAutoSetupGit', () => {
+  it('runs setup-git and logs when GH_TOKEN is set and no helper exists', async () => {
+    process.env.GH_TOKEN = 'token';
+    delete process.env.GITHUB_TOKEN;
+    mockExecFileAsync.mockResolvedValue({ stdout: '', stderr: '' });
+    mockGh.mockResolvedValue({ stdout: '', stderr: '' });
+
+    await expect(maybeAutoSetupGit()).resolves.toBeUndefined();
+
+    expect(mockExecFileAsync).toHaveBeenCalledWith('git', [
+      'config',
+      '--get-all',
+      'credential.helper',
+    ]);
+    expect(mockGh).toHaveBeenCalledWith(['auth', 'setup-git']);
+    expect(stdoutSpy).toHaveBeenCalledWith(
+      '[shipper] Ran `gh auth setup-git` (token auth detected, no git credential helper was configured).'
+    );
+  });
+
+  it('runs setup-git when only GITHUB_TOKEN is set and no helper exists', async () => {
+    delete process.env.GH_TOKEN;
+    process.env.GITHUB_TOKEN = 'token';
+    mockExecFileAsync.mockResolvedValue({ stdout: '', stderr: '' });
+    mockGh.mockResolvedValue({ stdout: '', stderr: '' });
+
+    await maybeAutoSetupGit();
+
+    expect(mockGh).toHaveBeenCalledWith(['auth', 'setup-git']);
+    expect(stdoutSpy).toHaveBeenCalledWith(
+      '[shipper] Ran `gh auth setup-git` (token auth detected, no git credential helper was configured).'
+    );
+  });
+
+  it('skips setup-git when a credential helper already exists', async () => {
+    process.env.GH_TOKEN = 'token';
+    mockExecFileAsync.mockResolvedValue({ stdout: 'osxkeychain\n', stderr: '' });
+
+    await maybeAutoSetupGit();
+
+    expect(mockGh).not.toHaveBeenCalled();
+    expect(stdoutSpy).not.toHaveBeenCalled();
+  });
+
+  it('skips the git config probe when no token env var is set', async () => {
+    delete process.env.GH_TOKEN;
+    delete process.env.GITHUB_TOKEN;
+
+    await maybeAutoSetupGit();
+
+    expect(mockExecFileAsync).not.toHaveBeenCalled();
+    expect(mockGh).not.toHaveBeenCalled();
+  });
+
+  it('runs setup-git when git config throws because no helper is configured', async () => {
+    process.env.GH_TOKEN = 'token';
+    mockExecFileAsync.mockRejectedValue(new Error('unset'));
+    mockGh.mockResolvedValue({ stdout: '', stderr: '' });
+
+    await maybeAutoSetupGit();
+
+    expect(mockGh).toHaveBeenCalledWith(['auth', 'setup-git']);
+  });
+
+  it('warns and resolves when setup-git fails', async () => {
+    process.env.GH_TOKEN = 'token';
+    mockExecFileAsync.mockResolvedValue({ stdout: '', stderr: '' });
+    mockGh.mockRejectedValue(new Error('setup failed'));
+
+    await expect(maybeAutoSetupGit()).resolves.toBeUndefined();
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[shipper] Could not auto-configure git credential helper (setup failed). Run: gh auth setup-git'
+    );
+  });
+});
+
+describe('runAuthPreflight', () => {
+  it('rejects with install guidance when gh is missing', async () => {
+    mockGh.mockRejectedValue(new Error('missing gh'));
+
+    await expect(runAuthPreflight()).rejects.toThrow(
+      'GitHub CLI (gh) is not installed. Install it from https://cli.github.com/'
+    );
+  });
+
+  it('rejects with the two-path auth message when gh auth status fails', async () => {
+    mockGh.mockImplementation((args: string[]) => {
+      if (args[0] === '--version') {
+        return Promise.resolve({ stdout: 'gh version 2.0.0', stderr: '' });
+      }
+      return Promise.reject(new Error(`Unexpected gh call: ${args.join(' ')}`));
+    });
+
+    await expect(runAuthPreflight()).rejects.toThrow(/gh auth login/);
+    await expect(runAuthPreflight()).rejects.toThrow(/GH_TOKEN/);
+    await expect(runAuthPreflight()).rejects.toThrow(/GITHUB_TOKEN/);
+    await expect(runAuthPreflight()).rejects.toThrow(/docs\/containers\.md/);
+  });
+
+  it('does not run setup-git when auth fails', async () => {
+    mockGh.mockImplementation((args: string[]) => {
+      if (args[0] === '--version') {
+        return Promise.resolve({ stdout: 'gh version 2.0.0', stderr: '' });
+      }
+      return Promise.reject(new Error('not logged in'));
+    });
+
+    await expect(runAuthPreflight()).rejects.toThrow(/GitHub CLI is not authenticated/);
+
+    expect(mockGh).not.toHaveBeenCalledWith(['auth', 'setup-git']);
+  });
+
+  it('runs setup-git after successful install and auth checks when token auth has no helper', async () => {
+    process.env.GH_TOKEN = 'token';
+    mockExecFileAsync.mockResolvedValue({ stdout: '', stderr: '' });
+    mockGh.mockImplementation((args: string[]) => {
+      if (args[0] === '--version') {
+        return Promise.resolve({ stdout: 'gh version 2.0.0', stderr: '' });
+      }
+      if (args[0] === 'auth' && args[1] === 'status') {
+        return Promise.resolve({ stdout: 'logged in', stderr: '' });
+      }
+      if (args[0] === 'auth' && args[1] === 'setup-git') {
+        return Promise.resolve({ stdout: '', stderr: '' });
+      }
+      return Promise.reject(new Error(`Unexpected gh call: ${args.join(' ')}`));
+    });
+
+    await runAuthPreflight();
+
+    expect(mockGh).toHaveBeenCalledWith(['auth', 'setup-git']);
   });
 });
 
@@ -348,12 +508,6 @@ describe('runPreflight', () => {
     mockAccess.mockResolvedValue();
     mockMkdir.mockResolvedValue(undefined);
     mockGh.mockImplementation((args: string[]) => {
-      if (args[0] === '--version') {
-        return Promise.resolve({ stdout: 'gh version 2.0.0', stderr: '' });
-      }
-      if (args[0] === 'auth' && args[1] === 'status') {
-        return Promise.resolve({ stdout: 'logged in', stderr: '' });
-      }
       if (args[0] === 'label' && args[1] === 'list') {
         return Promise.resolve({
           stdout: [
@@ -373,20 +527,16 @@ describe('runPreflight', () => {
     });
 
     await expect(runPreflight()).resolves.toBeUndefined();
+    expect(mockGh).not.toHaveBeenCalledWith(['--version']);
+    expect(mockGh).not.toHaveBeenCalledWith(['auth', 'status']);
     expect(mockMkdir).toHaveBeenCalledWith(path.resolve('.shipper', 'tmp'), {
       recursive: true,
     });
   });
 
   it('throws with the failing prerequisite when a single check fails', async () => {
-    mockAccess.mockResolvedValue();
+    mockAccess.mockRejectedValue(new Error('ENOENT'));
     mockGh.mockImplementation((args: string[]) => {
-      if (args[0] === '--version') {
-        return Promise.reject(new Error('missing gh'));
-      }
-      if (args[0] === 'auth' && args[1] === 'status') {
-        return Promise.resolve({ stdout: 'logged in', stderr: '' });
-      }
       if (args[0] === 'label' && args[1] === 'list') {
         return Promise.resolve({
           stdout: [
@@ -406,19 +556,13 @@ describe('runPreflight', () => {
     });
 
     await expect(runPreflight()).rejects.toThrow(
-      '  ✗ GitHub CLI (gh) is not installed. Install it from https://cli.github.com/\n\nRun `shipper init` to fix these issues.'
+      '  ✗ .shipper directory not found. Run: shipper init\n\nRun `shipper init` to fix these issues.'
     );
   });
 
   it('aggregates multiple failures into a single error message', async () => {
     mockAccess.mockRejectedValue(new Error('ENOENT'));
     mockGh.mockImplementation((args: string[]) => {
-      if (args[0] === '--version') {
-        return Promise.reject(new Error('missing gh'));
-      }
-      if (args[0] === 'auth' && args[1] === 'status') {
-        return Promise.reject(new Error('not logged in'));
-      }
       if (args[0] === 'label' && args[1] === 'list') {
         return Promise.reject(new Error('gh label list failed'));
       }
@@ -426,9 +570,7 @@ describe('runPreflight', () => {
     });
 
     await expect(runPreflight()).rejects.toThrow(
-      '  ✗ GitHub CLI (gh) is not installed. Install it from https://cli.github.com/\n' +
-        '  ✗ GitHub CLI is not authenticated. Run: gh auth login\n' +
-        '  ✗ .shipper directory not found. Run: shipper init\n' +
+      '  ✗ .shipper directory not found. Run: shipper init\n' +
         '  ✗ Could not check labels (gh label list failed)\n\n' +
         'Run `shipper init` to fix these issues.'
     );

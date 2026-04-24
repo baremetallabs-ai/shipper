@@ -1,6 +1,6 @@
 import { Argument, Command, CommanderError, Option } from 'commander';
 import { writeSync } from 'node:fs';
-import { runPreflight } from '@dnsquared/shipper-core';
+import { runAuthPreflight, runPreflight } from '@dnsquared/shipper-core';
 import { getRepoNwo } from '@dnsquared/shipper-core';
 import { loadSettings, logger, type AgentName, type CommandMode } from '@dnsquared/shipper-core';
 import { CLI_VERSION, checkVersionFreshness } from '@dnsquared/shipper-core';
@@ -135,6 +135,7 @@ program.hook(
     if (actionCommand.name() === 'init' || actionCommand.name() === 'setup') return;
     await loadSettings();
     checkVersionFreshness();
+    await runAuthPreflight();
     resolvedRepo = await getRepoNwo();
     await runPreflight(resolvedRepo);
     if (STAGE_COMMAND_NAMES.has(actionCommand.name())) {

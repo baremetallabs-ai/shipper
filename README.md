@@ -7,6 +7,8 @@ Shipper CLI is an opinionated workflow runner for GitHub-hosted repos. Prompt-dr
 Shipper assumes:
 
 - You are in a Git repo with a GitHub remote.
+- `gh` is authenticated. Either run `gh auth login` (interactive) or set `GH_TOKEN` /
+  `GITHUB_TOKEN` for container/CI use - see [docs/containers.md](docs/containers.md).
 - `shipper init` has been run for the repo.
 
 `shipper init`:

@@ -3,11 +3,17 @@ import { access, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
+import { toErrorMessage } from './errors.js';
 import { gh } from './gh.js';
 import { logger } from './logger.js';
 import { STAGE_LABEL_NAMES } from './labels.js';
 
 const execFileAsync = promisify(execFile);
+
+const TWO_PATH_AUTH_MESSAGE = `GitHub CLI is not authenticated. Choose one:
+  • Interactive:     gh auth login
+  • Container / CI:  export GH_TOKEN=<token>  (or GITHUB_TOKEN)
+See docs/containers.md for the container/CI walkthrough.`;
 
 function parseTrackedArtifactPaths(output: string): string[] {
   return output
@@ -40,6 +46,43 @@ export async function checkGhAuth(): Promise<CheckResult> {
   } catch {
     return { ok: false, message: 'GitHub CLI is not authenticated. Run: gh auth login' };
   }
+}
+
+export async function maybeAutoSetupGit(): Promise<void> {
+  const token = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN;
+  if (!token) return;
+
+  try {
+    const { stdout } = await execFileAsync('git', ['config', '--get-all', 'credential.helper']);
+    if (stdout.split(/\r?\n/).some((line) => line.trim().length > 0)) return;
+  } catch {
+    // git exits non-zero when credential.helper is unset; treat that as no helper.
+  }
+
+  try {
+    await gh(['auth', 'setup-git']);
+    logger.log(
+      'Ran `gh auth setup-git` (token auth detected, no git credential helper was configured).'
+    );
+  } catch (err) {
+    logger.warn(
+      `Could not auto-configure git credential helper (${toErrorMessage(err)}). Run: gh auth setup-git`
+    );
+  }
+}
+
+export async function runAuthPreflight(): Promise<void> {
+  const installed = await checkGhInstalled();
+  if (!installed.ok) {
+    throw new Error(installed.message);
+  }
+
+  const authenticated = await checkGhAuth();
+  if (!authenticated.ok) {
+    throw new Error(TWO_PATH_AUTH_MESSAGE);
+  }
+
+  await maybeAutoSetupGit();
 }
 
 export async function checkGitRepo(): Promise<CheckResult> {
@@ -144,7 +187,7 @@ export async function runPrereqChecks(checks: Array<() => Promise<CheckResult>>)
 }
 
 export async function runPreflight(repo?: string): Promise<void> {
-  const checks = [checkGhInstalled, checkGhAuth, checkShipperDir, () => checkLabels(repo)];
+  const checks = [checkShipperDir, () => checkLabels(repo)];
 
   const failures: string[] = [];
   for (const check of checks) {
