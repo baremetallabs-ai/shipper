@@ -17,6 +17,7 @@ vi.mock('@dnsquared/shipper-core', async () => {
     await vi.importActual<typeof import('@dnsquared/shipper-core')>('@dnsquared/shipper-core');
 
   return {
+    runAuthPreflight: vi.fn(),
     runPreflight: vi.fn(),
     warnTrackedOutputFiles: vi.fn(),
     loadSettings: vi.fn(),
@@ -80,6 +81,7 @@ import { prRemediateCommand } from '../src/commands/pr-remediate.js';
 import { setupCommand } from '../src/commands/setup.js';
 import { unlockCommand } from '../src/commands/unlock.js';
 import {
+  runAuthPreflight,
   runPreflight,
   warnTrackedOutputFiles,
   loadSettings,
@@ -102,12 +104,18 @@ const mockPrOpenCommand = vi.mocked(prOpenCommand);
 const mockPrRemediateCommand = vi.mocked(prRemediateCommand);
 const mockSetupCommand = vi.mocked(setupCommand);
 const mockUnlockCommand = vi.mocked(unlockCommand);
+const mockRunAuthPreflight = vi.mocked(runAuthPreflight);
 const mockRunPreflight = vi.mocked(runPreflight);
 const mockWarnTrackedOutputFiles = vi.mocked(warnTrackedOutputFiles);
 const mockLoadSettings = vi.mocked(loadSettings);
 const mockGetRepoNwo = vi.mocked(getRepoNwo);
 
 describe('shipper-cli', () => {
+  beforeEach(() => {
+    mockRunAuthPreflight.mockReset();
+    mockRunAuthPreflight.mockResolvedValue(undefined);
+  });
+
   describe('help output', () => {
     const originalArgv = [...process.argv];
     let exitSpy: ReturnType<typeof vi.spyOn>;
@@ -159,6 +167,7 @@ describe('shipper-cli', () => {
       expect(output).toContain('plan');
       expect(output).toContain('eject');
       expect(output).toContain('pr');
+      expect(mockRunAuthPreflight).not.toHaveBeenCalled();
       expect(mockRunPreflight).not.toHaveBeenCalled();
     });
 
@@ -231,6 +240,7 @@ describe('shipper-cli', () => {
       });
       expect(mockLoadSettings).not.toHaveBeenCalled();
       expect(mockGetRepoNwo).not.toHaveBeenCalled();
+      expect(mockRunAuthPreflight).not.toHaveBeenCalled();
       expect(mockRunPreflight).not.toHaveBeenCalled();
       expect(mockWarnTrackedOutputFiles).not.toHaveBeenCalled();
     });
@@ -263,8 +273,16 @@ describe('shipper-cli', () => {
 
       expect(mockEjectCommand).toHaveBeenCalledWith('groom');
       expect(mockLoadSettings).toHaveBeenCalled();
+      expect(mockRunAuthPreflight).toHaveBeenCalledOnce();
       expect(mockGetRepoNwo).toHaveBeenCalled();
       expect(mockRunPreflight).toHaveBeenCalledWith('owner/repo');
+
+      const authOrder = mockRunAuthPreflight.mock.invocationCallOrder[0];
+      const repoOrder = mockGetRepoNwo.mock.invocationCallOrder[0];
+      const preflightOrder = mockRunPreflight.mock.invocationCallOrder[0];
+
+      expect(authOrder).toBeLessThan(repoOrder);
+      expect(repoOrder).toBeLessThan(preflightOrder);
     });
   });
 
@@ -424,6 +442,7 @@ describe('shipper-cli', () => {
 
       expect(mockLoadSettings).toHaveBeenCalled();
       expect(mockRunPreflight).not.toHaveBeenCalled();
+      expect(mockRunAuthPreflight).not.toHaveBeenCalled();
       expect(mockSetupCommand).toHaveBeenCalledWith(['repo'], {
         mode: 'headless',
         agent: 'copilot',
@@ -631,6 +650,19 @@ describe('shipper-cli', () => {
       await expect(importEntrypoint()).rejects.toThrow('process.exit:1');
 
       expect(errorSpy).toHaveBeenCalledWith('[shipper] boom');
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    });
+
+    it('stops before repo resolution when auth preflight fails', async () => {
+      mockRunAuthPreflight.mockRejectedValueOnce(new Error('auth missing'));
+      process.argv = ['node', 'src/index.ts', 'groom', '42'];
+
+      await expect(importEntrypoint()).rejects.toThrow('process.exit:1');
+
+      expect(errorSpy).toHaveBeenCalledWith('[shipper] auth missing');
+      expect(mockGetRepoNwo).not.toHaveBeenCalled();
+      expect(mockRunPreflight).not.toHaveBeenCalled();
+      expect(mockGroomCommand).not.toHaveBeenCalled();
       expect(exitSpy).toHaveBeenCalledWith(1);
     });
 

@@ -107,6 +107,8 @@ export {
   checkGitHubRemote,
   checkGitRepo,
   checkLabels,
+  maybeAutoSetupGit,
+  runAuthPreflight,
   runPreflight,
   runPrereqChecks,
   warnTrackedOutputFiles,

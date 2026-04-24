@@ -1,5 +1,5 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { getRepoNwo, loadSettings, runPreflight } from '@dnsquared/shipper-core';
+import { getRepoNwo, loadSettings, runAuthPreflight, runPreflight } from '@dnsquared/shipper-core';
 import { resolveAndEnterRepoDir } from './repo-dir.js';
 import { registerInitErrorTools, registerTools } from './tools.js';
 
@@ -11,6 +11,7 @@ export async function createServer(): Promise<McpServer> {
   try {
     await resolveAndEnterRepoDir();
     await loadSettings();
+    await runAuthPreflight();
     const repo = await getRepoNwo();
     await runPreflight(repo);
     registerTools(server, repo);
