@@ -145,13 +145,15 @@ describe('maybeAutoSetupGit', () => {
 
     expect(mockExecFileAsync).toHaveBeenCalledWith('git', [
       'config',
-      '--get-all',
+      '--get-urlmatch',
       'credential.helper',
+      'https://github.com',
     ]);
     expect(mockGh).toHaveBeenCalledWith(['auth', 'setup-git']);
-    expect(stdoutSpy).toHaveBeenCalledWith(
+    expect(warnSpy).toHaveBeenCalledWith(
       '[shipper] Ran `gh auth setup-git` (token auth detected, no git credential helper was configured).'
     );
+    expect(stdoutSpy).not.toHaveBeenCalled();
   });
 
   it('runs setup-git when only GITHUB_TOKEN is set and no helper exists', async () => {
@@ -163,9 +165,27 @@ describe('maybeAutoSetupGit', () => {
     await maybeAutoSetupGit();
 
     expect(mockGh).toHaveBeenCalledWith(['auth', 'setup-git']);
-    expect(stdoutSpy).toHaveBeenCalledWith(
+    expect(warnSpy).toHaveBeenCalledWith(
       '[shipper] Ran `gh auth setup-git` (token auth detected, no git credential helper was configured).'
     );
+    expect(stdoutSpy).not.toHaveBeenCalled();
+  });
+
+  it('falls back to GITHUB_TOKEN when GH_TOKEN is empty', async () => {
+    process.env.GH_TOKEN = '';
+    process.env.GITHUB_TOKEN = 'token';
+    mockExecFileAsync.mockResolvedValue({ stdout: '', stderr: '' });
+    mockGh.mockResolvedValue({ stdout: '', stderr: '' });
+
+    await maybeAutoSetupGit();
+
+    expect(mockExecFileAsync).toHaveBeenCalledWith('git', [
+      'config',
+      '--get-urlmatch',
+      'credential.helper',
+      'https://github.com',
+    ]);
+    expect(mockGh).toHaveBeenCalledWith(['auth', 'setup-git']);
   });
 
   it('skips setup-git when a credential helper already exists', async () => {
@@ -176,6 +196,24 @@ describe('maybeAutoSetupGit', () => {
 
     expect(mockGh).not.toHaveBeenCalled();
     expect(stdoutSpy).not.toHaveBeenCalled();
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('skips setup-git when a GitHub URL-scoped credential helper already exists', async () => {
+    process.env.GH_TOKEN = 'token';
+    mockExecFileAsync.mockResolvedValue({ stdout: '!gh auth git-credential\n', stderr: '' });
+
+    await maybeAutoSetupGit();
+
+    expect(mockExecFileAsync).toHaveBeenCalledWith('git', [
+      'config',
+      '--get-urlmatch',
+      'credential.helper',
+      'https://github.com',
+    ]);
+    expect(mockGh).not.toHaveBeenCalled();
+    expect(stdoutSpy).not.toHaveBeenCalled();
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 
   it('skips the git config probe when no token env var is set', async () => {

@@ -49,19 +49,26 @@ export async function checkGhAuth(): Promise<CheckResult> {
 }
 
 export async function maybeAutoSetupGit(): Promise<void> {
-  const token = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN;
+  const token = [process.env.GH_TOKEN, process.env.GITHUB_TOKEN].find(
+    (value) => value !== undefined && value.trim().length > 0
+  );
   if (!token) return;
 
   try {
-    const { stdout } = await execFileAsync('git', ['config', '--get-all', 'credential.helper']);
-    if (stdout.split(/\r?\n/).some((line) => line.trim().length > 0)) return;
+    const { stdout } = await execFileAsync('git', [
+      'config',
+      '--get-urlmatch',
+      'credential.helper',
+      'https://github.com',
+    ]);
+    if (stdout.trim().length > 0) return;
   } catch {
-    // git exits non-zero when credential.helper is unset; treat that as no helper.
+    // git exits non-zero when no helper matches github.com; treat that as no helper.
   }
 
   try {
     await gh(['auth', 'setup-git']);
-    logger.log(
+    logger.warn(
       'Ran `gh auth setup-git` (token auth detected, no git credential helper was configured).'
     );
   } catch (err) {
