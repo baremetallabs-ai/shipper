@@ -23,9 +23,9 @@ The token needs the same access you would grant with `gh auth login`: `repo`, `r
 On each CLI or MCP preflight, shipper:
 
 - Detects `GH_TOKEN` or `GITHUB_TOKEN`.
-- Checks `git config --get-all credential.helper`.
+- Checks the effective git credential helper for `https://github.com`.
 - Runs `gh auth setup-git` only when token auth is present and no credential helper is configured.
-- Prints one info line when it makes that change:
+- Writes one line when it makes that change:
 
 ```text
 Ran `gh auth setup-git` (token auth detected, no git credential helper was configured).
