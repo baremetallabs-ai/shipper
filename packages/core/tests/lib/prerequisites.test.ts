@@ -439,6 +439,31 @@ describe('checkLabels', () => {
       message: 'All required labels exist',
     });
   });
+
+  it('does not pass --search to gh label list', async () => {
+    // Regression: GitHub's label search treats `key:value` as a qualifier and
+    // returns zero results, which made every shipper-initialized repo look
+    // uninitialized in the desktop app.
+    mockGh.mockResolvedValue({ stdout: '', stderr: '' });
+
+    await checkLabels('owner/repo');
+
+    expect(mockGh).toHaveBeenCalledTimes(1);
+    const args = mockGh.mock.calls[0]?.[0] ?? [];
+    expect(args).not.toContain('--search');
+    expect(args).toEqual([
+      'label',
+      'list',
+      '-R',
+      'owner/repo',
+      '-L',
+      '200',
+      '--json',
+      'name',
+      '-q',
+      '.[].name',
+    ]);
+  });
 });
 
 describe('warnTrackedOutputFiles', () => {

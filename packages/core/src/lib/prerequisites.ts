@@ -140,12 +140,17 @@ export async function checkShipperDir(): Promise<CheckResult> {
 
 export async function checkLabels(repo?: string): Promise<CheckResult> {
   try {
+    // Note: do not pass `--search 'shipper:'`. GitHub's label search now treats
+    // `key:value` as a search qualifier and returns zero results, which would
+    // make every shipper-initialized repo look uninitialized. Fetch the full
+    // label list and filter client-side instead. `-L 200` defeats the default
+    // page size of 30 for repos with many labels.
     const { stdout } = await gh([
       'label',
       'list',
       ...(repo ? ['-R', repo] : []),
-      '--search',
-      'shipper:',
+      '-L',
+      '200',
       '--json',
       'name',
       '-q',
