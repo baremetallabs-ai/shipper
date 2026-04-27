@@ -127,6 +127,7 @@ function renderBoard({
   shippingCommands = new Map<number, ActiveShippingCommand>(),
   pausedIssues = new Set<number>(),
   pausePendingIssues = new Set<number>(),
+  groomPendingIssues = new Set<number>(),
   resettingIssues = new Set<number>(),
   onResetSelect = vi.fn<(selection: ResetSelection) => void>(),
   onToggleAutoMerge = vi.fn(),
@@ -145,6 +146,7 @@ function renderBoard({
     settingPriorityIssues: new Set<number>(),
     pausedIssues,
     pausePendingIssues,
+    groomPendingIssues,
     shippingCommands,
     autoMergeEnabled: false,
     autoShipEnabled: false,
@@ -231,6 +233,7 @@ describe('PipelineBoard', () => {
         settingPriorityIssues={new Set<number>()}
         pausedIssues={new Set([22])}
         pausePendingIssues={new Set<number>()}
+        groomPendingIssues={new Set<number>()}
         shippingCommands={new Map<number, ActiveShippingCommand>()}
         autoMergeEnabled={false}
         autoShipEnabled={false}
@@ -506,6 +509,39 @@ describe('PipelineBoard', () => {
     });
 
     expect(screen.getAllByRole('button', { name: 'Groom' })).toHaveLength(1);
+  });
+
+  it('scopes pending Groom feedback to the matching new issue card', () => {
+    renderBoard({
+      attentionIssues: {
+        failed: [],
+        new: [
+          createIssue({
+            number: 7,
+            title: 'Needs grooming',
+            labels: [NEW_LABEL],
+            tokenUsage: createTokenUsage(),
+          }),
+          createIssue({
+            number: 9,
+            title: 'Also needs grooming',
+            labels: [NEW_LABEL],
+            tokenUsage: createTokenUsage(),
+          }),
+        ],
+      },
+      groomPendingIssues: new Set([7]),
+    });
+
+    const pendingCard = screen.getByTestId('issue-card-7');
+    const availableCard = screen.getByTestId('issue-card-9');
+    const pendingGroom = within(pendingCard).getByRole('button', { name: 'Groom' });
+    const availableGroom = within(availableCard).getByRole('button', { name: 'Groom' });
+
+    expect(pendingGroom).toHaveProperty('disabled', true);
+    expect(pendingGroom.innerHTML).toContain('animate-spin');
+    expect(availableGroom).toHaveProperty('disabled', false);
+    expect(availableGroom.innerHTML).not.toContain('animate-spin');
   });
 
   it('keeps failed Reset actions available when the New section is not rendered', () => {

@@ -87,6 +87,7 @@ export interface IssueCardProps {
   onUnblock?: () => void;
   resetTargets?: WorkflowStage[];
   groomDisabled?: boolean;
+  isGroomPending?: boolean;
   isResetting?: boolean;
   isUnlocking?: boolean;
   isUnblocking?: boolean;
@@ -128,6 +129,7 @@ export function IssueCard({
   onUnblock,
   resetTargets = [],
   groomDisabled = false,
+  isGroomPending = false,
   isResetting = false,
   isUnlocking = false,
   isUnblocking = false,
@@ -158,7 +160,8 @@ export function IssueCard({
       : isUnblocking
         ? 'Unblocking...'
         : null;
-  const isGroomDisabled = groomDisabled || isBlocked || isLocked || isFailed || isShipping;
+  const isGroomDisabled =
+    groomDisabled || isGroomPending || isBlocked || isLocked || isFailed || isShipping;
   const canUnlock = isLocked && !!onUnlock && !isShipping;
   const canUnblock = isBlocked && !isLocked && !!onUnblock && !isShipping;
   const canCloseNotPlanned = !!onCloseNotPlanned && !isLocked && !isShipping;
@@ -399,6 +402,9 @@ export function IssueCard({
                   }}
                   disabled={isGroomDisabled}
                 >
+                  {isGroomPending ? (
+                    <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+                  ) : null}
                   Groom
                 </Button>
               ) : null}
