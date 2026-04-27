@@ -33,8 +33,9 @@ import type { BackgroundCommandsBridge, IssuePipelineBridge } from './types.js';
 export default function App(): JSX.Element {
   const pipelineBridgeRef = useRef<IssuePipelineBridge | null>(null);
   const backgroundBridgeRef = useRef<BackgroundCommandsBridge | null>(null);
-  const launchingSetupReposRef = useRef<Set<string>>(new Set());
   const [resumeShipIssueNumber, setResumeShipIssueNumber] = useState<number | null>(null);
+  const [launchingGroomIssues, setLaunchingGroomIssues] = useState<Set<number>>(() => new Set());
+  const [launchingSetupRepos, setLaunchingSetupRepos] = useState<Set<string>>(() => new Set());
 
   const reposState = useRepos({
     pipelineBridgeRef,
@@ -103,6 +104,12 @@ export default function App(): JSX.Element {
       return;
     }
 
+    if (launchingGroomIssues.has(issueNumber)) {
+      return;
+    }
+
+    setLaunchingGroomIssues((current) => new Set(current).add(issueNumber));
+
     try {
       const result = await getShipperApi().spawnShipperGroom(issueNumber, activeRepo, 120, 30);
       terminalState.openRunningSession(result.sessionId, `groom — #${issueNumber}`, {
@@ -111,6 +118,12 @@ export default function App(): JSX.Element {
       });
     } catch (error) {
       pipelineState.setFetchError(`Failed to launch shipper groom: ${toErrorMessage(error)}`);
+    } finally {
+      setLaunchingGroomIssues((current) => {
+        const next = new Set(current);
+        next.delete(issueNumber);
+        return next;
+      });
     }
   }
 
@@ -120,11 +133,11 @@ export default function App(): JSX.Element {
       return;
     }
 
-    if (launchingSetupReposRef.current.has(repo)) {
+    if (launchingSetupRepos.has(repo)) {
       return;
     }
 
-    launchingSetupReposRef.current.add(repo);
+    setLaunchingSetupRepos((current) => new Set(current).add(repo));
 
     try {
       const result = await getShipperApi().spawnShipperSetup(repo, 120, 30);
@@ -134,7 +147,11 @@ export default function App(): JSX.Element {
     } catch (error) {
       pipelineState.setFetchError(`Failed to launch shipper setup: ${toErrorMessage(error)}`);
     } finally {
-      launchingSetupReposRef.current.delete(repo);
+      setLaunchingSetupRepos((current) => {
+        const next = new Set(current);
+        next.delete(repo);
+        return next;
+      });
     }
   }
 
@@ -373,6 +390,7 @@ export default function App(): JSX.Element {
                   canFetch={canFetch}
                   isLoading={pipelineState.isLoading}
                   setupEnabled={hasActiveRepo}
+                  isSetupPending={activeRepo ? launchingSetupRepos.has(activeRepo) : false}
                   onNewIssue={pipelineState.handleOpenNewIssue}
                   onAdopt={pipelineState.handleOpenAdopt}
                   onSetup={() => {
@@ -396,6 +414,7 @@ export default function App(): JSX.Element {
                   settingPriorityIssues={pipelineState.settingPriorityIssues}
                   pausedIssues={pipelineState.pausedIssues}
                   pausePendingIssues={backgroundState.pausePendingIssues}
+                  groomPendingIssues={launchingGroomIssues}
                   shippingCommands={backgroundState.shippingCommands}
                   autoMergeEnabled={autoMergeEnabled}
                   autoShipEnabled={autoShipEnabled}

@@ -19,6 +19,7 @@ describe('PipelineToolbar', () => {
         canFetch
         isLoading={false}
         setupEnabled
+        isSetupPending={false}
         onNewIssue={onNewIssue}
         onAdopt={onAdopt}
         onSetup={onSetup}
@@ -45,13 +46,14 @@ describe('PipelineToolbar', () => {
     expect(onRefresh).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps Setup independent from fetch/loading and disables it only through setupEnabled', () => {
+  it('keeps Setup independent from fetch/loading and disables it through setup state', () => {
     const { rerender } = render(
       <PipelineToolbar
         lastUpdated={null}
         canFetch={false}
         isLoading
         setupEnabled
+        isSetupPending={false}
         onNewIssue={vi.fn()}
         onAdopt={vi.fn()}
         onSetup={vi.fn()}
@@ -70,6 +72,7 @@ describe('PipelineToolbar', () => {
         canFetch
         isLoading={false}
         setupEnabled={false}
+        isSetupPending={false}
         onNewIssue={vi.fn()}
         onAdopt={vi.fn()}
         onSetup={vi.fn()}
@@ -81,5 +84,27 @@ describe('PipelineToolbar', () => {
     expect(screen.getByRole('button', { name: 'Adopt' })).toHaveProperty('disabled', false);
     expect(screen.getByRole('button', { name: 'Setup' })).toHaveProperty('disabled', true);
     expect(screen.getByRole('button', { name: 'Refresh' })).toHaveProperty('disabled', false);
+  });
+
+  it('renders disabled Setup button feedback while a setup launch is pending', () => {
+    render(
+      <PipelineToolbar
+        lastUpdated={null}
+        canFetch
+        isLoading={false}
+        setupEnabled
+        isSetupPending
+        onNewIssue={vi.fn()}
+        onAdopt={vi.fn()}
+        onSetup={vi.fn()}
+        onRefresh={vi.fn()}
+      />
+    );
+
+    const setupButton = screen.getByRole('button', { name: 'Setup' });
+
+    expect(setupButton).toHaveProperty('disabled', true);
+    expect(setupButton.textContent).toContain('Setup');
+    expect(setupButton.innerHTML).toContain('animate-spin');
   });
 });

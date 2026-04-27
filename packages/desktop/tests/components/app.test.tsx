@@ -10,6 +10,7 @@ const state = vi.hoisted(() => ({
   pipelineState: {} as Record<string, unknown>,
   terminalState: {} as Record<string, unknown>,
   spawnShipperSetupMock: vi.fn(),
+  spawnShipperGroomMock: vi.fn(),
   spawnBackgroundShipMock: vi.fn(),
   requestAutoShipHaltMock: vi.fn(),
 }));
@@ -33,7 +34,7 @@ vi.mock('../../src/renderer/hooks/use-terminal-sessions.js', () => ({
 vi.mock('../../src/renderer/lib/shipper-api.js', () => ({
   getShipperApi: () => ({
     spawnShipperSetup: state.spawnShipperSetupMock,
-    spawnShipperGroom: vi.fn(),
+    spawnShipperGroom: state.spawnShipperGroomMock,
     spawnBackgroundNew: vi.fn(),
     spawnBackgroundShip: state.spawnBackgroundShipMock,
     spawnBackgroundInit: vi.fn(),
@@ -71,13 +72,35 @@ vi.mock('../../src/renderer/components/new-issue-dialog.js', () => ({
 
 vi.mock('../../src/renderer/components/pipeline-board.js', () => ({
   PipelineBoard: ({
+    groomPendingIssues,
+    onGroom,
     onShip,
     onToggleAutoShip,
   }: {
+    groomPendingIssues: ReadonlySet<number>;
+    onGroom: (issueNumber: number) => void;
     onShip: (issueNumber: number) => void;
     onToggleAutoShip: () => void;
   }) => (
     <>
+      <button
+        type="button"
+        disabled={groomPendingIssues.has(42)}
+        onClick={() => {
+          onGroom(42);
+        }}
+      >
+        Groom issue 42
+      </button>
+      <button
+        type="button"
+        disabled={groomPendingIssues.has(43)}
+        onClick={() => {
+          onGroom(43);
+        }}
+      >
+        Groom issue 43
+      </button>
       <button
         type="button"
         onClick={() => {
@@ -158,6 +181,7 @@ import App from '../../src/renderer/App.js';
 
 function resetMockState(): void {
   state.spawnShipperSetupMock.mockReset();
+  state.spawnShipperGroomMock.mockReset();
   state.spawnBackgroundShipMock.mockReset();
   state.requestAutoShipHaltMock.mockReset();
   state.reposState = {
@@ -280,6 +304,75 @@ describe('App setup launch', () => {
     resetMockState();
   });
 
+  it('shows pending Groom feedback only for the launching issue and clears it on success', async () => {
+    let resolveGroom: ((value: { sessionId: string }) => void) | undefined;
+    const groomPromise = new Promise<{ sessionId: string }>((resolve) => {
+      resolveGroom = resolve;
+    });
+    state.spawnShipperGroomMock.mockReturnValue(groomPromise);
+
+    render(<App />);
+
+    const issue42Button = screen.getByRole('button', { name: 'Groom issue 42' });
+    const issue43Button = screen.getByRole('button', { name: 'Groom issue 43' });
+    fireEvent.click(issue42Button);
+
+    expect(issue42Button).toHaveProperty('disabled', true);
+    expect(issue43Button).toHaveProperty('disabled', false);
+
+    fireEvent.click(issue42Button);
+
+    expect(state.terminalState.focusExistingGroomSession).toHaveBeenCalledTimes(1);
+    expect(state.spawnShipperGroomMock).toHaveBeenCalledTimes(1);
+    expect(state.spawnShipperGroomMock).toHaveBeenCalledWith(42, 'owner/repo', 120, 30);
+    expect(state.terminalState.openRunningSession).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveGroom?.({ sessionId: 'pty-groom-42' });
+      await groomPromise;
+    });
+
+    expect(state.terminalState.openRunningSession).toHaveBeenCalledWith(
+      'pty-groom-42',
+      'groom — #42',
+      { repo: 'owner/repo', issueNumber: 42 }
+    );
+    expect(issue42Button).toHaveProperty('disabled', false);
+  });
+
+  it('clears pending Groom feedback after a failed launch and keeps the fetch-error path', async () => {
+    state.spawnShipperGroomMock.mockRejectedValue(new Error('spawn failed'));
+
+    render(<App />);
+
+    const issue42Button = screen.getByRole('button', { name: 'Groom issue 42' });
+
+    await act(async () => {
+      fireEvent.click(issue42Button);
+      await Promise.resolve();
+    });
+
+    expect(issue42Button).toHaveProperty('disabled', false);
+    expect(state.pipelineState.setFetchError).toHaveBeenCalledWith(
+      'Failed to launch shipper groom: spawn failed'
+    );
+  });
+
+  it('focuses an existing Groom session without showing pending feedback or spawning', () => {
+    vi.mocked(
+      state.terminalState.focusExistingGroomSession as (issueNumber: number) => boolean
+    ).mockReturnValue(true);
+
+    render(<App />);
+
+    const issue42Button = screen.getByRole('button', { name: 'Groom issue 42' });
+    fireEvent.click(issue42Button);
+
+    expect(state.terminalState.focusExistingGroomSession).toHaveBeenCalledWith(42);
+    expect(state.spawnShipperGroomMock).not.toHaveBeenCalled();
+    expect(issue42Button).toHaveProperty('disabled', false);
+  });
+
   it('deduplicates rapid Setup clicks while the first launch is still pending', async () => {
     let resolveSetup: ((value: { sessionId: string }) => void) | undefined;
     const setupPromise = new Promise<{ sessionId: string }>((resolve) => {
@@ -291,9 +384,12 @@ describe('App setup launch', () => {
 
     const setupButton = screen.getByRole('button', { name: 'Setup' });
     fireEvent.click(setupButton);
+
+    expect(setupButton).toHaveProperty('disabled', true);
+
     fireEvent.click(setupButton);
 
-    expect(state.terminalState.focusExistingSetupSession).toHaveBeenCalledTimes(2);
+    expect(state.terminalState.focusExistingSetupSession).toHaveBeenCalledTimes(1);
     expect(state.spawnShipperSetupMock).toHaveBeenCalledTimes(1);
     expect(state.spawnShipperSetupMock).toHaveBeenCalledWith('owner/repo', 120, 30);
     expect(state.terminalState.openRunningSession).not.toHaveBeenCalled();
@@ -308,9 +404,10 @@ describe('App setup launch', () => {
       'setup — owner/repo',
       { repo: 'owner/repo' }
     );
+    expect(setupButton).toHaveProperty('disabled', false);
   });
 
-  it('allows retrying Setup after a failed launch settles', async () => {
+  it('clears pending Setup feedback after a failed launch and keeps the fetch-error path', async () => {
     state.spawnShipperSetupMock
       .mockRejectedValueOnce(new Error('clone failed'))
       .mockResolvedValueOnce({ sessionId: 'pty-setup-43' });
@@ -324,12 +421,60 @@ describe('App setup launch', () => {
       await Promise.resolve();
     });
 
-    fireEvent.click(setupButton);
-
-    expect(state.spawnShipperSetupMock).toHaveBeenCalledTimes(2);
+    expect(setupButton).toHaveProperty('disabled', false);
     expect(state.pipelineState.setFetchError).toHaveBeenCalledWith(
       'Failed to launch shipper setup: clone failed'
     );
+
+    await act(async () => {
+      fireEvent.click(setupButton);
+      await Promise.resolve();
+    });
+
+    expect(state.spawnShipperSetupMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('focuses an existing Setup session without showing pending feedback or spawning', () => {
+    vi.mocked(
+      state.terminalState.focusExistingSetupSession as (repo: string) => boolean
+    ).mockReturnValue(true);
+
+    render(<App />);
+
+    const setupButton = screen.getByRole('button', { name: 'Setup' });
+    fireEvent.click(setupButton);
+
+    expect(state.terminalState.focusExistingSetupSession).toHaveBeenCalledWith('owner/repo');
+    expect(state.spawnShipperSetupMock).not.toHaveBeenCalled();
+    expect(setupButton).toHaveProperty('disabled', false);
+  });
+
+  it('scopes pending Setup feedback by repo when the active repo changes', () => {
+    state.spawnShipperSetupMock.mockReturnValue(new Promise(() => {}));
+
+    const { rerender } = render(<App />);
+
+    const repoASetupButton = screen.getByRole('button', { name: 'Setup' });
+    fireEvent.click(repoASetupButton);
+
+    expect(repoASetupButton).toHaveProperty('disabled', true);
+    expect(state.spawnShipperSetupMock).toHaveBeenCalledWith('owner/repo', 120, 30);
+
+    state.reposState = {
+      ...state.reposState,
+      activeRepo: 'owner/repo-b',
+      repos: ['owner/repo', 'owner/repo-b'],
+    };
+
+    rerender(<App />);
+
+    const repoBSetupButton = screen.getByRole('button', { name: 'Setup' });
+    expect(repoBSetupButton).toHaveProperty('disabled', false);
+
+    fireEvent.click(repoBSetupButton);
+
+    expect(state.spawnShipperSetupMock).toHaveBeenCalledTimes(2);
+    expect(state.spawnShipperSetupMock).toHaveBeenLastCalledWith('owner/repo-b', 120, 30);
   });
 
   it('prompts before shipping a paused issue and resumes only on confirm', async () => {

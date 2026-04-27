@@ -30,6 +30,7 @@ export interface PipelineBoardProps {
   settingPriorityIssues: ReadonlySet<number>;
   pausedIssues: ReadonlySet<number>;
   pausePendingIssues: ReadonlySet<number>;
+  groomPendingIssues: ReadonlySet<number>;
   shippingCommands: ReadonlyMap<number, ActiveShippingCommand>;
   autoMergeEnabled: boolean;
   autoShipEnabled: boolean;
@@ -62,6 +63,7 @@ export function PipelineBoard({
   settingPriorityIssues,
   pausedIssues,
   pausePendingIssues,
+  groomPendingIssues,
   shippingCommands,
   autoMergeEnabled,
   autoShipEnabled,
@@ -205,6 +207,7 @@ export function PipelineBoard({
                 }}
                 resetTargets={resetTargets}
                 groomDisabled={options.allowGroom ? !canFetch : undefined}
+                isGroomPending={options.allowGroom && groomPendingIssues.has(issue.number)}
                 isResetting={resettingIssues.has(issue.number)}
                 isSettingPriority={settingPriorityIssues.has(issue.number)}
                 isUnlocking={unlockingIssues.has(issue.number)}

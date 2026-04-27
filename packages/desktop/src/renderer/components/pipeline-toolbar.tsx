@@ -1,4 +1,5 @@
 import type { JSX } from 'react';
+import { LoaderCircle } from 'lucide-react';
 
 import { dateFormatter } from '../lib/constants.js';
 import { Button } from './ui/button.js';
@@ -8,6 +9,7 @@ interface PipelineToolbarProps {
   canFetch: boolean;
   isLoading: boolean;
   setupEnabled: boolean;
+  isSetupPending: boolean;
   onNewIssue: () => void;
   onAdopt: () => void;
   onSetup: () => void;
@@ -19,6 +21,7 @@ export function PipelineToolbar({
   canFetch,
   isLoading,
   setupEnabled,
+  isSetupPending,
   onNewIssue,
   onAdopt,
   onSetup,
@@ -37,7 +40,10 @@ export function PipelineToolbar({
       <Button variant="outline" onClick={onAdopt} disabled={!canFetch}>
         Adopt
       </Button>
-      <Button variant="outline" onClick={onSetup} disabled={!setupEnabled}>
+      <Button variant="outline" onClick={onSetup} disabled={!setupEnabled || isSetupPending}>
+        {isSetupPending ? (
+          <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+        ) : null}
         Setup
       </Button>
       <Button variant="outline" onClick={onRefresh} disabled={!canFetch || isLoading}>

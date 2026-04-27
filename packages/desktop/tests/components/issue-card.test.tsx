@@ -127,6 +127,23 @@ describe('IssueCard', () => {
     expect(screen.getByRole('button', { name: 'Ship' })).toHaveProperty('disabled', true);
   });
 
+  it('renders disabled Groom button feedback while a groom launch is pending', () => {
+    render(
+      <IssueCard
+        issue={createIssue()}
+        tokenUsage={createTokenUsage()}
+        onGroom={vi.fn()}
+        isGroomPending
+      />
+    );
+
+    const groomButton = screen.getByRole('button', { name: 'Groom' });
+
+    expect(groomButton).toHaveProperty('disabled', true);
+    expect(groomButton.textContent).toContain('Groom');
+    expect(groomButton.innerHTML).toContain('animate-spin');
+  });
+
   it('renders failed styling on the card surface', () => {
     render(
       <IssueCard issue={createIssue({ labels: [FAILED_LABEL] })} tokenUsage={createTokenUsage()} />
