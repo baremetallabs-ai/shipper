@@ -30,11 +30,17 @@ import { getWorkflowStageCacheKey } from './lib/app-utils.js';
 import { getShipperApi } from './lib/shipper-api.js';
 import type { BackgroundCommandsBridge, IssuePipelineBridge } from './types.js';
 
+function getGroomLaunchKey(repo: string, issueNumber: number): string {
+  return `${repo}#${issueNumber}`;
+}
+
 export default function App(): JSX.Element {
   const pipelineBridgeRef = useRef<IssuePipelineBridge | null>(null);
   const backgroundBridgeRef = useRef<BackgroundCommandsBridge | null>(null);
+  const launchingGroomKeysRef = useRef<Set<string>>(new Set());
+  const launchingSetupReposRef = useRef<Set<string>>(new Set());
   const [resumeShipIssueNumber, setResumeShipIssueNumber] = useState<number | null>(null);
-  const [launchingGroomIssues, setLaunchingGroomIssues] = useState<Set<number>>(() => new Set());
+  const [launchingGroomKeys, setLaunchingGroomKeys] = useState<Set<string>>(() => new Set());
   const [launchingSetupRepos, setLaunchingSetupRepos] = useState<Set<string>>(() => new Set());
 
   const reposState = useRepos({
@@ -66,6 +72,21 @@ export default function App(): JSX.Element {
   const showPipelineBoard = reposState.repos.length > 0 && repoInitialized === true;
   const autoMergeEnabled = activeRepo ? reposState.autoMergeRepos.has(activeRepo) : false;
   const autoShipEnabled = activeRepo ? backgroundState.autoShipRepos.has(activeRepo) : false;
+  const activeRepoGroomPendingIssues = useMemo(() => {
+    if (!activeRepo) {
+      return new Set<number>();
+    }
+
+    const keyPrefix = `${activeRepo}#`;
+    const issueNumbers = new Set<number>();
+    for (const key of launchingGroomKeys) {
+      if (key.startsWith(keyPrefix)) {
+        issueNumbers.add(Number(key.slice(keyPrefix.length)));
+      }
+    }
+
+    return issueNumbers;
+  }, [activeRepo, launchingGroomKeys]);
   const actionQueueCommands = useMemo(
     () =>
       backgroundState.backgroundCommands.map((command) => ({
@@ -100,30 +121,34 @@ export default function App(): JSX.Element {
   }
 
   async function handleShipperGroom(issueNumber: number): Promise<void> {
+    const repo = activeRepo;
+    if (!repo) {
+      return;
+    }
+
     if (terminalState.focusExistingGroomSession(issueNumber)) {
       return;
     }
 
-    if (launchingGroomIssues.has(issueNumber)) {
+    const groomKey = getGroomLaunchKey(repo, issueNumber);
+    if (launchingGroomKeysRef.current.has(groomKey)) {
       return;
     }
 
-    setLaunchingGroomIssues((current) => new Set(current).add(issueNumber));
+    launchingGroomKeysRef.current.add(groomKey);
+    setLaunchingGroomKeys(new Set(launchingGroomKeysRef.current));
 
     try {
-      const result = await getShipperApi().spawnShipperGroom(issueNumber, activeRepo, 120, 30);
+      const result = await getShipperApi().spawnShipperGroom(issueNumber, repo, 120, 30);
       terminalState.openRunningSession(result.sessionId, `groom — #${issueNumber}`, {
-        repo: activeRepo,
+        repo,
         issueNumber,
       });
     } catch (error) {
       pipelineState.setFetchError(`Failed to launch shipper groom: ${toErrorMessage(error)}`);
     } finally {
-      setLaunchingGroomIssues((current) => {
-        const next = new Set(current);
-        next.delete(issueNumber);
-        return next;
-      });
+      launchingGroomKeysRef.current.delete(groomKey);
+      setLaunchingGroomKeys(new Set(launchingGroomKeysRef.current));
     }
   }
 
@@ -133,11 +158,12 @@ export default function App(): JSX.Element {
       return;
     }
 
-    if (launchingSetupRepos.has(repo)) {
+    if (launchingSetupReposRef.current.has(repo)) {
       return;
     }
 
-    setLaunchingSetupRepos((current) => new Set(current).add(repo));
+    launchingSetupReposRef.current.add(repo);
+    setLaunchingSetupRepos(new Set(launchingSetupReposRef.current));
 
     try {
       const result = await getShipperApi().spawnShipperSetup(repo, 120, 30);
@@ -147,11 +173,8 @@ export default function App(): JSX.Element {
     } catch (error) {
       pipelineState.setFetchError(`Failed to launch shipper setup: ${toErrorMessage(error)}`);
     } finally {
-      setLaunchingSetupRepos((current) => {
-        const next = new Set(current);
-        next.delete(repo);
-        return next;
-      });
+      launchingSetupReposRef.current.delete(repo);
+      setLaunchingSetupRepos(new Set(launchingSetupReposRef.current));
     }
   }
 
@@ -414,7 +437,7 @@ export default function App(): JSX.Element {
                   settingPriorityIssues={pipelineState.settingPriorityIssues}
                   pausedIssues={pipelineState.pausedIssues}
                   pausePendingIssues={backgroundState.pausePendingIssues}
-                  groomPendingIssues={launchingGroomIssues}
+                  groomPendingIssues={activeRepoGroomPendingIssues}
                   shippingCommands={backgroundState.shippingCommands}
                   autoMergeEnabled={autoMergeEnabled}
                   autoShipEnabled={autoShipEnabled}

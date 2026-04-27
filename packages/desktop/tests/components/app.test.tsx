@@ -373,6 +373,65 @@ describe('App setup launch', () => {
     expect(issue42Button).toHaveProperty('disabled', false);
   });
 
+  it('does not launch Groom without an active repo', () => {
+    state.reposState = {
+      ...state.reposState,
+      activeRepo: '',
+    };
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Groom issue 42' }));
+
+    expect(state.terminalState.focusExistingGroomSession).not.toHaveBeenCalled();
+    expect(state.spawnShipperGroomMock).not.toHaveBeenCalled();
+  });
+
+  it('scopes pending Groom feedback by repo and opens sessions with the launch repo', async () => {
+    let resolveRepoAGroom: ((value: { sessionId: string }) => void) | undefined;
+    const repoAGroomPromise = new Promise<{ sessionId: string }>((resolve) => {
+      resolveRepoAGroom = resolve;
+    });
+    state.spawnShipperGroomMock
+      .mockReturnValueOnce(repoAGroomPromise)
+      .mockReturnValueOnce(new Promise(() => {}));
+
+    const { rerender } = render(<App />);
+
+    const repoAIssue42Button = screen.getByRole('button', { name: 'Groom issue 42' });
+    fireEvent.click(repoAIssue42Button);
+
+    expect(repoAIssue42Button).toHaveProperty('disabled', true);
+    expect(state.spawnShipperGroomMock).toHaveBeenCalledWith(42, 'owner/repo', 120, 30);
+
+    state.reposState = {
+      ...state.reposState,
+      activeRepo: 'owner/repo-b',
+      repos: ['owner/repo', 'owner/repo-b'],
+    };
+
+    rerender(<App />);
+
+    const repoBIssue42Button = screen.getByRole('button', { name: 'Groom issue 42' });
+    expect(repoBIssue42Button).toHaveProperty('disabled', false);
+
+    fireEvent.click(repoBIssue42Button);
+
+    expect(state.spawnShipperGroomMock).toHaveBeenCalledTimes(2);
+    expect(state.spawnShipperGroomMock).toHaveBeenLastCalledWith(42, 'owner/repo-b', 120, 30);
+
+    await act(async () => {
+      resolveRepoAGroom?.({ sessionId: 'pty-groom-repo-a-42' });
+      await repoAGroomPromise;
+    });
+
+    expect(state.terminalState.openRunningSession).toHaveBeenCalledWith(
+      'pty-groom-repo-a-42',
+      'groom — #42',
+      { repo: 'owner/repo', issueNumber: 42 }
+    );
+  });
+
   it('deduplicates rapid Setup clicks while the first launch is still pending', async () => {
     let resolveSetup: ((value: { sessionId: string }) => void) | undefined;
     const setupPromise = new Promise<{ sessionId: string }>((resolve) => {
