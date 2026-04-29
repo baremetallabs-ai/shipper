@@ -41,15 +41,11 @@ export async function ensureRepoClone(repo: string): Promise<string> {
 
 /**
  * Ensures a clone exists for creating git worktrees without modifying the
- * canonical worktree's checked-out files.
+ * canonical worktree's checked-out files. Callers that create worktrees fetch
+ * the specific refs they need immediately before worktree creation.
  */
 export async function ensureRepoCloneForWorktree(repo: string): Promise<string> {
-  return await ensureRepoCloneWithExisting(repo, async (clonePath) => {
-    await execFileAsync('git', ['fetch', 'origin'], {
-      cwd: clonePath,
-      encoding: 'utf-8',
-    });
-  });
+  return await ensureRepoCloneWithExisting(repo, async () => {});
 }
 
 async function ensureRepoCloneWithExisting(

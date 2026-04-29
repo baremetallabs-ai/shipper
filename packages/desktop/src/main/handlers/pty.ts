@@ -28,6 +28,10 @@ interface SpawnShipperGroomPayload extends SpawnPtyPayload {
   issueNumber: number;
 }
 
+function getRepoConcurrencyKey(repo: string): string {
+  return repo.toLowerCase();
+}
+
 function parseSpawnPtyPayload(value: unknown): SpawnPtyPayload | null {
   if (
     typeof value !== 'object' ||
@@ -69,6 +73,32 @@ function parseSpawnShipperGroomPayload(value: unknown): SpawnShipperGroomPayload
 
 export function registerPtyHandlers(ptyManager: PtyManager): void {
   const activeSetupRepos = new Set<string>();
+  const repoPreparationQueues = new Map<string, Promise<void>>();
+
+  const runWithRepoPreparationQueue = async <T>(
+    repo: string,
+    prepare: () => Promise<T>
+  ): Promise<T> => {
+    const repoKey = getRepoConcurrencyKey(repo);
+    const previous = repoPreparationQueues.get(repoKey) ?? Promise.resolve();
+    let releaseCurrent: () => void = () => {};
+    const current = new Promise<void>((resolve) => {
+      releaseCurrent = resolve;
+    });
+    const next = previous.catch(() => undefined).then(() => current);
+    repoPreparationQueues.set(repoKey, next);
+
+    await previous.catch(() => undefined);
+
+    try {
+      return await prepare();
+    } finally {
+      releaseCurrent();
+      if (repoPreparationQueues.get(repoKey) === next) {
+        repoPreparationQueues.delete(repoKey);
+      }
+    }
+  };
 
   ipcMain.handle('pty-spawn-shipper-groom', async (_event, payload: unknown) => {
     const parsedPayload = parseSpawnShipperGroomPayload(payload);
@@ -106,11 +136,13 @@ export function registerPtyHandlers(ptyManager: PtyManager): void {
     };
 
     try {
-      const repoRoot = await ensureRepoCloneForWorktree(parsedPayload.repo);
       const settings = getSettings();
-      const configuredBaseBranch = settings.defaultBaseBranch;
-      const baseBranch = configuredBaseBranch ?? (await resolveBaseBranch(parsedPayload.repo));
-      groomWorktree = await createDesktopGroomWorktree({ repoRoot, issueNumber, baseBranch });
+      groomWorktree = await runWithRepoPreparationQueue(parsedPayload.repo, async () => {
+        const repoRoot = await ensureRepoCloneForWorktree(parsedPayload.repo);
+        const configuredBaseBranch = settings.defaultBaseBranch;
+        const baseBranch = configuredBaseBranch ?? (await resolveBaseBranch(parsedPayload.repo));
+        return await createDesktopGroomWorktree({ repoRoot, issueNumber, baseBranch });
+      });
 
       const cmd = await buildPromptCommand('groom', {
         issueRef: issueNumber,
@@ -132,7 +164,12 @@ export function registerPtyHandlers(ptyManager: PtyManager): void {
         initialInput: cmd.initialInput,
       });
       ptyManager.onSessionExit(sessionId, () => {
-        void cleanupGroomSession();
+        void cleanupGroomSession().catch((cleanupError: unknown) => {
+          console.warn(
+            '[shipper] Failed to clean up groom session after session exit',
+            cleanupError
+          );
+        });
       });
 
       return { sessionId };
@@ -155,17 +192,20 @@ export function registerPtyHandlers(ptyManager: PtyManager): void {
       throw new Error('Invalid pty-spawn-shipper-setup payload.');
     }
 
-    if (activeSetupRepos.has(parsedPayload.repo)) {
+    const repoKey = getRepoConcurrencyKey(parsedPayload.repo);
+    if (activeSetupRepos.has(repoKey)) {
       throw new Error(`Setup is already running for ${parsedPayload.repo}.`);
     }
 
-    activeSetupRepos.add(parsedPayload.repo);
+    activeSetupRepos.add(repoKey);
     const clearSetupActive = (): void => {
-      activeSetupRepos.delete(parsedPayload.repo);
+      activeSetupRepos.delete(repoKey);
     };
 
     try {
-      const repoPath = await ensureRepoClone(parsedPayload.repo);
+      const repoPath = await runWithRepoPreparationQueue(parsedPayload.repo, async () => {
+        return await ensureRepoClone(parsedPayload.repo);
+      });
       const repoName = path.basename(repoPath);
       const hasShipperDir = existsSync(path.join(repoPath, '.shipper'));
       const userInput = hasShipperDir
