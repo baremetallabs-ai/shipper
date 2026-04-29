@@ -41,7 +41,13 @@ function isValidRepo(repo: string): boolean {
 
 interface OrganizationSection {
   organizationLogin: string;
-  repos: RepoPickerRepository[];
+  repos: OrganizationRepo[];
+}
+
+type OrganizationRepo = Extract<RepoPickerRepository, { group: 'organization' }>;
+
+function isOrganizationRepo(repo: RepoPickerRepository): repo is OrganizationRepo {
+  return repo.group === 'organization';
 }
 
 export function RepoPickerDialog({
@@ -110,14 +116,12 @@ export function RepoPickerDialog({
   const otherRepos = filteredRepos.filter((repo) => repo.group === 'other');
   const canRenderResults = fetchError === null;
   const organizationSections = Array.from(
-    filteredRepos
-      .filter((repo) => repo.group === 'organization')
-      .reduce((sections, repo) => {
-        const existingRepos = sections.get(repo.organizationLogin) ?? [];
-        existingRepos.push(repo);
-        sections.set(repo.organizationLogin, existingRepos);
-        return sections;
-      }, new Map<string, RepoPickerRepository[]>())
+    filteredRepos.filter(isOrganizationRepo).reduce((sections, repo) => {
+      const existingRepos = sections.get(repo.organizationLogin) ?? [];
+      existingRepos.push(repo);
+      sections.set(repo.organizationLogin, existingRepos);
+      return sections;
+    }, new Map<string, OrganizationRepo[]>())
   )
     .map(
       ([organizationLogin, organizationRepos]): OrganizationSection => ({
@@ -130,7 +134,7 @@ export function RepoPickerDialog({
         sensitivity: 'base',
       })
     );
-  const hasOrganizationRepos = organizationSections.some((section) => section.repos.length > 0);
+  const hasOrganizationRepos = organizationSections.length > 0;
   const hasListedRepos = ownerRepos.length > 0 || hasOrganizationRepos || otherRepos.length > 0;
   const showManualAdd =
     normalizedQuery.length > 0 &&

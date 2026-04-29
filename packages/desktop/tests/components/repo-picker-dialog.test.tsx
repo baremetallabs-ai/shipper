@@ -85,16 +85,18 @@ function renderRejectedDialog({
   return { ...result, onSelectRepo };
 }
 
-function getDialogText(): string {
-  // The desktop test tsconfig is Node-based, but this file runs under jsdom.
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-return
-  return screen.getByRole('dialog').textContent ?? '';
-}
-
 function expectTextBefore(first: string, second: string): void {
-  const text = getDialogText();
-  const firstIndex = text.indexOf(first);
-  const secondIndex = text.indexOf(second);
+  // The desktop test tsconfig is Node-based, but this file runs under jsdom.
+  /* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call */
+  const entries = Array.from(
+    screen.getByRole('dialog').querySelectorAll('[cmdk-group-heading], [data-slot="command-item"]')
+  ).map((entry) => {
+    const text = entry.textContent;
+    return typeof text === 'string' ? text.trim() : '';
+  });
+  /* eslint-enable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call */
+  const firstIndex = entries.indexOf(first);
+  const secondIndex = entries.indexOf(second);
 
   expect(firstIndex).toBeGreaterThanOrEqual(0);
   expect(secondIndex).toBeGreaterThanOrEqual(0);
