@@ -31,6 +31,7 @@ export interface PipelineBoardProps {
   pausedIssues: ReadonlySet<number>;
   pausePendingIssues: ReadonlySet<number>;
   groomPendingIssues: ReadonlySet<number>;
+  shipPendingIssues: ReadonlySet<number>;
   shippingCommands: ReadonlyMap<number, ActiveShippingCommand>;
   autoMergeEnabled: boolean;
   autoShipEnabled: boolean;
@@ -64,6 +65,7 @@ export function PipelineBoard({
   pausedIssues,
   pausePendingIssues,
   groomPendingIssues,
+  shipPendingIssues,
   shippingCommands,
   autoMergeEnabled,
   autoShipEnabled,
@@ -434,6 +436,7 @@ export function PipelineBoard({
                               isUnblocking={unblockingIssues.has(issue.number)}
                               onShip={!isReadyColumn ? onShip : undefined}
                               shipDisabled={!!shippingStatus || !canFetch || !hasActiveRepo}
+                              isShipPending={shipPendingIssues.has(issue.number)}
                               shippingStatus={shippingStatus}
                               onStopShip={
                                 shippingCmd

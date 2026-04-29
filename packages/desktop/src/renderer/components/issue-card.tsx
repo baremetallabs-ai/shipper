@@ -94,6 +94,7 @@ export interface IssueCardProps {
   isSettingPriority?: boolean;
   onShip?: (issueNumber: number) => void;
   shipDisabled?: boolean;
+  isShipPending?: boolean;
   shippingStatus?: 'queued' | 'running';
   onStopShip?: () => void;
   isPaused?: boolean;
@@ -136,6 +137,7 @@ export function IssueCard({
   isSettingPriority = false,
   onShip,
   shipDisabled = false,
+  isShipPending = false,
   shippingStatus,
   onStopShip,
   isPaused = false,
@@ -172,7 +174,8 @@ export function IssueCard({
   const hasFlatActions = canPause || canResume || canCloseNotPlanned || canUnlock || canUnblock;
   const showOverflowMenu = hasResetMenu || hasFlatActions || hasPriorityMenu;
   const showStopShipButton = isShipping && onStopShip !== undefined;
-  const isShipDisabled = shipDisabled || isBlocked || isLocked || isFailed || isShipping;
+  const isShipDisabled =
+    shipDisabled || isShipPending || isBlocked || isLocked || isFailed || isShipping;
   const totalTokens = getTotalTokens(tokenUsage);
   const tokenBreakdownSentence = formatTokenBreakdownSentence(tokenUsage);
 
@@ -418,6 +421,9 @@ export function IssueCard({
                   }}
                   disabled={isShipDisabled}
                 >
+                  {isShipPending ? (
+                    <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+                  ) : null}
                   Ship
                 </Button>
               ) : null}

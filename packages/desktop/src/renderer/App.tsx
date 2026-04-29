@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { JSX } from 'react';
 
 import { toErrorMessage } from '@dnsquared/shipper-core';
@@ -34,13 +34,21 @@ function getGroomLaunchKey(repo: string, issueNumber: number): string {
   return `${repo}#${issueNumber}`;
 }
 
+function getShipLaunchKey(repo: string, issueNumber: number): string {
+  return `${repo}#${issueNumber}`;
+}
+
 export default function App(): JSX.Element {
   const pipelineBridgeRef = useRef<IssuePipelineBridge | null>(null);
   const backgroundBridgeRef = useRef<BackgroundCommandsBridge | null>(null);
   const launchingGroomKeysRef = useRef<Set<string>>(new Set());
+  const launchingShipKeysRef = useRef<Map<string, string | null>>(new Map());
   const launchingSetupReposRef = useRef<Set<string>>(new Set());
   const [resumeShipIssueNumber, setResumeShipIssueNumber] = useState<number | null>(null);
   const [launchingGroomKeys, setLaunchingGroomKeys] = useState<Set<string>>(() => new Set());
+  const [launchingShipKeys, setLaunchingShipKeys] = useState<Map<string, string | null>>(
+    () => new Map()
+  );
   const [launchingSetupRepos, setLaunchingSetupRepos] = useState<Set<string>>(() => new Set());
 
   const reposState = useRepos({
@@ -87,6 +95,21 @@ export default function App(): JSX.Element {
 
     return issueNumbers;
   }, [activeRepo, launchingGroomKeys]);
+  const activeRepoShipPendingIssues = useMemo(() => {
+    if (!activeRepo) {
+      return new Set<number>();
+    }
+
+    const keyPrefix = `${activeRepo}#`;
+    const issueNumbers = new Set<number>();
+    for (const key of launchingShipKeys.keys()) {
+      if (key.startsWith(keyPrefix)) {
+        issueNumbers.add(Number(key.slice(keyPrefix.length)));
+      }
+    }
+
+    return issueNumbers;
+  }, [activeRepo, launchingShipKeys]);
   const actionQueueCommands = useMemo(
     () =>
       backgroundState.backgroundCommands.map((command) => ({
@@ -111,6 +134,24 @@ export default function App(): JSX.Element {
       })),
     [backgroundState.backgroundCommands, pipelineState.stageCache]
   );
+
+  useEffect(() => {
+    const visibleBackgroundSessionIds = new Set(
+      backgroundState.backgroundCommands.map((command) => command.id)
+    );
+    let changed = false;
+
+    for (const [shipKey, sessionId] of launchingShipKeysRef.current) {
+      if (sessionId !== null && visibleBackgroundSessionIds.has(sessionId)) {
+        launchingShipKeysRef.current.delete(shipKey);
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      setLaunchingShipKeys(new Map(launchingShipKeysRef.current));
+    }
+  }, [backgroundState.backgroundCommands, launchingShipKeys]);
 
   async function handleShipperNew(request: string, repo = activeRepo): Promise<void> {
     try {
@@ -179,13 +220,29 @@ export default function App(): JSX.Element {
   }
 
   async function handleShipperShip(issueNumber: number, repo = activeRepo): Promise<void> {
+    if (!repo) {
+      return;
+    }
+
+    const shipKey = getShipLaunchKey(repo, issueNumber);
+    if (launchingShipKeysRef.current.has(shipKey)) {
+      return;
+    }
+
+    launchingShipKeysRef.current.set(shipKey, null);
+    setLaunchingShipKeys(new Map(launchingShipKeysRef.current));
+
     try {
-      await getShipperApi().spawnBackgroundShip(
+      const result = await getShipperApi().spawnBackgroundShip(
         issueNumber,
         repo,
         reposState.autoMergeRepos.has(repo)
       );
+      launchingShipKeysRef.current.set(shipKey, result.sessionId);
+      setLaunchingShipKeys(new Map(launchingShipKeysRef.current));
     } catch (error) {
+      launchingShipKeysRef.current.delete(shipKey);
+      setLaunchingShipKeys(new Map(launchingShipKeysRef.current));
       pipelineState.setFetchError(`Failed to launch shipper ship: ${toErrorMessage(error)}`);
     }
   }
@@ -438,6 +495,7 @@ export default function App(): JSX.Element {
                   pausedIssues={pipelineState.pausedIssues}
                   pausePendingIssues={backgroundState.pausePendingIssues}
                   groomPendingIssues={activeRepoGroomPendingIssues}
+                  shipPendingIssues={activeRepoShipPendingIssues}
                   shippingCommands={backgroundState.shippingCommands}
                   autoMergeEnabled={autoMergeEnabled}
                   autoShipEnabled={autoShipEnabled}
