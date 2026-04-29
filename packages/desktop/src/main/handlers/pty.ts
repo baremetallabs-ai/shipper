@@ -6,10 +6,13 @@ import { ipcMain } from 'electron';
 import {
   acquireIssueLock,
   buildPromptCommand,
+  createDesktopGroomWorktree,
   ensureRepoClone,
+  ensureRepoCloneForWorktree,
   getSettings,
   releaseIssueLock,
   renewIssueLock,
+  resolveBaseBranch,
 } from '@dnsquared/shipper-core';
 
 import type { PtyManager } from '../pty-manager.js';
@@ -65,6 +68,8 @@ function parseSpawnShipperGroomPayload(value: unknown): SpawnShipperGroomPayload
 }
 
 export function registerPtyHandlers(ptyManager: PtyManager): void {
+  const activeSetupRepos = new Set<string>();
+
   ipcMain.handle('pty-spawn-shipper-groom', async (_event, payload: unknown) => {
     const parsedPayload = parseSpawnShipperGroomPayload(payload);
     if (parsedPayload === null) {
@@ -76,32 +81,45 @@ export function registerPtyHandlers(ptyManager: PtyManager): void {
     const heartbeatCancelled = { value: false };
     let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
     let lockReleased = false;
+    let cleanupPromise: Promise<void> | null = null;
+    let groomWorktree: Awaited<ReturnType<typeof createDesktopGroomWorktree>> | null = null;
 
-    const releaseLock = async (): Promise<void> => {
-      if (lockReleased) {
-        return;
-      }
+    const cleanupGroomSession = async (): Promise<void> => {
+      cleanupPromise ??= (async () => {
+        heartbeatCancelled.value = true;
+        if (heartbeatTimer !== null) {
+          clearInterval(heartbeatTimer);
+          heartbeatTimer = null;
+        }
 
-      lockReleased = true;
-      heartbeatCancelled.value = true;
-      if (heartbeatTimer !== null) {
-        clearInterval(heartbeatTimer);
-        heartbeatTimer = null;
-      }
-      await releaseIssueLock(parsedPayload.repo, issueNumber);
+        try {
+          if (!lockReleased) {
+            lockReleased = true;
+            await releaseIssueLock(parsedPayload.repo, issueNumber);
+          }
+        } finally {
+          await groomWorktree?.cleanup();
+        }
+      })();
+
+      await cleanupPromise;
     };
 
     try {
-      const repoPath = await ensureRepoClone(parsedPayload.repo);
+      const repoRoot = await ensureRepoCloneForWorktree(parsedPayload.repo);
+      const settings = getSettings();
+      const configuredBaseBranch = settings.defaultBaseBranch;
+      const baseBranch = configuredBaseBranch ?? (await resolveBaseBranch(parsedPayload.repo));
+      groomWorktree = await createDesktopGroomWorktree({ repoRoot, issueNumber, baseBranch });
 
       const cmd = await buildPromptCommand('groom', {
         issueRef: issueNumber,
         repo: parsedPayload.repo,
-        cwd: repoPath,
+        cwd: groomWorktree.wtPath,
         mode: 'interactive',
       });
 
-      const heartbeatMs = (getSettings().lockTimeoutMinutes / 3) * 60_000;
+      const heartbeatMs = (settings.lockTimeoutMinutes / 3) * 60_000;
       heartbeatTimer = setInterval(() => {
         void renewIssueLock(parsedPayload.repo, issueNumber, heartbeatCancelled);
       }, heartbeatMs);
@@ -110,16 +128,23 @@ export function registerPtyHandlers(ptyManager: PtyManager): void {
       ptyManager.spawn(sessionId, cmd.command, cmd.args, {
         cols: parsedPayload.cols,
         rows: parsedPayload.rows,
-        cwd: cmd.cwd ?? repoPath,
+        cwd: cmd.cwd ?? groomWorktree.wtPath,
         initialInput: cmd.initialInput,
       });
       ptyManager.onSessionExit(sessionId, () => {
-        void releaseLock();
+        void cleanupGroomSession();
       });
 
       return { sessionId };
     } catch (error) {
-      await releaseLock();
+      try {
+        await cleanupGroomSession();
+      } catch (cleanupError) {
+        console.warn(
+          '[shipper] Failed to clean up groom session after spawn failure',
+          cleanupError
+        );
+      }
       throw error;
     }
   });
@@ -130,28 +155,43 @@ export function registerPtyHandlers(ptyManager: PtyManager): void {
       throw new Error('Invalid pty-spawn-shipper-setup payload.');
     }
 
-    const repoPath = await ensureRepoClone(parsedPayload.repo);
-    const repoName = path.basename(repoPath);
-    const hasShipperDir = existsSync(path.join(repoPath, '.shipper'));
-    const userInput = hasShipperDir
-      ? `Run setup for ${repoName}. .shipper/ directory already exists.`
-      : `Run setup for ${repoName}. This is a fresh setup — no .shipper/ directory found.`;
-    const cmd = await buildPromptCommand('setup', {
-      userInput,
-      repo: parsedPayload.repo,
-      cwd: repoPath,
-      mode: 'interactive',
-    });
+    if (activeSetupRepos.has(parsedPayload.repo)) {
+      throw new Error(`Setup is already running for ${parsedPayload.repo}.`);
+    }
 
-    const sessionId = randomUUID();
-    ptyManager.spawn(sessionId, cmd.command, cmd.args, {
-      cols: parsedPayload.cols,
-      rows: parsedPayload.rows,
-      cwd: cmd.cwd ?? repoPath,
-      initialInput: cmd.initialInput,
-    });
+    activeSetupRepos.add(parsedPayload.repo);
+    const clearSetupActive = (): void => {
+      activeSetupRepos.delete(parsedPayload.repo);
+    };
 
-    return { sessionId };
+    try {
+      const repoPath = await ensureRepoClone(parsedPayload.repo);
+      const repoName = path.basename(repoPath);
+      const hasShipperDir = existsSync(path.join(repoPath, '.shipper'));
+      const userInput = hasShipperDir
+        ? `Run setup for ${repoName}. .shipper/ directory already exists.`
+        : `Run setup for ${repoName}. This is a fresh setup — no .shipper/ directory found.`;
+      const cmd = await buildPromptCommand('setup', {
+        userInput,
+        repo: parsedPayload.repo,
+        cwd: repoPath,
+        mode: 'interactive',
+      });
+
+      const sessionId = randomUUID();
+      ptyManager.spawn(sessionId, cmd.command, cmd.args, {
+        cols: parsedPayload.cols,
+        rows: parsedPayload.rows,
+        cwd: cmd.cwd ?? repoPath,
+        initialInput: cmd.initialInput,
+      });
+      ptyManager.onSessionExit(sessionId, clearSetupActive);
+
+      return { sessionId };
+    } catch (error) {
+      clearSetupActive();
+      throw error;
+    }
   });
 
   ipcMain.handle('pty-write', (_event, payload: unknown) => {

@@ -89,7 +89,8 @@ vi.mock('node:child_process', async () => {
   };
 });
 
-const { ensureRepoClone, getRepoClonePath } = await import('../../src/lib/repo-clone.js');
+const { ensureRepoClone, ensureRepoCloneForWorktree, getRepoClonePath } =
+  await import('../../src/lib/repo-clone.js');
 
 beforeEach(() => {
   mockGh.mockReset();
@@ -331,5 +332,122 @@ describe('ensureRepoClone', () => {
       cwd: clonePath,
     });
     expect(mockGh).not.toHaveBeenCalledWith(['repo', 'clone', 'owner/repo', clonePath]);
+  });
+});
+
+describe('ensureRepoCloneForWorktree', () => {
+  it('fetches an existing valid clone without resetting, cleaning, or syncing', async () => {
+    const clonePath = getRepoClonePath('owner/repo');
+    mockAccess.mockResolvedValue();
+    execFileMock.mockImplementationOnce((_cmd, _args, _opts, cb) => {
+      cb(null, 'true\n', '');
+    });
+    execFileMock.mockImplementationOnce((_cmd, _args, _opts, cb) => {
+      cb(null, '', '');
+    });
+
+    await expect(ensureRepoCloneForWorktree('owner/repo')).resolves.toBe(clonePath);
+
+    expect(execFileMock).toHaveBeenCalledTimes(2);
+    expect(execFileMock).toHaveBeenNthCalledWith(
+      1,
+      'git',
+      ['rev-parse', '--is-inside-work-tree'],
+      { cwd: clonePath, encoding: 'utf-8' },
+      expect.any(Function)
+    );
+    expect(execFileMock).toHaveBeenNthCalledWith(
+      2,
+      'git',
+      ['fetch', 'origin'],
+      { cwd: clonePath, encoding: 'utf-8' },
+      expect.any(Function)
+    );
+    expect(execFileMock.mock.calls.map(([, args]) => args)).not.toContainEqual(['reset', '--hard']);
+    expect(execFileMock.mock.calls.map(([, args]) => args)).not.toContainEqual(['clean', '-fdx']);
+    expect(mockGh).not.toHaveBeenCalledWith(['repo', 'sync', '--source', 'owner/repo'], {
+      cwd: clonePath,
+    });
+    expect(mockMkdir).not.toHaveBeenCalled();
+    expect(mockRm).not.toHaveBeenCalled();
+    expect(mockWarn).not.toHaveBeenCalled();
+  });
+
+  it('creates parent directories and clones when the worktree parent repo is missing', async () => {
+    const clonePath = getRepoClonePath('owner/repo');
+    mockAccess.mockRejectedValue(new Error('ENOENT'));
+    mockMkdir.mockResolvedValue(undefined);
+    mockGh.mockResolvedValue({ stdout: '', stderr: '' });
+
+    await expect(ensureRepoCloneForWorktree('owner/repo')).resolves.toBe(clonePath);
+
+    expect(mockMkdir).toHaveBeenCalledWith(path.join(homedir(), '.shipper', 'repos', 'owner'), {
+      recursive: true,
+    });
+    expect(execFileMock).not.toHaveBeenCalled();
+    expect(mockGh).toHaveBeenCalledWith(['repo', 'clone', 'owner/repo', clonePath]);
+  });
+
+  it.each(['core.bare = true', 'missing .git', 'corrupt .git / broken gitlink'])(
+    'removes and re-clones when the existing worktree parent clone is invalid (%s)',
+    async (scenario) => {
+      const clonePath = getRepoClonePath('owner/repo');
+      mockAccess.mockResolvedValue();
+      execFileMock.mockImplementationOnce((_cmd, _args, _opts, cb) => {
+        if (scenario === 'core.bare = true') {
+          cb(null, 'false\n', '');
+          return;
+        }
+
+        if (scenario === 'missing .git') {
+          cb(gitProbeError('fatal: not a git repository (or any of the parent directories): .git'));
+          return;
+        }
+
+        cb(gitProbeError('fatal: invalid gitfile format: /tmp/owner/repo/.git'));
+      });
+      mockRm.mockResolvedValue();
+      mockMkdir.mockResolvedValue(undefined);
+      mockGh.mockResolvedValue({ stdout: '', stderr: '' });
+
+      await expect(ensureRepoCloneForWorktree('owner/repo')).resolves.toBe(clonePath);
+
+      expect(mockWarn).toHaveBeenCalledWith(
+        `Clone at ${clonePath} is not a valid git worktree, removing and re-cloning`
+      );
+      expect(mockRm).toHaveBeenCalledWith(clonePath, { recursive: true, force: true });
+      expect(mockMkdir).toHaveBeenCalledWith(path.join(homedir(), '.shipper', 'repos', 'owner'), {
+        recursive: true,
+      });
+      expect(execFileMock).toHaveBeenCalledTimes(1);
+      expect(mockGh).toHaveBeenCalledWith(['repo', 'clone', 'owner/repo', clonePath]);
+    }
+  );
+
+  it('rethrows fetch failures without removing or re-cloning the valid worktree parent', async () => {
+    const clonePath = getRepoClonePath('owner/repo');
+    const fetchError = new Error('git fetch failed');
+    mockAccess.mockResolvedValue();
+    execFileMock.mockImplementationOnce((_cmd, _args, _opts, cb) => {
+      cb(null, 'true\n', '');
+    });
+    execFileMock.mockImplementationOnce((_cmd, _args, _opts, cb) => {
+      cb(fetchError);
+    });
+
+    await expect(ensureRepoCloneForWorktree('owner/repo')).rejects.toBe(fetchError);
+
+    expect(execFileMock).toHaveBeenCalledTimes(2);
+    expect(execFileMock).toHaveBeenNthCalledWith(
+      2,
+      'git',
+      ['fetch', 'origin'],
+      { cwd: clonePath, encoding: 'utf-8' },
+      expect.any(Function)
+    );
+    expect(mockWarn).not.toHaveBeenCalled();
+    expect(mockRm).not.toHaveBeenCalled();
+    expect(mockMkdir).not.toHaveBeenCalled();
+    expect(mockGh).not.toHaveBeenCalled();
   });
 });
