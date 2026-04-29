@@ -20,6 +20,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from './ui/dialog.js';
+import type { RepoPickerRepository } from '../types.js';
 
 interface RepoPickerDialogProps {
   open: boolean;
@@ -44,7 +45,7 @@ export function RepoPickerDialog({
   repos,
   onSelectRepo,
 }: RepoPickerDialogProps): JSX.Element {
-  const [availableRepos, setAvailableRepos] = useState<string[]>([]);
+  const [availableRepos, setAvailableRepos] = useState<RepoPickerRepository[]>([]);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [query, setQuery] = useState('');
@@ -90,7 +91,7 @@ export function RepoPickerDialog({
   const queryKey = toRepoKey(normalizedQuery);
   const configuredRepoKeys = new Set(repos.map((repo) => toRepoKey(repo)));
   const filteredRepos = availableRepos.filter((repo) => {
-    if (configuredRepoKeys.has(toRepoKey(repo))) {
+    if (configuredRepoKeys.has(toRepoKey(repo.nameWithOwner))) {
       return false;
     }
 
@@ -98,13 +99,16 @@ export function RepoPickerDialog({
       return true;
     }
 
-    return toRepoKey(repo).includes(queryKey);
+    return toRepoKey(repo.nameWithOwner).includes(queryKey);
   });
+  const ownerRepos = filteredRepos.filter((repo) => repo.group === 'owner');
+  const otherRepos = filteredRepos.filter((repo) => repo.group === 'other');
+  const hasListedRepos = ownerRepos.length > 0 || otherRepos.length > 0;
   const showManualAdd =
     normalizedQuery.length > 0 &&
     isValidRepo(normalizedQuery) &&
     !configuredRepoKeys.has(queryKey) &&
-    !filteredRepos.some((repo) => toRepoKey(repo) === queryKey);
+    !filteredRepos.some((repo) => toRepoKey(repo.nameWithOwner) === queryKey);
   const showDuplicateManual = normalizedQuery.length > 0 && configuredRepoKeys.has(queryKey);
   const showEmpty =
     !isLoading && filteredRepos.length === 0 && !showManualAdd && !showDuplicateManual;
@@ -151,18 +155,35 @@ export function RepoPickerDialog({
               <CommandEmpty>No repositories match the current search.</CommandEmpty>
             ) : null}
 
-            {filteredRepos.length > 0 ? (
+            {ownerRepos.length > 0 ? (
               <CommandGroup heading="Your repositories">
-                {filteredRepos.map((repo) => (
+                {ownerRepos.map((repo) => (
                   <CommandItem
-                    key={repo}
-                    value={repo}
+                    key={repo.nameWithOwner}
+                    value={repo.nameWithOwner}
                     onSelect={() => {
-                      handleSelect(repo);
+                      handleSelect(repo.nameWithOwner);
                     }}
                   >
                     <PlusCircle className="size-4 text-muted-foreground" />
-                    <span>{repo}</span>
+                    <span>{repo.nameWithOwner}</span>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            ) : null}
+
+            {otherRepos.length > 0 ? (
+              <CommandGroup heading="Other repositories">
+                {otherRepos.map((repo) => (
+                  <CommandItem
+                    key={repo.nameWithOwner}
+                    value={repo.nameWithOwner}
+                    onSelect={() => {
+                      handleSelect(repo.nameWithOwner);
+                    }}
+                  >
+                    <PlusCircle className="size-4 text-muted-foreground" />
+                    <span>{repo.nameWithOwner}</span>
                   </CommandItem>
                 ))}
               </CommandGroup>
@@ -170,7 +191,7 @@ export function RepoPickerDialog({
 
             {showManualAdd || showDuplicateManual ? (
               <>
-                {filteredRepos.length > 0 ? <CommandSeparator /> : null}
+                {hasListedRepos ? <CommandSeparator /> : null}
                 <CommandGroup heading="Manual entry">
                   {showManualAdd ? (
                     <CommandItem

@@ -11,6 +11,13 @@ interface ConfigPayload {
   autoMergeRepos: string[];
 }
 
+type RepoPickerGroup = 'owner' | 'other';
+
+interface RepoPickerRepository {
+  nameWithOwner: string;
+  group: RepoPickerGroup;
+}
+
 interface PipelineIssue extends ListIssueItem {
   tokenUsage: TokenUsage;
 }
@@ -103,7 +110,7 @@ interface ShipperAPI {
   }>;
   getConfig: () => Promise<ConfigPayload>;
   listAdoptableIssues: (repo: string) => Promise<ListAdoptableIssuesSuccess | ListIssuesFailure>;
-  listRepos: () => Promise<string[]>;
+  listRepos: () => Promise<RepoPickerRepository[]>;
   listIssues: (repo: string) => Promise<ListIssuesSuccess | ListIssuesFailure>;
   fetchIssueTimelines: (
     repo: string,

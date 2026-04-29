@@ -357,6 +357,10 @@ async function flushMicrotasks(count = 5): Promise<void> {
   }
 }
 
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string');
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   warnMock.mockClear();
@@ -564,6 +568,59 @@ describe('desktop IPC locking', () => {
     });
   });
 
+  it('lists repositories through GraphQL with owner and other grouping', async () => {
+    await loadHandlers();
+    state.ghMock.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        data: {
+          viewer: {
+            login: 'OctoCat',
+            repositories: {
+              nodes: [
+                { nameWithOwner: 'octocat/personal-new', owner: { login: 'octocat' } },
+                { nameWithOwner: 'acme/org-repo', owner: { login: 'acme' } },
+                { nameWithOwner: 'someone-else/foo', owner: { login: 'someone-else' } },
+              ],
+            },
+          },
+        },
+      }),
+      stderr: '',
+    });
+    const handler = getHandler('list-repos');
+
+    await expect(handler({}, undefined)).resolves.toEqual([
+      { nameWithOwner: 'octocat/personal-new', group: 'owner' },
+      { nameWithOwner: 'acme/org-repo', group: 'other' },
+      { nameWithOwner: 'someone-else/foo', group: 'other' },
+    ]);
+
+    const ghCall: unknown = state.ghMock.mock.calls[0]?.[0];
+    if (!isStringArray(ghCall)) {
+      throw new Error('Expected gh to be called with arguments.');
+    }
+
+    expect(ghCall).toEqual([
+      'api',
+      'graphql',
+      '-f',
+      expect.stringMatching(/^query=/),
+      '-F',
+      'limit=100',
+    ]);
+
+    const queryArgument = ghCall[3];
+    if (queryArgument === undefined) {
+      throw new Error('Expected GraphQL query argument.');
+    }
+
+    const query = queryArgument.slice('query='.length);
+    expect(query).toContain('affiliations: [OWNER, COLLABORATOR, ORGANIZATION_MEMBER]');
+    expect(query).toContain('isArchived: false');
+    expect(query).toContain('field: PUSHED_AT');
+    expect(query).toContain('direction: DESC');
+  });
+
   it('surfaces a descriptive error when list-repos returns malformed JSON', async () => {
     await loadHandlers();
     state.ghMock.mockResolvedValueOnce({ stdout: 'not json', stderr: '' });
@@ -571,6 +628,32 @@ describe('desktop IPC locking', () => {
 
     await expect(handler({}, undefined)).rejects.toThrow(
       /Failed to parse repository list from GitHub CLI: Unexpected token/
+    );
+  });
+
+  it('surfaces a descriptive error when list-repos returns GraphQL errors', async () => {
+    await loadHandlers();
+    state.ghMock.mockResolvedValueOnce({
+      stdout: JSON.stringify({ errors: [{ message: 'bad query' }] }),
+      stderr: '',
+    });
+    const handler = getHandler('list-repos');
+
+    await expect(handler({}, undefined)).rejects.toThrow(
+      /Failed to parse repository list from GitHub CLI:/
+    );
+  });
+
+  it('surfaces a descriptive error when list-repos returns malformed GraphQL data', async () => {
+    await loadHandlers();
+    state.ghMock.mockResolvedValueOnce({
+      stdout: JSON.stringify({ data: { viewer: { login: 'octocat', repositories: {} } } }),
+      stderr: '',
+    });
+    const handler = getHandler('list-repos');
+
+    await expect(handler({}, undefined)).rejects.toThrow(
+      /Failed to parse repository list from GitHub CLI:/
     );
   });
 

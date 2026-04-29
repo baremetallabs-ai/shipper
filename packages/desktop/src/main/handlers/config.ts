@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { app, ipcMain } from 'electron';
-import { gh, toErrorMessage } from '@dnsquared/shipper-core';
+import { gh, isPlainObject, toErrorMessage } from '@dnsquared/shipper-core';
 
 import { parseRepo } from './shared.js';
 
@@ -17,7 +17,35 @@ interface ParseConfigResult {
   changed: boolean;
 }
 
+type RepoPickerGroup = 'owner' | 'other';
+
+interface RepoPickerRepository {
+  nameWithOwner: string;
+  group: RepoPickerGroup;
+}
+
 const defaultConfig: AppConfig = { repos: [], activeRepo: '', autoMergeRepos: [] };
+
+const repoPickerRepositoriesQuery = `
+query DesktopRepoPickerRepositories($limit: Int!) {
+  viewer {
+    login
+    repositories(
+      first: $limit
+      affiliations: [OWNER, COLLABORATOR, ORGANIZATION_MEMBER]
+      isArchived: false
+      orderBy: { field: PUSHED_AT, direction: DESC }
+    ) {
+      nodes {
+        nameWithOwner
+        owner {
+          login
+        }
+      }
+    }
+  }
+}
+`;
 
 function getConfigPath(): string {
   return join(app.getPath('userData'), 'config.json');
@@ -201,10 +229,64 @@ function parseConfig(value: unknown): ParseConfigResult | null {
   };
 }
 
-function parseRepoList(json: string): string[] {
+function parseRepoList(json: string): RepoPickerRepository[] {
   try {
-    const parsed = JSON.parse(json) as Array<{ nameWithOwner: string }>;
-    return parsed.map((repo) => repo.nameWithOwner);
+    const parsed = JSON.parse(json) as unknown;
+    if (!isPlainObject(parsed)) {
+      throw new Error('Expected a repository list object.');
+    }
+
+    if ('errors' in parsed && Array.isArray(parsed.errors) && parsed.errors.length > 0) {
+      throw new Error('GitHub GraphQL returned errors.');
+    }
+
+    if (!('data' in parsed) || !isPlainObject(parsed.data)) {
+      throw new Error('Expected repository list data.');
+    }
+
+    const { data } = parsed;
+    if (!('viewer' in data) || !isPlainObject(data.viewer)) {
+      throw new Error('Expected repository list viewer.');
+    }
+
+    const { viewer } = data;
+    if (!('login' in viewer) || typeof viewer.login !== 'string') {
+      throw new Error('Expected repository list viewer login.');
+    }
+
+    if (!('repositories' in viewer) || !isPlainObject(viewer.repositories)) {
+      throw new Error('Expected repository list repositories.');
+    }
+
+    const { repositories } = viewer;
+    if (!('nodes' in repositories) || !Array.isArray(repositories.nodes)) {
+      throw new Error('Expected repository list nodes.');
+    }
+
+    const viewerLogin = viewer.login.toLowerCase();
+
+    return repositories.nodes.map((node: unknown) => {
+      if (!isPlainObject(node)) {
+        throw new Error('Expected repository list node object.');
+      }
+
+      if (!('nameWithOwner' in node) || typeof node.nameWithOwner !== 'string') {
+        throw new Error('Expected repository list node nameWithOwner.');
+      }
+
+      if (!('owner' in node) || !isPlainObject(node.owner)) {
+        throw new Error('Expected repository list node owner.');
+      }
+
+      if (!('login' in node.owner) || typeof node.owner.login !== 'string') {
+        throw new Error('Expected repository list node owner login.');
+      }
+
+      return {
+        nameWithOwner: node.nameWithOwner,
+        group: node.owner.login.toLowerCase() === viewerLogin ? 'owner' : 'other',
+      };
+    });
   } catch (error) {
     throw new Error(`Failed to parse repository list from GitHub CLI: ${toErrorMessage(error)}`);
   }
@@ -213,7 +295,14 @@ function parseRepoList(json: string): string[] {
 export function registerConfigHandlers(): void {
   ipcMain.handle('get-config', () => readConfig());
   ipcMain.handle('list-repos', async () => {
-    const result = await gh(['repo', 'list', '--json', 'nameWithOwner', '--limit', '100']);
+    const result = await gh([
+      'api',
+      'graphql',
+      '-f',
+      `query=${repoPickerRepositoriesQuery}`,
+      '-F',
+      'limit=100',
+    ]);
     return parseRepoList(result.stdout);
   });
   ipcMain.handle('set-config', (_event, config: unknown) => {

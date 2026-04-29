@@ -16,6 +16,13 @@ export interface AppConfig {
   autoMergeRepos: string[];
 }
 
+export type RepoPickerGroup = 'owner' | 'other';
+
+export interface RepoPickerRepository {
+  nameWithOwner: string;
+  group: RepoPickerGroup;
+}
+
 export interface PipelineIssue extends ListIssueItem {
   tokenUsage: TokenUsage;
 }
@@ -72,7 +79,7 @@ export interface PtyExitEvent {
 export interface ShipperApi {
   checkPrerequisites: () => Promise<Prerequisites>;
   getConfig: () => Promise<AppConfig>;
-  listRepos: () => Promise<string[]>;
+  listRepos: () => Promise<RepoPickerRepository[]>;
   listAdoptableIssues: (repo: string) => Promise<ListAdoptableIssuesSuccess | ListIssuesFailure>;
   listIssues: (repo: string) => Promise<ListIssuesSuccess | ListIssuesFailure>;
   fetchIssueTimelines: (
