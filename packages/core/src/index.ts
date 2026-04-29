@@ -116,7 +116,7 @@ export {
 export type { RunPromptOpts } from './lib/prompt-runner.js';
 export { buildPromptCommand, runPrompt } from './lib/prompt-runner.js';
 export { agentPrompts } from './lib/prompts.js';
-export { ensureRepoClone } from './lib/repo-clone.js';
+export { ensureRepoClone, ensureRepoCloneForWorktree } from './lib/repo-clone.js';
 export { getRepoNwo } from './lib/repo.js';
 export type { ArtifactScan, ResetOpResult, ResetResult, WorkflowStage } from './lib/reset.js';
 export {
@@ -164,7 +164,9 @@ export type { TokenUsage } from './lib/token-usage.js';
 export { totalTokens } from './lib/usage.js';
 export { extractFinalMessage } from './lib/transcript.js';
 export { CLI_VERSION, checkVersionFreshness } from './lib/version.js';
+export type { CreateDesktopGroomWorktreeOpts, DesktopGroomWorktree } from './lib/worktree.js';
 export {
+  createDesktopGroomWorktree,
   formatConflictContext,
   getCommitsAheadCount,
   getGitRevParse,

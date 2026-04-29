@@ -27,18 +27,40 @@ export function getRepoClonePath(repo: string): string {
  * Returns the absolute path to the local clone.
  */
 export async function ensureRepoClone(repo: string): Promise<string> {
+  return await ensureRepoCloneWithExisting(repo, async (clonePath) => {
+    const gitOptions = {
+      cwd: clonePath,
+      encoding: 'utf-8' as const,
+    };
+
+    await execFileAsync('git', ['reset', '--hard'], gitOptions);
+    await execFileAsync('git', ['clean', '-fdx'], gitOptions);
+    await gh(['repo', 'sync', '--source', repo], { cwd: clonePath });
+  });
+}
+
+/**
+ * Ensures a clone exists for creating git worktrees without modifying the
+ * canonical worktree's checked-out files.
+ */
+export async function ensureRepoCloneForWorktree(repo: string): Promise<string> {
+  return await ensureRepoCloneWithExisting(repo, async (clonePath) => {
+    await execFileAsync('git', ['fetch', 'origin'], {
+      cwd: clonePath,
+      encoding: 'utf-8',
+    });
+  });
+}
+
+async function ensureRepoCloneWithExisting(
+  repo: string,
+  onExistingValidClone: (clonePath: string) => Promise<void>
+): Promise<string> {
   const clonePath = getRepoClonePath(repo);
 
   if (await exists(clonePath)) {
     if (await isValidWorktree(clonePath)) {
-      const gitOptions = {
-        cwd: clonePath,
-        encoding: 'utf-8' as const,
-      };
-
-      await execFileAsync('git', ['reset', '--hard'], gitOptions);
-      await execFileAsync('git', ['clean', '-fdx'], gitOptions);
-      await gh(['repo', 'sync', '--source', repo], { cwd: clonePath });
+      await onExistingValidClone(clonePath);
       return clonePath;
     }
 

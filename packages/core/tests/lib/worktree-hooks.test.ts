@@ -35,6 +35,11 @@ vi.mock('node:child_process', async () => {
   };
 });
 
+vi.mock('node:crypto', async () => {
+  const actual = await vi.importActual<typeof import('node:crypto')>('node:crypto');
+  return { ...actual, randomUUID: () => 'desktop-session-uuid' };
+});
+
 vi.mock('node:fs/promises', async () => {
   const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
   return {
@@ -107,7 +112,8 @@ function gitArgsFromSpawnCalls(): string[][] {
     .map(([, args]) => args ?? []);
 }
 
-const { createWorktree, withWorktree } = await import('../../src/lib/worktree.js');
+const { createDesktopGroomWorktree, createWorktree, withWorktree } =
+  await import('../../src/lib/worktree.js');
 
 const WORKTREES_DIR = path.join('/home/user', '.shipper', 'worktrees');
 const defaultOpts = {
@@ -119,6 +125,10 @@ const defaultOpts = {
   stage: 'implement',
 };
 const expectedWtPath = path.join(WORKTREES_DIR, 'my-repo--wt--shipper-42-add-feature');
+const expectedDesktopGroomWtPath = path.join(
+  WORKTREES_DIR,
+  'my-repo--desktop-groom--42--desktop-session-uuid'
+);
 const expectedNpmCachePath = path.join(expectedWtPath, '.shipper', 'tmp', '.npm-cache');
 const expectedXdgCachePath = path.join(expectedWtPath, '.shipper', 'tmp', '.cache');
 const expectedTurboCachePath = path.join(expectedWtPath, '.shipper', 'tmp', '.turbo-cache');
@@ -184,6 +194,92 @@ afterEach(() => {
   restoreEnvVar('XDG_CACHE_HOME', originalXdgCacheHome);
   restoreEnvVar('UV_CACHE_DIR', originalUvCacheDir);
   restoreEnvVar('TURBO_CACHE_DIR', originalTurboCacheDir);
+});
+
+describe('createDesktopGroomWorktree', () => {
+  it('creates a detached UUID-suffixed worktree and removes it during cleanup', async () => {
+    queueExecResult(); // git worktree prune
+    queueExecResult(); // git fetch origin main refspec
+    queueExecResult({ stdout: 'abc123\n' }); // git rev-parse --verify origin/main
+
+    const result = await createDesktopGroomWorktree({
+      repoRoot: '/repos/my-repo',
+      issueNumber: '42',
+      baseBranch: 'main',
+    });
+
+    expect(result.wtPath).toBe(expectedDesktopGroomWtPath);
+    expect(mkdirMock).toHaveBeenCalledWith(WORKTREES_DIR, { recursive: true });
+    expect(gitArgsFromExecCalls()).toEqual([
+      ['worktree', 'prune'],
+      ['fetch', 'origin', 'refs/heads/main:refs/remotes/origin/main'],
+      ['rev-parse', '--verify', 'origin/main'],
+    ]);
+    expect(gitArgsFromSpawnCalls()).toEqual([
+      ['worktree', 'add', '--detach', expectedDesktopGroomWtPath, 'origin/main'],
+    ]);
+
+    await result.cleanup();
+
+    expect(gitArgsFromSpawnCalls()).toEqual([
+      ['worktree', 'add', '--detach', expectedDesktopGroomWtPath, 'origin/main'],
+      ['worktree', 'remove', '--force', expectedDesktopGroomWtPath],
+    ]);
+  });
+
+  it('fails fast with a descriptive error when fetching the desktop groom base fails', async () => {
+    queueExecResult(); // git worktree prune
+    queueExecResult({ code: 1, stderr: 'fatal: network down' }); // git fetch origin main refspec
+
+    await expect(
+      createDesktopGroomWorktree({
+        repoRoot: '/repos/my-repo',
+        issueNumber: '42',
+        baseBranch: 'main',
+      })
+    ).rejects.toThrow(
+      'Failed to fetch origin/main before worktree creation: git fetch origin refs/heads/main:refs/remotes/origin/main exited with code 1:\nfatal: network down'
+    );
+
+    expect(gitArgsFromSpawnCalls()).toEqual([]);
+  });
+
+  it('fails fast with a descriptive error when the desktop groom base ref is missing', async () => {
+    queueExecResult(); // git worktree prune
+    queueExecResult(); // git fetch origin
+    queueExecResult({ code: 128, stderr: 'fatal: ambiguous argument origin/main' });
+
+    await expect(
+      createDesktopGroomWorktree({
+        repoRoot: '/repos/my-repo',
+        issueNumber: '42',
+        baseBranch: 'main',
+      })
+    ).rejects.toThrow(
+      "Remote ref origin/main does not exist after fetching origin. Ensure the branch 'main' exists on origin.\ngit rev-parse --verify origin/main exited with code 128:\nfatal: ambiguous argument origin/main"
+    );
+
+    expect(gitArgsFromSpawnCalls()).toEqual([]);
+  });
+
+  it('removes a desktop groom worktree only once when cleanup is called repeatedly', async () => {
+    queueExecResult(); // git worktree prune
+    queueExecResult(); // git fetch origin main refspec
+    queueExecResult({ stdout: 'abc123\n' }); // git rev-parse --verify origin/main
+
+    const result = await createDesktopGroomWorktree({
+      repoRoot: '/repos/my-repo',
+      issueNumber: '42',
+      baseBranch: 'main',
+    });
+
+    await result.cleanup();
+    await result.cleanup();
+
+    expect(
+      gitArgsFromSpawnCalls().filter((args) => args[0] === 'worktree' && args[1] === 'remove')
+    ).toHaveLength(1);
+  });
 });
 
 describe('createWorktree', () => {

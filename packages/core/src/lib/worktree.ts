@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { access, mkdir, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
@@ -43,6 +44,57 @@ export interface CreateWorktreeOpts {
 export interface CreateWorktreeResult {
   wtPath: string;
   didResetToBase: boolean;
+}
+
+export interface CreateDesktopGroomWorktreeOpts {
+  repoRoot: string;
+  issueNumber: string;
+  baseBranch: string;
+}
+
+export interface DesktopGroomWorktree {
+  wtPath: string;
+  cleanup: () => Promise<void>;
+}
+
+export async function createDesktopGroomWorktree(
+  opts: CreateDesktopGroomWorktreeOpts
+): Promise<DesktopGroomWorktree> {
+  await execAsync('git', ['worktree', 'prune'], { cwd: opts.repoRoot });
+  await mkdir(WORKTREES_DIR, { recursive: true });
+
+  const wtPath = path.join(
+    WORKTREES_DIR,
+    `${path.basename(opts.repoRoot)}--desktop-groom--${opts.issueNumber}--${randomUUID()}`
+  );
+  const startPoint = `origin/${opts.baseBranch}`;
+  const fetchArgs = ['fetch', 'origin', `refs/heads/${opts.baseBranch}:refs/remotes/${startPoint}`];
+  const fetchResult = await execAsync('git', fetchArgs, { cwd: opts.repoRoot });
+  if (fetchResult.code !== 0) {
+    throw new Error(
+      `Failed to fetch origin/${opts.baseBranch} before worktree creation: ${formatCommandFailure('git', fetchArgs, fetchResult)}`
+    );
+  }
+
+  const verifyArgs = ['rev-parse', '--verify', startPoint];
+  const verifyResult = await execAsync('git', verifyArgs, { cwd: opts.repoRoot });
+  if (verifyResult.code !== 0) {
+    throw new Error(
+      `Remote ref ${startPoint} does not exist after fetching origin. Ensure the branch '${opts.baseBranch}' exists on origin.\n${formatCommandFailure('git', verifyArgs, verifyResult)}`
+    );
+  }
+
+  await spawnAsync('git', ['worktree', 'add', '--detach', wtPath, startPoint], {
+    cwd: opts.repoRoot,
+  });
+
+  let cleanupPromise: Promise<void> | undefined;
+  const cleanup = async (): Promise<void> => {
+    cleanupPromise ??= removeWorktree(opts.repoRoot, wtPath);
+    await cleanupPromise;
+  };
+
+  return { wtPath, cleanup };
 }
 
 export async function createWorktree(opts: CreateWorktreeOpts): Promise<CreateWorktreeResult> {
