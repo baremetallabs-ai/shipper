@@ -33,7 +33,12 @@ function formatZodIssue(issue: core.$ZodIssue): string {
     return `expected ${issue.expected}`;
   }
 
-  if (issue.code === 'invalid_value') {
+  if (
+    issue.code === 'invalid_value' &&
+    'values' in issue &&
+    Array.isArray(issue.values) &&
+    issue.values.length > 0
+  ) {
     if (issue.values.length === 1) {
       return `expected ${JSON.stringify(issue.values[0])}`;
     }

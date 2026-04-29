@@ -55,6 +55,21 @@ describe('parseGhJson', () => {
     );
   });
 
+  it('falls back to the issue message when an invalid_value issue lacks values', () => {
+    const schema = {
+      safeParse: () => ({
+        success: false,
+        error: {
+          issues: [{ code: 'invalid_value', path: ['status'], message: 'Invalid option' }],
+        },
+      }),
+    } as unknown as z.ZodType;
+
+    expect(() => parseGhJson(JSON.stringify({ status: 'ready' }), schema, 'Status')).toThrow(
+      'gh returned an invalid Status payload: invalid option at status'
+    );
+  });
+
   it('wraps invalid JSON in GhPayloadError', () => {
     expect(() => parseGhJson('not json', IssueSchema, 'Issue')).toThrow(GhPayloadError);
     expect(() => parseGhJson('not json', IssueSchema, 'Issue')).toThrow(
