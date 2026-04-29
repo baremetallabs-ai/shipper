@@ -8,6 +8,7 @@ export default [
       'dist/',
       'out/',
       'packages/*/dist/',
+      'packages/*/.astro/',
       'packages/*/out/',
       'node_modules/',
       'coverage/',
