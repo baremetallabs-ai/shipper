@@ -568,7 +568,7 @@ describe('desktop IPC locking', () => {
     });
   });
 
-  it('lists repositories through GraphQL with owner and other grouping', async () => {
+  it('lists repositories through GraphQL with owner, organization, and other grouping', async () => {
     await loadHandlers();
     state.ghMock.mockResolvedValueOnce({
       stdout: JSON.stringify({
@@ -577,10 +577,42 @@ describe('desktop IPC locking', () => {
             login: 'OctoCat',
             repositories: {
               nodes: [
-                { nameWithOwner: 'octocat/personal-new', owner: { login: 'octocat' } },
+                {
+                  nameWithOwner: 'octocat/personal-new',
+                  owner: { __typename: 'User', login: 'octocat' },
+                },
                 null,
-                { nameWithOwner: 'acme/org-repo', owner: { login: 'acme' } },
-                { nameWithOwner: 'someone-else/foo', owner: { login: 'someone-else' } },
+                {
+                  nameWithOwner: 'acme/member-repo',
+                  owner: {
+                    __typename: 'Organization',
+                    login: 'acme',
+                    viewerIsAMember: true,
+                    viewerCanAdminister: false,
+                  },
+                },
+                {
+                  nameWithOwner: 'beta-admin/internal-repo',
+                  owner: {
+                    __typename: 'Organization',
+                    login: 'beta-admin',
+                    viewerIsAMember: false,
+                    viewerCanAdminister: true,
+                  },
+                },
+                {
+                  nameWithOwner: 'outside/private-repo',
+                  owner: {
+                    __typename: 'Organization',
+                    login: 'outside',
+                    viewerIsAMember: false,
+                    viewerCanAdminister: false,
+                  },
+                },
+                {
+                  nameWithOwner: 'someone-else/read-only-repo',
+                  owner: { __typename: 'User', login: 'someone-else' },
+                },
               ],
             },
           },
@@ -592,8 +624,14 @@ describe('desktop IPC locking', () => {
 
     await expect(handler({}, undefined)).resolves.toEqual([
       { nameWithOwner: 'octocat/personal-new', group: 'owner' },
-      { nameWithOwner: 'acme/org-repo', group: 'other' },
-      { nameWithOwner: 'someone-else/foo', group: 'other' },
+      { nameWithOwner: 'acme/member-repo', group: 'organization', organizationLogin: 'acme' },
+      {
+        nameWithOwner: 'beta-admin/internal-repo',
+        group: 'organization',
+        organizationLogin: 'beta-admin',
+      },
+      { nameWithOwner: 'outside/private-repo', group: 'other' },
+      { nameWithOwner: 'someone-else/read-only-repo', group: 'other' },
     ]);
 
     const ghCall: unknown = state.ghMock.mock.calls[0]?.[0];
@@ -620,6 +658,40 @@ describe('desktop IPC locking', () => {
     expect(query).toContain('isArchived: false');
     expect(query).toContain('field: PUSHED_AT');
     expect(query).toContain('direction: DESC');
+    expect(query).toContain('__typename');
+    expect(query).toContain('viewerIsAMember');
+    expect(query).toContain('viewerCanAdminister');
+  });
+
+  it('surfaces a descriptive error when organization owner flags are malformed', async () => {
+    await loadHandlers();
+    state.ghMock.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        data: {
+          viewer: {
+            login: 'octocat',
+            repositories: {
+              nodes: [
+                {
+                  nameWithOwner: 'acme/org-repo',
+                  owner: {
+                    __typename: 'Organization',
+                    login: 'acme',
+                    viewerIsAMember: true,
+                  },
+                },
+              ],
+            },
+          },
+        },
+      }),
+      stderr: '',
+    });
+    const handler = getHandler('list-repos');
+
+    await expect(handler({}, undefined)).rejects.toThrow(
+      /Failed to parse repository list from GitHub CLI: Expected repository list node organization viewer flags./
+    );
   });
 
   it('surfaces a descriptive error when list-repos returns malformed JSON', async () => {

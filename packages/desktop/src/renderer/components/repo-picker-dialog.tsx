@@ -39,6 +39,11 @@ function isValidRepo(repo: string): boolean {
   return repoPattern.test(repo);
 }
 
+interface OrganizationSection {
+  organizationLogin: string;
+  repos: RepoPickerRepository[];
+}
+
 export function RepoPickerDialog({
   open,
   onOpenChange,
@@ -103,7 +108,30 @@ export function RepoPickerDialog({
   });
   const ownerRepos = filteredRepos.filter((repo) => repo.group === 'owner');
   const otherRepos = filteredRepos.filter((repo) => repo.group === 'other');
-  const hasListedRepos = ownerRepos.length > 0 || otherRepos.length > 0;
+  const canRenderResults = fetchError === null;
+  const organizationSections = Array.from(
+    filteredRepos
+      .filter((repo) => repo.group === 'organization')
+      .reduce((sections, repo) => {
+        const existingRepos = sections.get(repo.organizationLogin) ?? [];
+        existingRepos.push(repo);
+        sections.set(repo.organizationLogin, existingRepos);
+        return sections;
+      }, new Map<string, RepoPickerRepository[]>())
+  )
+    .map(
+      ([organizationLogin, organizationRepos]): OrganizationSection => ({
+        organizationLogin,
+        repos: organizationRepos,
+      })
+    )
+    .sort((first, second) =>
+      first.organizationLogin.localeCompare(second.organizationLogin, undefined, {
+        sensitivity: 'base',
+      })
+    );
+  const hasOrganizationRepos = organizationSections.some((section) => section.repos.length > 0);
+  const hasListedRepos = ownerRepos.length > 0 || hasOrganizationRepos || otherRepos.length > 0;
   const showManualAdd =
     normalizedQuery.length > 0 &&
     isValidRepo(normalizedQuery) &&
@@ -111,7 +139,11 @@ export function RepoPickerDialog({
     !filteredRepos.some((repo) => toRepoKey(repo.nameWithOwner) === queryKey);
   const showDuplicateManual = normalizedQuery.length > 0 && configuredRepoKeys.has(queryKey);
   const showEmpty =
-    !isLoading && filteredRepos.length === 0 && !showManualAdd && !showDuplicateManual;
+    canRenderResults &&
+    !isLoading &&
+    filteredRepos.length === 0 &&
+    !showManualAdd &&
+    !showDuplicateManual;
 
   function handleSelect(repo: string): void {
     void onSelectRepo(repo);
@@ -170,17 +202,25 @@ export function RepoPickerDialog({
               <CommandEmpty>No repositories match the current search.</CommandEmpty>
             ) : null}
 
-            {ownerRepos.length > 0 ? (
+            {canRenderResults && ownerRepos.length > 0 ? (
               <CommandGroup heading="Your repositories">{renderRepoItems(ownerRepos)}</CommandGroup>
             ) : null}
 
-            {otherRepos.length > 0 ? (
+            {canRenderResults
+              ? organizationSections.map((section) => (
+                  <CommandGroup key={section.organizationLogin} heading={section.organizationLogin}>
+                    {renderRepoItems(section.repos)}
+                  </CommandGroup>
+                ))
+              : null}
+
+            {canRenderResults && otherRepos.length > 0 ? (
               <CommandGroup heading="Other repositories">
                 {renderRepoItems(otherRepos)}
               </CommandGroup>
             ) : null}
 
-            {showManualAdd || showDuplicateManual ? (
+            {canRenderResults && (showManualAdd || showDuplicateManual) ? (
               <>
                 {hasListedRepos ? <CommandSeparator /> : null}
                 <CommandGroup heading="Manual entry">
