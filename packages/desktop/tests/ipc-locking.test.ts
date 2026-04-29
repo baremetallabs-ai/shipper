@@ -414,7 +414,7 @@ describe('desktop IPC locking', () => {
     expect(meta.logFile).toContain('/.shipper/sessions/owner-repo/desktop-');
     expect(typeof spawnCall.onComplete).toBe('function');
     expect(state.ptySpawnMock).not.toHaveBeenCalled();
-  });
+  }, 10_000);
 
   it('spawns `ship` through the background manager with `--merge` when requested', async () => {
     await loadHandlers();

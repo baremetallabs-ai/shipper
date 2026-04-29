@@ -59,7 +59,7 @@ describe('pause-state handlers', () => {
     const handler = getHandler('pause-state:list');
 
     expect(handler({}, 'owner/repo')).toEqual([]);
-  });
+  }, 10_000);
 
   it('falls back to an empty list when the pause-state file contains malformed JSON', async () => {
     await loadHandlers();

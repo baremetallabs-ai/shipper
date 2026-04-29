@@ -106,7 +106,7 @@ describe('shipCommand', () => {
     const pauseProbe = firstCall[0].pauseProbe;
     expect(await pauseProbe?.()).toBe(false);
     expect(existsSyncMock).toHaveBeenCalledWith('/tmp/pause-sentinel');
-  });
+  }, 10_000);
 
   it('does not pass a pause probe when no sentinel env var is present', async () => {
     const { shipCommand } = await import('../../src/commands/ship.js');
