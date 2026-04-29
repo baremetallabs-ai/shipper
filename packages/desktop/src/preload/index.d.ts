@@ -11,12 +11,10 @@ interface ConfigPayload {
   autoMergeRepos: string[];
 }
 
-type RepoPickerGroup = 'owner' | 'other';
-
-interface RepoPickerRepository {
-  nameWithOwner: string;
-  group: RepoPickerGroup;
-}
+type RepoPickerRepository =
+  | { nameWithOwner: string; group: 'owner' }
+  | { nameWithOwner: string; group: 'other' }
+  | { nameWithOwner: string; group: 'organization'; organizationLogin: string };
 
 interface PipelineIssue extends ListIssueItem {
   tokenUsage: TokenUsage;

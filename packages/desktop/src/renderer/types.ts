@@ -16,12 +16,10 @@ export interface AppConfig {
   autoMergeRepos: string[];
 }
 
-export type RepoPickerGroup = 'owner' | 'other';
-
-export interface RepoPickerRepository {
-  nameWithOwner: string;
-  group: RepoPickerGroup;
-}
+export type RepoPickerRepository =
+  | { nameWithOwner: string; group: 'owner' }
+  | { nameWithOwner: string; group: 'other' }
+  | { nameWithOwner: string; group: 'organization'; organizationLogin: string };
 
 export interface PipelineIssue extends ListIssueItem {
   tokenUsage: TokenUsage;

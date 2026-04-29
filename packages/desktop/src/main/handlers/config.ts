@@ -17,12 +17,10 @@ interface ParseConfigResult {
   changed: boolean;
 }
 
-type RepoPickerGroup = 'owner' | 'other';
-
-interface RepoPickerRepository {
-  nameWithOwner: string;
-  group: RepoPickerGroup;
-}
+type RepoPickerRepository =
+  | { nameWithOwner: string; group: 'owner' }
+  | { nameWithOwner: string; group: 'other' }
+  | { nameWithOwner: string; group: 'organization'; organizationLogin: string };
 
 const defaultConfig: AppConfig = { repos: [], activeRepo: '', autoMergeRepos: [] };
 
@@ -39,7 +37,12 @@ query DesktopRepoPickerRepositories($limit: Int!) {
       nodes {
         nameWithOwner
         owner {
+          __typename
           login
+          ... on Organization {
+            viewerIsAMember
+            viewerCanAdminister
+          }
         }
       }
     }
@@ -274,7 +277,7 @@ function parseRepoList(json: string): RepoPickerRepository[] {
 
     const viewerLogin = viewer.login.toLowerCase();
 
-    return repositories.nodes.flatMap((node: unknown) => {
+    return repositories.nodes.flatMap<RepoPickerRepository>((node: unknown) => {
       if (node === null) {
         return [];
       }
@@ -295,10 +298,39 @@ function parseRepoList(json: string): RepoPickerRepository[] {
         throw new Error('Expected repository list node owner login.');
       }
 
+      if (!('__typename' in node.owner) || typeof node.owner.__typename !== 'string') {
+        throw new Error('Expected repository list node owner typename.');
+      }
+
+      if (node.owner.login.toLowerCase() === viewerLogin) {
+        return [{ nameWithOwner: node.nameWithOwner, group: 'owner' }];
+      }
+
+      if (node.owner.__typename === 'Organization') {
+        if (
+          !('viewerIsAMember' in node.owner) ||
+          typeof node.owner.viewerIsAMember !== 'boolean' ||
+          !('viewerCanAdminister' in node.owner) ||
+          typeof node.owner.viewerCanAdminister !== 'boolean'
+        ) {
+          throw new Error('Expected repository list node organization viewer flags.');
+        }
+
+        if (node.owner.viewerIsAMember || node.owner.viewerCanAdminister) {
+          return [
+            {
+              nameWithOwner: node.nameWithOwner,
+              group: 'organization',
+              organizationLogin: node.owner.login,
+            },
+          ];
+        }
+      }
+
       return [
         {
           nameWithOwner: node.nameWithOwner,
-          group: node.owner.login.toLowerCase() === viewerLogin ? 'owner' : 'other',
+          group: 'other',
         },
       ];
     });
