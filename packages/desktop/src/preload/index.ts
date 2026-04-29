@@ -52,6 +52,8 @@ const shipperAPI = {
   checkPrerequisites: () => ipcRenderer.invoke('check-prerequisites'),
   getConfig: () => ipcRenderer.invoke('get-config'),
   listRepos: () => ipcRenderer.invoke('list-repos'),
+  searchRepos: (request: { query: string; cursor?: string | null }) =>
+    ipcRenderer.invoke('search-repos', request),
   listAdoptableIssues: (repo: string) => ipcRenderer.invoke('list-adoptable-issues', { repo }),
   listIssues: (repo: string) => ipcRenderer.invoke('list-issues', { repo }),
   fetchIssueTimelines: (repo: string, issueNumbers: number[]) =>

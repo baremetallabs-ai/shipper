@@ -22,7 +22,27 @@ type RepoPickerRepository =
   | { nameWithOwner: string; group: 'other' }
   | { nameWithOwner: string; group: 'organization'; organizationLogin: string };
 
+type RepoPickerSearchRepository = Extract<RepoPickerRepository, { group: 'owner' | 'other' }>;
+
+interface RepoPickerSearchPageInfo {
+  hasNextPage: boolean;
+  endCursor: string | null;
+}
+
+interface RepoPickerSearchResult {
+  repositories: RepoPickerSearchRepository[];
+  pageInfo: RepoPickerSearchPageInfo;
+}
+
+interface RepoPickerSearchScope {
+  viewerLogin: string;
+  organizationLogins: string[];
+  collaboratorRepositories: RepoPickerSearchRepository[];
+}
+
 const defaultConfig: AppConfig = { repos: [], activeRepo: '', autoMergeRepos: [] };
+const repoPickerPageSize = 100;
+let repoSearchScopePromise: Promise<RepoPickerSearchScope> | null = null;
 
 const repoPickerRepositoriesQuery = `
 query DesktopRepoPickerRepositories($limit: Int!) {
@@ -43,6 +63,71 @@ query DesktopRepoPickerRepositories($limit: Int!) {
             viewerIsAMember
             viewerCanAdminister
           }
+        }
+      }
+    }
+  }
+}
+`;
+
+const repoPickerViewerLoginQuery = `
+query DesktopRepoPickerViewerLogin {
+  viewer {
+    login
+  }
+}
+`;
+
+const repoPickerOrganizationsQuery = `
+query DesktopRepoPickerOrganizations($limit: Int!, $cursor: String) {
+  viewer {
+    organizations(first: $limit, after: $cursor) {
+      nodes {
+        login
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+}
+`;
+
+const repoPickerCollaboratorRepositoriesQuery = `
+query DesktopRepoPickerCollaboratorRepositories($limit: Int!, $cursor: String) {
+  viewer {
+    repositories(
+      first: $limit
+      after: $cursor
+      affiliations: [COLLABORATOR]
+      isArchived: false
+    ) {
+      nodes {
+        nameWithOwner
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+}
+`;
+
+const repoPickerSearchQuery = `
+query DesktopRepoPickerSearch($searchQuery: String!, $limit: Int!, $cursor: String) {
+  search(query: $searchQuery, type: REPOSITORY, first: $limit, after: $cursor) {
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+    nodes {
+      ... on Repository {
+        nameWithOwner
+        isArchived
+        owner {
+          login
         }
       }
     }
@@ -104,6 +189,24 @@ function writeConfig(config: AppConfig): void {
 
 function toRepoKey(repo: string): string {
   return repo.trim().toLowerCase();
+}
+
+async function githubGraphql(
+  query: string,
+  variables: Record<string, string | number | boolean | null | undefined>
+): Promise<string> {
+  const args = ['api', 'graphql', '-f', `query=${query}`];
+
+  for (const [key, value] of Object.entries(variables)) {
+    if (value === null || value === undefined) {
+      continue;
+    }
+
+    args.push('-F', `${key}=${String(value)}`);
+  }
+
+  const result = await gh(args);
+  return result.stdout;
 }
 
 function parseConfig(value: unknown): ParseConfigResult | null {
@@ -339,18 +442,398 @@ function parseRepoList(json: string): RepoPickerRepository[] {
   }
 }
 
+function parseGraphqlEnvelope(json: string, context: string): Record<string, unknown> {
+  const parsed = JSON.parse(json) as unknown;
+  if (!isPlainObject(parsed)) {
+    throw new Error(`Expected ${context} object.`);
+  }
+
+  if ('errors' in parsed && Array.isArray(parsed.errors) && parsed.errors.length > 0) {
+    const messages = parsed.errors
+      .map((error) =>
+        isPlainObject(error) && typeof error.message === 'string' ? error.message.trim() : ''
+      )
+      .filter((message) => message.length > 0);
+    throw new Error(
+      messages.length > 0
+        ? `GitHub GraphQL returned errors: ${messages.join('; ')}`
+        : 'GitHub GraphQL returned errors.'
+    );
+  }
+
+  if (!('data' in parsed) || !isPlainObject(parsed.data)) {
+    throw new Error(`Expected ${context} data.`);
+  }
+
+  return parsed.data;
+}
+
+function parsePageInfo(value: unknown, context: string): RepoPickerSearchPageInfo {
+  if (!isPlainObject(value)) {
+    throw new Error(`Expected ${context} pageInfo.`);
+  }
+
+  if (!('hasNextPage' in value) || typeof value.hasNextPage !== 'boolean') {
+    throw new Error(`Expected ${context} pageInfo hasNextPage.`);
+  }
+
+  if (
+    !('endCursor' in value) ||
+    (value.endCursor !== null && typeof value.endCursor !== 'string')
+  ) {
+    throw new Error(`Expected ${context} pageInfo endCursor.`);
+  }
+
+  return { hasNextPage: value.hasNextPage, endCursor: value.endCursor };
+}
+
+function requireViewer(data: Record<string, unknown>, context: string): Record<string, unknown> {
+  if (!('viewer' in data) || !isPlainObject(data.viewer)) {
+    throw new Error(`Expected ${context} viewer.`);
+  }
+
+  return data.viewer;
+}
+
+function parseViewerLogin(json: string): string {
+  try {
+    const data = parseGraphqlEnvelope(json, 'repository search viewer login');
+    const viewer = requireViewer(data, 'repository search viewer login');
+    if (!('login' in viewer) || typeof viewer.login !== 'string' || viewer.login.length === 0) {
+      throw new Error('Expected repository search viewer login.');
+    }
+
+    return viewer.login;
+  } catch (error) {
+    throw new Error(
+      `Failed to parse repository search viewer login from GitHub CLI: ${toErrorMessage(error)}`
+    );
+  }
+}
+
+function parseOrganizationPage(json: string): {
+  logins: string[];
+  pageInfo: RepoPickerSearchPageInfo;
+} {
+  try {
+    const data = parseGraphqlEnvelope(json, 'repository search organizations');
+    const viewer = requireViewer(data, 'repository search organizations');
+    if (!('organizations' in viewer) || !isPlainObject(viewer.organizations)) {
+      throw new Error('Expected repository search organizations.');
+    }
+
+    const { organizations } = viewer;
+    if (!('nodes' in organizations) || !Array.isArray(organizations.nodes)) {
+      throw new Error('Expected repository search organization nodes.');
+    }
+
+    return {
+      logins: organizations.nodes.flatMap((node: unknown) => {
+        if (node === null) {
+          return [];
+        }
+
+        if (!isPlainObject(node)) {
+          throw new Error('Expected repository search organization node object.');
+        }
+
+        if (!('login' in node) || typeof node.login !== 'string') {
+          throw new Error('Expected repository search organization login.');
+        }
+
+        const login = node.login.trim();
+        return login.length > 0 ? [login] : [];
+      }),
+      pageInfo: parsePageInfo(organizations.pageInfo, 'repository search organizations'),
+    };
+  } catch (error) {
+    throw new Error(
+      `Failed to parse repository search organizations from GitHub CLI: ${toErrorMessage(error)}`
+    );
+  }
+}
+
+function parseCollaboratorRepositoryPage(json: string): {
+  repositories: RepoPickerSearchRepository[];
+  pageInfo: RepoPickerSearchPageInfo;
+} {
+  try {
+    const data = parseGraphqlEnvelope(json, 'repository search collaborator repositories');
+    const viewer = requireViewer(data, 'repository search collaborator repositories');
+    if (!('repositories' in viewer) || !isPlainObject(viewer.repositories)) {
+      throw new Error('Expected repository search collaborator repositories.');
+    }
+
+    const { repositories } = viewer;
+    if (!('nodes' in repositories) || !Array.isArray(repositories.nodes)) {
+      throw new Error('Expected repository search collaborator repository nodes.');
+    }
+
+    return {
+      repositories: repositories.nodes.flatMap((node: unknown) => {
+        if (node === null) {
+          return [];
+        }
+
+        if (!isPlainObject(node)) {
+          throw new Error('Expected repository search collaborator repository node object.');
+        }
+
+        if (!('nameWithOwner' in node) || typeof node.nameWithOwner !== 'string') {
+          throw new Error('Expected repository search collaborator repository nameWithOwner.');
+        }
+
+        return [{ nameWithOwner: node.nameWithOwner, group: 'other' }];
+      }),
+      pageInfo: parsePageInfo(repositories.pageInfo, 'repository search collaborator repositories'),
+    };
+  } catch (error) {
+    throw new Error(
+      `Failed to parse repository search collaborator repositories from GitHub CLI: ${toErrorMessage(
+        error
+      )}`
+    );
+  }
+}
+
+async function fetchRepoSearchScope(): Promise<RepoPickerSearchScope> {
+  const viewerLogin = parseViewerLogin(await githubGraphql(repoPickerViewerLoginQuery, {}));
+  const organizationLogins: string[] = [];
+  const seenOrganizationLogins = new Set<string>();
+  let organizationCursor: string | null = null;
+
+  do {
+    const page = parseOrganizationPage(
+      await githubGraphql(repoPickerOrganizationsQuery, {
+        limit: repoPickerPageSize,
+        cursor: organizationCursor,
+      })
+    );
+
+    for (const login of page.logins) {
+      const loginKey = login.toLowerCase();
+      if (seenOrganizationLogins.has(loginKey)) {
+        continue;
+      }
+
+      seenOrganizationLogins.add(loginKey);
+      organizationLogins.push(login);
+    }
+
+    organizationCursor = page.pageInfo.hasNextPage ? page.pageInfo.endCursor : null;
+  } while (organizationCursor !== null);
+
+  const collaboratorRepositories: RepoPickerSearchRepository[] = [];
+  const seenCollaboratorRepositories = new Set<string>();
+  let collaboratorCursor: string | null = null;
+
+  do {
+    const page = parseCollaboratorRepositoryPage(
+      await githubGraphql(repoPickerCollaboratorRepositoriesQuery, {
+        limit: repoPickerPageSize,
+        cursor: collaboratorCursor,
+      })
+    );
+
+    for (const repository of page.repositories) {
+      const repoKey = toRepoKey(repository.nameWithOwner);
+      if (seenCollaboratorRepositories.has(repoKey)) {
+        continue;
+      }
+
+      seenCollaboratorRepositories.add(repoKey);
+      collaboratorRepositories.push(repository);
+    }
+
+    collaboratorCursor = page.pageInfo.hasNextPage ? page.pageInfo.endCursor : null;
+  } while (collaboratorCursor !== null);
+
+  return { viewerLogin, organizationLogins, collaboratorRepositories };
+}
+
+async function getRepoSearchScope(): Promise<RepoPickerSearchScope> {
+  repoSearchScopePromise ??= fetchRepoSearchScope();
+
+  try {
+    return await repoSearchScopePromise;
+  } catch (error) {
+    repoSearchScopePromise = null;
+    throw error;
+  }
+}
+
+function normalizeSearchTerms(query: string): string[] {
+  return query
+    .trim()
+    .split(/[\s/]+/)
+    .map((term) => term.replace(/[^A-Za-z0-9_.-]/g, ''))
+    .filter((term) => term.length > 0);
+}
+
+function buildRepositorySearchQuery(query: string, scope: RepoPickerSearchScope): string {
+  return [
+    ...normalizeSearchTerms(query),
+    'in:name',
+    'archived:false',
+    'fork:true',
+    `user:${scope.viewerLogin}`,
+    ...scope.organizationLogins.map((login) => `org:${login}`),
+  ].join(' ');
+}
+
+function findCollaboratorSearchMatches(
+  scope: RepoPickerSearchScope,
+  query: string
+): RepoPickerSearchRepository[] {
+  const queryKey = toRepoKey(query);
+  return scope.collaboratorRepositories.filter(
+    (repository) => toRepoKey(repository.nameWithOwner) === queryKey
+  );
+}
+
+function parseRepoSearchResult(json: string, viewerLogin: string): RepoPickerSearchResult {
+  try {
+    const data = parseGraphqlEnvelope(json, 'repository search result');
+    if (!('search' in data) || !isPlainObject(data.search)) {
+      throw new Error('Expected repository search result search.');
+    }
+
+    const { search } = data;
+    if (!('nodes' in search) || !Array.isArray(search.nodes)) {
+      throw new Error('Expected repository search result nodes.');
+    }
+
+    const viewerLoginKey = viewerLogin.toLowerCase();
+
+    return {
+      repositories: search.nodes.flatMap((node: unknown) => {
+        if (node === null) {
+          return [];
+        }
+
+        if (!isPlainObject(node)) {
+          return [];
+        }
+
+        if (!('nameWithOwner' in node) && !('owner' in node) && !('isArchived' in node)) {
+          return [];
+        }
+
+        if (!('nameWithOwner' in node) || typeof node.nameWithOwner !== 'string') {
+          throw new Error('Expected repository search result node nameWithOwner.');
+        }
+
+        if (!('owner' in node) || !isPlainObject(node.owner)) {
+          throw new Error('Expected repository search result node owner.');
+        }
+
+        if (!('login' in node.owner) || typeof node.owner.login !== 'string') {
+          throw new Error('Expected repository search result node owner login.');
+        }
+
+        if (!('isArchived' in node) || typeof node.isArchived !== 'boolean') {
+          throw new Error('Expected repository search result node isArchived.');
+        }
+
+        if (node.isArchived) {
+          return [];
+        }
+
+        return [
+          {
+            nameWithOwner: node.nameWithOwner,
+            group: node.owner.login.toLowerCase() === viewerLoginKey ? 'owner' : 'other',
+          },
+        ];
+      }),
+      pageInfo: parsePageInfo(search.pageInfo, 'repository search result'),
+    };
+  } catch (error) {
+    throw new Error(
+      `Failed to parse repository search result from GitHub CLI: ${toErrorMessage(error)}`
+    );
+  }
+}
+
+function mergeSearchRepositories(
+  first: RepoPickerSearchRepository[],
+  second: RepoPickerSearchRepository[]
+): RepoPickerSearchRepository[] {
+  const merged: RepoPickerSearchRepository[] = [];
+  const seenRepos = new Set<string>();
+
+  for (const repository of [...first, ...second]) {
+    const repoKey = toRepoKey(repository.nameWithOwner);
+    if (seenRepos.has(repoKey)) {
+      continue;
+    }
+
+    seenRepos.add(repoKey);
+    merged.push(repository);
+  }
+
+  return merged;
+}
+
+function parseSearchPayload(payload: unknown): { query: string; cursor: string | null } {
+  if (!isPlainObject(payload) || !('query' in payload) || typeof payload.query !== 'string') {
+    throw new Error('Invalid repository search payload.');
+  }
+
+  if (
+    'cursor' in payload &&
+    payload.cursor !== null &&
+    payload.cursor !== undefined &&
+    typeof payload.cursor !== 'string'
+  ) {
+    throw new Error('Invalid repository search payload.');
+  }
+
+  const cursor = 'cursor' in payload && typeof payload.cursor === 'string' ? payload.cursor : null;
+
+  return { query: payload.query, cursor };
+}
+
 export function registerConfigHandlers(): void {
   ipcMain.handle('get-config', () => readConfig());
   ipcMain.handle('list-repos', async () => {
-    const result = await gh([
-      'api',
-      'graphql',
-      '-f',
-      `query=${repoPickerRepositoriesQuery}`,
-      '-F',
-      'limit=100',
-    ]);
-    return parseRepoList(result.stdout);
+    return parseRepoList(
+      await githubGraphql(repoPickerRepositoriesQuery, { limit: repoPickerPageSize })
+    );
+  });
+  ipcMain.handle('search-repos', async (_event, payload: unknown) => {
+    const parsedPayload = parseSearchPayload(payload);
+    const trimmedQuery = parsedPayload.query.trim();
+
+    if (trimmedQuery.length === 0) {
+      return {
+        repositories: [],
+        pageInfo: { hasNextPage: false, endCursor: null },
+      } satisfies RepoPickerSearchResult;
+    }
+
+    const scope = await getRepoSearchScope();
+    const searchQuery = buildRepositorySearchQuery(trimmedQuery, scope);
+    const searchResult = parseRepoSearchResult(
+      await githubGraphql(repoPickerSearchQuery, {
+        searchQuery,
+        limit: repoPickerPageSize,
+        cursor: parsedPayload.cursor,
+      }),
+      scope.viewerLogin
+    );
+
+    if (parsedPayload.cursor !== null) {
+      return searchResult;
+    }
+
+    return {
+      repositories: mergeSearchRepositories(
+        findCollaboratorSearchMatches(scope, trimmedQuery),
+        searchResult.repositories
+      ),
+      pageInfo: searchResult.pageInfo,
+    } satisfies RepoPickerSearchResult;
   });
   ipcMain.handle('set-config', (_event, config: unknown) => {
     const parsedConfig = parseConfig(config);

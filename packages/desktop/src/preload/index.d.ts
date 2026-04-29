@@ -16,6 +16,16 @@ type RepoPickerRepository =
   | { nameWithOwner: string; group: 'other' }
   | { nameWithOwner: string; group: 'organization'; organizationLogin: string };
 
+type RepoPickerSearchRepository = Extract<RepoPickerRepository, { group: 'owner' | 'other' }>;
+
+interface RepoPickerSearchResult {
+  repositories: RepoPickerSearchRepository[];
+  pageInfo: {
+    hasNextPage: boolean;
+    endCursor: string | null;
+  };
+}
+
 interface PipelineIssue extends ListIssueItem {
   tokenUsage: TokenUsage;
 }
@@ -109,6 +119,10 @@ interface ShipperAPI {
   getConfig: () => Promise<ConfigPayload>;
   listAdoptableIssues: (repo: string) => Promise<ListAdoptableIssuesSuccess | ListIssuesFailure>;
   listRepos: () => Promise<RepoPickerRepository[]>;
+  searchRepos: (request: {
+    query: string;
+    cursor?: string | null;
+  }) => Promise<RepoPickerSearchResult>;
   listIssues: (repo: string) => Promise<ListIssuesSuccess | ListIssuesFailure>;
   fetchIssueTimelines: (
     repo: string,
