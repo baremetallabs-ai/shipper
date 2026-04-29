@@ -60,6 +60,10 @@ export interface DesktopGroomWorktree {
 export async function createDesktopGroomWorktree(
   opts: CreateDesktopGroomWorktreeOpts
 ): Promise<DesktopGroomWorktree> {
+  if (!/^\d+$/.test(opts.issueNumber)) {
+    throw new Error('Desktop groom worktree issueNumber must contain only digits.');
+  }
+
   await execAsync('git', ['worktree', 'prune'], { cwd: opts.repoRoot });
   await mkdir(WORKTREES_DIR, { recursive: true });
 

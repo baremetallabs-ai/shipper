@@ -336,19 +336,16 @@ describe('ensureRepoClone', () => {
 });
 
 describe('ensureRepoCloneForWorktree', () => {
-  it('fetches an existing valid clone without resetting, cleaning, or syncing', async () => {
+  it('returns an existing valid clone without fetching, resetting, cleaning, or syncing', async () => {
     const clonePath = getRepoClonePath('owner/repo');
     mockAccess.mockResolvedValue();
     execFileMock.mockImplementationOnce((_cmd, _args, _opts, cb) => {
       cb(null, 'true\n', '');
     });
-    execFileMock.mockImplementationOnce((_cmd, _args, _opts, cb) => {
-      cb(null, '', '');
-    });
 
     await expect(ensureRepoCloneForWorktree('owner/repo')).resolves.toBe(clonePath);
 
-    expect(execFileMock).toHaveBeenCalledTimes(2);
+    expect(execFileMock).toHaveBeenCalledTimes(1);
     expect(execFileMock).toHaveBeenNthCalledWith(
       1,
       'git',
@@ -356,13 +353,7 @@ describe('ensureRepoCloneForWorktree', () => {
       { cwd: clonePath, encoding: 'utf-8' },
       expect.any(Function)
     );
-    expect(execFileMock).toHaveBeenNthCalledWith(
-      2,
-      'git',
-      ['fetch', 'origin'],
-      { cwd: clonePath, encoding: 'utf-8' },
-      expect.any(Function)
-    );
+    expect(execFileMock.mock.calls.map(([, args]) => args)).not.toContainEqual(['fetch', 'origin']);
     expect(execFileMock.mock.calls.map(([, args]) => args)).not.toContainEqual(['reset', '--hard']);
     expect(execFileMock.mock.calls.map(([, args]) => args)).not.toContainEqual(['clean', '-fdx']);
     expect(mockGh).not.toHaveBeenCalledWith(['repo', 'sync', '--source', 'owner/repo'], {
@@ -423,31 +414,4 @@ describe('ensureRepoCloneForWorktree', () => {
       expect(mockGh).toHaveBeenCalledWith(['repo', 'clone', 'owner/repo', clonePath]);
     }
   );
-
-  it('rethrows fetch failures without removing or re-cloning the valid worktree parent', async () => {
-    const clonePath = getRepoClonePath('owner/repo');
-    const fetchError = new Error('git fetch failed');
-    mockAccess.mockResolvedValue();
-    execFileMock.mockImplementationOnce((_cmd, _args, _opts, cb) => {
-      cb(null, 'true\n', '');
-    });
-    execFileMock.mockImplementationOnce((_cmd, _args, _opts, cb) => {
-      cb(fetchError);
-    });
-
-    await expect(ensureRepoCloneForWorktree('owner/repo')).rejects.toBe(fetchError);
-
-    expect(execFileMock).toHaveBeenCalledTimes(2);
-    expect(execFileMock).toHaveBeenNthCalledWith(
-      2,
-      'git',
-      ['fetch', 'origin'],
-      { cwd: clonePath, encoding: 'utf-8' },
-      expect.any(Function)
-    );
-    expect(mockWarn).not.toHaveBeenCalled();
-    expect(mockRm).not.toHaveBeenCalled();
-    expect(mockMkdir).not.toHaveBeenCalled();
-    expect(mockGh).not.toHaveBeenCalled();
-  });
 });

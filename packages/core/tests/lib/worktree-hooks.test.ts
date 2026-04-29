@@ -280,6 +280,20 @@ describe('createDesktopGroomWorktree', () => {
       gitArgsFromSpawnCalls().filter((args) => args[0] === 'worktree' && args[1] === 'remove')
     ).toHaveLength(1);
   });
+
+  it('rejects non-numeric issue numbers before building the desktop groom path', async () => {
+    await expect(
+      createDesktopGroomWorktree({
+        repoRoot: '/repos/my-repo',
+        issueNumber: '42/..',
+        baseBranch: 'main',
+      })
+    ).rejects.toThrow('Desktop groom worktree issueNumber must contain only digits.');
+
+    expect(execFileMock).not.toHaveBeenCalled();
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(mkdirMock).not.toHaveBeenCalled();
+  });
 });
 
 describe('createWorktree', () => {

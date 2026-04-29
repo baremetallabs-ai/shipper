@@ -62,6 +62,8 @@ const state = vi.hoisted(() => ({
   browserWindowEventHandlers: new Map<string, (...args: unknown[]) => void>(),
 }));
 
+const warnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
 vi.mock('@dnsquared/shipper-core', async () => {
   const { isPlainObject, toError, toErrorMessage } =
     await vi.importActual<typeof import('@dnsquared/shipper-core')>('@dnsquared/shipper-core');
@@ -340,8 +342,25 @@ function getPtySpawnCwds(): unknown[] {
   });
 }
 
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((promiseResolve) => {
+    resolve = promiseResolve;
+  });
+
+  return { promise, resolve };
+}
+
+async function flushMicrotasks(count = 5): Promise<void> {
+  for (let index = 0; index < count; index += 1) {
+    await Promise.resolve();
+  }
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  warnMock.mockClear();
+  warnMock.mockImplementation(() => {});
   mockUserDataPath = mkdtempSync(join(tmpdir(), 'shipper-desktop-tests-'));
 });
 
@@ -768,6 +787,38 @@ describe('desktop IPC locking', () => {
     expect(getPtySpawnCwds()).toEqual(['/tmp/groom-wt-42', '/tmp/groom-wt-43']);
   });
 
+  it('serializes groom clone preparation and worktree creation per repo without blocking active groom sessions', async () => {
+    await loadHandlers();
+    const firstWorktree = deferred<{ wtPath: string; cleanup: () => Promise<void> }>();
+    state.createDesktopGroomWorktreeMock
+      .mockReturnValueOnce(firstWorktree.promise)
+      .mockResolvedValueOnce({
+        wtPath: '/tmp/groom-wt-43',
+        cleanup: state.desktopGroomCleanupMock,
+      });
+    const handler = getHandler('pty-spawn-shipper-groom');
+
+    const first = handler({}, { repo: 'owner/repo', issueNumber: 42, cols: 120, rows: 40 });
+    await flushMicrotasks();
+    const second = handler({}, { repo: 'owner/repo', issueNumber: 43, cols: 120, rows: 40 });
+    await flushMicrotasks();
+
+    expect(state.ensureRepoCloneForWorktreeMock).toHaveBeenCalledTimes(1);
+    expect(state.createDesktopGroomWorktreeMock).toHaveBeenCalledTimes(1);
+
+    firstWorktree.resolve({
+      wtPath: '/tmp/groom-wt-42',
+      cleanup: state.desktopGroomCleanupMock,
+    });
+
+    await first;
+    await second;
+
+    expect(state.ensureRepoCloneForWorktreeMock).toHaveBeenCalledTimes(2);
+    expect(state.createDesktopGroomWorktreeMock).toHaveBeenCalledTimes(2);
+    expect(getPtySpawnCwds()).toEqual(['/tmp/groom-wt-42', '/tmp/groom-wt-43']);
+  });
+
   it('releases the groom lock and removes the worktree when the PTY session exits', async () => {
     await loadHandlers();
     const handler = getHandler('pty-spawn-shipper-groom');
@@ -789,6 +840,32 @@ describe('desktop IPC locking', () => {
 
     expect(state.releaseIssueLockMock).toHaveBeenCalledWith('owner/repo', '42');
     expect(state.desktopGroomCleanupMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('logs groom cleanup failures on PTY exit', async () => {
+    await loadHandlers();
+    const handler = getHandler('pty-spawn-shipper-groom');
+    state.releaseIssueLockMock.mockRejectedValueOnce(new Error('release failed'));
+
+    const result = parseSessionResult(
+      await handler(
+        {},
+        {
+          repo: 'owner/repo',
+          issueNumber: 42,
+          cols: 120,
+          rows: 40,
+        }
+      )
+    );
+
+    state.exitCallbacks.get(result.sessionId)?.();
+    await flushMicrotasks();
+
+    expect(warnMock).toHaveBeenCalledWith(
+      '[shipper] Failed to clean up groom session after session exit',
+      expect.any(Error)
+    );
   });
 
   it('releases the groom lock and removes the worktree when prompt building fails', async () => {
@@ -942,6 +1019,19 @@ describe('desktop IPC locking', () => {
     expect(state.ptySpawnMock).toHaveBeenCalledTimes(1);
   });
 
+  it('refuses a second setup PTY for the same repo regardless of repo casing', async () => {
+    await loadHandlers();
+    const handler = getHandler('pty-spawn-shipper-setup');
+
+    await handler({}, { repo: 'Owner/Repo', cols: 120, rows: 40 });
+
+    await expect(handler({}, { repo: 'owner/repo', cols: 120, rows: 40 })).rejects.toThrow(
+      'Setup is already running for owner/repo.'
+    );
+    expect(state.ensureRepoCloneMock).toHaveBeenCalledTimes(1);
+    expect(state.ptySpawnMock).toHaveBeenCalledTimes(1);
+  });
+
   it('allows setup for the same repo again after the active setup PTY exits', async () => {
     await loadHandlers();
     const handler = getHandler('pty-spawn-shipper-setup');
@@ -983,6 +1073,34 @@ describe('desktop IPC locking', () => {
     await setupHandler({}, { repo: 'owner/repo', cols: 120, rows: 40 });
 
     expect(state.ensureRepoCloneForWorktreeMock).toHaveBeenCalledWith('owner/repo');
+    expect(state.ensureRepoCloneMock).toHaveBeenCalledTimes(1);
+    expect(getPtySpawnCwds()).toEqual(['/tmp/groom-wt', '/tmp/repo']);
+  });
+
+  it('serializes groom and setup canonical repo preparation for the same repo', async () => {
+    await loadHandlers();
+    const firstWorktree = deferred<{ wtPath: string; cleanup: () => Promise<void> }>();
+    state.createDesktopGroomWorktreeMock.mockReturnValueOnce(firstWorktree.promise);
+    const groomHandler = getHandler('pty-spawn-shipper-groom');
+    const setupHandler = getHandler('pty-spawn-shipper-setup');
+
+    const groom = groomHandler({}, { repo: 'owner/repo', issueNumber: 42, cols: 120, rows: 40 });
+    await flushMicrotasks();
+    const setup = setupHandler({}, { repo: 'owner/repo', cols: 120, rows: 40 });
+    await flushMicrotasks();
+
+    expect(state.ensureRepoCloneForWorktreeMock).toHaveBeenCalledTimes(1);
+    expect(state.createDesktopGroomWorktreeMock).toHaveBeenCalledTimes(1);
+    expect(state.ensureRepoCloneMock).not.toHaveBeenCalled();
+
+    firstWorktree.resolve({
+      wtPath: '/tmp/groom-wt',
+      cleanup: state.desktopGroomCleanupMock,
+    });
+
+    await groom;
+    await setup;
+
     expect(state.ensureRepoCloneMock).toHaveBeenCalledTimes(1);
     expect(getPtySpawnCwds()).toEqual(['/tmp/groom-wt', '/tmp/repo']);
   });
