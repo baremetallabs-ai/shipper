@@ -1,4 +1,13 @@
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
@@ -21,9 +30,12 @@ interface PtySessionEntry {
 }
 
 const GRACE_TIMEOUT_MS = 5_000;
+const NODE_PTY_CACHE_MARKER = '.shipper-node-pty-cache.json';
 const require = createRequire(import.meta.url);
 
-let cachedPty: typeof NodePty | null = null;
+type NodePtyModule = typeof import('node-pty');
+
+let cachedPty: NodePtyModule | null = null;
 
 type ElectronApp = typeof import('electron').app;
 interface ElectronModule {
@@ -41,13 +53,86 @@ function isPackagedDarwinElectron(): boolean {
 }
 
 function readNodePtyPackageVersion(sourcePath: string): string {
-  const packageJson = JSON.parse(readFileSync(path.join(sourcePath, 'package.json'), 'utf-8')) as {
-    version?: unknown;
-  };
+  const packageJsonPath = path.join(sourcePath, 'package.json');
+  let packageJson: { version?: unknown };
+  try {
+    packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8')) as {
+      version?: unknown;
+    };
+  } catch (error) {
+    throw new Error(`Unable to read node-pty package metadata from ${packageJsonPath}.`, {
+      cause: error,
+    });
+  }
+
   if (typeof packageJson.version !== 'string') {
     throw new Error('Unable to determine node-pty package version.');
   }
   return packageJson.version;
+}
+
+function hasValidCacheMarker(markerPath: string, marker: string): boolean {
+  try {
+    return existsSync(markerPath) && readFileSync(markerPath, 'utf-8') === marker;
+  } catch {
+    return false;
+  }
+}
+
+function createNodePtyCacheCandidate(
+  cacheRoot: string,
+  sourcePath: string,
+  marker: string
+): string {
+  const tempPath = mkdtempSync(path.join(cacheRoot, '.node-pty-'));
+  try {
+    cpSync(sourcePath, tempPath, { recursive: true });
+    writeFileSync(path.join(tempPath, NODE_PTY_CACHE_MARKER), marker);
+    return tempPath;
+  } catch (error) {
+    rmSync(tempPath, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+function isExistingPathError(error: unknown): boolean {
+  const code =
+    typeof error === 'object' && error !== null && 'code' in error
+      ? (error as { code?: unknown }).code
+      : undefined;
+
+  return code === 'EEXIST' || code === 'ENOTEMPTY';
+}
+
+function publishNodePtyCacheCandidate(
+  tempPath: string,
+  cachePath: string,
+  markerPath: string,
+  marker: string
+): string {
+  if (hasValidCacheMarker(markerPath, marker)) {
+    rmSync(tempPath, { recursive: true, force: true });
+    return cachePath;
+  }
+
+  try {
+    renameSync(tempPath, cachePath);
+    return cachePath;
+  } catch (error) {
+    if (isExistingPathError(error) && hasValidCacheMarker(markerPath, marker)) {
+      rmSync(tempPath, { recursive: true, force: true });
+      return cachePath;
+    }
+
+    const fallbackPath = `${cachePath}-${path.basename(tempPath)}`;
+    try {
+      renameSync(tempPath, fallbackPath);
+      return fallbackPath;
+    } catch (fallbackError) {
+      rmSync(tempPath, { recursive: true, force: true });
+      throw new Error('Unable to publish node-pty native cache.', { cause: fallbackError });
+    }
+  }
 }
 
 function ensurePackagedDarwinNodePtyPath(): string {
@@ -63,25 +148,24 @@ function ensurePackagedDarwinNodePtyPath(): string {
   const electronVersion = process.versions.electron;
   const cacheRoot = path.join(app.getPath('userData'), 'native');
   const cachePath = path.join(cacheRoot, `node-pty-${packageVersion}-electron-${electronVersion}`);
-  const markerPath = path.join(cachePath, '.shipper-node-pty-cache.json');
+  const markerPath = path.join(cachePath, NODE_PTY_CACHE_MARKER);
   const marker = `${JSON.stringify({ packageVersion, electronVersion }, null, 2)}\n`;
 
-  if (!existsSync(markerPath) || readFileSync(markerPath, 'utf-8') !== marker) {
-    rmSync(cachePath, { recursive: true, force: true });
-    mkdirSync(cacheRoot, { recursive: true });
-    cpSync(sourcePath, cachePath, { recursive: true });
-    writeFileSync(markerPath, marker);
+  mkdirSync(cacheRoot, { recursive: true });
+  if (!hasValidCacheMarker(markerPath, marker)) {
+    const tempPath = createNodePtyCacheCandidate(cacheRoot, sourcePath, marker);
+    return publishNodePtyCacheCandidate(tempPath, cachePath, markerPath, marker);
   }
 
   return cachePath;
 }
 
-function loadNodePty(): typeof NodePty {
+function loadNodePty(): NodePtyModule {
   if (cachedPty !== null) return cachedPty;
 
   if (isPackagedDarwinElectron()) {
     const nodePtyPath = path.join(ensurePackagedDarwinNodePtyPath(), 'lib', 'index.js');
-    cachedPty = require(nodePtyPath) as typeof NodePty;
+    cachedPty = require(nodePtyPath) as NodePtyModule;
     return cachedPty;
   }
 
