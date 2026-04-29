@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { parseGhJson } from './gh-json.js';
 
 function makeParser<TOutput, TInput = unknown>(
-  schema: z.ZodType<TOutput, z.ZodTypeDef, TInput>,
+  schema: z.ZodType<TOutput, TInput>,
   shapeName: string
 ): (json: string) => TOutput {
   return (json) => parseGhJson(json, schema, shapeName);

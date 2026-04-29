@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 
 const ghMock = vi.hoisted(() =>
   vi.fn<
@@ -36,6 +37,22 @@ describe('parseGhJson', () => {
         'Issue'
       )
     ).toThrow('gh returned an invalid Issue payload: expected string at labels[0].name');
+  });
+
+  it('formats enum value validation failures with the allowed values', () => {
+    const schema = z.object({ status: z.enum(['new', 'planned']) });
+
+    expect(() => parseGhJson(JSON.stringify({ status: 'ready' }), schema, 'Status')).toThrow(
+      'gh returned an invalid Status payload: expected one of "new", "planned" at status'
+    );
+  });
+
+  it('formats literal value validation failures with the expected value', () => {
+    const schema = z.object({ state: z.literal('OPEN') });
+
+    expect(() => parseGhJson(JSON.stringify({ state: 'CLOSED' }), schema, 'State')).toThrow(
+      'gh returned an invalid State payload: expected "OPEN" at state'
+    );
   });
 
   it('wraps invalid JSON in GhPayloadError', () => {
