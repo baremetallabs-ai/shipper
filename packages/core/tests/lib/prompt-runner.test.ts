@@ -88,12 +88,8 @@ const getSettingsMock = vi.fn<() => { agentTimeoutMinutes: number }>().mockRetur
   agentTimeoutMinutes: 60,
 });
 const stdinPipeMock = vi.spyOn(process.stdin, 'pipe').mockImplementation(() => undefined as never);
-const stdinUnpipeMock = vi
-  .spyOn(process.stdin, 'unpipe')
-  .mockImplementation(() => process.stdin as never);
-const stdinPauseMock = vi
-  .spyOn(process.stdin, 'pause')
-  .mockImplementation(() => process.stdin as never);
+const stdinUnpipeMock = vi.spyOn(process.stdin, 'unpipe').mockImplementation(() => process.stdin);
+const stdinPauseMock = vi.spyOn(process.stdin, 'pause').mockImplementation(() => process.stdin);
 
 vi.mock('node:child_process', async () => {
   const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
@@ -202,7 +198,7 @@ function mockSpawnResult(
     child.stdin = Object.assign(new EventEmitter(), {
       end: vi.fn(),
       write: vi.fn(),
-    }) as PromptStdin;
+    });
     child.stdout = stdout;
     child.stderr = stderr;
     globalThis.queueMicrotask(() => {

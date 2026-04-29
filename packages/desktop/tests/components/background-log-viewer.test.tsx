@@ -33,10 +33,7 @@ function mockPreMetrics(initialState: PreMetricsState): PreMetricsMock {
     createElement: (tagName: string, options?: unknown) => unknown;
     querySelector: (selector: string) => unknown;
   };
-  const originalCreateElement = documentLike.createElement.bind(documentLike) as (
-    tagName: string,
-    options?: unknown
-  ) => unknown;
+  const originalCreateElement = documentLike.createElement.bind(documentLike);
 
   function decoratePre(element: PreElementLike): void {
     Object.defineProperty(element, 'clientHeight', {
@@ -118,7 +115,7 @@ function getActiveElement(): unknown {
 }
 
 function scrollViewer(pre: PreElementLike): void {
-  fireEvent.scroll(pre as never);
+  fireEvent.scroll(pre);
 }
 
 function getMaxScrollTop(metrics: PreMetricsState): number {

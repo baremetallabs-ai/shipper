@@ -17,15 +17,9 @@ const WORKTREE_HOOK_META = {
 type WorktreeHookEvent = keyof typeof WORKTREE_HOOK_META;
 
 function extractExecError(err: unknown): { code: number | 'unknown'; stderr: string } {
-  const rawStatus =
-    err && typeof err === 'object' && 'status' in err
-      ? (err as { status: unknown }).status
-      : undefined;
+  const rawStatus = err && typeof err === 'object' && 'status' in err ? err.status : undefined;
   const code = typeof rawStatus === 'number' ? rawStatus : 'unknown';
-  const stderr =
-    err && typeof err === 'object' && 'stderr' in err
-      ? String((err as { stderr: unknown }).stderr).trim()
-      : '';
+  const stderr = err && typeof err === 'object' && 'stderr' in err ? String(err.stderr).trim() : '';
   return { code, stderr };
 }
 

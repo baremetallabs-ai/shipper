@@ -5,10 +5,10 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({
-  reposState: {} as Record<string, unknown>,
-  backgroundState: {} as Record<string, unknown>,
-  pipelineState: {} as Record<string, unknown>,
-  terminalState: {} as Record<string, unknown>,
+  reposState: {},
+  backgroundState: {},
+  pipelineState: {},
+  terminalState: {},
   spawnShipperSetupMock: vi.fn(),
   spawnShipperGroomMock: vi.fn(),
   spawnBackgroundShipMock: vi.fn(),

@@ -121,7 +121,7 @@ export class PtyManager {
       cols: options.cols,
       rows: options.rows,
       cwd: options.cwd,
-      env: options.env ?? (process.env as Record<string, string>),
+      env: options.env ?? process.env,
     });
 
     const entry: PtySessionEntry = {

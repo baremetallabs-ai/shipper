@@ -118,9 +118,7 @@ export function getStageIndex(stage: WorkflowStage): number {
 
 export function parseStage(input: string): WorkflowStage | null {
   const normalized = input.replace(/^shipper:/, '');
-  return RESETTABLE_STAGE_NAMES.includes(normalized as WorkflowStage)
-    ? (normalized as WorkflowStage)
-    : null;
+  return RESETTABLE_STAGE_NAMES.includes(normalized) ? (normalized as WorkflowStage) : null;
 }
 
 export function getCurrentStage(labels: string[]): CurrentStage {

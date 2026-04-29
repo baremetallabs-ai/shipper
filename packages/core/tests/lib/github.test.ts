@@ -74,7 +74,6 @@ const {
   tryResolvePrForIssue,
 } = await import('../../src/lib/github.js');
 type TimelineLabelEvent = import('../../src/lib/github.js').TimelineLabelEvent;
-type FormatPRInput = Parameters<typeof formatPR>[0];
 const repo = 'owner/repo';
 
 describe('formatIssue', () => {
@@ -228,7 +227,7 @@ describe('formatPR', () => {
           submittedAt: '2025-01-02T01:00:00Z',
         },
       ],
-    } as unknown as FormatPRInput);
+    });
 
     expect(result).toContain('<review author="reviewer" state="APPROVED"');
     expect(result).toContain('></review>');
@@ -248,7 +247,7 @@ describe('formatPR', () => {
       headRefName: 'fix/login&session',
       baseRefName: 'main',
       reviews: [],
-    } as unknown as FormatPRInput);
+    });
 
     expect(result).toContain('title="Fix &quot;login&quot; &amp; &lt;session&gt; bug"');
     expect(result).toContain('labels="P0 &amp; critical, &quot;urgent&quot;"');
@@ -276,7 +275,7 @@ describe('formatPR', () => {
           submittedAt: null,
         },
       ],
-    } as unknown as FormatPRInput);
+    });
 
     expect(result).toContain('<review author="reviewer" state="PENDING" date=""></review>');
   });

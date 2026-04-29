@@ -472,9 +472,7 @@ describe('warnTrackedOutputFiles', () => {
       stdout: '.shipper/output/result.json\r\n.shipper/input/example.txt\r\n',
       stderr: '',
     });
-    const stderrSpy = vi
-      .spyOn(process.stderr, 'write')
-      .mockImplementation((() => true) as typeof process.stderr.write);
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
 
     await warnTrackedOutputFiles();
 
@@ -499,9 +497,7 @@ describe('warnTrackedOutputFiles', () => {
 
   it('stays silent when no tracked files are returned', async () => {
     mockExecFileAsync.mockResolvedValue({ stdout: '', stderr: '' });
-    const stderrSpy = vi
-      .spyOn(process.stderr, 'write')
-      .mockImplementation((() => true) as typeof process.stderr.write);
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
 
     await warnTrackedOutputFiles();
 
@@ -516,9 +512,7 @@ describe('warnTrackedOutputFiles', () => {
         '.shipper/output/.gitkeep\r\n.shipper/input/.gitkeep\r\n.shipper/output/result.json\r\n',
       stderr: '',
     });
-    const stderrSpy = vi
-      .spyOn(process.stderr, 'write')
-      .mockImplementation((() => true) as typeof process.stderr.write);
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
 
     await warnTrackedOutputFiles();
 
@@ -532,9 +526,7 @@ describe('warnTrackedOutputFiles', () => {
 
   it('returns without writing when git ls-files fails', async () => {
     mockExecFileAsync.mockRejectedValue(new Error('git failed'));
-    const stderrSpy = vi
-      .spyOn(process.stderr, 'write')
-      .mockImplementation((() => true) as typeof process.stderr.write);
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
 
     await warnTrackedOutputFiles();
 
