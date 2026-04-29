@@ -21,6 +21,19 @@ export type RepoPickerRepository =
   | { nameWithOwner: string; group: 'other' }
   | { nameWithOwner: string; group: 'organization'; organizationLogin: string };
 
+export type RepoPickerSearchRepository = Extract<
+  RepoPickerRepository,
+  { group: 'owner' | 'other' }
+>;
+
+export interface RepoPickerSearchResult {
+  repositories: RepoPickerSearchRepository[];
+  pageInfo: {
+    hasNextPage: boolean;
+    endCursor: string | null;
+  };
+}
+
 export interface PipelineIssue extends ListIssueItem {
   tokenUsage: TokenUsage;
 }
@@ -78,6 +91,10 @@ export interface ShipperApi {
   checkPrerequisites: () => Promise<Prerequisites>;
   getConfig: () => Promise<AppConfig>;
   listRepos: () => Promise<RepoPickerRepository[]>;
+  searchRepos: (request: {
+    query: string;
+    cursor?: string | null;
+  }) => Promise<RepoPickerSearchResult>;
   listAdoptableIssues: (repo: string) => Promise<ListAdoptableIssuesSuccess | ListIssuesFailure>;
   listIssues: (repo: string) => Promise<ListIssuesSuccess | ListIssuesFailure>;
   fetchIssueTimelines: (

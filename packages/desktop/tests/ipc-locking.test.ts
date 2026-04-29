@@ -361,6 +361,70 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string');
 }
 
+function getGhArgs(index: number): string[] {
+  const ghCall: unknown = state.ghMock.mock.calls[index]?.[0];
+  if (!isStringArray(ghCall)) {
+    throw new Error(`Expected gh call ${index} to have string arguments.`);
+  }
+
+  return ghCall;
+}
+
+function getGhQuery(index: number): string {
+  const queryArgument = getGhArgs(index).find((argument) => argument.startsWith('query='));
+  if (queryArgument === undefined) {
+    throw new Error(`Expected gh call ${index} to include a GraphQL query.`);
+  }
+
+  return queryArgument.slice('query='.length);
+}
+
+function getGhVariable(index: number, variableName: string): string | undefined {
+  return getGhArgs(index).find((argument) => argument.startsWith(`${variableName}=`));
+}
+
+function mockRepoSearchScope({
+  viewerLogin = 'octocat',
+  organizations = ['acme'],
+  collaborators = [],
+}: {
+  viewerLogin?: string;
+  organizations?: string[];
+  collaborators?: string[];
+} = {}): void {
+  state.ghMock
+    .mockResolvedValueOnce({
+      stdout: JSON.stringify({ data: { viewer: { login: viewerLogin } } }),
+      stderr: '',
+    })
+    .mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        data: {
+          viewer: {
+            organizations: {
+              nodes: organizations.map((login) => ({ login })),
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+          },
+        },
+      }),
+      stderr: '',
+    })
+    .mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        data: {
+          viewer: {
+            repositories: {
+              nodes: collaborators.map((nameWithOwner) => ({ nameWithOwner })),
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+          },
+        },
+      }),
+      stderr: '',
+    });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   warnMock.mockClear();
@@ -728,6 +792,259 @@ describe('desktop IPC locking', () => {
     await expect(handler({}, undefined)).rejects.toThrow(
       /Failed to parse repository list from GitHub CLI:/
     );
+  });
+
+  it('searches repositories through relationship-scoped GraphQL and parses paged results', async () => {
+    await loadHandlers();
+    state.ghMock
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({ data: { viewer: { login: 'OctoCat' } } }),
+        stderr: '',
+      })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          data: {
+            viewer: {
+              organizations: {
+                nodes: [{ login: 'acme' }, { login: 'ACME' }],
+                pageInfo: { hasNextPage: true, endCursor: 'org-cursor-1' },
+              },
+            },
+          },
+        }),
+        stderr: '',
+      })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          data: {
+            viewer: {
+              organizations: {
+                nodes: [{ login: 'beta' }, null],
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            },
+          },
+        }),
+        stderr: '',
+      })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          data: {
+            viewer: {
+              repositories: {
+                nodes: [
+                  { nameWithOwner: 'outside/exact-match' },
+                  { nameWithOwner: 'OUTSIDE/EXACT-MATCH' },
+                ],
+                pageInfo: { hasNextPage: true, endCursor: 'collab-cursor-1' },
+              },
+            },
+          },
+        }),
+        stderr: '',
+      })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          data: {
+            viewer: {
+              repositories: {
+                nodes: [{ nameWithOwner: 'outside/other' }, null],
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            },
+          },
+        }),
+        stderr: '',
+      })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          data: {
+            search: {
+              nodes: [
+                {
+                  nameWithOwner: 'outside/exact-match',
+                  isArchived: false,
+                  owner: { login: 'outside' },
+                },
+                null,
+                {},
+                {
+                  nameWithOwner: 'octocat/shipper',
+                  isArchived: false,
+                  owner: { login: 'octocat' },
+                },
+                { nameWithOwner: 'acme/shipper', isArchived: false, owner: { login: 'acme' } },
+                { nameWithOwner: 'acme/old', isArchived: true, owner: { login: 'acme' } },
+              ],
+              pageInfo: { hasNextPage: true, endCursor: 'search-cursor-1' },
+            },
+          },
+        }),
+        stderr: '',
+      });
+    const handler = getHandler('search-repos');
+
+    await expect(
+      handler({}, { query: 'outside/exact-match user:public archived:true', cursor: null })
+    ).resolves.toEqual({
+      repositories: [
+        { nameWithOwner: 'outside/exact-match', group: 'other' },
+        { nameWithOwner: 'octocat/shipper', group: 'owner' },
+        { nameWithOwner: 'acme/shipper', group: 'other' },
+      ],
+      pageInfo: { hasNextPage: true, endCursor: 'search-cursor-1' },
+    });
+
+    expect(getGhVariable(1, 'limit')).toBe('limit=100');
+    expect(getGhVariable(1, 'cursor')).toBeUndefined();
+    expect(getGhVariable(2, 'cursor')).toBe('cursor=org-cursor-1');
+    expect(getGhVariable(3, 'limit')).toBe('limit=100');
+    expect(getGhVariable(4, 'cursor')).toBe('cursor=collab-cursor-1');
+
+    const organizationQuery = getGhQuery(1);
+    expect(organizationQuery).toContain('viewer');
+    expect(organizationQuery).toContain('organizations(first: $limit, after: $cursor)');
+
+    const collaboratorQuery = getGhQuery(3);
+    expect(collaboratorQuery).toContain('affiliations: [COLLABORATOR]');
+    expect(collaboratorQuery).toContain('isArchived: false');
+
+    const searchQueryVariable = getGhVariable(5, 'searchQuery');
+    expect(searchQueryVariable).toContain('outside exact-match userpublic archivedtrue');
+    expect(searchQueryVariable).toContain('in:name');
+    expect(searchQueryVariable).toContain('archived:false');
+    expect(searchQueryVariable).toContain('fork:true');
+    expect(searchQueryVariable).toContain('user:OctoCat');
+    expect(searchQueryVariable).toContain('org:acme');
+    expect(searchQueryVariable).toContain('org:beta');
+    expect(searchQueryVariable).not.toContain('user:public');
+    expect(searchQueryVariable).not.toContain('archived:true');
+  });
+
+  it('passes load-more cursors to repository search without merging collaborator exact matches', async () => {
+    await loadHandlers();
+    mockRepoSearchScope({ collaborators: ['outside/exact-match'] });
+    state.ghMock.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        data: {
+          search: {
+            nodes: [
+              { nameWithOwner: 'acme/next-page', isArchived: false, owner: { login: 'acme' } },
+            ],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+      }),
+      stderr: '',
+    });
+    const handler = getHandler('search-repos');
+
+    await expect(
+      handler({}, { query: 'outside/exact-match', cursor: 'search-cursor-1' })
+    ).resolves.toEqual({
+      repositories: [{ nameWithOwner: 'acme/next-page', group: 'other' }],
+      pageInfo: { hasNextPage: false, endCursor: null },
+    });
+
+    expect(getGhVariable(3, 'cursor')).toBe('cursor=search-cursor-1');
+  });
+
+  it('returns an empty page for blank repository search queries', async () => {
+    await loadHandlers();
+    const handler = getHandler('search-repos');
+
+    await expect(handler({}, { query: '   ', cursor: null })).resolves.toEqual({
+      repositories: [],
+      pageInfo: { hasNextPage: false, endCursor: null },
+    });
+    expect(state.ghMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed repository search payloads', async () => {
+    await loadHandlers();
+    const handler = getHandler('search-repos');
+
+    await expect(handler({}, { query: 'shipper', cursor: 42 })).rejects.toThrow(
+      'Invalid repository search payload.'
+    );
+    await expect(handler({}, { cursor: null })).rejects.toThrow(
+      'Invalid repository search payload.'
+    );
+  });
+
+  it('surfaces descriptive repository search parser errors', async () => {
+    await loadHandlers();
+    mockRepoSearchScope();
+    state.ghMock.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        data: {
+          search: {
+            nodes: [{ nameWithOwner: 'octocat/shipper', isArchived: false }],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+      }),
+      stderr: '',
+    });
+    const handler = getHandler('search-repos');
+
+    await expect(handler({}, { query: 'shipper', cursor: null })).rejects.toThrow(
+      /Failed to parse repository search result from GitHub CLI: Expected repository search result node owner./
+    );
+  });
+
+  it('surfaces descriptive repository search scope parser errors', async () => {
+    await loadHandlers();
+    state.ghMock.mockResolvedValueOnce({
+      stdout: JSON.stringify({ data: { viewer: { login: 'octocat' } } }),
+      stderr: '',
+    });
+    state.ghMock.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        data: {
+          viewer: {
+            organizations: {
+              nodes: [{ login: 42 }],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+          },
+        },
+      }),
+      stderr: '',
+    });
+    const handler = getHandler('search-repos');
+
+    await expect(handler({}, { query: 'shipper', cursor: null })).rejects.toThrow(
+      /Failed to parse repository search organizations from GitHub CLI: Expected repository search organization login./
+    );
+  });
+
+  it('resets failed repository search scope initialization so later searches can retry', async () => {
+    await loadHandlers();
+    state.ghMock.mockRejectedValueOnce(new Error('viewer failed'));
+    mockRepoSearchScope();
+    state.ghMock.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        data: {
+          search: {
+            nodes: [
+              { nameWithOwner: 'octocat/shipper', isArchived: false, owner: { login: 'octocat' } },
+            ],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+      }),
+      stderr: '',
+    });
+    const handler = getHandler('search-repos');
+
+    await expect(handler({}, { query: 'shipper', cursor: null })).rejects.toThrow('viewer failed');
+    await expect(handler({}, { query: 'shipper', cursor: null })).resolves.toEqual({
+      repositories: [{ nameWithOwner: 'octocat/shipper', group: 'owner' }],
+      pageInfo: { hasNextPage: false, endCursor: null },
+    });
+
+    expect(state.ghMock).toHaveBeenCalledTimes(5);
   });
 
   it('prefers settings.local.json over settings.json when resolving the init agent', async () => {
@@ -1798,6 +2115,7 @@ describe('desktop IPC locking', () => {
         'execute-reset',
         'get-config',
         'list-repos',
+        'search-repos',
         'pause-state:list',
         'pause-state:add',
         'pause-state:remove',

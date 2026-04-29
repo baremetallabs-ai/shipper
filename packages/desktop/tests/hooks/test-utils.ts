@@ -73,6 +73,9 @@ export function createMockShipperApi(): MockShipperApiController {
     ),
     listAdoptableIssues: vi.fn(() => Promise.resolve({ ok: true, issues: [] })),
     listRepos: vi.fn(() => Promise.resolve([])),
+    searchRepos: vi.fn(() =>
+      Promise.resolve({ repositories: [], pageInfo: { hasNextPage: false, endCursor: null } })
+    ),
     listIssues: vi.fn(() => Promise.resolve({ ok: true, issues: [] })),
     fetchIssueTimelines: vi.fn(() => Promise.resolve(new Map<number, TimelineLabelEvent[]>())),
     listPausedIssues: vi.fn(() => Promise.resolve([])),
