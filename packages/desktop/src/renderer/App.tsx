@@ -30,11 +30,7 @@ import { getWorkflowStageCacheKey } from './lib/app-utils.js';
 import { getShipperApi } from './lib/shipper-api.js';
 import type { BackgroundCommandsBridge, IssuePipelineBridge } from './types.js';
 
-function getGroomLaunchKey(repo: string, issueNumber: number): string {
-  return `${repo}#${issueNumber}`;
-}
-
-function getShipLaunchKey(repo: string, issueNumber: number): string {
+function getLaunchKey(repo: string, issueNumber: number): string {
   return `${repo}#${issueNumber}`;
 }
 
@@ -136,6 +132,10 @@ export default function App(): JSX.Element {
   );
 
   useEffect(() => {
+    if (launchingShipKeysRef.current.size === 0) {
+      return;
+    }
+
     const visibleBackgroundSessionIds = new Set(
       backgroundState.backgroundCommands.map((command) => command.id)
     );
@@ -171,7 +171,7 @@ export default function App(): JSX.Element {
       return;
     }
 
-    const groomKey = getGroomLaunchKey(repo, issueNumber);
+    const groomKey = getLaunchKey(repo, issueNumber);
     if (launchingGroomKeysRef.current.has(groomKey)) {
       return;
     }
@@ -224,7 +224,7 @@ export default function App(): JSX.Element {
       return;
     }
 
-    const shipKey = getShipLaunchKey(repo, issueNumber);
+    const shipKey = getLaunchKey(repo, issueNumber);
     if (launchingShipKeysRef.current.has(shipKey)) {
       return;
     }
