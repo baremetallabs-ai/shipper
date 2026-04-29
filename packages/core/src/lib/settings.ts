@@ -270,7 +270,10 @@ async function readSettingsFile(filepath: string): Promise<Partial<Settings>> {
   }
 
   try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const parsed: unknown = JSON.parse(raw);
+    if (!isPlainObject(parsed)) {
+      return {};
+    }
     // Auto-migrate legacy "agent" string to "agents.default"
     if (typeof parsed.agent === 'string' && !parsed.agents && !parsed.commands) {
       parsed.agents = { default: parsed.agent };
