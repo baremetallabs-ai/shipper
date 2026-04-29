@@ -144,6 +144,28 @@ describe('IssueCard', () => {
     expect(groomButton.innerHTML).toContain('animate-spin');
   });
 
+  it('renders disabled Ship button feedback while a ship launch is pending', () => {
+    const onShip = vi.fn();
+
+    render(
+      <IssueCard
+        issue={createIssue()}
+        tokenUsage={createTokenUsage()}
+        onShip={onShip}
+        isShipPending
+      />
+    );
+
+    const shipButton = screen.getByRole('button', { name: 'Ship' });
+
+    expect(shipButton).toHaveProperty('disabled', true);
+    expect(shipButton.textContent).toContain('Ship');
+    expect(shipButton.innerHTML).toContain('animate-spin');
+
+    fireEvent.click(shipButton);
+    expect(onShip).not.toHaveBeenCalled();
+  });
+
   it('renders failed styling on the card surface', () => {
     render(
       <IssueCard issue={createIssue({ labels: [FAILED_LABEL] })} tokenUsage={createTokenUsage()} />

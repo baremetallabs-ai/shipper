@@ -73,11 +73,13 @@ vi.mock('../../src/renderer/components/new-issue-dialog.js', () => ({
 vi.mock('../../src/renderer/components/pipeline-board.js', () => ({
   PipelineBoard: ({
     groomPendingIssues,
+    shipPendingIssues,
     onGroom,
     onShip,
     onToggleAutoShip,
   }: {
     groomPendingIssues: ReadonlySet<number>;
+    shipPendingIssues: ReadonlySet<number>;
     onGroom: (issueNumber: number) => void;
     onShip: (issueNumber: number) => void;
     onToggleAutoShip: () => void;
@@ -103,11 +105,21 @@ vi.mock('../../src/renderer/components/pipeline-board.js', () => ({
       </button>
       <button
         type="button"
+        disabled={shipPendingIssues.has(42)}
         onClick={() => {
           onShip(42);
         }}
       >
-        Ship issue
+        Ship issue 42
+      </button>
+      <button
+        type="button"
+        disabled={shipPendingIssues.has(43)}
+        onClick={() => {
+          onShip(43);
+        }}
+      >
+        Ship issue 43
       </button>
       <button
         type="button"
@@ -295,6 +307,23 @@ function resetMockState(): void {
     pendingCloseSession: null,
     sessions: [],
     toggleButtonRef: { current: null },
+  };
+}
+
+function createBackgroundShipCommand(
+  overrides: Record<string, unknown> = {}
+): Record<string, unknown> {
+  return {
+    id: 'bg-ship-42',
+    command: 'ship',
+    repo: 'owner/repo',
+    status: 'running',
+    title: 'Ship #42',
+    detail: 'Shipping #42...',
+    output: '',
+    cancelled: false,
+    issueNumber: 42,
+    ...overrides,
   };
 }
 
@@ -536,14 +565,117 @@ describe('App setup launch', () => {
     expect(state.spawnShipperSetupMock).toHaveBeenLastCalledWith('owner/repo-b', 120, 30);
   });
 
-  it('prompts before shipping a paused issue and resumes only on confirm', async () => {
-    state.pipelineState.pausedIssues = new Set<number>([42]);
+  it('shows pending Ship feedback until the launched background command is visible', async () => {
+    let resolveShip: ((value: { sessionId: string }) => void) | undefined;
+    const shipPromise = new Promise<{ sessionId: string }>((resolve) => {
+      resolveShip = resolve;
+    });
+    state.spawnBackgroundShipMock.mockReturnValue(shipPromise);
+
+    const { rerender } = render(<App />);
+
+    const issue42Button = screen.getByRole('button', { name: 'Ship issue 42' });
+    const issue43Button = screen.getByRole('button', { name: 'Ship issue 43' });
+
+    fireEvent.click(issue42Button);
+
+    expect(issue42Button).toHaveProperty('disabled', true);
+    expect(issue43Button).toHaveProperty('disabled', false);
+
+    fireEvent.click(issue42Button);
+
+    expect(state.spawnBackgroundShipMock).toHaveBeenCalledTimes(1);
+    expect(state.spawnBackgroundShipMock).toHaveBeenCalledWith(42, 'owner/repo', false);
+
+    await act(async () => {
+      resolveShip?.({ sessionId: 'bg-ship-42' });
+      await shipPromise;
+    });
+
+    expect(screen.getByRole('button', { name: 'Ship issue 42' })).toHaveProperty('disabled', true);
+
+    state.backgroundState = {
+      ...state.backgroundState,
+      backgroundCommands: [createBackgroundShipCommand()],
+    };
+
+    await act(async () => {
+      rerender(<App />);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByRole('button', { name: 'Ship issue 42' })).toHaveProperty('disabled', false);
+  });
+
+  it('does not clear pending Ship feedback for stale commands from the same issue', async () => {
+    state.backgroundState = {
+      ...state.backgroundState,
+      backgroundCommands: [
+        createBackgroundShipCommand({
+          id: 'old-bg-ship-42',
+          status: 'complete',
+        }),
+      ],
+    };
+    state.spawnBackgroundShipMock.mockResolvedValue({ sessionId: 'new-bg-ship-42' });
+
+    const { rerender } = render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ship issue 42' }));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.getByRole('button', { name: 'Ship issue 42' })).toHaveProperty('disabled', true);
+
+    state.backgroundState = {
+      ...state.backgroundState,
+      backgroundCommands: [
+        createBackgroundShipCommand({
+          id: 'new-bg-ship-42',
+        }),
+      ],
+    };
+
+    await act(async () => {
+      rerender(<App />);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByRole('button', { name: 'Ship issue 42' })).toHaveProperty('disabled', false);
+  });
+
+  it('clears pending Ship feedback after a failed launch and keeps the fetch-error path', async () => {
+    state.spawnBackgroundShipMock.mockRejectedValue(new Error('spawn failed'));
 
     render(<App />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Ship issue' }));
+    const issue42Button = screen.getByRole('button', { name: 'Ship issue 42' });
+
+    await act(async () => {
+      fireEvent.click(issue42Button);
+      await Promise.resolve();
+    });
+
+    expect(issue42Button).toHaveProperty('disabled', false);
+    expect(state.pipelineState.setFetchError).toHaveBeenCalledWith(
+      'Failed to launch shipper ship: spawn failed'
+    );
+  });
+
+  it('prompts before shipping a paused issue and shows pending feedback only after confirm', async () => {
+    state.pipelineState.pausedIssues = new Set<number>([42]);
+    state.spawnBackgroundShipMock.mockReturnValue(new Promise(() => {}));
+
+    render(<App />);
+
+    const issue42Button = screen.getByRole('button', { name: 'Ship issue 42' });
+    fireEvent.click(issue42Button);
+
     expect(screen.getByText('This issue is paused. Resume and ship anyway?')).toBeTruthy();
     expect(state.spawnBackgroundShipMock).not.toHaveBeenCalled();
+    expect(issue42Button).toHaveProperty('disabled', false);
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Resume and ship' }));
@@ -552,6 +684,7 @@ describe('App setup launch', () => {
 
     expect(state.backgroundState.handleResumeIssue).toHaveBeenCalledWith(42, 'owner/repo');
     expect(state.spawnBackgroundShipMock).toHaveBeenCalledWith(42, 'owner/repo', false);
+    expect(screen.getByRole('button', { name: 'Ship issue 42' })).toHaveProperty('disabled', true);
   });
 
   it('leaves a paused issue untouched when the resume-and-ship dialog is cancelled', () => {
@@ -559,7 +692,7 @@ describe('App setup launch', () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Ship issue' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Ship issue 42' }));
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
     expect(state.backgroundState.handleResumeIssue).not.toHaveBeenCalled();

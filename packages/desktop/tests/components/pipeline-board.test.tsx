@@ -128,6 +128,7 @@ function renderBoard({
   pausedIssues = new Set<number>(),
   pausePendingIssues = new Set<number>(),
   groomPendingIssues = new Set<number>(),
+  shipPendingIssues = new Set<number>(),
   resettingIssues = new Set<number>(),
   onResetSelect = vi.fn<(selection: ResetSelection) => void>(),
   onToggleAutoMerge = vi.fn(),
@@ -147,6 +148,7 @@ function renderBoard({
     pausedIssues,
     pausePendingIssues,
     groomPendingIssues,
+    shipPendingIssues,
     shippingCommands,
     autoMergeEnabled: false,
     autoShipEnabled: false,
@@ -234,6 +236,7 @@ describe('PipelineBoard', () => {
         pausedIssues={new Set([22])}
         pausePendingIssues={new Set<number>()}
         groomPendingIssues={new Set<number>()}
+        shipPendingIssues={new Set<number>()}
         shippingCommands={new Map<number, ActiveShippingCommand>()}
         autoMergeEnabled={false}
         autoShipEnabled={false}
@@ -542,6 +545,35 @@ describe('PipelineBoard', () => {
     expect(pendingGroom.innerHTML).toContain('animate-spin');
     expect(availableGroom).toHaveProperty('disabled', false);
     expect(availableGroom.innerHTML).not.toContain('animate-spin');
+  });
+
+  it('scopes pending Ship feedback to the matching pipeline issue card', () => {
+    renderBoard({
+      issues: [
+        createIssue({ number: 22, title: 'First ship candidate' }),
+        createIssue({ number: 23, title: 'Second ship candidate' }),
+      ],
+      columnMap: createColumnMap({
+        [IMPLEMENTED_LABEL]: [
+          createIssue({ number: 22, title: 'First ship candidate' }),
+          createIssue({ number: 23, title: 'Second ship candidate' }),
+        ],
+      }),
+      attentionIssues: { failed: [], new: [] },
+      shipPendingIssues: new Set([22]),
+    });
+
+    const pendingCard = screen.getByTestId('issue-card-22');
+    const availableCard = screen.getByTestId('issue-card-23');
+    const pendingShip = within(pendingCard).getByRole('button', { name: 'Ship' });
+    const availableShip = within(availableCard).getByRole('button', { name: 'Ship' });
+    const autoShip = screen.getByRole('button', { name: 'Auto-ship' });
+
+    expect(pendingShip).toHaveProperty('disabled', true);
+    expect(pendingShip.innerHTML).toContain('animate-spin');
+    expect(availableShip).toHaveProperty('disabled', false);
+    expect(availableShip.innerHTML).not.toContain('animate-spin');
+    expect(autoShip).toHaveProperty('disabled', false);
   });
 
   it('keeps failed Reset actions available when the New section is not rendered', () => {
