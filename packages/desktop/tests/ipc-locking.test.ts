@@ -578,6 +578,7 @@ describe('desktop IPC locking', () => {
             repositories: {
               nodes: [
                 { nameWithOwner: 'octocat/personal-new', owner: { login: 'octocat' } },
+                null,
                 { nameWithOwner: 'acme/org-repo', owner: { login: 'acme' } },
                 { nameWithOwner: 'someone-else/foo', owner: { login: 'someone-else' } },
               ],
@@ -640,7 +641,7 @@ describe('desktop IPC locking', () => {
     const handler = getHandler('list-repos');
 
     await expect(handler({}, undefined)).rejects.toThrow(
-      /Failed to parse repository list from GitHub CLI:/
+      /Failed to parse repository list from GitHub CLI: GitHub GraphQL returned errors: bad query/
     );
   });
 

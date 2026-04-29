@@ -237,7 +237,16 @@ function parseRepoList(json: string): RepoPickerRepository[] {
     }
 
     if ('errors' in parsed && Array.isArray(parsed.errors) && parsed.errors.length > 0) {
-      throw new Error('GitHub GraphQL returned errors.');
+      const messages = parsed.errors
+        .map((error) =>
+          isPlainObject(error) && typeof error.message === 'string' ? error.message.trim() : ''
+        )
+        .filter((message) => message.length > 0);
+      throw new Error(
+        messages.length > 0
+          ? `GitHub GraphQL returned errors: ${messages.join('; ')}`
+          : 'GitHub GraphQL returned errors.'
+      );
     }
 
     if (!('data' in parsed) || !isPlainObject(parsed.data)) {
@@ -265,7 +274,11 @@ function parseRepoList(json: string): RepoPickerRepository[] {
 
     const viewerLogin = viewer.login.toLowerCase();
 
-    return repositories.nodes.map((node: unknown) => {
+    return repositories.nodes.flatMap((node: unknown) => {
+      if (node === null) {
+        return [];
+      }
+
       if (!isPlainObject(node)) {
         throw new Error('Expected repository list node object.');
       }
@@ -282,10 +295,12 @@ function parseRepoList(json: string): RepoPickerRepository[] {
         throw new Error('Expected repository list node owner login.');
       }
 
-      return {
-        nameWithOwner: node.nameWithOwner,
-        group: node.owner.login.toLowerCase() === viewerLogin ? 'owner' : 'other',
-      };
+      return [
+        {
+          nameWithOwner: node.nameWithOwner,
+          group: node.owner.login.toLowerCase() === viewerLogin ? 'owner' : 'other',
+        },
+      ];
     });
   } catch (error) {
     throw new Error(`Failed to parse repository list from GitHub CLI: ${toErrorMessage(error)}`);
