@@ -1,6 +1,6 @@
 appId: com.dnsquared.shipper
 productName: Shipper
-electronVersion: 35.7.5
+electronVersion: 41.3.0
 
 mac:
   category: public.app-category.developer-tools

@@ -1,5 +1,10 @@
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import path from 'node:path';
+
 import type { BrowserWindow } from 'electron';
-import * as pty from 'node-pty';
+import * as bundledPty from 'node-pty';
+import type * as NodePty from 'node-pty';
 
 export interface PtySpawnOptions {
   cols: number;
@@ -10,12 +15,79 @@ export interface PtySpawnOptions {
 }
 
 interface PtySessionEntry {
-  ptyProcess: pty.IPty;
+  ptyProcess: NodePty.IPty;
   sequence: number;
   pendingBytes: number[];
 }
 
 const GRACE_TIMEOUT_MS = 5_000;
+const require = createRequire(import.meta.url);
+
+let cachedPty: typeof NodePty | null = null;
+
+type ElectronApp = typeof import('electron').app;
+interface ElectronModule {
+  app: ElectronApp;
+}
+
+function getElectronApp(): ElectronApp {
+  return (require('electron') as ElectronModule).app;
+}
+
+function isPackagedDarwinElectron(): boolean {
+  return (
+    process.platform === 'darwin' && 'electron' in process.versions && getElectronApp().isPackaged
+  );
+}
+
+function readNodePtyPackageVersion(sourcePath: string): string {
+  const packageJson = JSON.parse(readFileSync(path.join(sourcePath, 'package.json'), 'utf-8')) as {
+    version?: unknown;
+  };
+  if (typeof packageJson.version !== 'string') {
+    throw new Error('Unable to determine node-pty package version.');
+  }
+  return packageJson.version;
+}
+
+function ensurePackagedDarwinNodePtyPath(): string {
+  const app = getElectronApp();
+  // node-pty's macOS helper fails to spawn from inside a .app bundle path.
+  const sourcePath = path.join(
+    process.resourcesPath,
+    'app.asar.unpacked',
+    'node_modules',
+    'node-pty'
+  );
+  const packageVersion = readNodePtyPackageVersion(sourcePath);
+  const electronVersion = process.versions.electron;
+  const cacheRoot = path.join(app.getPath('userData'), 'native');
+  const cachePath = path.join(cacheRoot, `node-pty-${packageVersion}-electron-${electronVersion}`);
+  const markerPath = path.join(cachePath, '.shipper-node-pty-cache.json');
+  const marker = `${JSON.stringify({ packageVersion, electronVersion }, null, 2)}\n`;
+
+  if (!existsSync(markerPath) || readFileSync(markerPath, 'utf-8') !== marker) {
+    rmSync(cachePath, { recursive: true, force: true });
+    mkdirSync(cacheRoot, { recursive: true });
+    cpSync(sourcePath, cachePath, { recursive: true });
+    writeFileSync(markerPath, marker);
+  }
+
+  return cachePath;
+}
+
+function loadNodePty(): typeof NodePty {
+  if (cachedPty !== null) return cachedPty;
+
+  if (isPackagedDarwinElectron()) {
+    const nodePtyPath = path.join(ensurePackagedDarwinNodePtyPath(), 'lib', 'index.js');
+    cachedPty = require(nodePtyPath) as typeof NodePty;
+    return cachedPty;
+  }
+
+  cachedPty = bundledPty;
+  return cachedPty;
+}
 
 /**
  * Decodes a chunk of bytes that may contain incomplete UTF-8 sequences at the end.
@@ -116,7 +188,7 @@ export class PtyManager {
       throw new Error(`Session "${id}" is already running.`);
     }
 
-    const ptyProcess = pty.spawn(command, args, {
+    const ptyProcess = loadNodePty().spawn(command, args, {
       name: 'xterm-256color',
       cols: options.cols,
       rows: options.rows,
