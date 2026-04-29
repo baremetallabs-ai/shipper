@@ -46,7 +46,7 @@ function queueExecResult(opts: { code?: number; stdout?: string; stderr?: string
         error.stderr = stderr;
         callback(error, stdout, stderr);
       });
-      return {} as object;
+      return {};
     }
   );
 }
@@ -122,7 +122,7 @@ describe('execAsync', () => {
           error.stderr = '';
           callback(error, '', '');
         });
-        return {} as object;
+        return {};
       }
     );
 

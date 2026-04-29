@@ -40,15 +40,13 @@ describe('ship-worker', () => {
       listener: (...args: unknown[]) => void
     ) => {
       if (event === 'message') {
-        messageHandler = listener as (message: unknown) => void;
+        messageHandler = listener;
       }
       return process;
     }) as typeof process.on);
     processExitMock = vi
       .spyOn(process, 'exit')
-      .mockImplementation(
-        ((code?: string | number | null) => code as never) as typeof process.exit
-      );
+      .mockImplementation((code?: string | number | null) => code as never);
     Object.defineProperty(process, 'send', {
       configurable: true,
       value: processSendMock,

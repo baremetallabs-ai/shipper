@@ -108,12 +108,12 @@ export async function loadSettings(): Promise<void> {
     ...Object.keys(localCommands).filter(isSafeCommandKey),
     'default',
   ]);
-  const mergedCommands = {
+  const mergedCommands: Settings['commands'] = {
     ...Object.fromEntries(
       Object.entries(DEFAULTS.commands).map(([step, config]) => [step, { ...config }])
     ),
     default: { ...DEFAULTS.commands.default },
-  } as Settings['commands'];
+  };
 
   for (const step of allCommandSteps) {
     const baseConfig = isPlainObject(baseCommands[step]) ? baseCommands[step] : {};
@@ -123,7 +123,7 @@ export async function loadSettings(): Promise<void> {
         ...DEFAULTS.commands.default,
         ...baseConfig,
         ...localConfig,
-      } as Settings['commands']['default'];
+      };
       continue;
     }
 
@@ -131,7 +131,7 @@ export async function loadSettings(): Promise<void> {
       ...DEFAULTS.commands[step],
       ...baseConfig,
       ...localConfig,
-    } as CommandConfig;
+    };
   }
 
   settings = {
@@ -335,7 +335,7 @@ async function readSettingsFile(filepath: string): Promise<Partial<Settings>> {
       delete parsed.headless;
     }
 
-    return parsed as Partial<Settings>;
+    return parsed;
   } catch (err: unknown) {
     throw new Error(`Malformed JSON in ${filepath}: ${toErrorMessage(err)}`);
   }

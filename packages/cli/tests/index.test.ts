@@ -125,9 +125,7 @@ describe('shipper-cli', () => {
       exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
         throw new Error(`process.exit:${code ?? 0}`);
       }) as typeof process.exit);
-      writeSpy = vi
-        .spyOn(process.stdout, 'write')
-        .mockImplementation((() => true) as typeof process.stdout.write);
+      writeSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
       mockRunPreflight.mockClear();
       mockWarnTrackedOutputFiles.mockClear();
       mockLoadSettings.mockClear();
