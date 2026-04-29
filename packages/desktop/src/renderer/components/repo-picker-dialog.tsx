@@ -118,6 +118,21 @@ export function RepoPickerDialog({
     onOpenChange(false);
   }
 
+  function renderRepoItems(reposToRender: RepoPickerRepository[]): JSX.Element[] {
+    return reposToRender.map((repo) => (
+      <CommandItem
+        key={repo.nameWithOwner}
+        value={repo.nameWithOwner}
+        onSelect={() => {
+          handleSelect(repo.nameWithOwner);
+        }}
+      >
+        <PlusCircle className="size-4 text-muted-foreground" />
+        <span>{repo.nameWithOwner}</span>
+      </CommandItem>
+    ));
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="gap-0 p-0">
@@ -156,36 +171,12 @@ export function RepoPickerDialog({
             ) : null}
 
             {ownerRepos.length > 0 ? (
-              <CommandGroup heading="Your repositories">
-                {ownerRepos.map((repo) => (
-                  <CommandItem
-                    key={repo.nameWithOwner}
-                    value={repo.nameWithOwner}
-                    onSelect={() => {
-                      handleSelect(repo.nameWithOwner);
-                    }}
-                  >
-                    <PlusCircle className="size-4 text-muted-foreground" />
-                    <span>{repo.nameWithOwner}</span>
-                  </CommandItem>
-                ))}
-              </CommandGroup>
+              <CommandGroup heading="Your repositories">{renderRepoItems(ownerRepos)}</CommandGroup>
             ) : null}
 
             {otherRepos.length > 0 ? (
               <CommandGroup heading="Other repositories">
-                {otherRepos.map((repo) => (
-                  <CommandItem
-                    key={repo.nameWithOwner}
-                    value={repo.nameWithOwner}
-                    onSelect={() => {
-                      handleSelect(repo.nameWithOwner);
-                    }}
-                  >
-                    <PlusCircle className="size-4 text-muted-foreground" />
-                    <span>{repo.nameWithOwner}</span>
-                  </CommandItem>
-                ))}
+                {renderRepoItems(otherRepos)}
               </CommandGroup>
             ) : null}
 
