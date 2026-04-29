@@ -80,7 +80,7 @@ type Handler = (args: Record<string, unknown>) => Promise<{
   isError?: boolean;
 }>;
 
-type ToolSchema = Record<string, z.ZodTypeAny> | undefined;
+type ToolSchema = Record<string, z.ZodType> | undefined;
 type ToolGetter = ((name: string) => Handler) & {
   getSchema: (name: string) => ToolSchema;
   invokeValidated: (
@@ -277,6 +277,17 @@ describe('shipper_reset', () => {
     const getTool = collectTools();
 
     const error = await expectZodError(getTool.invokeValidated('shipper_reset', { target: 'new' }));
+
+    expect(error.issues[0]?.path).toEqual(['issue']);
+    expect(mockScanArtifacts).not.toHaveBeenCalled();
+  });
+
+  it('validates wrong-typed issue at the registered schema boundary', async () => {
+    const getTool = collectTools();
+
+    const error = await expectZodError(
+      getTool.invokeValidated('shipper_reset', { issue: '42', target: 'new' })
+    );
 
     expect(error.issues[0]?.path).toEqual(['issue']);
     expect(mockScanArtifacts).not.toHaveBeenCalled();
@@ -757,6 +768,17 @@ describe('shipper_advance', () => {
 });
 
 describe('shipper_create_issue', () => {
+  it('validates empty requests at the registered schema boundary', async () => {
+    const getTool = collectTools();
+
+    const error = await expectZodError(
+      getTool.invokeValidated('shipper_create_issue', { request: '' })
+    );
+
+    expect(error.issues[0]?.path).toEqual(['request']);
+    expect(mockSpawnShipper).not.toHaveBeenCalled();
+  });
+
   it('returns the created issue payload, final message, and session log without transcript content', async () => {
     mockSpawnShipper.mockResolvedValue({
       exitCode: 0,

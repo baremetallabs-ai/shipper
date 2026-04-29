@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import type { core, z } from 'zod';
 import { toErrorMessage } from './errors.js';
 import { gh } from './gh.js';
 
@@ -13,13 +13,14 @@ export class GhPayloadError extends Error {
   }
 }
 
-export function formatZodPath(path: (string | number)[]): string {
+export function formatZodPath(path: PropertyKey[]): string {
   return path.reduce<string>((result, segment) => {
     if (typeof segment === 'number') {
       return `${result}[${segment}]`;
     }
 
-    return result ? `${result}.${segment}` : segment;
+    const key = String(segment);
+    return result ? `${result}.${key}` : key;
   }, '');
 }
 
@@ -27,17 +28,17 @@ function lowercaseFirst(value: string): string {
   return value ? `${value[0]?.toLowerCase() ?? ''}${value.slice(1)}` : value;
 }
 
-function formatZodIssue(issue: z.ZodIssue): string {
-  if (issue.code === z.ZodIssueCode.invalid_type) {
+function formatZodIssue(issue: core.$ZodIssue): string {
+  if (issue.code === 'invalid_type') {
     return `expected ${issue.expected}`;
   }
 
-  if (issue.code === z.ZodIssueCode.invalid_literal) {
-    return `expected ${JSON.stringify(issue.expected)}`;
-  }
+  if (issue.code === 'invalid_value') {
+    if (issue.values.length === 1) {
+      return `expected ${JSON.stringify(issue.values[0])}`;
+    }
 
-  if (issue.code === z.ZodIssueCode.invalid_enum_value) {
-    return `expected one of ${issue.options.map((option) => JSON.stringify(option)).join(', ')}`;
+    return `expected one of ${issue.values.map((value) => JSON.stringify(value)).join(', ')}`;
   }
 
   return lowercaseFirst(issue.message);
@@ -45,7 +46,7 @@ function formatZodIssue(issue: z.ZodIssue): string {
 
 export function parseGhJson<TOutput, TInput = unknown>(
   json: string,
-  schema: z.ZodType<TOutput, z.ZodTypeDef, TInput>,
+  schema: z.ZodType<TOutput, TInput>,
   shapeName: string
 ): TOutput {
   let parsed: unknown;
@@ -59,7 +60,7 @@ export function parseGhJson<TOutput, TInput = unknown>(
     );
   }
 
-  const result: z.SafeParseReturnType<TInput, TOutput> = schema.safeParse(parsed);
+  const result = schema.safeParse(parsed);
   if (result.success) {
     return result.data;
   }
