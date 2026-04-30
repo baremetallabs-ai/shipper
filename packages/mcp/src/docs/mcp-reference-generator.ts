@@ -10,7 +10,7 @@ import { z } from 'zod';
 import { mcpToolDefinitions, type ToolName } from '../tools.js';
 import { toolExtras, type ToolExtras } from './tool-extras.js';
 
-export const REMEDIATION_LINE = 'Run npm run docs:generate-mcp and commit the result.';
+export const REMEDIATION_LINE = 'Run `npm run docs:generate-mcp` and commit the result.';
 
 const landingIntro =
   'Shipper exposes its workflow operations to AI agents via an MCP server. Each tool below has a dedicated reference page covering schema, examples, and error modes.';
