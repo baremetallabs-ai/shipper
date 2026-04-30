@@ -60,6 +60,15 @@ describe('ejectCommand', () => {
     );
   });
 
+  it('allows setup to be ejected explicitly', () => {
+    ejectCommand('setup');
+
+    expect(writeFileSyncMock).toHaveBeenCalledWith(
+      path.resolve('.shipper', 'prompts', 'claude', 'setup.md'),
+      core.agentPrompts.claude['setup.md']
+    );
+  });
+
   it('uses the default agent even when per-step overrides are present', () => {
     // getSettings reads module-level settings state, which is not covered by fake transport seams.
     vi.spyOn(core, 'getSettings').mockReturnValue({
@@ -117,7 +126,7 @@ describe('ejectCommand', () => {
     expect(() => {
       ejectCommand('not-a-prompt');
     }).toThrow(
-      'Error: Invalid prompt name "not-a-prompt". Valid prompt names: new, groom, design, plan, implement, pr-open, pr-review, pr-remediate, unblock'
+      'Error: Invalid prompt name "not-a-prompt". Valid prompt names: new, groom, design, plan, implement, pr-open, pr-review, pr-remediate, unblock, setup'
     );
     expect(errorSpy).not.toHaveBeenCalled();
     expect(writeFileSyncMock).not.toHaveBeenCalled();
