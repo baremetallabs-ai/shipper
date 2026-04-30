@@ -13,7 +13,7 @@ const {
   mockGetRepoNwo: vi.fn<() => Promise<string>>(),
   mockLoadSettings: vi.fn<() => Promise<void>>(),
   mockRegisterInitErrorTools: vi.fn<(server: object, error: unknown) => void>(),
-  mockRegisterTools: vi.fn<(server: object, repo: string) => void>(),
+  mockRegisterTools: vi.fn<(server: object, repo: string) => Promise<void>>(),
   mockResolveAndEnterRepoDir: vi.fn<() => Promise<string>>(),
   mockRunAuthPreflight: vi.fn<() => Promise<void>>(),
   mockRunPreflight: vi.fn<(repo: string) => Promise<void>>(),
@@ -45,9 +45,7 @@ vi.mock('../src/tools.js', () => ({
   registerInitErrorTools: (server: object, error: unknown) => {
     mockRegisterInitErrorTools(server, error);
   },
-  registerTools: (server: object, repo: string) => {
-    mockRegisterTools(server, repo);
-  },
+  registerTools: (server: object, repo: string) => mockRegisterTools(server, repo),
 }));
 
 const { createServer } = await import('../src/server.js');
@@ -64,6 +62,11 @@ describe('createServer', () => {
     mockRunAuthPreflight.mockResolvedValue(undefined);
     mockGetRepoNwo.mockResolvedValue('owner/repo');
     mockRunPreflight.mockResolvedValue(undefined);
+    let registrationCompleted = false;
+    mockRegisterTools.mockImplementationOnce(async () => {
+      await Promise.resolve();
+      registrationCompleted = true;
+    });
 
     const server = await createServer();
 
@@ -74,6 +77,7 @@ describe('createServer', () => {
     expect(mockGetRepoNwo).toHaveBeenCalledOnce();
     expect(mockRunPreflight).toHaveBeenCalledWith('owner/repo');
     expect(mockRegisterTools).toHaveBeenCalledWith(server, 'owner/repo');
+    expect(registrationCompleted).toBe(true);
     expect(mockRegisterInitErrorTools).not.toHaveBeenCalled();
 
     const resolveOrder = mockResolveAndEnterRepoDir.mock.invocationCallOrder[0];

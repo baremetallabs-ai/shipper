@@ -50,6 +50,7 @@ import {
   type ShipperRunner,
   type ToolTextResult,
 } from './helpers.js';
+import { buildDocsCorpus, type DocsCorpus, type DocsSearchMatch } from './docs/corpus.js';
 
 const STAGE_SHORT_NAMES = STAGE_LABEL_NAMES.map((l) => l.replace(/^shipper:/, ''));
 const STATUS_FILTER_VALUES = [...STAGE_SHORT_NAMES, 'blocked', 'failed'] as const;
@@ -75,6 +76,8 @@ export const toolNames = [
   'shipper_list_issues',
   'shipper_get_issue',
   'shipper_get_pr_checks',
+  'shipper_docs_search',
+  'shipper_docs_get',
   'shipper_advance',
   'shipper_groom',
   'shipper_create_issue',
@@ -89,6 +92,7 @@ export const toolNames = [
 export type ToolName = (typeof toolNames)[number];
 
 type McpInputSchema = ZodRawShapeCompat;
+type McpToolContext = { docsCorpus: DocsCorpus };
 
 export type McpToolDefinition<InputSchema extends McpInputSchema = McpInputSchema> = {
   name: ToolName;
@@ -96,7 +100,7 @@ export type McpToolDefinition<InputSchema extends McpInputSchema = McpInputSchem
   inputSchema: InputSchema;
   annotations?: ToolAnnotations;
   experimental?: { flag: typeof MCP_GROOMING_FLAG; enabled: () => boolean };
-  createHandler: (repo: string) => ToolCallback<InputSchema>;
+  createHandler: (repo: string, context: McpToolContext) => ToolCallback<InputSchema>;
 };
 
 function defineTool<const InputSchema extends McpInputSchema>(
@@ -107,6 +111,20 @@ function defineTool<const InputSchema extends McpInputSchema>(
 
 function textOk(text: string): ToolTextResult {
   return { content: [{ type: 'text', text }] };
+}
+
+function formatDocsSearchMatches(matches: DocsSearchMatch[]): string {
+  return matches
+    .map((match, index) =>
+      [
+        `Match ${index + 1}`,
+        `path: ${match.path}`,
+        `title: ${match.title}`,
+        `score: ${match.score.toFixed(2)}`,
+        `snippet: ${match.snippet}`,
+      ].join('\n')
+    )
+    .join('\n\n');
 }
 
 interface PendingSession {
@@ -725,6 +743,46 @@ export const mcpToolDefinitions = [
       },
   }),
   defineTool({
+    name: 'shipper_docs_search',
+    description:
+      'Search the Shipper documentation corpus. Returns matching pages with relevance-ranked snippets so an agent can decide which page(s) to fetch in full.',
+    inputSchema: {
+      query: z.string().min(1),
+      limit: z.number().int().positive().max(25).optional(),
+    },
+    annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+    createHandler:
+      (_repo, context) =>
+      ({ query, limit }) => {
+        try {
+          const matches = context.docsCorpus.search(query, limit ?? 5);
+          if (matches.length === 0) {
+            return textOk(`No documentation matches found for query: ${query}`);
+          }
+          return textOk(formatDocsSearchMatches(matches));
+        } catch (err) {
+          return formatToolError(err);
+        }
+      },
+  }),
+  defineTool({
+    name: 'shipper_docs_get',
+    description:
+      'Fetch the full markdown content of a Shipper documentation page by its docs-site path.',
+    inputSchema: { path: z.string().min(1) },
+    annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+    createHandler:
+      (_repo, context) =>
+      ({ path }) => {
+        try {
+          const page = context.docsCorpus.get(path);
+          return textOk(page.body);
+        } catch (err) {
+          return formatToolError(err);
+        }
+      },
+  }),
+  defineTool({
     name: 'shipper_advance',
     description:
       'Advance an issue by one workflow stage (shipper next). Dispatches to the appropriate stage command based on the current label. Runs in headless mode — may take several minutes for implementation and PR review stages. Refuses to operate on `shipper:new` issues because grooming requires interactive input.',
@@ -1232,7 +1290,9 @@ export const mcpToolDefinitions = [
   }),
 ] as const;
 
-export function registerTools(server: McpServer, repo: string): void {
+export async function registerTools(server: McpServer, repo: string): Promise<void> {
+  const context: McpToolContext = { docsCorpus: await buildDocsCorpus() };
+
   for (const definition of mcpToolDefinitions) {
     if (definition.experimental && !definition.experimental.enabled()) {
       continue;
@@ -1245,7 +1305,7 @@ export function registerTools(server: McpServer, repo: string): void {
         inputSchema: definition.inputSchema,
         ...(definition.annotations ? { annotations: definition.annotations } : {}),
       },
-      definition.createHandler(repo) as ToolCallback<McpInputSchema>
+      definition.createHandler(repo, context) as ToolCallback<McpInputSchema>
     );
   }
 }
@@ -1255,6 +1315,8 @@ export function registerInitErrorTools(server: McpServer, error: unknown): void 
     'shipper_list_issues',
     'shipper_get_issue',
     'shipper_get_pr_checks',
+    'shipper_docs_search',
+    'shipper_docs_get',
     'shipper_advance',
     'shipper_create_issue',
     'shipper_unblock',

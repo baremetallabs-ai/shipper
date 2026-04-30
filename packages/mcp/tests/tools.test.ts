@@ -19,6 +19,9 @@ const {
   mockSpawnShipper,
   mockStartShipper,
   mockTryResolvePr,
+  mockBuildDocsCorpus,
+  mockDocsGet,
+  mockDocsSearch,
 } = vi.hoisted(() => ({
   mockExecuteReset: vi.fn(),
   mockExtractFinalMessage: vi.fn(),
@@ -36,6 +39,9 @@ const {
   mockSpawnShipper: vi.fn(),
   mockStartShipper: vi.fn(),
   mockTryResolvePr: vi.fn(),
+  mockBuildDocsCorpus: vi.fn(),
+  mockDocsGet: vi.fn(),
+  mockDocsSearch: vi.fn(),
 }));
 
 vi.mock('node:fs/promises', async () => {
@@ -77,6 +83,10 @@ vi.mock('../src/helpers.js', async () => {
   };
 });
 
+vi.mock('../src/docs/corpus.js', () => ({
+  buildDocsCorpus: mockBuildDocsCorpus,
+}));
+
 import { registerInitErrorTools, registerTools, toolNames } from '../src/tools.js';
 
 type Handler = (args: Record<string, unknown>) => Promise<{
@@ -95,7 +105,7 @@ type ToolGetter = ((name: string) => Handler) & {
   names: () => string[];
 };
 
-function collectTools(): ToolGetter {
+async function collectTools(): Promise<ToolGetter> {
   const registrations = new Map<
     string,
     { handler: Handler; inputSchema: ToolSchema; annotations?: ToolAnnotations }
@@ -113,7 +123,7 @@ function collectTools(): ToolGetter {
       });
     },
   };
-  registerTools(mockServer as unknown as Parameters<typeof registerTools>[0], 'owner/repo');
+  await registerTools(mockServer as unknown as Parameters<typeof registerTools>[0], 'owner/repo');
   const getRegistration = (name: string) => {
     const registration = registrations.get(name);
     if (!registration) {
@@ -232,6 +242,23 @@ beforeEach(() => {
   mockIsLockStale.mockResolvedValue(false);
   mockScanArtifacts.mockResolvedValue(makeResetScan());
   mockExecuteReset.mockResolvedValue({ operations: [], hasFailures: false });
+  mockDocsSearch.mockReturnValue([
+    {
+      path: 'agents/setup',
+      title: 'Repository setup for agents',
+      score: 12.5,
+      snippet: 'Configure a repository so any coding agent can run Shipper reliably.',
+    },
+  ]);
+  mockDocsGet.mockReturnValue({
+    path: 'agents/setup',
+    title: 'Repository setup for agents',
+    body: '# Repository setup for agents\n\nConfigure agents here.',
+  });
+  mockBuildDocsCorpus.mockResolvedValue({
+    search: mockDocsSearch,
+    get: mockDocsGet,
+  });
   // Default startShipper mock: delegate to spawnShipper (which tests configure with mockResolvedValue)
   // and surface a single completion event. Tests exercising defer can override.
   mockStartShipper.mockImplementation(
@@ -268,13 +295,13 @@ function withFlag<T>(value: string | undefined, fn: () => T | Promise<T>): Promi
 
 describe('registerTools', () => {
   it('registers every tool when experimental grooming is enabled and only gated tools otherwise', async () => {
-    await withFlag('1', () => {
-      const getTool = collectTools();
+    await withFlag('1', async () => {
+      const getTool = await collectTools();
       expect(getTool.names()).toEqual([...toolNames]);
     });
 
-    await withFlag(undefined, () => {
-      const getTool = collectTools();
+    await withFlag(undefined, async () => {
+      const getTool = await collectTools();
       expect(getTool.names()).toEqual(
         toolNames.filter((name) => name !== 'shipper_groom' && name !== 'shipper_answer_question')
       );
@@ -282,12 +309,22 @@ describe('registerTools', () => {
   });
 
   it('registers the expected MCP behavior annotations without false-valued defaults', async () => {
-    await withFlag('1', () => {
-      const getTool = collectTools();
+    await withFlag('1', async () => {
+      const getTool = await collectTools();
       const expected = {
         shipper_list_issues: { readOnlyHint: true, openWorldHint: true },
         shipper_get_issue: { readOnlyHint: true, openWorldHint: true },
         shipper_get_pr_checks: { readOnlyHint: true, openWorldHint: true },
+        shipper_docs_search: {
+          readOnlyHint: true,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+        shipper_docs_get: {
+          readOnlyHint: true,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
         shipper_advance: { openWorldHint: true },
         shipper_groom: { openWorldHint: true },
         shipper_create_issue: { openWorldHint: true },
@@ -302,7 +339,6 @@ describe('registerTools', () => {
       for (const name of toolNames) {
         const annotations = getTool.getAnnotations(name);
         expect(annotations).toEqual(expected[name]);
-        expect(Object.values(annotations ?? {})).not.toContain(false);
       }
     });
   });
@@ -323,7 +359,7 @@ describe('shipper_list_issues', () => {
       stderr: '',
     });
 
-    const getTool = collectTools();
+    const getTool = await collectTools();
     const result = await getTool('shipper_list_issues')({});
     const text = result.content[0]?.text ?? '';
     expect(text).toContain('Groomed one');
@@ -339,7 +375,7 @@ describe('shipper_get_issue', () => {
     mockFetchIssue.mockResolvedValue('<issue number="7">...</issue>');
     mockTryResolvePr.mockResolvedValue('99');
 
-    const getTool = collectTools();
+    const getTool = await collectTools();
     const result = await getTool('shipper_get_issue')({ issue: 7 });
 
     expect(result.content[0]?.text).toContain('<issue number="7">');
@@ -347,11 +383,78 @@ describe('shipper_get_issue', () => {
   });
 });
 
+describe('shipper_docs_search', () => {
+  it('uses the default limit and renders stable grouped text', async () => {
+    const getTool = await collectTools();
+    const result = await getTool('shipper_docs_search')({ query: 'setup agents' });
+    const text = result.content[0]?.text ?? '';
+
+    expect(mockBuildDocsCorpus).toHaveBeenCalledOnce();
+    expect(mockDocsSearch).toHaveBeenCalledWith('setup agents', 5);
+    expect(text).toBe(`Match 1
+path: agents/setup
+title: Repository setup for agents
+score: 12.50
+snippet: Configure a repository so any coding agent can run Shipper reliably.`);
+  });
+
+  it('accepts the max explicit limit and returns a no-match message', async () => {
+    mockDocsSearch.mockReturnValueOnce([]);
+
+    const getTool = await collectTools();
+    const result = await getTool.invokeValidated('shipper_docs_search', {
+      query: 'missing',
+      limit: 25,
+    });
+
+    expect(mockDocsSearch).toHaveBeenCalledWith('missing', 25);
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0]?.text).toBe('No documentation matches found for query: missing');
+  });
+
+  it('validates limit above 25 at the registered schema boundary', async () => {
+    const getTool = await collectTools();
+
+    const error = await expectZodError(
+      getTool.invokeValidated('shipper_docs_search', { query: 'setup', limit: 26 })
+    );
+
+    expect(error.issues[0]?.path).toEqual(['limit']);
+    expect(mockDocsSearch).not.toHaveBeenCalled();
+  });
+});
+
+describe('shipper_docs_get', () => {
+  it('returns the full markdown body for a known docs path', async () => {
+    const getTool = await collectTools();
+    const result = await getTool('shipper_docs_get')({ path: 'agents/setup' });
+
+    expect(mockDocsGet).toHaveBeenCalledWith('agents/setup');
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0]?.text).toBe('# Repository setup for agents\n\nConfigure agents here.');
+  });
+
+  it('returns a suggested-search error for unknown docs paths', async () => {
+    mockDocsGet.mockImplementationOnce(() => {
+      throw new Error(
+        'Documentation page not found for path "missing". Call shipper_docs_search to find a valid docs path.'
+      );
+    });
+
+    const getTool = await collectTools();
+    const result = await getTool('shipper_docs_get')({ path: 'missing' });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain('missing');
+    expect(result.content[0]?.text).toContain('shipper_docs_search');
+  });
+});
+
 describe('shipper_unlock', () => {
   it('releases a specific issue lock', async () => {
     mockReleaseLock.mockResolvedValue(undefined);
 
-    const getTool = collectTools();
+    const getTool = await collectTools();
     const result = await getTool('shipper_unlock')({ issue: 10 });
 
     expect(mockReleaseLock).toHaveBeenCalledWith('owner/repo', '10');
@@ -361,7 +464,7 @@ describe('shipper_unlock', () => {
 
 describe('shipper_reset', () => {
   it('validates missing issue at the registered schema boundary', async () => {
-    const getTool = collectTools();
+    const getTool = await collectTools();
 
     const error = await expectZodError(getTool.invokeValidated('shipper_reset', { target: 'new' }));
 
@@ -370,7 +473,7 @@ describe('shipper_reset', () => {
   });
 
   it('validates wrong-typed issue at the registered schema boundary', async () => {
-    const getTool = collectTools();
+    const getTool = await collectTools();
 
     const error = await expectZodError(
       getTool.invokeValidated('shipper_reset', { issue: '42', target: 'new' })
@@ -381,7 +484,7 @@ describe('shipper_reset', () => {
   });
 
   it('validates missing target at the registered schema boundary', async () => {
-    const getTool = collectTools();
+    const getTool = await collectTools();
 
     const error = await expectZodError(getTool.invokeValidated('shipper_reset', { issue: 42 }));
 
@@ -390,7 +493,7 @@ describe('shipper_reset', () => {
   });
 
   it('validates invalid target values and lists the allowed stages', async () => {
-    const getTool = collectTools();
+    const getTool = await collectTools();
 
     const error = await expectZodError(
       getTool.invokeValidated('shipper_reset', { issue: 42, target: 'ready' })
@@ -410,7 +513,7 @@ describe('shipper_reset', () => {
       stderr: '',
     });
 
-    const getTool = collectTools();
+    const getTool = await collectTools();
     const result = await getTool('shipper_reset')({ issue: 42, target: 'new' });
 
     expect(result.isError).toBe(true);
@@ -424,7 +527,7 @@ describe('shipper_reset', () => {
       .mockRejectedValueOnce(notPullRequestError())
       .mockResolvedValueOnce(issueLabelsStateResponse('CLOSED', 'shipper:groomed'));
 
-    const getTool = collectTools();
+    const getTool = await collectTools();
     const result = await getTool('shipper_reset')({ issue: 42, target: 'new' });
 
     expect(result.isError).toBe(true);
@@ -440,7 +543,7 @@ describe('shipper_reset', () => {
       .mockRejectedValueOnce(notPullRequestError())
       .mockResolvedValueOnce(issueLabelsResponse('shipper:groomed'));
 
-    const getTool = collectTools();
+    const getTool = await collectTools();
     const result = await getTool('shipper_reset')({ issue: 42, target: 'groomed' });
 
     expect(result.isError).toBe(true);
@@ -455,7 +558,7 @@ describe('shipper_reset', () => {
       .mockRejectedValueOnce(notPullRequestError())
       .mockResolvedValueOnce(issueLabelsResponse('shipper:groomed'));
 
-    const getTool = collectTools();
+    const getTool = await collectTools();
     const result = await getTool('shipper_reset')({ issue: 42, target: 'planned' });
 
     expect(result.isError).toBe(true);
@@ -477,7 +580,7 @@ describe('shipper_reset', () => {
       })
     );
 
-    const getTool = collectTools();
+    const getTool = await collectTools();
     const result = await getTool('shipper_reset')({
       issue: 42,
       target: 'implemented',
@@ -505,7 +608,7 @@ describe('shipper_reset', () => {
       .mockResolvedValueOnce(issueLabelsResponse('shipper:groomed', 'shipper:locked'));
     mockIsLockStale.mockResolvedValueOnce(false);
 
-    const getTool = collectTools();
+    const getTool = await collectTools();
     const result = await getTool('shipper_reset')({ issue: 42, target: 'new' });
 
     expect(result.isError).toBe(true);
@@ -526,7 +629,7 @@ describe('shipper_reset', () => {
       })
     );
 
-    const getTool = collectTools();
+    const getTool = await collectTools();
     const result = await getTool('shipper_reset')({ issue: 42, target: 'new', dry_run: true });
 
     expect(result.isError).toBeUndefined();
@@ -555,7 +658,7 @@ describe('shipper_reset', () => {
       })
     );
 
-    const getTool = collectTools();
+    const getTool = await collectTools();
     const result = await getTool('shipper_reset')({ issue: 42, target: 'groomed', dry_run: true });
     const text = result.content[0]?.text ?? '';
 
@@ -592,7 +695,7 @@ describe('shipper_reset', () => {
       })
     );
 
-    const getTool = collectTools();
+    const getTool = await collectTools();
     const result = await getTool('shipper_reset')({ issue: 42, target: 'implemented' });
 
     expect(result.isError).toBeUndefined();
@@ -626,7 +729,7 @@ describe('shipper_reset', () => {
       hasFailures: false,
     });
 
-    const getTool = collectTools();
+    const getTool = await collectTools();
     const result = await getTool('shipper_reset')({ issue: 42, target: 'groomed' });
 
     expect(result.isError).toBeUndefined();
@@ -664,7 +767,7 @@ describe('shipper_reset', () => {
       hasFailures: true,
     });
 
-    const getTool = collectTools();
+    const getTool = await collectTools();
     const result = await getTool('shipper_reset')({ issue: 42, target: 'new' });
 
     expect(result.isError).toBe(true);
@@ -677,7 +780,7 @@ describe('shipper_reset', () => {
   it('surfaces operational PR probe failures instead of treating them as not-a-PR misses', async () => {
     mockGh.mockRejectedValueOnce(prProbeFailureError());
 
-    const getTool = collectTools();
+    const getTool = await collectTools();
     const result = await getTool('shipper_reset')({ issue: 42, target: 'new' });
 
     expect(result.isError).toBe(true);
@@ -712,7 +815,7 @@ describe('shipper_advance', () => {
     mockExtractFinalMessage.mockResolvedValue('Implemented the requested change.');
     mockTryResolvePr.mockResolvedValue('17');
 
-    const getTool = collectTools();
+    const getTool = await collectTools();
     const result = await getTool('shipper_advance')({ issue: 42 });
     const text = result.content[0]?.text ?? '';
 
@@ -750,7 +853,7 @@ describe('shipper_advance', () => {
     });
     mockExtractFinalMessage.mockResolvedValue('Rejected the current implementation approach.');
 
-    const getTool = collectTools();
+    const getTool = await collectTools();
     const result = await getTool('shipper_advance')({ issue: 42 });
 
     expect(result.isError).toBe(true);
@@ -782,7 +885,7 @@ describe('shipper_advance', () => {
     });
     mockExtractFinalMessage.mockResolvedValue('Marked the issue as failed.');
 
-    const getTool = collectTools();
+    const getTool = await collectTools();
     const result = await getTool('shipper_advance')({ issue: 42 });
 
     expect(result.isError).toBe(true);
@@ -811,7 +914,7 @@ describe('shipper_advance', () => {
       logFile: '/tmp/crash.jsonl',
     });
 
-    const getTool = collectTools();
+    const getTool = await collectTools();
     const result = await getTool('shipper_advance')({ issue: 42 });
 
     expect(result.isError).toBe(true);
@@ -831,7 +934,7 @@ describe('shipper_advance', () => {
       timedOut: false,
     });
 
-    const getTool = collectTools();
+    const getTool = await collectTools();
     const result = await getTool('shipper_advance')({ issue: 42 });
 
     expect(mockFindLatestSessionMeta).not.toHaveBeenCalled();
@@ -845,7 +948,7 @@ describe('shipper_advance', () => {
   it('refuses to advance a shipper:new issue', async () => {
     mockGh.mockResolvedValue(issueLabelsResponse('shipper:new'));
 
-    const getTool = collectTools();
+    const getTool = await collectTools();
     const result = await getTool('shipper_advance')({ issue: 42 });
 
     expect(mockSpawnShipper).not.toHaveBeenCalled();
@@ -928,7 +1031,7 @@ describe('shipper_advance + shipper_answer_question (defer/answer cycle)', () =>
       mockExtractFinalMessage.mockResolvedValue('Done.');
       mockTryResolvePr.mockResolvedValue('99');
 
-      const getTool = collectTools();
+      const getTool = await collectTools();
 
       // Initial advance returns awaiting_answer.
       const advanceResult = await getTool('shipper_advance')({ issue: 42 });
@@ -999,7 +1102,7 @@ describe('shipper_advance + shipper_answer_question (defer/answer cycle)', () =>
       mockStartShipper.mockReturnValueOnce(runner);
       mockGh.mockResolvedValueOnce(issueLabelsResponse('shipper:planned'));
 
-      const getTool = collectTools();
+      const getTool = await collectTools();
       await getTool('shipper_advance')({ issue: 42 });
 
       const second = await getTool('shipper_answer_question')({
@@ -1014,7 +1117,7 @@ describe('shipper_advance + shipper_answer_question (defer/answer cycle)', () =>
 
   it('errors clearly when shipper_answer_question is called with an unknown session id', async () => {
     await withFlag('1', async () => {
-      const getTool = collectTools();
+      const getTool = await collectTools();
       const result = await getTool('shipper_answer_question')({
         session_id: 'nonexistent',
         answers: { 'Q?': 'A' },
@@ -1027,8 +1130,8 @@ describe('shipper_advance + shipper_answer_question (defer/answer cycle)', () =>
 
 describe('shipper_groom', () => {
   it('is not registered when the experimental flag is unset', async () => {
-    await withFlag(undefined, () => {
-      const getTool = collectTools();
+    await withFlag(undefined, async () => {
+      const getTool = await collectTools();
       expect(getTool.names()).not.toContain('shipper_groom');
       expect(getTool.names()).not.toContain('shipper_answer_question');
     });
@@ -1037,7 +1140,7 @@ describe('shipper_groom', () => {
   it('refuses on an issue that is not at shipper:new', async () => {
     await withFlag('1', async () => {
       mockGh.mockResolvedValueOnce(issueLabelsResponse('shipper:groomed'));
-      const getTool = collectTools();
+      const getTool = await collectTools();
       const result = await getTool('shipper_groom')({ issue: 42 });
       expect(result.isError).toBe(true);
       expect(result.content[0]?.text).toContain('only operates on issues at shipper:new');
@@ -1067,7 +1170,7 @@ describe('shipper_groom', () => {
       });
       mockExtractFinalMessage.mockResolvedValue('Issue groomed.');
 
-      const getTool = collectTools();
+      const getTool = await collectTools();
       const result = await getTool('shipper_groom')({ issue: 42 });
 
       expect(result.isError).toBeUndefined();
@@ -1132,7 +1235,7 @@ describe('shipper_groom', () => {
       });
       mockExtractFinalMessage.mockResolvedValue('Done.');
 
-      const getTool = collectTools();
+      const getTool = await collectTools();
       const initial = await getTool('shipper_groom')({ issue: 42 });
       expect(initial.isError).toBeUndefined();
       expect(initial.content[0]?.text).toContain('Status: awaiting_answer');
@@ -1152,7 +1255,7 @@ describe('shipper_groom', () => {
 
 describe('shipper_create_issue', () => {
   it('validates empty requests at the registered schema boundary', async () => {
-    const getTool = collectTools();
+    const getTool = await collectTools();
 
     const error = await expectZodError(
       getTool.invokeValidated('shipper_create_issue', { request: '' })
@@ -1191,7 +1294,7 @@ describe('shipper_create_issue', () => {
       stderr: '',
     });
 
-    const getTool = collectTools();
+    const getTool = await collectTools();
     const result = await getTool('shipper_create_issue')({ request: 'Improve MCP output' });
     const text = result.content[0]?.text ?? '';
 
@@ -1237,7 +1340,7 @@ describe('shipper_create_issue', () => {
       stderr: '',
     });
 
-    const getTool = collectTools();
+    const getTool = await collectTools();
     const result = await getTool('shipper_create_issue')({ request: 'Prefer last URL' });
 
     expect(mockGh).toHaveBeenCalledTimes(1);
@@ -1293,7 +1396,7 @@ describe('shipper_create_issue', () => {
         stderr: '',
       });
 
-    const getTool = collectTools();
+    const getTool = await collectTools();
     const result = await getTool('shipper_create_issue')({ request: 'Fallback path' });
 
     expect(result.content[0]?.text).toContain('Created issue: #56 Fallback issue');
@@ -1341,7 +1444,7 @@ describe('shipper_create_issue', () => {
         stderr: '',
       });
 
-    const getTool = collectTools();
+    const getTool = await collectTools();
     const result = await getTool('shipper_create_issue')({ request: 'Fallback' });
 
     expect(result.content[0]?.text).toContain('Created issue: #57 Recovered via fallback');
@@ -1384,7 +1487,7 @@ describe('shipper_create_issue', () => {
       stderr: '',
     });
 
-    const getTool = collectTools();
+    const getTool = await collectTools();
     const result = await getTool('shipper_create_issue')({ request: 'Fallback ambiguity' });
 
     expect(result.isError).toBe(true);
@@ -1417,7 +1520,7 @@ describe('shipper_create_issue', () => {
     );
     mockGh.mockRejectedValue(new Error('gh issue view failed'));
 
-    const getTool = collectTools();
+    const getTool = await collectTools();
     const result = await getTool('shipper_create_issue')({ request: 'GH recovery failure' });
 
     expect(result.isError).toBe(true);
@@ -1461,7 +1564,7 @@ describe('shipper_unblock', () => {
       '## Implementation Summary\n\nDependency landed upstream.\n\n## Agent Feedback\nIgnored.'
     );
 
-    const getTool = collectTools();
+    const getTool = await collectTools();
     const result = await getTool('shipper_unblock')({ issue: 42 });
 
     expect(result.content[0]?.text).toContain('Verdict: unblocked');
@@ -1493,7 +1596,7 @@ describe('shipper_unblock', () => {
     mockExtractFinalMessage.mockResolvedValue(undefined);
     mockReadResultFile.mockRejectedValue(new Error('Missing result.json'));
 
-    const getTool = collectTools();
+    const getTool = await collectTools();
     const result = await getTool('shipper_unblock')({ issue: 42 });
 
     expect(result.content[0]?.text).toContain('Verdict: still-blocked');
@@ -1534,7 +1637,7 @@ describe('shipper_unblock', () => {
       '## Implementation Summary\n\nStill blocked by upstream failure.\n'
     );
 
-    const getTool = collectTools();
+    const getTool = await collectTools();
     const result = await getTool('shipper_unblock')({ issue: 42 });
 
     expect(result.isError).toBe(true);
@@ -1564,7 +1667,7 @@ describe('shipper_unblock', () => {
     });
     mockReadResultFile.mockRejectedValue(new Error('Missing result.json'));
 
-    const getTool = collectTools();
+    const getTool = await collectTools();
     const result = await getTool('shipper_unblock')({ issue: 42 });
 
     expect(result.isError).toBe(true);
@@ -1583,7 +1686,7 @@ describe('shipper_merge', () => {
       timedOut: false,
     });
 
-    const getTool = collectTools();
+    const getTool = await collectTools();
     const result = await getTool('shipper_merge')({});
 
     expect(result.content[0]?.text).toContain('[exit 0] shipper merge --once');
@@ -1593,7 +1696,7 @@ describe('shipper_merge', () => {
 });
 
 describe('registerInitErrorTools', () => {
-  it('includes shipper_reset and returns the standard init-error payload', async () => {
+  it('includes unconditional docs and reset tools and returns the standard init-error payload', async () => {
     const handlers = new Map<string, Handler>();
     const mockServer = {
       registerTool: (name: string, _config: unknown, handler: Handler) => {
@@ -1607,6 +1710,8 @@ describe('registerInitErrorTools', () => {
     );
 
     expect([...handlers.keys()]).toContain('shipper_reset');
+    expect([...handlers.keys()]).toContain('shipper_docs_search');
+    expect([...handlers.keys()]).toContain('shipper_docs_get');
 
     const result = await handlers.get('shipper_reset')?.({});
     expect(result?.isError).toBe(true);

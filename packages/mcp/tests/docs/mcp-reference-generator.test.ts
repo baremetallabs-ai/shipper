@@ -141,6 +141,10 @@ describe('mcp reference generator', () => {
 
   it('renders behavior hints from explicit annotations only', () => {
     const rendered = renderToolPage(findTool('shipper_reset'), toolExtras.shipper_reset);
+    const docsRendered = renderToolPage(
+      findTool('shipper_docs_search'),
+      toolExtras.shipper_docs_search
+    );
 
     expect(rendered).toContain('## Behavior hints');
     expect(rendered).toContain(
@@ -151,6 +155,15 @@ describe('mcp reference generator', () => {
     );
     expect(rendered).not.toContain('readOnlyHint: false');
     expect(rendered).not.toContain('idempotentHint: false');
+    expect(docsRendered).toContain(
+      '- readOnlyHint: true — The tool only reads state and does not intentionally modify the repository.'
+    );
+    expect(docsRendered).toContain(
+      '- idempotentHint: true — Retrying the same call is expected to be safe once the target state is reached.'
+    );
+    expect(docsRendered).toContain(
+      '- openWorldHint: false — The tool reaches GitHub or other external systems outside the MCP server.'
+    );
   });
 
   it('derives schema table rows from Zod descriptions, required state, enum values, and defaults', () => {
@@ -200,6 +213,7 @@ describe('mcp reference generator', () => {
     const index = await readFile(indexPath, 'utf8');
 
     const orderedGroups = [
+      '## Documentation',
       '## Inspection (read-only)',
       '## Issue lifecycle',
       '## Recovery & cleanup',
@@ -212,6 +226,8 @@ describe('mcp reference generator', () => {
       expect(nextIndex).toBeGreaterThan(previousIndex);
       previousIndex = nextIndex;
     }
+    expect(index).toContain('[shipper_docs_search](./shipper_docs_search)');
+    expect(index).toContain('[shipper_docs_get](./shipper_docs_get)');
     expect(index).toContain('[shipper_groom (experimental)](./shipper_groom)');
     expect(index).toContain('[shipper_answer_question (experimental)](./shipper_answer_question)');
     expect(

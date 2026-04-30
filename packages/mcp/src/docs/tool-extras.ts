@@ -62,6 +62,49 @@ Pending:
     errorModes: [{ name: 'GitHub command failure', message: githubError }],
     relatedTools: ['shipper_merge'],
   },
+  shipper_docs_search: {
+    whenToUse:
+      'Use this when an agent needs to discover relevant Shipper docs pages or snippets before fetching a full page.',
+    example: {
+      call: { query: 'setup agents', limit: 2 },
+      result: `Match 1
+path: agents/setup
+title: Repository setup for agents
+score: 18.00
+snippet: Configure a repository so any coding agent can run Shipper reliably...`,
+    },
+    errorModes: [
+      {
+        name: 'Corpus unavailable or read failure',
+        message:
+          'Shipper documentation corpus is unavailable. Rebuild @dnsquared/shipper-mcp with the docs snapshot or set SHIPPER_DOCS_PATH to an absolute docs corpus path.',
+      },
+    ],
+    relatedTools: ['shipper_docs_get'],
+  },
+  shipper_docs_get: {
+    whenToUse:
+      'Use this after search identifies a docs-site path, or when the agent already knows the path of the page it needs.',
+    example: {
+      call: { path: 'agents/setup' },
+      result: `# Repository setup for agents
+
+Configure a repository so coding agents can run Shipper reliably.`,
+    },
+    errorModes: [
+      {
+        name: 'Unknown path',
+        message:
+          'Documentation page not found for path "<path>". Call shipper_docs_search to find a valid docs path.',
+      },
+      {
+        name: 'Corpus unavailable or read failure',
+        message:
+          'Shipper documentation corpus is unavailable. Rebuild @dnsquared/shipper-mcp with the docs snapshot or set SHIPPER_DOCS_PATH to an absolute docs corpus path.',
+      },
+    ],
+    relatedTools: ['shipper_docs_search'],
+  },
   shipper_advance: {
     whenToUse:
       'Use this for the normal one-step workflow progression once an issue has moved past intake. Use `shipper_groom` instead for `shipper:new` issues when experimental MCP grooming is enabled.',
