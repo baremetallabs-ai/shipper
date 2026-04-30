@@ -496,7 +496,7 @@
         },
         {
           "number": 259,
-          "title": "docs(#243): sync README, CLAUDE.md, and state-machine.md with current codebase",
+          "title": "docs(#243): sync README, CLAUDE.md, and state machine docs with current codebase",
           "headRefName": "shipper/243-docs-audit-and-update-readme-md-claude-md-and-stat",
           "baseRefName": "main",
           "timelineItems": {

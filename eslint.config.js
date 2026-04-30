@@ -12,6 +12,7 @@ export default [
       'packages/*/out/',
       'node_modules/',
       'coverage/',
+      '.shipper/',
       '**/*.config.*',
     ],
   },
