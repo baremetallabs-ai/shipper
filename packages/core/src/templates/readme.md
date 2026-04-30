@@ -31,28 +31,17 @@ This folder is managed by [Shipper CLI](https://github.com/dnsquared/shipper-cli
 
 ## Workflow Stages
 
-Each issue progresses through these label-based stages:
+Each issue progresses through Shipper's label-based workflow:
 
 ```
 shipper:new → shipper:groomed → shipper:designed → shipper:planned →
 shipper:implemented → shipper:pr-open → shipper:pr-reviewed → shipper:ready
 ```
 
-- **shipper:new** — Issue created, awaiting product grooming
-- **shipper:groomed** — Product-groomed, awaiting design review
-- **shipper:designed** — Design-reviewed, awaiting implementation planning
-- **shipper:planned** — Implementation planned, ready for coding
-- **shipper:implemented** — Code complete, awaiting PR creation
-- **shipper:pr-open** — PR opened, awaiting review
-- **shipper:pr-reviewed** — PR reviewed, pending remediation
-- **shipper:ready** — Ready for final review and merge
-- **shipper:blocked** — Blocked by a dependency (run `shipper unblock`)
-- **shipper:locked** — Active shipper instance is working on this issue
-- **shipper:failed** — Automated processing failed, requires investigation (run `shipper reset`)
-- **shipper:priority-high** — Processed first in `ship --auto`
-- **shipper:priority-low** — Processed last in `ship --auto`
+See the state-machine reference for label definitions, transition behavior, locking, blocking, reset,
+and auto-ship ordering:
 
-Use `shipper next <issue>` to advance one stage at a time through the shared in-process dispatcher, or run `shipper ship <issue>` to carry the issue through the remaining stages end-to-end. Individual stage commands also remain available (for example, `shipper groom <issue>` or `shipper design <issue>`).
+https://shipper.baremetallabs.ai/concepts/state-machine/
 
 ## Customizing Prompts
 
@@ -62,9 +51,11 @@ Run `shipper eject` to scaffold editable prompt overrides. Existing overrides ar
 
 **`settings.json`** — Team-wide configuration, committed to version control:
 
-- `prReviewWait` — PR review wait strategy (default: `{ "mode": "checks", "maxDurationMinutes": 30 }`). Use `{ "mode": "timer", "durationMinutes": 30 }` to wait a fixed number of minutes from PR creation time, or a checks-mode object such as `{ "mode": "checks", "minDurationMinutes": 10, "maxDurationMinutes": 30 }` to wait for CI with an optional minimum review window and optional maximum polling ceiling. `minDurationMinutes` and `maxDurationMinutes` are both optional. Legacy `prReviewWaitMinutes`, timer-mode `timeoutMinutes`, and checks-mode `timeoutMinutes` values auto-migrate to the new shape.
-
 **`settings.local.json`** — Local overrides that apply only to your machine. This file is gitignored and will not be committed. Any key set here takes precedence over `settings.json`.
+
+See the settings reference for supported keys, defaults, and precedence:
+
+https://shipper.baremetallabs.ai/reference/settings/
 
 ## Hooks
 
@@ -120,5 +111,6 @@ Hook scripts must be executable. Run `chmod +x .shipper/hooks/<hook-name>` after
 ## Further Help
 
 - Run `shipper --help` to see all available commands
-- See the project [README](https://github.com/dnsquared/shipper-cli#readme) for full documentation
+- See the CLI reference: https://shipper.baremetallabs.ai/reference/cli/
+- See the full documentation: https://shipper.baremetallabs.ai
 - [Open an issue](https://github.com/dnsquared/shipper-cli/issues) to report bugs or request features

@@ -1,0 +1,46 @@
+---
+title: Architecture
+---
+
+Shipper is a small npm workspace. `packages/cli` contains the `shipper` entrypoint and command
+implementations, `packages/core` contains shared prompts, settings, GitHub integration, worktrees,
+and locking, `packages/desktop` contains the early Electron app, and `packages/mcp` exposes Shipper
+workflow tools to AI agents.
+
+## Runtime Tour
+
+Each CLI command lives in `packages/cli/src/commands/<name>.ts` and follows the same basic pattern:
+validate input, check prerequisites, then execute the action through local command code or shared
+core helpers.
+
+Prompt-driven execution is centralized in `packages/core/src/lib/prompt-runner.ts`. Bundled prompts
+live under `packages/core/src/prompts/<agent>/`. At runtime, Shipper first checks for a repo-local
+override at `.shipper/prompts/<agent>/<name>.md`; if none exists, it uses the bundled prompt.
+`runPrompt()` builds the agent command, appends requested issue or PR context, and spawns the
+configured agent CLI.
+
+The `new`, `groom`, `design`, `plan`, `implement`, and PR commands run in fresh ephemeral worktrees.
+`withWorktree()` in `packages/core/src/lib/worktree.ts` handles create, callback, and cleanup. The
+agent sees a clean checkout from the configured base branch or PR branch, not whatever happens to be
+in your current working tree.
+
+`shipper next` and sequential `shipper ship` use `packages/cli/src/commands/stage-dispatch.ts` to
+run the next stage in-process. Parallel `shipper ship --auto --parallel <n>` keeps fault isolation by
+forking `packages/cli/src/ship-worker.ts` and exchanging one run message plus one result message over
+IPC.
+
+All GitHub interaction goes through the `gh` CLI. Structured `gh --json` payloads are parsed through
+`packages/core/src/lib/gh-schemas.ts` or `packages/core/src/lib/gh-json.ts` so command code does not
+depend on unchecked JSON shapes.
+
+Workflow state is represented by GitHub labels:
+`shipper:new -> shipper:groomed -> shipper:designed -> shipper:planned -> shipper:implemented -> shipper:pr-open -> shipper:pr-reviewed -> shipper:ready`.
+Control labels such as `shipper:blocked`, `shipper:locked`, and `shipper:failed` modify command
+selection and safety behavior. Priority labels affect auto-ship ordering.
+
+Locks use the `shipper:locked` label. Shipper acquires the lock before workflow work, renews it on a
+heartbeat, treats old locks as stale after `lockTimeoutMinutes`, and releases the label in cleanup.
+
+Stage output is reduced to a verdict. `accept` advances, `reject` rolls back according to the state
+transition table, and `fail` or a crash stops the run as a terminal failure. The State Machine and
+Protocol pages cover those contracts in detail.

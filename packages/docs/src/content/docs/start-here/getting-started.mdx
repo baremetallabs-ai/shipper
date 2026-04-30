@@ -1,0 +1,47 @@
+---
+title: Getting Started
+---
+
+You need a Git repository with a GitHub remote, an authenticated GitHub CLI, and Shipper initialized
+in the repo.
+
+For interactive use, authenticate with GitHub CLI:
+
+```bash
+gh auth login
+```
+
+For containers or CI, export `GH_TOKEN` or `GITHUB_TOKEN` in the environment where Shipper runs.
+See the [Containers reference](/reference/containers/) for the token and git credential helper path.
+
+Initialize Shipper once per repository:
+
+```bash
+shipper init
+```
+
+`shipper init` creates or updates `.shipper/`, ensures the workflow labels exist in GitHub, and
+checks the required local tooling. It is idempotent, so rerun it after upgrades or if a preflight
+check tells you the repo is not initialized.
+
+Create a first issue from a rough request:
+
+```bash
+shipper new "your idea"
+```
+
+Advance one stage at a time:
+
+```bash
+shipper next <issue>
+```
+
+Or ask Shipper to run the remaining workflow for one issue:
+
+```bash
+shipper ship <issue>
+```
+
+`shipper next` reads the issue's current workflow label and dispatches the matching stage command.
+`shipper ship` keeps dispatching until the issue reaches the next terminal point, including orderly
+rollback and resume behavior when an agent returns a reject verdict.
