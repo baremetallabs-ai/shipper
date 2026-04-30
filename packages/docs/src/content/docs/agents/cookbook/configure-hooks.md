@@ -49,8 +49,8 @@ under `.shipper/hooks/`.
 
 6. Check related reference material.
 
-   Use [Reference > MCP](../../reference/mcp/) for agent tool details and
-   [Reference > CLI](../../reference/cli/) for command details.
+   Use [Reference > MCP](/reference/mcp/) for agent tool details and
+   [Reference > CLI](/reference/cli/) for command details.
 
 ## Verification
 

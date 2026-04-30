@@ -45,7 +45,7 @@ agent. Ejected prompts are committed under `.shipper/prompts/<agent>/`.
 
 5. Check the CLI reference for command details.
 
-   Use [Reference > CLI > shipper eject](../../reference/cli/eject/) for the generated command
+   Use [Reference > CLI > shipper eject](/reference/cli/eject/) for the generated command
    reference.
 
 ## Verification
@@ -53,5 +53,6 @@ agent. Ejected prompts are committed under `.shipper/prompts/<agent>/`.
 Verify that the expected prompt override exists after ejecting it.
 
 ```sh
-test -f .shipper/prompts/claude/pr_open.md
+AGENT=$(node -p "JSON.parse(require('node:fs').readFileSync('.shipper/settings.json', 'utf8')).commands?.default?.agent ?? 'claude'")
+test -f ".shipper/prompts/${AGENT}/pr_open.md"
 ```
