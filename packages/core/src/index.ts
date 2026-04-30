@@ -15,6 +15,7 @@ export {
 } from './lib/checks.js';
 export { toError, toErrorMessage } from './lib/errors.js';
 export { PAUSED_EXIT_CODE, RETRIABLE_FAILURE_EXIT_CODE } from './lib/exit-codes.js';
+export { MCP_GROOMING_FLAG, isMcpGroomingEnabled } from './lib/feature-flags.js';
 export { gh } from './lib/gh.js';
 export { GhPayloadError } from './lib/gh-json.js';
 export type { MergeQueueSearchNode, PrViewForMerge } from './lib/gh-schemas.js';
@@ -113,6 +114,9 @@ export {
   runPrereqChecks,
   warnTrackedOutputFiles,
 } from './lib/prerequisites.js';
+export type { DeferQuestion, DeferQuestionOption } from './lib/defer-stream.js';
+export type { AnswerLine, DeferMarkerPayload } from './lib/defer-loop.js';
+export { DEFER_MARKER_PREFIX, DEFER_MARKER_SUFFIX, parseDeferMarker } from './lib/defer-loop.js';
 export type { RunPromptOpts } from './lib/prompt-runner.js';
 export { buildPromptCommand, runPrompt } from './lib/prompt-runner.js';
 export { agentPrompts } from './lib/prompts.js';

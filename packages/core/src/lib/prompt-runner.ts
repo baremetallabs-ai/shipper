@@ -3,6 +3,17 @@ import { createWriteStream, readFileSync, statSync } from 'node:fs';
 import { mkdir, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import {
+  buildClaudeResumeArgs,
+  clearAnswersEnv,
+  closeStdinReader,
+  emitDeferMarker,
+  logDeferCycle,
+  readNextAnswerLine,
+  setAnswersEnv,
+  writeAnswersFile,
+} from './defer-loop.js';
+import { StreamJsonDeferConsumer } from './defer-stream.js';
 import { toError, toErrorMessage } from './errors.js';
 import { parseFrontmatter } from './frontmatter.js';
 import { fetchIssue, fetchPR } from './github.js';
@@ -124,25 +135,47 @@ function resolveWorktreeGitDir(cwd: string): WorktreeDirs | undefined {
   }
 }
 
-function spawnAsync(
-  command: string,
-  args: string[],
-  opts: { cwd?: string; timeoutMs?: number; logFile?: string; initialInput?: string }
-): Promise<number> {
+interface SpawnAsyncOpts {
+  cwd?: string;
+  timeoutMs?: number;
+  logFile?: string;
+  initialInput?: string;
+  onStdoutChunk?: (chunk: Buffer) => void;
+  appendLog?: boolean;
+  /**
+   * When true, force stdin to 'ignore' even if other options would normally inherit it.
+   * Used by the claude defer loop so the CLI's stdin (used to receive deferred answers
+   * from the MCP parent) isn't shared with the worker claude process.
+   */
+  stdinIgnore?: boolean;
+}
+
+function spawnAsync(command: string, args: string[], opts: SpawnAsyncOpts): Promise<number> {
   return new Promise((resolve, reject) => {
     const hasInitialInput = opts.initialInput !== undefined;
+    const onStdoutChunk = opts.onStdoutChunk;
     const captureStream = getLogCaptureStream();
+    const needsStdoutPipe = !!(opts.logFile || captureStream || onStdoutChunk);
+    const stdinMode: 'pipe' | 'inherit' | 'ignore' = hasInitialInput
+      ? 'pipe'
+      : opts.stdinIgnore
+        ? 'ignore'
+        : 'inherit';
     const stdio:
       | 'inherit'
       | ['inherit', 'pipe', 'pipe']
+      | ['ignore', 'pipe', 'pipe']
       | ['pipe', 'inherit', 'inherit']
-      | ['pipe', 'pipe', 'pipe'] = hasInitialInput
-      ? opts.logFile || captureStream
-        ? ['pipe', 'pipe', 'pipe']
-        : ['pipe', 'inherit', 'inherit']
-      : opts.logFile || captureStream
-        ? ['inherit', 'pipe', 'pipe']
-        : 'inherit';
+      | ['pipe', 'pipe', 'pipe'] =
+      stdinMode === 'pipe'
+        ? needsStdoutPipe
+          ? ['pipe', 'pipe', 'pipe']
+          : ['pipe', 'inherit', 'inherit']
+        : needsStdoutPipe
+          ? stdinMode === 'ignore'
+            ? ['ignore', 'pipe', 'pipe']
+            : ['inherit', 'pipe', 'pipe']
+          : 'inherit';
     const child: ChildProcess = spawn(command, args, {
       stdio,
       env: process.env,
@@ -167,7 +200,7 @@ function spawnAsync(
       };
     }
 
-    if (opts.logFile || captureStream) {
+    if (needsStdoutPipe) {
       const stdout = child.stdout;
       const stderr = child.stderr;
       if (!stdout) {
@@ -181,7 +214,9 @@ function spawnAsync(
 
       try {
         if (opts.logFile) {
-          outputLogStream = createWriteStream(opts.logFile);
+          outputLogStream = opts.appendLog
+            ? createWriteStream(opts.logFile, { flags: 'a' })
+            : createWriteStream(opts.logFile);
           logCompletion = new Promise((logResolve, logReject) => {
             let settled = false;
 
@@ -203,6 +238,9 @@ function spawnAsync(
         }
 
         stdout.on('data', (chunk: Buffer | string) => {
+          if (onStdoutChunk) {
+            onStdoutChunk(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+          }
           process.stdout.write(chunk);
           outputLogStream?.write(chunk);
           captureStream?.write(chunk);
@@ -271,7 +309,13 @@ async function resolvePromptCommand(
   name: string,
   opts: RunPromptOpts,
   effectiveMode: CommandMode
-): Promise<{ agent: AgentName; args: string[]; promptBody: string; disableMcp: boolean }> {
+): Promise<{
+  agent: AgentName;
+  args: string[];
+  resumeBaseArgs: string[];
+  promptBody: string;
+  disableMcp: boolean;
+}> {
   const agent = resolveAgent(name, opts.agent);
   if (agent === 'copilot') {
     try {
@@ -396,6 +440,10 @@ async function resolvePromptCommand(
     }
   }
 
+  // Snapshot the args before the prompt body and user message are appended; these
+  // are what we'll pass to `claude --resume` since the session already holds them.
+  const resumeBaseArgs = [...args];
+
   if (agent === 'claude') {
     args.push('--append-system-prompt', promptBody);
   } else if (agent === 'copilot') {
@@ -475,7 +523,7 @@ async function resolvePromptCommand(
     );
   }
 
-  return { agent, args, promptBody, disableMcp };
+  return { agent, args, resumeBaseArgs, promptBody, disableMcp };
 }
 
 export async function buildPromptCommand(
@@ -489,6 +537,63 @@ export async function buildPromptCommand(
 
 export async function runPrompt(name: string, opts: RunPromptOpts): Promise<number> {
   return await runPromptImpl(name, opts);
+}
+
+async function spawnClaudeWithDeferLoop(
+  initialArgs: string[],
+  resumeBaseArgs: string[],
+  spawnOpts: SpawnAsyncOpts,
+  cwd: string
+): Promise<number> {
+  let currentArgs = initialArgs;
+  let isResume = false;
+  try {
+    for (;;) {
+      const consumer = new StreamJsonDeferConsumer();
+      const exitCode = await spawnAsync('claude', currentArgs, {
+        ...spawnOpts,
+        onStdoutChunk: (chunk) => {
+          consumer.consume(chunk);
+        },
+        appendLog: isResume ? true : spawnOpts.appendLog,
+        stdinIgnore: true,
+      });
+      consumer.flush();
+      const result = consumer.getResult();
+      if (result?.kind !== 'deferred') {
+        return exitCode;
+      }
+      logDeferCycle(result.sessionId, result.questions.length);
+      const markerPayload: Parameters<typeof emitDeferMarker>[0] = {
+        sessionId: result.sessionId,
+        questions: result.questions,
+      };
+      if (result.toolUseId) {
+        markerPayload.toolUseId = result.toolUseId;
+      }
+      emitDeferMarker(markerPayload);
+
+      let answer;
+      try {
+        answer = await readNextAnswerLine();
+      } catch (err) {
+        logger.error(`Failed to read deferred answer from stdin: ${toErrorMessage(err)}`);
+        return exitCode;
+      }
+
+      const { path: answersPath } = await writeAnswersFile(cwd, result.sessionId, answer.answers);
+      setAnswersEnv(answersPath);
+      currentArgs = buildClaudeResumeArgs(resumeBaseArgs, result.sessionId);
+      isResume = true;
+    }
+  } finally {
+    clearAnswersEnv();
+    // The defer loop attaches a readline.Interface to process.stdin to read answers
+    // from the MCP parent. Once the loop ends, that interface keeps the Node event
+    // loop alive — the CLI hangs after claude exits and the MCP parent never sees
+    // the child close. Detach explicitly so the CLI can drain and exit.
+    closeStdinReader();
+  }
 }
 
 async function runPromptDefault(name: string, opts: RunPromptOpts): Promise<number> {
@@ -544,12 +649,21 @@ async function runPromptDefault(name: string, opts: RunPromptOpts): Promise<numb
     if (resolved.disableMcp) {
       logger.log(`MCP loading disabled for stage ${name}.`);
     }
-    const exitCode = await spawnAsync(agent, args, {
+    const baseSpawnOpts: SpawnAsyncOpts = {
       cwd: opts.cwd,
-      timeoutMs,
-      logFile: spawnLogFile,
-      initialInput,
-    });
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+      ...(spawnLogFile !== undefined ? { logFile: spawnLogFile } : {}),
+      ...(initialInput !== undefined ? { initialInput } : {}),
+    };
+    const useDeferLoop = agent === 'claude' && effectiveMode === 'headless';
+    const exitCode = useDeferLoop
+      ? await spawnClaudeWithDeferLoop(
+          args,
+          resolved.resumeBaseArgs,
+          baseSpawnOpts,
+          opts.cwd ?? process.cwd()
+        )
+      : await spawnAsync(agent, args, baseSpawnOpts);
     let usage: TokenUsage | undefined;
 
     if (trackUsage && spawnLogFile) {

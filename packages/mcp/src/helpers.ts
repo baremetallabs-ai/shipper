@@ -1,6 +1,6 @@
-import { spawn } from 'node:child_process';
-import type { ArtifactScan, ResetResult } from '@dnsquared/shipper-core';
-import { toErrorMessage } from '@dnsquared/shipper-core';
+import { spawn, type ChildProcess } from 'node:child_process';
+import type { ArtifactScan, DeferMarkerPayload, ResetResult } from '@dnsquared/shipper-core';
+import { DEFER_MARKER_PREFIX, parseDeferMarker, toErrorMessage } from '@dnsquared/shipper-core';
 
 export interface SpawnResult {
   exitCode: number;
@@ -94,6 +94,154 @@ export async function spawnShipper(
       });
     });
   });
+}
+
+export interface ShipperDeferEvent {
+  kind: 'deferred';
+  payload: DeferMarkerPayload;
+  sessionId: string;
+}
+
+export interface ShipperCompletionEvent {
+  kind: 'completed';
+  result: SpawnResult;
+}
+
+export type ShipperEvent = ShipperDeferEvent | ShipperCompletionEvent;
+
+export interface ShipperRunner {
+  /** Awaits the next significant event from the running shipper child. */
+  next(): Promise<ShipperEvent>;
+  /** Writes a JSON answers line to the child's stdin to resume a deferred worker. */
+  answer(answers: Record<string, string>): Promise<void>;
+  /** Sends SIGKILL to the child. */
+  cancel(): void;
+  /** True once the child has emitted a completion event (no more defers possible). */
+  isCompleted(): boolean;
+}
+
+interface PendingResolver {
+  resolve: (event: ShipperEvent) => void;
+  reject: (err: Error) => void;
+}
+
+/**
+ * Spawn `shipper` and stream its stdout, surfacing each defer marker as a discrete event.
+ * Caller drives the run with `runner.next()` until a completion event is returned.
+ * Between defers, caller calls `runner.answer(...)` to feed the worker its answer.
+ */
+export function startShipper(args: string[], opts: { timeoutMs: number }): ShipperRunner {
+  const child: ChildProcess = spawn('shipper', args, {
+    cwd: process.cwd(),
+    env: process.env,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  let stdout = '';
+  let stderr = '';
+  let stdoutLineBuffer = '';
+  let timedOut = false;
+  let completed = false;
+  const eventQueue: ShipperEvent[] = [];
+  let pending: PendingResolver | undefined;
+
+  const timer = setTimeout(() => {
+    timedOut = true;
+    child.kill('SIGKILL');
+  }, opts.timeoutMs);
+
+  const enqueue = (event: ShipperEvent): void => {
+    if (event.kind === 'completed') {
+      completed = true;
+    }
+    if (pending) {
+      const resolver = pending;
+      pending = undefined;
+      resolver.resolve(event);
+      return;
+    }
+    eventQueue.push(event);
+  };
+
+  const fail = (err: Error): void => {
+    clearTimeout(timer);
+    if (pending) {
+      const resolver = pending;
+      pending = undefined;
+      resolver.reject(err);
+    }
+  };
+
+  child.stdout?.on('data', (chunk: Buffer) => {
+    const text = chunk.toString('utf8');
+    stdout += text;
+    stdoutLineBuffer += text;
+    let newlineIdx: number;
+    while ((newlineIdx = stdoutLineBuffer.indexOf('\n')) !== -1) {
+      const line = stdoutLineBuffer.slice(0, newlineIdx);
+      stdoutLineBuffer = stdoutLineBuffer.slice(newlineIdx + 1);
+      const trimmed = line.trim();
+      if (!trimmed.startsWith(DEFER_MARKER_PREFIX)) continue;
+      const payload = parseDeferMarker(trimmed);
+      if (!payload) continue;
+      enqueue({ kind: 'deferred', payload, sessionId: payload.sessionId });
+    }
+  });
+
+  child.stderr?.on('data', (chunk: Buffer) => {
+    stderr += chunk.toString('utf8');
+  });
+
+  child.on('error', (err) => {
+    fail(err instanceof Error ? err : new Error(String(err)));
+  });
+
+  child.on('close', (code) => {
+    clearTimeout(timer);
+    enqueue({
+      kind: 'completed',
+      result: {
+        exitCode: code ?? -1,
+        stdout,
+        stderr,
+        timedOut,
+      },
+    });
+  });
+
+  return {
+    next: async () => {
+      const queued = eventQueue.shift();
+      if (queued) return queued;
+      if (completed) {
+        throw new Error('Shipper child has already completed; no more events.');
+      }
+      return await new Promise<ShipperEvent>((resolve, reject) => {
+        pending = { resolve, reject };
+      });
+    },
+    answer: async (answers) => {
+      if (completed) {
+        throw new Error('Cannot submit an answer: shipper child already completed.');
+      }
+      const stdin = child.stdin;
+      if (!stdin || stdin.destroyed) {
+        throw new Error('shipper child stdin is unavailable; cannot submit answer.');
+      }
+      const line = JSON.stringify({ answers }) + '\n';
+      await new Promise<void>((resolve, reject) => {
+        stdin.write(line, (err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+    },
+    cancel: () => {
+      clearTimeout(timer);
+      child.kill('SIGKILL');
+    },
+    isCompleted: () => completed,
+  };
 }
 
 export function formatToolError(error: unknown): ToolTextResult {

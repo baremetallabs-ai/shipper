@@ -16,6 +16,7 @@ const {
   mockResolveSessionRepo,
   mockScanArtifacts,
   mockSpawnShipper,
+  mockStartShipper,
   mockTryResolvePr,
 } = vi.hoisted(() => ({
   mockExecuteReset: vi.fn(),
@@ -32,6 +33,7 @@ const {
   mockResolveSessionRepo: vi.fn(),
   mockScanArtifacts: vi.fn(),
   mockSpawnShipper: vi.fn(),
+  mockStartShipper: vi.fn(),
   mockTryResolvePr: vi.fn(),
 }));
 
@@ -70,6 +72,7 @@ vi.mock('../src/helpers.js', async () => {
   return {
     ...actual,
     spawnShipper: mockSpawnShipper,
+    startShipper: mockStartShipper,
   };
 });
 
@@ -219,7 +222,39 @@ beforeEach(() => {
   mockIsLockStale.mockResolvedValue(false);
   mockScanArtifacts.mockResolvedValue(makeResetScan());
   mockExecuteReset.mockResolvedValue({ operations: [], hasFailures: false });
+  // Default startShipper mock: delegate to spawnShipper (which tests configure with mockResolvedValue)
+  // and surface a single completion event. Tests exercising defer can override.
+  mockStartShipper.mockImplementation(
+    (args: string[], opts: { timeoutMs: number }): Record<string, unknown> => {
+      const resultPromise = mockSpawnShipper(args, opts) as Promise<unknown>;
+      return {
+        next: async (): Promise<unknown> => {
+          const result = await resultPromise;
+          return { kind: 'completed', result };
+        },
+        answer: async (): Promise<void> => {},
+        cancel: (): void => {},
+        isCompleted: (): boolean => true,
+      };
+    }
+  );
 });
+
+function withFlag<T>(value: string | undefined, fn: () => T | Promise<T>): Promise<T> {
+  const original = process.env.SHIPPER_EXPERIMENTAL_MCP_GROOMING;
+  if (value === undefined) {
+    Reflect.deleteProperty(process.env, 'SHIPPER_EXPERIMENTAL_MCP_GROOMING');
+  } else {
+    process.env.SHIPPER_EXPERIMENTAL_MCP_GROOMING = value;
+  }
+  return Promise.resolve(fn()).finally(() => {
+    if (original === undefined) {
+      Reflect.deleteProperty(process.env, 'SHIPPER_EXPERIMENTAL_MCP_GROOMING');
+    } else {
+      process.env.SHIPPER_EXPERIMENTAL_MCP_GROOMING = original;
+    }
+  });
+}
 
 describe('shipper_list_issues', () => {
   it('groups issues by stage and renders blocked/failed separately', async () => {
@@ -764,6 +799,302 @@ describe('shipper_advance', () => {
     expect(mockSpawnShipper).not.toHaveBeenCalled();
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toContain('interactively');
+  });
+});
+
+describe('shipper_advance + shipper_answer_question (defer/answer cycle)', () => {
+  function makeRunner(events: unknown[], onAnswer?: (answers: Record<string, string>) => void) {
+    return {
+      next: (): Promise<unknown> => {
+        if (events.length === 0) {
+          return Promise.reject(new Error('runner exhausted in test'));
+        }
+        return Promise.resolve(events.shift());
+      },
+      answer: (answers: Record<string, string>): Promise<void> => {
+        onAnswer?.(answers);
+        return Promise.resolve();
+      },
+      cancel: (): void => {},
+      isCompleted: (): boolean => events.length === 0,
+    };
+  }
+
+  it('returns awaiting_answer on initial defer and resumes on answer with completion', async () => {
+    await withFlag('1', async () => {
+      mockGh
+        .mockResolvedValueOnce(issueLabelsResponse('shipper:planned'))
+        .mockResolvedValueOnce(issueLabelsResponse('shipper:implemented'));
+
+      let capturedAnswers: Record<string, string> | undefined;
+      const runner = makeRunner(
+        [
+          {
+            kind: 'deferred',
+            sessionId: 'sess-defer-1',
+            payload: {
+              sessionId: 'sess-defer-1',
+              questions: [
+                {
+                  question: 'Use TypeScript?',
+                  header: 'Lang',
+                  options: [
+                    { label: 'Yes', description: 'TS' },
+                    { label: 'No', description: 'JS' },
+                  ],
+                  multiSelect: false,
+                },
+              ],
+            },
+          },
+          {
+            kind: 'completed',
+            result: {
+              exitCode: 0,
+              stdout: '{"type":"assistant"}',
+              stderr: '',
+              timedOut: false,
+            },
+          },
+        ],
+        (answers) => {
+          capturedAnswers = answers;
+        }
+      );
+      mockStartShipper.mockReturnValueOnce(runner);
+
+      mockFindLatestSessionMeta.mockResolvedValue({
+        issue: '42',
+        stage: 'implement',
+        timestamp: '2026-04-29T00:00:00.000Z',
+        agent: 'claude',
+        model: 'sonnet',
+        repo: 'owner/repo',
+        exitCode: 0,
+        logFile: '/tmp/defer-cycle.jsonl',
+      });
+      mockExtractFinalMessage.mockResolvedValue('Done.');
+      mockTryResolvePr.mockResolvedValue('99');
+
+      const getTool = collectTools();
+
+      // Initial advance returns awaiting_answer.
+      const advanceResult = await getTool('shipper_advance')({ issue: 42 });
+      expect(advanceResult.isError).toBeUndefined();
+      expect(advanceResult.content[0]?.text).toContain('Status: awaiting_answer');
+      expect(advanceResult.content[0]?.text).toContain('Session: sess-defer-1');
+      expect(advanceResult.content[0]?.text).toContain('Use TypeScript?');
+      // Worker's option labels and descriptions must be stripped before the
+      // orchestrator sees the questions — we don't want to bias its answer.
+      expect(advanceResult.content[0]?.text).not.toContain('"Yes"');
+      expect(advanceResult.content[0]?.text).not.toContain('"No"');
+      expect(advanceResult.content[0]?.text).not.toContain('"options"');
+      expect(advanceResult.content[0]?.text).not.toContain('"multiSelect"');
+
+      // Answer the question; expect completion + advance summary.
+      const answerResult = await getTool('shipper_answer_question')({
+        session_id: 'sess-defer-1',
+        answers: { 'Use TypeScript?': 'Yes' },
+      });
+      expect(answerResult.isError).toBeUndefined();
+      expect(capturedAnswers).toEqual({ 'Use TypeScript?': 'Yes' });
+      expect(answerResult.content[0]?.text).toContain(
+        'Stage: shipper:planned -> shipper:implemented (accept)'
+      );
+    });
+  });
+
+  it('returns another awaiting_answer when the worker defers again on resume', async () => {
+    await withFlag('1', async () => {
+      const runner = makeRunner([
+        {
+          kind: 'deferred',
+          sessionId: 'sess-defer-2',
+          payload: {
+            sessionId: 'sess-defer-2',
+            questions: [
+              {
+                question: 'First?',
+                header: 'Q1',
+                options: [
+                  { label: 'A', description: 'a' },
+                  { label: 'B', description: 'b' },
+                ],
+                multiSelect: false,
+              },
+            ],
+          },
+        },
+        {
+          kind: 'deferred',
+          sessionId: 'sess-defer-2',
+          payload: {
+            sessionId: 'sess-defer-2',
+            questions: [
+              {
+                question: 'Second?',
+                header: 'Q2',
+                options: [
+                  { label: 'X', description: 'x' },
+                  { label: 'Y', description: 'y' },
+                ],
+                multiSelect: false,
+              },
+            ],
+          },
+        },
+      ]);
+      mockStartShipper.mockReturnValueOnce(runner);
+      mockGh.mockResolvedValueOnce(issueLabelsResponse('shipper:planned'));
+
+      const getTool = collectTools();
+      await getTool('shipper_advance')({ issue: 42 });
+
+      const second = await getTool('shipper_answer_question')({
+        session_id: 'sess-defer-2',
+        answers: { 'First?': 'A' },
+      });
+      expect(second.isError).toBeUndefined();
+      expect(second.content[0]?.text).toContain('Status: awaiting_answer');
+      expect(second.content[0]?.text).toContain('Second?');
+    });
+  });
+
+  it('errors clearly when shipper_answer_question is called with an unknown session id', async () => {
+    await withFlag('1', async () => {
+      const getTool = collectTools();
+      const result = await getTool('shipper_answer_question')({
+        session_id: 'nonexistent',
+        answers: { 'Q?': 'A' },
+      });
+      expect(result.isError).toBe(true);
+      expect(result.content[0]?.text).toContain('No pending shipper session');
+    });
+  });
+});
+
+describe('shipper_groom', () => {
+  it('is not registered when the experimental flag is unset', async () => {
+    await withFlag(undefined, () => {
+      const getTool = collectTools();
+      expect(getTool.names()).not.toContain('shipper_groom');
+      expect(getTool.names()).not.toContain('shipper_answer_question');
+    });
+  });
+
+  it('refuses on an issue that is not at shipper:new', async () => {
+    await withFlag('1', async () => {
+      mockGh.mockResolvedValueOnce(issueLabelsResponse('shipper:groomed'));
+      const getTool = collectTools();
+      const result = await getTool('shipper_groom')({ issue: 42 });
+      expect(result.isError).toBe(true);
+      expect(result.content[0]?.text).toContain('only operates on issues at shipper:new');
+    });
+  });
+
+  it('runs end-to-end on a shipper:new issue and surfaces the accept transition', async () => {
+    await withFlag('1', async () => {
+      mockGh
+        .mockResolvedValueOnce(issueLabelsResponse('shipper:new'))
+        .mockResolvedValueOnce(issueLabelsResponse('shipper:groomed'));
+      mockSpawnShipper.mockResolvedValue({
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+        timedOut: false,
+      });
+      mockFindLatestSessionMeta.mockResolvedValue({
+        issue: '42',
+        stage: 'groom',
+        timestamp: '2026-04-29T00:00:00.000Z',
+        agent: 'claude',
+        model: 'sonnet',
+        repo: 'owner/repo',
+        exitCode: 0,
+        logFile: '/tmp/groom.jsonl',
+      });
+      mockExtractFinalMessage.mockResolvedValue('Issue groomed.');
+
+      const getTool = collectTools();
+      const result = await getTool('shipper_groom')({ issue: 42 });
+
+      expect(result.isError).toBeUndefined();
+      const text = result.content[0]?.text ?? '';
+      expect(text).toContain('Stage: shipper:new -> shipper:groomed (accept)');
+      expect(text).toContain('Issue groomed.');
+      expect(text).toContain('Session log: /tmp/groom.jsonl');
+      expect(mockSpawnShipper).toHaveBeenCalledWith(['groom', '42', '--mode', 'headless'], {
+        timeoutMs: 60 * 60 * 1000,
+      });
+    });
+  });
+
+  it('returns awaiting_answer when the worker defers and resumes through shipper_answer_question', async () => {
+    await withFlag('1', async () => {
+      mockGh
+        .mockResolvedValueOnce(issueLabelsResponse('shipper:new'))
+        .mockResolvedValueOnce(issueLabelsResponse('shipper:groomed'));
+
+      const events: unknown[] = [
+        {
+          kind: 'deferred',
+          sessionId: 'sess-groom-1',
+          payload: {
+            sessionId: 'sess-groom-1',
+            questions: [
+              {
+                question: 'Scope?',
+                header: 'Scope',
+                options: [
+                  { label: 'Narrow', description: 'narrow' },
+                  { label: 'Wide', description: 'wide' },
+                ],
+                multiSelect: false,
+              },
+            ],
+          },
+        },
+        {
+          kind: 'completed',
+          result: { exitCode: 0, stdout: '', stderr: '', timedOut: false },
+        },
+      ];
+      mockStartShipper.mockReturnValueOnce({
+        next: (): Promise<unknown> =>
+          events.length === 0
+            ? Promise.reject(new Error('exhausted'))
+            : Promise.resolve(events.shift()),
+        answer: (): Promise<void> => Promise.resolve(),
+        cancel: (): void => {},
+        isCompleted: (): boolean => events.length === 0,
+      });
+      mockFindLatestSessionMeta.mockResolvedValue({
+        issue: '42',
+        stage: 'groom',
+        timestamp: '2026-04-29T00:00:00.000Z',
+        agent: 'claude',
+        model: 'sonnet',
+        repo: 'owner/repo',
+        exitCode: 0,
+        logFile: '/tmp/groom-defer.jsonl',
+      });
+      mockExtractFinalMessage.mockResolvedValue('Done.');
+
+      const getTool = collectTools();
+      const initial = await getTool('shipper_groom')({ issue: 42 });
+      expect(initial.isError).toBeUndefined();
+      expect(initial.content[0]?.text).toContain('Status: awaiting_answer');
+      expect(initial.content[0]?.text).toContain('Scope?');
+
+      const completion = await getTool('shipper_answer_question')({
+        session_id: 'sess-groom-1',
+        answers: { 'Scope?': 'Narrow' },
+      });
+      expect(completion.isError).toBeUndefined();
+      expect(completion.content[0]?.text).toContain(
+        'Stage: shipper:new -> shipper:groomed (accept)'
+      );
+    });
   });
 });
 

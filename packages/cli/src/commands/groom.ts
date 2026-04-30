@@ -4,6 +4,7 @@ import {
   generateBranchName,
   getRepoRoot,
   getSettings,
+  isMcpGroomingEnabled,
   logger,
   resolveBaseBranch,
   resolveMode,
@@ -79,14 +80,17 @@ export async function groomCommand(
   options: GroomOptions = { auto: false }
 ): Promise<void> {
   const effectiveMode = resolveMode('groom', options.mode);
-  if (effectiveMode === 'headless') {
+  const mcpGroomingEnabled = isMcpGroomingEnabled();
+  if (effectiveMode === 'headless' && !mcpGroomingEnabled) {
     throw new Error(
       'Error: groom does not support headless mode. Grooming requires interactive input.'
     );
   }
-  const stdin = Reflect.get(process, 'stdin') as ReadStream | undefined;
-  if (!stdin?.isTTY) {
-    throw new Error('Error: shipper groom requires an interactive terminal. stdin is not a TTY.');
+  if (effectiveMode !== 'headless') {
+    const stdin = Reflect.get(process, 'stdin') as ReadStream | undefined;
+    if (!stdin?.isTTY) {
+      throw new Error('Error: shipper groom requires an interactive terminal. stdin is not a TTY.');
+    }
   }
 
   if (options.auto) {

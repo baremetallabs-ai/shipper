@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { toErrorMessage } from './errors.js';
+import { isMcpGroomingEnabled } from './feature-flags.js';
 import { logger } from './logger.js';
 import { isPlainObject } from './type-guards.js';
 
@@ -198,6 +199,9 @@ export function resolveMode(step: string, override?: CommandMode): CommandMode {
   const s = getSettings();
   const mode = s.commands[step]?.mode ?? s.commands.default.mode;
   if (mode === undefined) {
+    if (step === 'groom' && isMcpGroomingEnabled()) {
+      return 'headless';
+    }
     return 'default';
   }
   return validateMode(mode, step);

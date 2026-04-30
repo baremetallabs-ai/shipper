@@ -21,8 +21,9 @@ import {
   getStageLabel,
   getWorktreeRepoName,
   gh,
-  isLockStale,
   isClean,
+  isLockStale,
+  isMcpGroomingEnabled,
   listIssues,
   parseIssueLabelsState,
   parseIssueTitleLabelsList,
@@ -42,6 +43,8 @@ import {
   formatToolError,
   formatUnblockResult,
   spawnShipper,
+  startShipper,
+  type ShipperRunner,
   type ToolTextResult,
 } from './helpers.js';
 
@@ -51,6 +54,7 @@ const RESET_TARGET_VALUES = ['new', 'groomed', 'designed', 'planned', 'implement
 
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
 const STAGE_FOR_LABEL = {
+  'shipper:new': 'groom',
   'shipper:groomed': 'design',
   'shipper:designed': 'plan',
   'shipper:planned': 'implement',
@@ -66,6 +70,74 @@ type GhIssueCandidate = { number: number; title?: string; url?: string; createdA
 
 function textOk(text: string): ToolTextResult {
   return { content: [{ type: 'text', text }] };
+}
+
+interface PendingSession {
+  runner: ShipperRunner;
+  /** What the shipper child was originally asked to do — used for log/diagnostic context. */
+  originatingTool: string;
+  /** Issue number (if applicable) — restored into formatAdvanceResult on completion. */
+  issue?: number;
+  /** Repo the originating call was made against. */
+  repo: string;
+  /** Args passed to the original shipper invocation (for replay if ever needed). */
+  args: string[];
+  /** Pre-stage label captured before spawn so post-completion can reconstruct outcome. */
+  preStageLabel?: string | null;
+  /** Started-at timestamp for session log resolution on completion. */
+  startedAt: Date;
+  /** Repo slug for session log resolution. */
+  repoSlug: string;
+}
+
+const pendingSessions = new Map<string, PendingSession>();
+
+export function getPendingSession(sessionId: string): PendingSession | undefined {
+  return pendingSessions.get(sessionId);
+}
+
+function clearPendingSession(sessionId: string): void {
+  pendingSessions.delete(sessionId);
+}
+
+function formatAwaitingAnswer(payload: {
+  sessionId: string;
+  questions: unknown[];
+  toolUseId?: string;
+}): ToolTextResult {
+  // Strip the worker's suggested options/labels before showing questions to the
+  // orchestrator. The worker's options bias the answer (and tend to skew lazy);
+  // the orchestrator should investigate and answer freely. The bridge accepts
+  // free-text answers, so the orchestrator never needs to see the option list.
+  const sanitizedQuestions = sanitizeQuestionsForOrchestrator(payload.questions);
+  const text = [
+    'Status: awaiting_answer',
+    `Session: ${payload.sessionId}`,
+    payload.toolUseId ? `Tool use id: ${payload.toolUseId}` : undefined,
+    '',
+    'The headless worker called AskUserQuestion and is paused awaiting answers from the orchestrator.',
+    'Reply with `shipper_answer_question` providing { session_id, answers } where answers is a map',
+    'of question text -> your answer (free text). Investigate the codebase / context yourself before',
+    'answering — do not rely on the worker for option lists; they have been stripped intentionally',
+    'so your answer is unbiased.',
+    '',
+    'Questions (JSON):',
+    JSON.stringify(sanitizedQuestions, null, 2),
+  ]
+    .filter((line): line is string => line !== undefined)
+    .join('\n');
+  return { content: [{ type: 'text', text }] };
+}
+
+function sanitizeQuestionsForOrchestrator(questions: unknown[]): unknown[] {
+  return questions.map((q) => {
+    if (!q || typeof q !== 'object') return q;
+    const obj = q as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    if (typeof obj.question === 'string') out.question = obj.question;
+    if (typeof obj.header === 'string') out.header = obj.header;
+    return out;
+  });
 }
 
 function issueSchema(): z.ZodNumber {
@@ -277,6 +349,7 @@ function resolveAdvanceOutcome(
   }
 
   const transitionTargets = {
+    groom: { accept: 'shipper:groomed', reject: 'shipper:new' },
     design: { accept: 'shipper:designed', reject: 'shipper:new' },
     plan: { accept: 'shipper:planned', reject: 'shipper:groomed' },
     implement: { accept: 'shipper:implemented', reject: 'shipper:designed' },
@@ -629,7 +702,30 @@ export function registerTools(server: McpServer, repo: string): void {
         const preStage = parseAdvanceStage(preStageLabel);
         const startedAt = new Date();
         const args = ['next', String(issue), '--mode', 'headless'];
-        const result = await spawnShipper(args, { timeoutMs: agentTimeoutMs() });
+        const runner = startShipper(args, { timeoutMs: agentTimeoutMs() });
+
+        const event = await runner.next();
+        if (event.kind === 'deferred') {
+          pendingSessions.set(event.sessionId, {
+            runner,
+            originatingTool: 'shipper_advance',
+            issue,
+            repo,
+            args,
+            preStageLabel,
+            startedAt,
+            repoSlug: sessionRepo.repoSlug,
+          });
+          return formatAwaitingAnswer({
+            sessionId: event.sessionId,
+            questions: event.payload.questions,
+            ...(event.payload.toolUseId !== undefined
+              ? { toolUseId: event.payload.toolUseId }
+              : {}),
+          });
+        }
+
+        const result = event.result;
         const postIssue = await fetchIssueLabels(repo, issue);
         const postLabels = postIssue.labels.map((label) => label.name);
         const outcome =
@@ -663,6 +759,73 @@ export function registerTools(server: McpServer, repo: string): void {
       }
     }
   );
+
+  if (isMcpGroomingEnabled()) {
+    server.registerTool(
+      'shipper_groom',
+      {
+        description:
+          "Run grooming on a `shipper:new` issue in headless mode and bridge AskUserQuestion through MCP so the orchestrator answers the worker's clarifying questions via `shipper_answer_question`.",
+        inputSchema: { issue: issueSchema() },
+      },
+      async ({ issue }) => {
+        try {
+          const sessionRepo = await resolveSessionRepo({ repo });
+          const preIssue = await fetchIssueLabels(repo, issue);
+          const preLabels = preIssue.labels.map((label) => label.name);
+          if (!preLabels.includes(NEW_LABEL)) {
+            throw new Error(
+              `shipper_groom only operates on issues at ${NEW_LABEL}. Issue #${issue} has labels: ${preLabels.join(', ') || '(none)'}.`
+            );
+          }
+          const startedAt = new Date();
+          const args = ['groom', String(issue), '--mode', 'headless'];
+          const runner = startShipper(args, { timeoutMs: agentTimeoutMs() });
+
+          const event = await runner.next();
+          if (event.kind === 'deferred') {
+            pendingSessions.set(event.sessionId, {
+              runner,
+              originatingTool: 'shipper_groom',
+              issue,
+              repo,
+              args,
+              preStageLabel: NEW_LABEL,
+              startedAt,
+              repoSlug: sessionRepo.repoSlug,
+            });
+            return formatAwaitingAnswer({
+              sessionId: event.sessionId,
+              questions: event.payload.questions,
+              ...(event.payload.toolUseId !== undefined
+                ? { toolUseId: event.payload.toolUseId }
+                : {}),
+            });
+          }
+
+          const result = event.result;
+          const postIssue = await fetchIssueLabels(repo, issue);
+          const postLabels = postIssue.labels.map((label) => label.name);
+          const outcome =
+            resolveAdvanceOutcome(NEW_LABEL, postLabels) ??
+            resolveNoopAdvanceOutcome(NEW_LABEL, result);
+          const sessionContext = await resolveSessionContext({
+            repoSlug: sessionRepo.repoSlug,
+            issue: String(issue),
+            stage: 'groom',
+            since: startedAt,
+          });
+          return formatAdvanceResult(result, outcome, {
+            command: `shipper ${args.join(' ')}`,
+            finalMessage: sessionContext.finalMessage,
+            sessionLogPath: sessionContext.sessionLogPath,
+          });
+        } catch (err) {
+          return formatToolError(err);
+        }
+      }
+    );
+  }
 
   server.registerTool(
     'shipper_create_issue',
@@ -926,6 +1089,88 @@ export function registerTools(server: McpServer, repo: string): void {
       }
     }
   );
+
+  if (isMcpGroomingEnabled()) {
+    server.registerTool(
+      'shipper_answer_question',
+      {
+        description:
+          'Provide answers to a paused headless worker that called AskUserQuestion. The worker resumes with the supplied answers and continues until it either defers again (returning another awaiting_answer payload) or completes.',
+        inputSchema: {
+          session_id: z.string().min(1),
+          answers: z.record(z.string(), z.string()),
+        },
+      },
+      async ({ session_id, answers }) => {
+        try {
+          const session = pendingSessions.get(session_id);
+          if (!session) {
+            throw new Error(
+              `No pending shipper session with id "${session_id}". The worker may have already completed or the MCP server may have restarted.`
+            );
+          }
+          await session.runner.answer(answers);
+          const event = await session.runner.next();
+          if (event.kind === 'deferred') {
+            // Replace the entry under the (likely-same) sessionId with the latest payload context.
+            // Session id rarely changes across the same claude run, but we guard anyway.
+            if (event.sessionId !== session_id) {
+              pendingSessions.delete(session_id);
+              pendingSessions.set(event.sessionId, session);
+            }
+            return formatAwaitingAnswer({
+              sessionId: event.sessionId,
+              questions: event.payload.questions,
+              ...(event.payload.toolUseId !== undefined
+                ? { toolUseId: event.payload.toolUseId }
+                : {}),
+            });
+          }
+
+          // Completion path — replicate shipper_advance/shipper_groom's post-completion summary.
+          clearPendingSession(session_id);
+          const result = event.result;
+          const advanceLikeTools = new Set(['shipper_advance', 'shipper_groom']);
+          if (!advanceLikeTools.has(session.originatingTool) || session.issue === undefined) {
+            return formatSpawnResult(result, `shipper ${session.args.join(' ')}`);
+          }
+          const issue = session.issue;
+          const postIssue = await fetchIssueLabels(repo, issue);
+          const postLabels = postIssue.labels.map((label) => label.name);
+          const preStageLabel = session.preStageLabel ?? undefined;
+          const preStage = parseAdvanceStage(preStageLabel);
+          const outcome =
+            resolveAdvanceOutcome(preStageLabel, postLabels) ??
+            resolveNoopAdvanceOutcome(preStageLabel, result);
+          const sessionContext = preStage
+            ? await resolveSessionContext({
+                repoSlug: session.repoSlug,
+                issue: String(issue),
+                stage: preStage,
+                since: session.startedAt,
+              })
+            : {};
+          const prNumber = await tryResolvePrForIssue(repo, issue);
+          return formatAdvanceResult(
+            result,
+            outcome
+              ? {
+                  ...outcome,
+                  prUrl: prNumber ? `https://github.com/${repo}/pull/${prNumber}` : undefined,
+                }
+              : undefined,
+            {
+              command: `shipper ${session.args.join(' ')}`,
+              finalMessage: sessionContext.finalMessage,
+              sessionLogPath: sessionContext.sessionLogPath,
+            }
+          );
+        } catch (err) {
+          return formatToolError(err);
+        }
+      }
+    );
+  }
 }
 
 export function registerInitErrorTools(server: McpServer, error: unknown): void {
@@ -940,6 +1185,7 @@ export function registerInitErrorTools(server: McpServer, error: unknown): void 
     'shipper_unlock',
     'shipper_reset',
     'shipper_adopt',
+    ...(isMcpGroomingEnabled() ? ['shipper_answer_question', 'shipper_groom'] : []),
   ];
   for (const name of names) {
     server.registerTool(

@@ -2,7 +2,10 @@
   "mcpServers": {
     "shipper": {
       "command": "node",
-      "args": ["packages/mcp/dist/index.js"]
+      "args": ["packages/mcp/dist/index.js"],
+      "env": {
+        "SHIPPER_EXPERIMENTAL_MCP_GROOMING": "1"
+      }
     }
   }
 }

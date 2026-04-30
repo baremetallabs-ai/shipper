@@ -12,3 +12,4 @@ coverage/
 .cache/
 tmp/
 release/
+.claude/*.lock

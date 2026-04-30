@@ -4,8 +4,10 @@ import { access, mkdir, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { installDeferBridge } from './defer-bridge.js';
 import { runAdvisoryHook, runWorktreeHook } from './hooks.js';
-import { createLogger } from './logger.js';
+import { createLogger, logger } from './logger.js';
+import { toErrorMessage } from './errors.js';
 import { getSettings } from './settings.js';
 import {
   execAsync,
@@ -267,6 +269,13 @@ async function withWorktreeDefault<T>(
 
     worktreeLogger.worktreeStep('running setup hooks');
     await runWorktreeHook('worktree-setup', hookEnv, wtPath);
+    try {
+      await installDeferBridge(wtPath);
+    } catch (err) {
+      logger.warn(
+        `Warning: Failed to install AskUserQuestion defer bridge in ${wtPath}: ${toErrorMessage(err)}`
+      );
+    }
     worktreeLogger.worktreeStep('running agent');
     return await fn(wtPath);
   } finally {

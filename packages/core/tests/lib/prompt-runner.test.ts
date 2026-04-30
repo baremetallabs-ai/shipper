@@ -1275,7 +1275,7 @@ describe('runPrompt', () => {
     expect(spawnMock.mock.calls[0]?.[2]).toMatchObject({
       cwd: undefined,
       env: process.env,
-      stdio: ['inherit', 'pipe', 'pipe'],
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
     const writeMetaCall = writeSessionMetaMock.mock.calls[0];
     expect(writeMetaCall?.[0]).toContain('/home/user/.shipper/sessions/owner-repo/308-implement-');
@@ -1403,7 +1403,7 @@ describe('runPrompt', () => {
     // The createWriteStream should receive the override path, not the session path
     expect(createWriteStreamMock).toHaveBeenCalledWith(overridePath);
     expect(spawnMock.mock.calls[0]?.[2]).toMatchObject({
-      stdio: ['inherit', 'pipe', 'pipe'],
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
 
     // Session metadata should still be written under ~/.shipper/sessions/...
@@ -1506,7 +1506,7 @@ describe('runPrompt', () => {
 
     expect(stdoutWriteMock).toHaveBeenCalledWith('headless output\n');
     expect(spawnMock.mock.calls[0]?.[2]).toMatchObject({
-      stdio: ['inherit', 'pipe', 'pipe'],
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
 
     stdoutWriteMock.mockRestore();
@@ -1590,8 +1590,11 @@ describe('runPrompt', () => {
     );
     expect(createWriteStreamMock).not.toHaveBeenCalled();
     expect(writeSessionMetaMock).not.toHaveBeenCalled();
+    // Claude headless always pipes stdout so the defer-bridge consumer can read stream-json,
+    // even when session logging is disabled. Stdin is ignored so the CLI's stdin (used to receive
+    // deferred answers from the MCP parent) isn't shared with claude.
     expect(spawnMock.mock.calls[0]?.[2]).toMatchObject({
-      stdio: 'inherit',
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
     expect(spawnedArgs()).toContain('--output-format');
     warnMock.mockRestore();

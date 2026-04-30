@@ -627,6 +627,52 @@ describe('resolveMode', () => {
 
     expect(() => resolveMode('groom')).toThrow('Invalid mode "banana" for step "groom"');
   });
+
+  it('flips groom default to headless when SHIPPER_EXPERIMENTAL_MCP_GROOMING is set', async () => {
+    readFileMock.mockImplementation((p: string) => {
+      if (p === settingsPath) {
+        return JSON.stringify({ commands: { default: { agent: 'claude' } } });
+      }
+      throw enoent(p);
+    });
+
+    const original = process.env.SHIPPER_EXPERIMENTAL_MCP_GROOMING;
+    process.env.SHIPPER_EXPERIMENTAL_MCP_GROOMING = '1';
+    try {
+      const { loadSettings, resolveMode } = await loadModule();
+      await loadSettings();
+      expect(resolveMode('groom')).toBe('headless');
+      // Other steps unchanged.
+      expect(resolveMode('design')).toBe('default');
+    } finally {
+      if (original === undefined) {
+        Reflect.deleteProperty(process.env, 'SHIPPER_EXPERIMENTAL_MCP_GROOMING');
+      } else {
+        process.env.SHIPPER_EXPERIMENTAL_MCP_GROOMING = original;
+      }
+    }
+  });
+
+  it('keeps groom default at "default" when the experimental flag is unset', async () => {
+    readFileMock.mockImplementation((p: string) => {
+      if (p === settingsPath) {
+        return JSON.stringify({ commands: { default: { agent: 'claude' } } });
+      }
+      throw enoent(p);
+    });
+
+    const original = process.env.SHIPPER_EXPERIMENTAL_MCP_GROOMING;
+    Reflect.deleteProperty(process.env, 'SHIPPER_EXPERIMENTAL_MCP_GROOMING');
+    try {
+      const { loadSettings, resolveMode } = await loadModule();
+      await loadSettings();
+      expect(resolveMode('groom')).toBe('default');
+    } finally {
+      if (original !== undefined) {
+        process.env.SHIPPER_EXPERIMENTAL_MCP_GROOMING = original;
+      }
+    }
+  });
 });
 
 describe('resolveModel', () => {
