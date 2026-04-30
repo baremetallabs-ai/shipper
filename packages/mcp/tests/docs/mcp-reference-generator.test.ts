@@ -124,6 +124,21 @@ describe('mcp reference generator', () => {
     );
   });
 
+  it('keeps abbreviations inside the frontmatter summary sentence', () => {
+    const rendered = renderToolPage(
+      {
+        ...findTool('shipper_reset'),
+        description:
+          'Inspect related identifiers, e.g. issue labels, before choosing a reset target. Follow-up text should not be included.',
+      },
+      toolExtras.shipper_reset
+    );
+
+    expect(rendered).toContain(
+      'description: "Inspect related identifiers, e.g. issue labels, before choosing a reset target."'
+    );
+  });
+
   it('renders behavior hints from explicit annotations only', () => {
     const rendered = renderToolPage(findTool('shipper_reset'), toolExtras.shipper_reset);
 

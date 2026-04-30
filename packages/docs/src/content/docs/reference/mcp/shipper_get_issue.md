@@ -46,7 +46,7 @@ Use this when an agent needs the issue body, labels, state, and linked PR before
 
 ## Error modes
 
-- GitHub command failure: GitHub command failure: <underlying error message>
+- GitHub command failure: Command failed: gh <args>
 
 ## Related tools
 

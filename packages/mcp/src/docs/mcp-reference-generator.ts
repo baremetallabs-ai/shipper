@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -109,8 +110,27 @@ function asStringArray(value: unknown): string[] {
 
 function singleSentence(value: string): string {
   const trimmed = value.trim().replace(/\s+/g, ' ');
-  const match = trimmed.match(/^.*?[.!?](?:\s|$)/);
-  return (match?.[0] ?? trimmed).trim();
+  const abbreviations = new Set(['e.g.', 'i.e.', 'mr.', 'mrs.', 'ms.', 'dr.', 'vs.', 'etc.']);
+
+  for (let index = 0; index < trimmed.length; index += 1) {
+    const char = trimmed[index];
+    if (char !== '.' && char !== '!' && char !== '?') {
+      continue;
+    }
+    const next = trimmed[index + 1];
+    if (next !== undefined && !/\s/.test(next)) {
+      continue;
+    }
+
+    const sentence = trimmed.slice(0, index + 1).trim();
+    const lastToken = sentence.split(/\s+/).at(-1)?.toLowerCase();
+    if (lastToken && abbreviations.has(lastToken)) {
+      continue;
+    }
+    return sentence;
+  }
+
+  return trimmed;
 }
 
 function formatDefault(value: unknown): string {
@@ -314,14 +334,27 @@ async function writeGeneratedTree(baseDir: string, model: McpReferenceModel): Pr
   }
 }
 
+function resolveModulePath(root: string, specifier: string): string | undefined {
+  try {
+    return createRequire(path.join(root, 'package.json')).resolve(specifier);
+  } catch {
+    return undefined;
+  }
+}
+
 function formatGeneratedTree(baseDir: string, root: string): void {
-  const prettierBin = [root, repoRoot()]
-    .map((candidate) => path.join(candidate, 'node_modules/prettier/bin/prettier.cjs'))
+  const roots = [...new Set([root, repoRoot()])];
+  const prettierBin = roots
+    .flatMap((candidate) => [
+      resolveModulePath(candidate, 'prettier/bin/prettier.cjs'),
+      path.join(candidate, 'node_modules/prettier/bin/prettier.cjs'),
+    ])
+    .filter((candidate): candidate is string => candidate !== undefined)
     .find((candidate) => existsSync(candidate));
   if (!prettierBin) {
     throw new Error('Prettier binary not found. Run npm install first.');
   }
-  const prettierConfig = [root, repoRoot()]
+  const prettierConfig = roots
     .map((candidate) => path.join(candidate, '.prettierrc'))
     .find((candidate) => existsSync(candidate));
   if (!prettierConfig) {
