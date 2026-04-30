@@ -37,11 +37,11 @@ interface RepoPickerSearchResult {
 interface RepoPickerSearchScope {
   viewerLogin: string;
   organizationLogins: string[];
-  collaboratorRepositories: RepoPickerSearchRepository[];
 }
 
 const defaultConfig: AppConfig = { repos: [], activeRepo: '', autoMergeRepos: [] };
 const repoPickerPageSize = 100;
+const repoPickerSearchQueryMaxLength = 256;
 let repoSearchScopePromise: Promise<RepoPickerSearchScope> | null = null;
 
 const repoPickerRepositoriesQuery = `
@@ -202,7 +202,7 @@ async function githubGraphql(
       continue;
     }
 
-    args.push('-F', `${key}=${String(value)}`);
+    args.push(typeof value === 'string' ? '-f' : '-F', `${key}=${String(value)}`);
   }
 
   const result = await gh(args);
@@ -623,6 +623,16 @@ async function fetchRepoSearchScope(): Promise<RepoPickerSearchScope> {
     organizationCursor = page.pageInfo.hasNextPage ? page.pageInfo.endCursor : null;
   } while (organizationCursor !== null);
 
+  return { viewerLogin, organizationLogins };
+}
+
+async function fetchCollaboratorSearchMatches(
+  query: string
+): Promise<RepoPickerSearchRepository[]> {
+  if (parseRepo(query) === null) {
+    return [];
+  }
+
   const collaboratorRepositories: RepoPickerSearchRepository[] = [];
   const seenCollaboratorRepositories = new Set<string>();
   let collaboratorCursor: string | null = null;
@@ -648,7 +658,10 @@ async function fetchRepoSearchScope(): Promise<RepoPickerSearchScope> {
     collaboratorCursor = page.pageInfo.hasNextPage ? page.pageInfo.endCursor : null;
   } while (collaboratorCursor !== null);
 
-  return { viewerLogin, organizationLogins, collaboratorRepositories };
+  const queryKey = toRepoKey(query);
+  return collaboratorRepositories.filter(
+    (repository) => toRepoKey(repository.nameWithOwner) === queryKey
+  );
 }
 
 async function getRepoSearchScope(): Promise<RepoPickerSearchScope> {
@@ -670,25 +683,66 @@ function normalizeSearchTerms(query: string): string[] {
     .filter((term) => term.length > 0);
 }
 
-function buildRepositorySearchQuery(query: string, scope: RepoPickerSearchScope): string {
-  return [
-    ...normalizeSearchTerms(query),
-    'in:name',
-    'archived:false',
-    'fork:true',
-    `user:${scope.viewerLogin}`,
-    ...scope.organizationLogins.map((login) => `org:${login}`),
-  ].join(' ');
+function buildSearchTermText(query: string, maxLength: number): string {
+  if (maxLength <= 0) {
+    return '';
+  }
+
+  let termText = '';
+  for (const term of normalizeSearchTerms(query)) {
+    const separator = termText.length === 0 ? '' : ' ';
+    const remainingLength = maxLength - termText.length - separator.length;
+    if (remainingLength <= 0) {
+      break;
+    }
+
+    termText += `${separator}${term.slice(0, remainingLength)}`;
+    if (term.length > remainingLength) {
+      break;
+    }
+  }
+
+  return termText;
 }
 
-function findCollaboratorSearchMatches(
-  scope: RepoPickerSearchScope,
-  query: string
-): RepoPickerSearchRepository[] {
-  const queryKey = toRepoKey(query);
-  return scope.collaboratorRepositories.filter(
-    (repository) => toRepoKey(repository.nameWithOwner) === queryKey
-  );
+function buildRepositorySearchQuery(query: string, scopeQualifiers: string[]): string {
+  const qualifiers = ['in:name', 'archived:false', 'fork:true', ...scopeQualifiers];
+  const qualifierText = qualifiers.join(' ');
+  const maxTermLength = repoPickerSearchQueryMaxLength - qualifierText.length - 1;
+  const termText = buildSearchTermText(query, maxTermLength);
+
+  return termText.length > 0 ? `${termText} ${qualifierText}` : qualifierText;
+}
+
+function buildRepositorySearchQueries(query: string, scope: RepoPickerSearchScope): string[] {
+  const scopeQualifiers = [
+    `user:${scope.viewerLogin}`,
+    ...scope.organizationLogins.map((login) => `org:${login}`),
+  ];
+  const searchQueries: string[] = [];
+  let currentScopeQualifiers: string[] = [];
+
+  for (const scopeQualifier of scopeQualifiers) {
+    const nextScopeQualifiers = [...currentScopeQualifiers, scopeQualifier];
+    const nextSearchQuery = buildRepositorySearchQuery(query, nextScopeQualifiers);
+
+    if (
+      currentScopeQualifiers.length > 0 &&
+      nextSearchQuery.length > repoPickerSearchQueryMaxLength
+    ) {
+      searchQueries.push(buildRepositorySearchQuery(query, currentScopeQualifiers));
+      currentScopeQualifiers = [scopeQualifier];
+      continue;
+    }
+
+    currentScopeQualifiers = nextScopeQualifiers;
+  }
+
+  if (currentScopeQualifiers.length > 0) {
+    searchQueries.push(buildRepositorySearchQuery(query, currentScopeQualifiers));
+  }
+
+  return searchQueries;
 }
 
 function parseRepoSearchResult(json: string, viewerLogin: string): RepoPickerSearchResult {
@@ -715,7 +769,7 @@ function parseRepoSearchResult(json: string, viewerLogin: string): RepoPickerSea
           return [];
         }
 
-        if (!('nameWithOwner' in node) && !('owner' in node) && !('isArchived' in node)) {
+        if (!('nameWithOwner' in node) || !('owner' in node) || !('isArchived' in node)) {
           return [];
         }
 
@@ -794,9 +848,89 @@ function parseSearchPayload(payload: unknown): { query: string; cursor: string |
   return { query: payload.query, cursor };
 }
 
+function encodeRepoSearchCursor(cursors: (string | null)[]): string | null {
+  if (cursors.length === 1) {
+    return cursors[0] ?? null;
+  }
+
+  if (cursors.every((cursor) => cursor === null)) {
+    return null;
+  }
+
+  return Buffer.from(JSON.stringify({ cursors }), 'utf8').toString('base64url');
+}
+
+function parseRepoSearchCursor(cursor: string, expectedLength: number): (string | null)[] {
+  if (expectedLength === 1) {
+    return [cursor];
+  }
+
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as unknown;
+    if (!isPlainObject(parsed) || !('cursors' in parsed) || !Array.isArray(parsed.cursors)) {
+      throw new Error('Expected repository search cursor payload.');
+    }
+
+    const cursors: unknown[] = parsed.cursors;
+    if (
+      cursors.length !== expectedLength ||
+      !cursors.every((value) => value === null || typeof value === 'string')
+    ) {
+      throw new Error('Expected repository search cursor payload.');
+    }
+
+    return cursors.map((value) => (typeof value === 'string' ? value : null));
+  } catch (error) {
+    throw new Error(`Invalid repository search cursor: ${toErrorMessage(error)}`);
+  }
+}
+
+async function searchRepositories(
+  query: string,
+  scope: RepoPickerSearchScope,
+  cursor: string | null
+): Promise<RepoPickerSearchResult> {
+  const searchQueries = buildRepositorySearchQueries(query, scope);
+  const cursors =
+    cursor === null
+      ? searchQueries.map(() => null)
+      : parseRepoSearchCursor(cursor, searchQueries.length);
+  let repositories: RepoPickerSearchRepository[] = [];
+  const nextCursors: (string | null)[] = [];
+
+  for (const [index, searchQuery] of searchQueries.entries()) {
+    const currentCursor = cursors[index] ?? null;
+    if (cursor !== null && currentCursor === null) {
+      nextCursors.push(null);
+      continue;
+    }
+
+    const searchResult = parseRepoSearchResult(
+      await githubGraphql(repoPickerSearchQuery, {
+        searchQuery,
+        limit: repoPickerPageSize,
+        cursor: currentCursor,
+      }),
+      scope.viewerLogin
+    );
+
+    repositories = mergeSearchRepositories(repositories, searchResult.repositories);
+    nextCursors.push(searchResult.pageInfo.hasNextPage ? searchResult.pageInfo.endCursor : null);
+  }
+
+  return {
+    repositories,
+    pageInfo: {
+      hasNextPage: nextCursors.some((nextCursor) => nextCursor !== null),
+      endCursor: encodeRepoSearchCursor(nextCursors),
+    },
+  };
+}
+
 export function registerConfigHandlers(): void {
   ipcMain.handle('get-config', () => readConfig());
   ipcMain.handle('list-repos', async () => {
+    repoSearchScopePromise = null;
     return parseRepoList(
       await githubGraphql(repoPickerRepositoriesQuery, { limit: repoPickerPageSize })
     );
@@ -813,15 +947,7 @@ export function registerConfigHandlers(): void {
     }
 
     const scope = await getRepoSearchScope();
-    const searchQuery = buildRepositorySearchQuery(trimmedQuery, scope);
-    const searchResult = parseRepoSearchResult(
-      await githubGraphql(repoPickerSearchQuery, {
-        searchQuery,
-        limit: repoPickerPageSize,
-        cursor: parsedPayload.cursor,
-      }),
-      scope.viewerLogin
-    );
+    const searchResult = await searchRepositories(trimmedQuery, scope, parsedPayload.cursor);
 
     if (parsedPayload.cursor !== null) {
       return searchResult;
@@ -829,7 +955,7 @@ export function registerConfigHandlers(): void {
 
     return {
       repositories: mergeSearchRepositories(
-        findCollaboratorSearchMatches(scope, trimmedQuery),
+        await fetchCollaboratorSearchMatches(trimmedQuery),
         searchResult.repositories
       ),
       pageInfo: searchResult.pageInfo,
