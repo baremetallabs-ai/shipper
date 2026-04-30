@@ -89,7 +89,10 @@ export const commandExtras: Record<CommandPath, CommandExtras> = {
       { code: 0, when: 'The selected issue or issues are labeled successfully.' },
       { code: 1, when: 'Validation, issue lookup, or label mutation fails.' },
     ],
-    constraints: ['--all and an explicit issue argument are mutually exclusive'],
+    constraints: [
+      '--all and an explicit issue argument are mutually exclusive',
+      'An issue argument is required unless --all is used',
+    ],
   },
   priority: {
     examples: [
@@ -137,6 +140,7 @@ export const commandExtras: Record<CommandPath, CommandExtras> = {
     constraints: [
       promptMcpConstraint,
       '--auto and an explicit issue argument are mutually exclusive',
+      'An issue argument is required unless --auto is used',
       '--auto and --mode are mutually exclusive',
       '--parallel <n> requires --auto',
       '--parallel <n> must be a positive integer',
@@ -211,7 +215,10 @@ export const commandExtras: Record<CommandPath, CommandExtras> = {
       { code: 0, when: 'The selected lock or stale locks are released.' },
       { code: 1, when: 'Validation, issue lookup, or label mutation fails.' },
     ],
-    constraints: ['--stale cannot be used with an issue argument'],
+    constraints: [
+      '--stale cannot be used with an issue argument',
+      'An issue argument is required unless --stale is used',
+    ],
   },
   merge: {
     examples: [

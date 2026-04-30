@@ -45,3 +45,4 @@ shipper adopt --all
 ## Constraints
 
 - --all and an explicit issue argument are mutually exclusive
+- An issue argument is required unless --all is used

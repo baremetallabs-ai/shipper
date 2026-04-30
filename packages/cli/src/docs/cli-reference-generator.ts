@@ -16,17 +16,21 @@ import {
 export const REMEDIATION_LINE = 'Run npm run docs:generate-cli and commit the result.';
 
 type GroupInfo = {
+  kind: 'group';
   pathSegments: string[];
   command: Command;
   description: string;
-  children: LeafInfo[];
+  children: ReferenceChild[];
 };
 
 export type LeafInfo = {
+  kind: 'leaf';
   pathSegments: string[];
   command: Command;
   description: string;
 };
+
+type ReferenceChild = GroupInfo | LeafInfo;
 
 export type ReferenceModel = {
   groups: GroupInfo[];
@@ -35,14 +39,15 @@ export type ReferenceModel = {
 
 type CommandExtrasRegistry = Record<string, CommandExtras>;
 type GroupRegistry = Record<string, { description: string }>;
+type CategoryDefinition = { title: string; commands: readonly string[] };
 const groups: GroupRegistry = commandGroups;
 
-const categoryMap: { title: string; commands: CommandPath[] }[] = [
+const categoryMap = [
   { title: 'Getting started', commands: ['init', 'setup'] },
   { title: 'Issue intake', commands: ['new', 'adopt', 'priority'] },
   { title: 'Workflow', commands: ['next', 'groom', 'design', 'plan', 'implement', 'ship'] },
   { title: 'Operations', commands: ['merge', 'reset', 'unblock', 'unlock', 'eject'] },
-];
+] as const satisfies readonly { title: string; commands: readonly CommandPath[] }[];
 
 const landingDescription = 'Reference for every shipper CLI command.';
 const landingIntro =
@@ -73,11 +78,12 @@ function linkForPath(pathSegments: string[]): string {
 }
 
 function leafOutputPath(baseDir: string, pathSegments: string[]): string {
-  if (pathSegments.length === 1) {
-    return path.join(baseDir, `${pathSegments[0]}.md`);
+  const leafSegment = pathSegments.at(-1);
+  if (!leafSegment) {
+    throw new Error('Cannot render a leaf command without a path.');
   }
 
-  return path.join(baseDir, pathSegments[0] ?? '', `${pathSegments[1] ?? ''}.md`);
+  return path.join(baseDir, ...pathSegments.slice(0, -1), `${leafSegment}.md`);
 }
 
 function groupOutputPath(baseDir: string, pathSegments: string[]): string {
@@ -91,23 +97,26 @@ function readDescription(command: Command): string {
 export function discoverReferenceModel(program: Command): ReferenceModel {
   const model: ReferenceModel = { groups: [], leaves: [] };
 
-  function visit(command: Command, pathSegments: string[]): LeafInfo | undefined {
+  function visit(command: Command, pathSegments: string[]): ReferenceChild {
     const description = readDescription(command);
     if (command.commands.length === 0) {
-      const leaf = { pathSegments, command, description };
+      const leaf = { kind: 'leaf' as const, pathSegments, command, description };
       model.leaves.push(leaf);
       return leaf;
     }
 
-    const group: GroupInfo = { pathSegments, command, description, children: [] };
+    const group: GroupInfo = {
+      kind: 'group',
+      pathSegments,
+      command,
+      description,
+      children: [],
+    };
     model.groups.push(group);
     for (const child of command.commands) {
-      const leaf = visit(child, [...pathSegments, child.name()]);
-      if (leaf) {
-        group.children.push(leaf);
-      }
+      group.children.push(visit(child, [...pathSegments, child.name()]));
     }
-    return undefined;
+    return group;
   }
 
   for (const command of program.commands) {
@@ -120,10 +129,17 @@ export function discoverReferenceModel(program: Command): ReferenceModel {
 export function validateReferenceModel(
   model: ReferenceModel,
   extras: CommandExtrasRegistry = commandExtras,
-  groupDefinitions: GroupRegistry = groups
+  groupDefinitions: GroupRegistry = groups,
+  categories: readonly CategoryDefinition[] = categoryMap
 ): void {
   const errors: string[] = [];
   const leafPaths = new Set(model.leaves.map((leaf) => commandPath(leaf.pathSegments)));
+  const groupPaths = new Set(model.groups.map((group) => commandPath(group.pathSegments)));
+  const topLevelLeafPaths = new Set(
+    model.leaves
+      .filter((leaf) => leaf.pathSegments.length === 1)
+      .map((leaf) => commandPath(leaf.pathSegments))
+  );
 
   for (const group of model.groups) {
     const groupPath = commandPath(group.pathSegments);
@@ -132,6 +148,15 @@ export function validateReferenceModel(
     }
     if (!groupDefinitions[groupPath]) {
       errors.push(`Command group "${groupPath}" is missing an extras group description.`);
+    }
+  }
+
+  for (const [groupPath, groupDefinition] of Object.entries(groupDefinitions)) {
+    if (!groupPaths.has(groupPath)) {
+      errors.push(`Docs group descriptions reference unknown command group "${groupPath}".`);
+    }
+    if (!groupDefinition.description.trim()) {
+      errors.push(`Docs group description for "${groupPath}" is empty.`);
     }
   }
 
@@ -148,6 +173,35 @@ export function validateReferenceModel(
   for (const pathKey of Object.keys(extras)) {
     if (!leafPaths.has(pathKey)) {
       errors.push(`Docs extras reference unknown command "${pathKey}".`);
+    }
+  }
+
+  const categoryCounts = new Map<string, string[]>();
+  for (const category of categories) {
+    for (const pathKey of category.commands) {
+      if (!topLevelLeafPaths.has(pathKey)) {
+        errors.push(
+          `Landing page category "${category.title}" references unknown top-level command "${pathKey}".`
+        );
+        continue;
+      }
+      const categoryTitles = categoryCounts.get(pathKey) ?? [];
+      categoryTitles.push(category.title);
+      categoryCounts.set(pathKey, categoryTitles);
+    }
+  }
+
+  for (const pathKey of topLevelLeafPaths) {
+    const categoryTitles = categoryCounts.get(pathKey) ?? [];
+    if (categoryTitles.length === 0) {
+      errors.push(`Top-level command "${pathKey}" is missing from the landing page category map.`);
+    }
+    if (categoryTitles.length > 1) {
+      errors.push(
+        `Top-level command "${pathKey}" appears in multiple landing page categories: ${categoryTitles.join(
+          ', '
+        )}.`
+      );
     }
   }
 
@@ -340,9 +394,16 @@ function renderLandingPage(model: ReferenceModel): string {
 function renderGroupPage(group: GroupInfo): string {
   const pathKey = commandPath(group.pathSegments);
   const groupDescription = groups[pathKey]?.description ?? group.description;
-  const rows = group.children.map((leaf) => {
-    const childName = leaf.pathSegments.at(-1) ?? commandPath(leaf.pathSegments);
-    return `- [shipper ${commandPath(leaf.pathSegments)}](./${childName}) - ${leaf.description}`;
+  const rows = group.children.map((child) => {
+    const childPath = commandPath(child.pathSegments);
+    if (child.kind === 'group') {
+      const relativePath = child.pathSegments.slice(group.pathSegments.length).join('/');
+      const description = groups[childPath]?.description ?? child.description;
+      return `- [shipper ${childPath}](./${relativePath}/) - ${description}`;
+    }
+
+    const childName = child.pathSegments.at(-1) ?? childPath;
+    return `- [shipper ${childPath}](./${childName}) - ${child.description}`;
   });
 
   return (
@@ -464,6 +525,10 @@ function unifiedDiff(actualDir: string, expectedDir: string): string {
     }
   );
 
+  if (result.error) {
+    return `Failed to run git diff: ${result.error.message}`;
+  }
+
   return [result.stdout, result.stderr].filter(Boolean).join('');
 }
 
@@ -472,21 +537,25 @@ export async function checkCliReference(root = repoRoot()): Promise<void> {
   validateReferenceModel(model);
 
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'shipper-cli-reference-'));
-  const tempDir = path.join(tempRoot, 'cli');
-  await mkdir(tempDir, { recursive: true });
-  await writeGeneratedTree(tempDir, model);
-  formatGeneratedTree(tempDir, root);
+  try {
+    const tempDir = path.join(tempRoot, 'cli');
+    await mkdir(tempDir, { recursive: true });
+    await writeGeneratedTree(tempDir, model);
+    formatGeneratedTree(tempDir, root);
 
-  const outputDir = cliReferenceDir(root);
-  const oldFile = oldCliReferenceFile(root);
-  const oldFileExists = existsSync(oldFile);
-  const matches = !oldFileExists && (await treesMatch(outputDir, tempDir));
+    const outputDir = cliReferenceDir(root);
+    const oldFile = oldCliReferenceFile(root);
+    const oldFileExists = existsSync(oldFile);
+    const matches = !oldFileExists && (await treesMatch(outputDir, tempDir));
 
-  if (!matches) {
-    const messages = oldFileExists
-      ? [`Unexpected hand-written CLI reference remains at ${oldFile}.\n`]
-      : [];
-    const diff = unifiedDiff(outputDir, tempDir);
-    throw new Error([...messages, diff, REMEDIATION_LINE].filter(Boolean).join('\n'));
+    if (!matches) {
+      const messages = oldFileExists
+        ? [`Unexpected hand-written CLI reference remains at ${oldFile}.\n`]
+        : [];
+      const diff = unifiedDiff(outputDir, tempDir);
+      throw new Error([...messages, diff, REMEDIATION_LINE].filter(Boolean).join('\n'));
+    }
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
   }
 }

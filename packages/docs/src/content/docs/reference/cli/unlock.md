@@ -45,3 +45,4 @@ shipper unlock --stale
 ## Constraints
 
 - --stale cannot be used with an issue argument
+- An issue argument is required unless --stale is used

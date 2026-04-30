@@ -59,6 +59,49 @@ describe('cli reference generator', () => {
     }).toThrow('Docs extras reference unknown command "stale".');
   });
 
+  it('fails validation when a top-level command is missing from the landing categories', () => {
+    const program = createProgram();
+    program.command('doctor').description('Diagnose the local Shipper environment');
+    const model = discoverReferenceModel(program);
+    const extras: Record<string, CommandExtras> = {
+      ...commandExtras,
+      doctor: commandExtras.init,
+    };
+
+    expect(() => {
+      validateReferenceModel(model, extras, groups);
+    }).toThrow('Top-level command "doctor" is missing from the landing page category map.');
+  });
+
+  it('fails validation when a top-level command appears in multiple landing categories', () => {
+    const model = discoverReferenceModel(createProgram());
+
+    expect(() => {
+      validateReferenceModel(model, commandExtras, groups, [
+        { title: 'First', commands: ['init', 'setup'] },
+        { title: 'Second', commands: ['init'] },
+      ]);
+    }).toThrow('Top-level command "init" appears in multiple landing page categories');
+  });
+
+  it('fails validation when group descriptions are stale or empty', () => {
+    const model = discoverReferenceModel(createProgram());
+
+    expect(() => {
+      validateReferenceModel(model, commandExtras, {
+        ...groups,
+        stale: { description: 'Stale group' },
+      });
+    }).toThrow('Docs group descriptions reference unknown command group "stale".');
+
+    expect(() => {
+      validateReferenceModel(model, commandExtras, {
+        ...groups,
+        pr: { description: '' },
+      });
+    }).toThrow('Docs group description for "pr" is empty.');
+  });
+
   it('fails validation when a command or group has an empty description', () => {
     const program = new Command();
     const group = program.command('group').description('');
