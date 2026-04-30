@@ -3,9 +3,10 @@ title: CLI
 ---
 
 Stage commands that operate on issues (`groom`, `design`, `plan`, `implement`) accept an optional
-issue argument and, when omitted, auto-select the first eligible issue. Stage commands that operate
-on pull requests (`pr open`, `pr review`, `pr remediate`) accept an optional PR argument and, when
-omitted, auto-select the first eligible PR.
+issue argument and, when omitted, auto-select the first eligible issue. `pr open` accepts an
+optional issue argument and, when omitted, auto-selects the first eligible issue. `pr review` and
+`pr remediate` accept an optional PR number or URL and, when omitted, auto-select the first eligible
+PR; they can also accept an issue reference through linked PR resolution.
 
 All prompt-running commands accept `--mode <headless|interactive|default>`,
 `--agent <claude|codex|copilot>`, `--model <model>`, `--disable-mcp`, and `--enable-mcp`. When MCP

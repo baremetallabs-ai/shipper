@@ -71,17 +71,22 @@ shipper:ready
 
 ### How transitions happen
 
-Labels are transitioned by the coding agent, not by command code directly. Each prompt instructs the
-agent to run `gh issue edit` with `--add-label` and `--remove-label` in a single atomic call. For
-example, after a successful groom:
+For result-protocol stages after grooming, labels are transitioned by Shipper from the agent's
+result file. The agent writes `result.json`; Shipper resolves the verdict to a label transition and
+runs `gh issue edit` with every `--add-label` and `--remove-label` argument in one atomic call. For
+example, after a successful design:
 
 ```bash
-gh issue edit <ISSUE> --add-label "shipper:groomed" --remove-label "shipper:new"
+gh issue edit <ISSUE> --add-label "shipper:designed" --remove-label "shipper:groomed"
 ```
+
+`shipper new` and grooming still perform prompt-owned GitHub mutations such as issue creation,
+issue-body edits, comments, and the initial `shipper:new` / `shipper:groomed` labels. The
+result-file transition contract owns the downstream workflow stages.
 
 ### Rollback paths
 
-Agents can roll back to an earlier stage if the work is insufficient:
+A `reject` verdict rolls back to an earlier stage if the work is insufficient:
 
 | Stage        | Can roll back to      |
 | ------------ | --------------------- |
@@ -95,14 +100,16 @@ Agents can roll back to an earlier stage if the work is insufficient:
 ### Reject is an interior event
 
 `shipper ship <issue>`, `shipper ship --auto`, and `shipper next` treat a stage `reject` verdict as
-an orderly rollback, not as a terminal command failure. After the stage updates the issue label, the
-ship loop re-reads that rolled-back label and continues from the corresponding stage.
+an orderly rollback, not as a terminal command failure. After Shipper applies the rollback label
+transition from the result file, the ship loop re-reads that label and continues from the
+corresponding stage.
 
 The existing safety rails still apply:
 
 - Every forward or backward label change counts toward the per-run transition cap
   (`MAX_TRANSITIONS = 15`). Hitting the cap still relabels the issue `shipper:failed`.
-- If a reject does not change the workflow label, the run still aborts to avoid an infinite loop.
+- If a reject does not produce an observable workflow-label move, the run still aborts to avoid an
+  infinite loop.
 - Crashes (no verdict) and explicit `fail` verdicts are still terminal failures.
 
 Rolling back to `shipper:new` is the one special case:

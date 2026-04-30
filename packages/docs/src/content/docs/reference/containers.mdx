@@ -11,7 +11,7 @@ Set `GH_TOKEN` before running Shipper:
 
 ```bash
 export GH_TOKEN=<token>
-shipper next
+shipper next <issue-or-pr>
 ```
 
 `GITHUB_TOKEN` works identically. In GitHub Actions, `GITHUB_TOKEN` is the default token name, so pass
@@ -51,7 +51,7 @@ docker run --rm \
   -v "$(pwd):/workspace" \
   -w /workspace \
   <image-with-gh-git-and-shipper> \
-  shipper next
+  shipper next <issue-or-pr>
 ```
 
 The image must include `git`, `gh`, and `shipper`. The mounted workspace should be a GitHub-backed
@@ -65,7 +65,7 @@ Pass the workflow token into the Shipper step:
 - name: Run shipper
   env:
     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  run: shipper next
+  run: shipper next <issue-or-pr>
 ```
 
 If the job runs inside a custom container, that container still needs `git`, `gh`, and `shipper`

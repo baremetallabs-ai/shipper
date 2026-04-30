@@ -45,3 +45,10 @@ Shipper-managed issues without shelling out to the CLI.
 
 The registered tool list lives in `packages/mcp/src/tools.ts`. Feature-flag-dependent tools may be
 absent from a running server even though they are part of the source tree.
+
+MCP grooming support is experimental and is off unless `SHIPPER_EXPERIMENTAL_MCP_GROOMING` is set to
+a truthy value. With the flag enabled, `shipper_groom` and `shipper_answer_question` are registered
+and `groom` defaults to headless mode. MCP loading for grooming is still controlled by normal
+settings precedence: the built-in default is `commands.groom.disableMcp = true`, so set
+`commands.groom.disableMcp` to `false` in `.shipper/settings.json` or `.shipper/settings.local.json`
+when the grooming agent needs MCP servers loaded.
