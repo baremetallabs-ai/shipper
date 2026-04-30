@@ -13,7 +13,7 @@ const execFileAsync = promisify(execFile);
 const TWO_PATH_AUTH_MESSAGE = `GitHub CLI is not authenticated. Choose one:
   • Interactive:     gh auth login
   • Container / CI:  export GH_TOKEN=<token>  (or GITHUB_TOKEN)
-See docs/containers.md for the container/CI walkthrough.`;
+See https://shipper.baremetallabs.ai/reference/containers/ for the container/CI walkthrough.`;
 
 function parseTrackedArtifactPaths(output: string): string[] {
   return output

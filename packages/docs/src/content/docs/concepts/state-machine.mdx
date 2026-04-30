@@ -1,6 +1,9 @@
-# Label-Based State Machine
+---
+title: State Machine
+---
 
-Shipper uses GitHub issue labels as the sole representation of workflow state. Each issue carries exactly one `shipper:*` workflow label at a time, plus zero or more control and priority labels.
+Shipper uses GitHub issue labels as the sole representation of workflow state. Each issue carries
+exactly one `shipper:*` workflow label at a time, plus zero or more control and priority labels.
 
 ## Labels
 
@@ -36,7 +39,7 @@ Normal priority is the default when neither label is present.
 
 ## State transitions
 
-```
+```text
 shipper:new
   |  groom
   v
@@ -68,9 +71,11 @@ shipper:ready
 
 ### How transitions happen
 
-Labels are transitioned by the coding agent, not by command code directly. Each prompt instructs the agent to run `gh issue edit` with `--add-label` and `--remove-label` in a single atomic call. For example, after a successful groom:
+Labels are transitioned by the coding agent, not by command code directly. Each prompt instructs the
+agent to run `gh issue edit` with `--add-label` and `--remove-label` in a single atomic call. For
+example, after a successful groom:
 
-```
+```bash
 gh issue edit <ISSUE> --add-label "shipper:groomed" --remove-label "shipper:new"
 ```
 
@@ -89,10 +94,9 @@ Agents can roll back to an earlier stage if the work is insufficient:
 
 ### Reject is an interior event
 
-`shipper ship <issue>`, `shipper ship --auto`, and `shipper next` treat a stage `reject`
-verdict as an orderly rollback, not as a terminal command failure. After the stage updates the
-issue label, the ship loop re-reads that rolled-back label and continues from the corresponding
-stage.
+`shipper ship <issue>`, `shipper ship --auto`, and `shipper next` treat a stage `reject` verdict as
+an orderly rollback, not as a terminal command failure. After the stage updates the issue label, the
+ship loop re-reads that rolled-back label and continues from the corresponding stage.
 
 The existing safety rails still apply:
 
@@ -111,34 +115,41 @@ Rolling back to `shipper:new` is the one special case:
 ## The `next` command
 
 Auto-advances an issue by reading its current label and dispatching to the corresponding stage
-through the shared in-process dispatcher. `next` validates that exactly one workflow label is
-present, rejects issues marked `shipper:failed`, and refuses blocked issues except `shipper:new`,
-which can always be groomed. If the dispatched stage rejects, `next` logs the rolled-back label and
-exits zero. Crashes and explicit `fail` verdicts still exit non-zero.
+through the shared in-process dispatcher. `next` validates that exactly one workflow label is present,
+rejects issues marked `shipper:failed`, and refuses blocked issues except `shipper:new`, which can
+always be groomed. If the dispatched stage rejects, `next` logs the rolled-back label and exits zero.
+Crashes and explicit `fail` verdicts still exit non-zero.
 
 ## The `ship --auto` command
 
-Processes issues in priority order. Auto-ship chooses the highest-priority available issue first, then prefers the most-complete stage within the same priority tier:
+Processes issues in priority order. Auto-ship chooses the highest-priority available issue first,
+then prefers the most-complete stage within the same priority tier:
 
-```
+```text
 shipper:ready > shipper:pr-reviewed > shipper:pr-open > shipper:implemented
 > shipper:planned > shipper:designed > shipper:groomed
 ```
 
 `shipper:new` is excluded from auto-ship because grooming is interactive by default.
 
-Issues are ordered by priority first: `shipper:priority-high`, then normal priority, then `shipper:priority-low`. Within the same priority tier, auto-ship prefers the most-complete stage using the ordering above. Within the same stage and priority tier, issues are processed FIFO by label-application timestamp queried via the GitHub timeline API.
+Issues are ordered by priority first: `shipper:priority-high`, then normal priority, then
+`shipper:priority-low`. Within the same priority tier, auto-ship prefers the most-complete stage
+using the ordering above. Within the same stage and priority tier, issues are processed FIFO by
+label-application timestamp queried via the GitHub timeline API.
 
-After exhausting available issues, auto-ship attempts to unblock `shipper:blocked` issues. If any are unblocked, it loops back to process the newly available issues.
+After exhausting available issues, auto-ship attempts to unblock `shipper:blocked` issues. If any
+are unblocked, it loops back to process the newly available issues.
 
-Sequential auto-ship and single-issue `shipper ship <issue>` runs execute stages in-process through the same dispatcher that powers `shipper next`. Parallel auto-ship keeps one OS process per active issue for fault isolation and communicates with each worker through a small fork/IPC protocol.
+Sequential auto-ship and single-issue `shipper ship <issue>` runs execute stages in-process through
+the same dispatcher that powers `shipper next`. Parallel auto-ship keeps one OS process per active
+issue for fault isolation and communicates with each worker through a small fork/IPC protocol.
 
-A non-NEW reject stays inside that per-issue ship loop. Auto-ship only records a failure when the
-run ends in a terminal error, such as a crash, an explicit `fail`, transition-cap exhaustion, or a
-reject that rolls the issue back to `shipper:new`.
+A non-NEW reject stays inside that per-issue ship loop. Auto-ship only records a failure when the run
+ends in a terminal error, such as a crash, an explicit `fail`, transition-cap exhaustion, or a reject
+that rolls the issue back to `shipper:new`.
 
-The shared per-run transition cap (`MAX_TRANSITIONS = 15`) prevents infinite loops, including
-tight `pr-reviewed <-> pr-remediate` reject/resume cycles.
+The shared per-run transition cap (`MAX_TRANSITIONS = 15`) prevents infinite loops, including tight
+`pr-reviewed <-> pr-remediate` reject/resume cycles.
 
 ## The `reset` command
 
@@ -146,8 +157,12 @@ tight `pr-reviewed <-> pr-remediate` reject/resume cycles.
 
 - Without `--to`, it presents an interactive picker of valid earlier targets.
 - With `--to <stage>`, it resets directly to the specified earlier stage.
-- Valid reset targets are `new`, `groomed`, `designed`, `planned`, and `implemented`, as long as the target is behind the current stage.
-- Reset removes later shipper labels, closes matching open PRs, and for any closed PR whose head ref starts with `shipper/` attempts to delete that remote branch; it also removes matching local branches and local worktrees, deletes later-stage issue comments, and posts a reset notice comment after re-applying the target label.
+- Valid reset targets are `new`, `groomed`, `designed`, `planned`, and `implemented`, as long as the
+  target is behind the current stage.
+- Reset removes later shipper labels, closes matching open PRs, and for any closed PR whose head ref
+  starts with `shipper/` attempts to delete that remote branch; it also removes matching local
+  branches and local worktrees, deletes later-stage issue comments, and posts a reset notice comment
+  after re-applying the target label.
 - Reset always removes `shipper:failed`.
 - Reset preserves `shipper:priority-high` and `shipper:priority-low`.
 
@@ -155,16 +170,22 @@ tight `pr-reviewed <-> pr-remediate` reject/resume cycles.
 
 The `shipper:locked` label prevents concurrent execution on the same issue.
 
-- **Acquire:** Adds the label. If it is already present and stale according to `lockTimeoutMinutes` (default `30` minutes), Shipper clears and reacquires it. If the lock is still fresh, the command errors out.
-- **Heartbeat:** Renews the lock every `lockTimeoutMinutes / 3` minutes. With the default timeout, that is every 10 minutes.
-- **Release:** Removes the label in a `finally` block after command completion. Signal handlers (`SIGINT` and `SIGTERM`) also release the lock.
-- **Staleness detection:** Queries the issue timeline API for the most recent `labeled` event for `shipper:locked` and compares its age to the configured timeout.
+- **Acquire:** Adds the label. If it is already present and stale according to `lockTimeoutMinutes`
+  (default `30` minutes), Shipper clears and reacquires it. If the lock is still fresh, the command
+  errors out.
+- **Heartbeat:** Renews the lock every `lockTimeoutMinutes / 3` minutes. With the default timeout,
+  that is every 10 minutes.
+- **Release:** Removes the label in a `finally` block after command completion. Signal handlers
+  (`SIGINT` and `SIGTERM`) also release the lock.
+- **Staleness detection:** Queries the issue timeline API for the most recent `labeled` event for
+  `shipper:locked` and compares its age to the configured timeout.
 
 All workflow commands wrap their execution in `withIssueLock()`.
 
 ## Blocking
 
-`shipper:blocked` indicates an issue has unmet dependencies. It is typically set by the agent during grooming when dependencies are discovered.
+`shipper:blocked` indicates an issue has unmet dependencies. It is typically set by the agent during
+grooming when dependencies are discovered.
 
 - The `next` command refuses to advance blocked issues, except `shipper:new`.
 - `selectIssuesForStage()` excludes blocked issues from auto-selection, except for `shipper:new`.

@@ -1,0 +1,47 @@
+---
+title: MCP
+---
+
+The MCP server exposes a workflow-oriented tool surface for agents that need to inspect or operate on
+Shipper-managed issues without shelling out to the CLI.
+
+## Tools
+
+- `shipper_list_issues`: list open Shipper-managed issues grouped by workflow stage, with optional
+  status filtering.
+- `shipper_get_issue`: fetch issue details, labels, body, state, author, and any linked open PR.
+- `shipper_get_pr_checks`: summarize PR check status with failed and pending details.
+- `shipper_create_issue`: create a new `shipper:new` issue from a plain-text request.
+- `shipper_advance`: advance an issue by one workflow step in headless mode.
+- `shipper_groom`: run grooming on a `shipper:new` issue in headless mode. This tool is registered
+  only when MCP grooming support is enabled.
+- `shipper_answer_question`: answer a paused headless grooming worker. This tool is registered only
+  when MCP grooming support is enabled.
+- `shipper_unblock`: retry a blocked issue and report the unblock verdict.
+- `shipper_merge`: run the ready-PR merge queue once.
+- `shipper_unlock`: release one issue lock or sweep stale locks.
+- `shipper_reset`: reset an issue back to an earlier workflow stage and clean up later artifacts.
+- `shipper_adopt`: apply `shipper:new` to an existing issue.
+
+## `shipper_reset`
+
+`shipper_reset` inputs and behavior:
+
+- Required inputs: `issue` (positive integer) and `target` (`new`, `groomed`, `designed`, `planned`,
+  or `implemented`).
+- Optional input: `dry_run` (boolean, defaults to `false`).
+- Rejects pull request numbers and closed issues without making any changes.
+- Rejects same-stage and forward resets; reset only works backward, with the same `implemented`
+  exception the CLI allows for `shipper:pr-open`, `shipper:pr-reviewed`, and `shipper:ready`.
+- Rejects fresh `shipper:locked` issues and tells the caller to release the lock with
+  `shipper_unlock` before retrying. Stale locks are treated as unlocked.
+- With `dry_run: true`, returns a preview of labels, comments, PRs, remote branches, local branches,
+  and local worktrees that would be cleaned up, followed by `Dry run only; no changes made.`
+- If the pre-run scan finds nothing to do, returns a normal success response stating that the issue
+  is already clean for the requested target.
+- On live runs, returns a full per-operation ledger. If any cleanup operation fails, the MCP response
+  is marked `isError: true` but still includes every succeeded, skipped, and failed operation with
+  reasons.
+
+The registered tool list lives in `packages/mcp/src/tools.ts`. Feature-flag-dependent tools may be
+absent from a running server even though they are part of the source tree.

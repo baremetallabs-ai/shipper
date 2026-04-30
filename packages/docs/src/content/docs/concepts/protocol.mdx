@@ -1,0 +1,71 @@
+---
+title: Protocol
+---
+
+This is the contract between Shipper and the agents it runs. Commands prepare context, agents do the
+stage work, and the result file tells Shipper how to interpret the stage.
+
+## Prompt-driven execution
+
+Stage prompts are bundled per agent under `packages/core/src/prompts/<agent>/`. The `agentPrompts`
+map in `packages/core/src/lib/prompts.ts` points each supported agent at its bundled prompt modules.
+
+Prompt resolution order is:
+
+1. Local override: `.shipper/prompts/<agent>/<name>.md`
+2. Bundled default: `packages/core/src/prompts/<agent>/<name>.md`
+
+`runPrompt()` in `packages/core/src/lib/prompt-runner.ts` resolves the prompt, reads frontmatter,
+builds the selected agent command, appends issue or PR context when requested, injects environment
+settings, and spawns the configured agent. `shipper eject` writes local prompt overrides so a repo
+can change the contract text without editing the package.
+
+## Verdicts
+
+Result files use one of three valid verdicts:
+
+| Verdict  | Meaning                                                                |
+| -------- | ---------------------------------------------------------------------- |
+| `accept` | The stage completed and Shipper should move the issue forward.         |
+| `reject` | The stage found a problem and Shipper should roll back as configured.  |
+| `fail`   | The stage could not complete and the issue should be marked as failed. |
+
+A crash, timeout, or missing result file is treated as a terminal failure. `reject` is not a command
+failure for `next` or `ship`; it is an interior workflow event as long as the agent actually changes
+the workflow label to the rollback target.
+
+Rollback targets come from `STAGE_TRANSITIONS` in
+`packages/core/src/lib/stage-transitions.ts`. For example, an implementation reject rolls the issue
+back to `shipper:designed`, and a PR review reject rolls it back to `shipper:implemented`.
+
+## Label transitions
+
+Agents transition issue labels with one atomic `gh issue edit` call that includes every
+`--add-label` and `--remove-label` argument for the stage output. `executeTransition()` in
+`packages/core/src/lib/output-protocol/protocol-actions.ts` builds that single command when applying
+protocol output.
+
+PR-stage labels are mirrored onto the pull request with a separate best-effort `gh pr edit` call.
+The issue label transition is still the source of truth for workflow state.
+
+## MCP loading policy
+
+Settings are merged in this order:
+
+1. Built-in defaults
+2. `.shipper/settings.json`
+3. `.shipper/settings.local.json`
+4. One-run CLI flags
+
+`commands.default.disableMcp` defaults to `false`. `commands.groom.disableMcp` defaults to `true`.
+Any `commands.<stage>.disableMcp` value overrides the default for that stage, and `--disable-mcp` or
+`--enable-mcp` overrides settings for one invocation.
+
+When MCP loading is disabled, Shipper logs:
+
+```text
+MCP loading disabled for stage <name>.
+```
+
+It then injects the empty MCP configuration or disable flags appropriate to the selected agent.
+When MCP loading remains enabled, Shipper does not print an extra MCP line.

@@ -1,0 +1,336 @@
+---
+title: CLI
+---
+
+Stage commands that operate on issues (`groom`, `design`, `plan`, `implement`) accept an optional
+issue argument and, when omitted, auto-select the first eligible issue. Stage commands that operate
+on pull requests (`pr open`, `pr review`, `pr remediate`) accept an optional PR argument and, when
+omitted, auto-select the first eligible PR.
+
+All prompt-running commands accept `--mode <headless|interactive|default>`,
+`--agent <claude|codex|copilot>`, `--model <model>`, `--disable-mcp`, and `--enable-mcp`. When MCP
+loading is suppressed for a run, Shipper prints exactly one line before agent output begins:
+`MCP loading disabled for stage <name>.`
+
+## `shipper setup [words...]` (alias: `shipper agent`)
+
+Purpose: configure repository settings with an agent.
+
+Behavior:
+
+- Runs the setup prompt before the rest of the workflow is used.
+- Accepts optional freeform instructions, for example `shipper setup "change agent to codex"`.
+- If no instructions are provided, seeds the prompt with repo-aware setup text.
+
+Output:
+
+- Updated `.shipper/` configuration for the repository.
+
+## `shipper new <request>`
+
+Purpose: convert a rough idea into a lightweight, high-level GitHub issue.
+
+Behavior:
+
+- Agent asks a small number of clarifying questions.
+- Agent drafts a concise issue with title, summary, acceptance criteria, out of scope, and notes.
+- Runs inside a fresh ephemeral git worktree created from the configured base branch, so the agent
+  drafts against the same clean view every downstream stage sees. Uncommitted or in-progress files
+  in your checkout are not visible to the agent; commit and push them first or describe them in the
+  request if they matter.
+- Agent creates the issue via `gh issue create --body-file ...` and applies label `shipper:new`.
+
+Output:
+
+- A new GitHub issue labeled `shipper:new`.
+
+## `shipper groom [issue] [--auto]`
+
+Purpose: make the issue decision-complete at the product level.
+
+Behavior:
+
+- Agent reads the full issue and comments.
+- Agent explores the codebase only to understand existing user-facing behavior.
+- Agent interviews the product owner to resolve missing product decisions.
+- Agent updates the issue body, posts a grooming summary comment, and transitions the issue to
+  `shipper:groomed`.
+- `--auto` grooms all eligible `shipper:new` issues in sequence. It is mutually exclusive with an
+  explicit issue number.
+
+Output:
+
+- Updated original issue body and grooming summary comment.
+- Issue labeled `shipper:groomed`.
+- Optional new `shipper:new` issues if the work is split.
+
+## `shipper design [issue]`
+
+Purpose: make the issue decision-complete at the technical design level.
+
+Behavior:
+
+- Agent reads the issue plus grooming outputs.
+- Agent explores the codebase to understand architecture and constraints.
+- Agent posts a technical design comment and transitions the issue to `shipper:designed`.
+
+Output:
+
+- Design doc comment on the issue.
+- Issue labeled `shipper:designed`.
+
+## `shipper plan [issue]`
+
+Purpose: produce a detailed implementation plan with no open questions.
+
+Behavior:
+
+- Agent reads the issue and design.
+- Agent identifies specific files and areas to change.
+- Agent writes an implementation plan comment and transitions the issue to `shipper:planned`.
+
+Output:
+
+- Implementation plan comment.
+- Issue labeled `shipper:planned`.
+
+## `shipper implement [issue]`
+
+Purpose: implement the change on a new branch and push it.
+
+Behavior:
+
+- Shipper creates an ephemeral git worktree for the issue.
+- Advisory install and worktree hooks may run on worktree creation.
+- Agent implements according to the plan, runs checks, commits, pushes, and posts an implementation
+  summary.
+
+Output:
+
+- Pushed branch.
+- Implementation summary comment.
+- Issue labeled `shipper:implemented`.
+
+## `shipper pr open [issue]`
+
+Purpose: open a PR from the implemented branch.
+
+Behavior:
+
+- Shipper creates a fresh ephemeral worktree tracking the pushed branch.
+- Agent runs quality checks, validates requirements, remediates if needed, and creates a PR.
+
+Output:
+
+- PR opened and linked to the issue.
+- Issue labeled `shipper:pr-open`.
+
+## `shipper pr review [pr|issue]`
+
+Purpose: create a first-pass review in GitHub review format.
+
+Behavior:
+
+- Agent reviews the PR diff against acceptance criteria and plan.
+- Agent posts a GitHub review with actionable feedback.
+
+Output:
+
+- A GitHub PR review from Shipper.
+
+## `shipper pr remediate [pr|issue]`
+
+Purpose: handle review feedback and prepare the PR for human merge.
+
+Behavior:
+
+- Shipper creates an ephemeral worktree on the PR branch.
+- Agent pulls review feedback, applies accepted changes, runs checks, pushes updates, and replies to
+  reviewers.
+
+Output:
+
+- PR updated and checks passing.
+- Reviewer replies posted.
+- Issue labeled `shipper:ready`.
+
+## `shipper unblock <issue>`
+
+Purpose: check if a blocked issue's dependencies are resolved and clear the block.
+
+Behavior:
+
+- Reads the issue to determine what it is blocked on.
+- If the dependency is resolved, removes `shipper:blocked` and instructs the user to continue with
+  `shipper next`.
+
+Output:
+
+- Issue unblocked and ready to advance, or still blocked with an explanation.
+
+## `shipper next <ref> [--agent <name>]`
+
+Purpose: advance an issue to the next workflow step based on its current label.
+
+Behavior:
+
+- Reads the current shipper label.
+- Runs the corresponding next-stage command through the shared in-process stage dispatcher.
+- If the stage rejects, logs the rolled-back workflow label and exits zero. Crashes and explicit
+  `fail` verdicts still exit non-zero.
+- Works with both issue numbers and PR numbers.
+- `--agent <claude|codex|copilot>` overrides the agent used for the dispatched step.
+- `--model <model>` overrides the model used for the dispatched step.
+- `--disable-mcp` and `--enable-mcp` override MCP loading for the dispatched step.
+
+Output:
+
+- The issue advances one step in the workflow or is left at the rolled-back label after a reject.
+
+## `shipper ship <issue> [--merge]` or `shipper ship --auto [--parallel <n>] [--agent <name>]`
+
+Purpose: run the full workflow end-to-end.
+
+Behavior:
+
+- Runs the remaining stages through the same in-process stage dispatcher used by `shipper next`.
+- Reject verdicts roll the issue back and the per-issue ship loop resumes from the new label. A
+  resumed issue that eventually reaches `shipper:ready` is reported as a normal pass.
+- If a reject rolls a single-issue run back to `shipper:new`, `shipper ship <issue>` stops before
+  running interactive `groom`, leaves the issue at `shipper:new`, logs that grooming is required,
+  and exits zero.
+- `--merge` auto-merges the PR after reaching `shipper:ready`.
+- `--auto` runs a continuous loop that auto-selects issues, ships them, and merges their PRs. It is
+  mutually exclusive with an explicit issue number and implies `--merge`.
+- In auto-ship, non-NEW rejects stay interior to the per-issue run. A reject that rolls back to
+  `shipper:new` is still recorded as a failure and skipped for the rest of that auto run because
+  grooming is interactive and `shipper:new` is not an auto candidate.
+- `--parallel <n>` sets the number of parallel slots in auto-ship mode and requires `--auto`.
+  Sequential auto runs stay in-process; parallel auto uses one worker process per active issue over
+  a small IPC protocol.
+- `--agent <claude|codex|copilot>` overrides the agent used by dispatched steps.
+- `--model <model>` overrides the model used by dispatched steps.
+- `--disable-mcp` and `--enable-mcp` override MCP loading for every dispatched prompt-running stage
+  in that ship invocation.
+
+Output:
+
+- The issue progresses through all remaining stages, including resumed reject loops when needed.
+
+## `shipper merge [number] [--once] [--dry-run] [--interval <seconds>] [--repo <owner/repo>]`
+
+Purpose: merge queue for PRs labeled `shipper:ready`.
+
+Behavior:
+
+- Polls for PRs labeled `shipper:ready` and merges them one at a time.
+- If a specific PR or issue number is given, merges only that PR.
+- `--once` processes the queue once and exits.
+- `--dry-run` prints actions without executing them.
+- `--interval <seconds>` sets the polling interval (default: `60`).
+- `--repo <owner/repo>` targets a specific repository instead of inferring from the current working
+  directory.
+
+Output:
+
+- PRs are merged and cleaned up.
+
+## `shipper adopt <issue>` or `shipper adopt --all`
+
+Purpose: bring existing GitHub issues into the shipper workflow.
+
+Behavior:
+
+- `shipper adopt <issue>` applies `shipper:new` to a single issue.
+- `shipper adopt --all` adopts every open issue that does not already have a shipper workflow label.
+
+Output:
+
+- Selected issues are labeled `shipper:new`, ready for `groom` or `next`.
+
+## `shipper eject [name]`
+
+Purpose: scaffold prompt overrides for customization.
+
+Behavior:
+
+- Writes prompt overrides to `./.shipper/prompts/<agent>/`, using the default agent from
+  `settings.commands.default.agent`.
+- With no `name`, ejects the nine workflow prompts: `new`, `groom`, `design`, `plan`, `implement`,
+  `pr-open`, `pr-review`, `pr-remediate`, and `unblock`.
+- `setup` is intentionally excluded from the default eject set.
+- With `name`, ejects a single prompt override using the same names listed above.
+- Existing files are left in place and reported as skipped.
+
+Output:
+
+- Local prompt override files ready for editing.
+
+## `shipper priority <issue> <high|normal|low>`
+
+Purpose: set the processing priority for an issue.
+
+Behavior:
+
+- Sets, changes, or clears priority labels on a shipper-managed issue.
+- The issue must be open and already be in the shipper workflow.
+- `high` adds `shipper:priority-high` and removes `shipper:priority-low`.
+- `low` adds `shipper:priority-low` and removes `shipper:priority-high`.
+- `normal` removes both priority labels, restoring default priority.
+
+Output:
+
+- Prints whether the priority changed, for example `Issue #<number> priority set to <level>.`
+
+## `shipper issue list [--status <name>]`
+
+Purpose: list shipper-managed issues by pipeline status.
+
+Behavior:
+
+- Groups open shipper-managed issues by their most advanced workflow label.
+- `--status <name>` filters to a single stage or control status.
+- Valid short status names are `new`, `groomed`, `designed`, `planned`, `implemented`, `pr-open`,
+  `pr-reviewed`, `ready`, `blocked`, and `failed`.
+- Blocked and failed issues are grouped into separate sections.
+- Locked issues show a `[locked]` suffix.
+
+Output:
+
+- Grouped issue lists, or `No shipper-managed issues found.`
+
+## `shipper reset <issue> [-f | --force] [--to <stage>]`
+
+Purpose: reset an issue back to an earlier workflow stage.
+
+Behavior:
+
+- Without `--to`, prompts you to choose an earlier valid target stage interactively.
+- With `--to <stage>`, resets directly to the named earlier stage.
+- The same cleanup capability is available to MCP clients via `shipper_reset`. The MCP tool always
+  requires an explicit target, never prompts for confirmation, does not expose a lock-override flag,
+  and supports `dry_run` previews.
+- Valid targets are earlier workflow stages: `new`, `groomed`, `designed`, `planned`, and
+  `implemented`.
+- Cleans up later-stage artifacts by closing associated PRs and, for any closed PR whose head ref
+  starts with `shipper/`, attempting to delete that remote branch; it also removes matching local
+  branches and worktrees, deletes later issue comments, and re-applies the target workflow label.
+- Posts a reset notice comment after cleanup.
+- Prompts for confirmation unless `-f` or `--force` is passed.
+
+Output:
+
+- Issue reset to the selected earlier stage with later artifacts cleaned up.
+
+## `shipper unlock [issue] [--stale]`
+
+Purpose: force-release the `shipper:locked` label on an issue, or sweep all stale locks.
+
+Behavior:
+
+- `shipper unlock <issue>` removes the `shipper:locked` label from the specified issue.
+- `shipper unlock --stale` releases all stale locks across the repository.
+
+Output:
+
+- Lock released. The issue can be worked on by a new shipper instance.
