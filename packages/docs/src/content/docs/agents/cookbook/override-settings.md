@@ -75,7 +75,7 @@ Edit `.shipper/settings.json` for committed repository defaults. Use
 
 8. Keep the full schema in the reference.
 
-   Use [Reference > Settings](../../reference/settings/) for the complete settings table.
+   Use [Reference > Settings](/reference/settings/) for the complete settings table.
 
 ## Verification
 

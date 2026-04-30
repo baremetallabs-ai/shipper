@@ -49,8 +49,8 @@ Change the agent Shipper uses globally or for a specific prompt-running stage. U
 
 4. Check the reference when you need more settings fields.
 
-   Use [Reference > Settings](../../reference/settings/) for the full settings schema and
-   [Reference > CLI](../../reference/cli/) for command details.
+   Use [Reference > Settings](/reference/settings/) for the full settings schema and
+   [Reference > CLI](/reference/cli/) for command details.
 
 ## Verification
 

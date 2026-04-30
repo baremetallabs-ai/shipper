@@ -40,7 +40,7 @@ worktrees.
    }
    ```
 
-   See [Reference > Settings](../reference/settings/) for the full settings shape.
+   See [Reference > Settings](/reference/settings/) for the full settings shape.
 
 5. Verify the install command through Shipper's script.
 
@@ -152,7 +152,7 @@ only when coverage is missing.
    After writing the workflow, update `CLAUDE.md` or `AGENTS.md` so its `Commands` section matches
    the selected checks.
 
-See [Reference > CLI](../reference/cli/) for command details.
+See [Reference > CLI](/reference/cli/) for command details.
 
 ## Task 4: Configure branch protections
 
