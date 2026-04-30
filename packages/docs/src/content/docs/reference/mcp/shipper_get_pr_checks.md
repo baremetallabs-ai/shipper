@@ -41,7 +41,7 @@ Pending:
 
 ## Error modes
 
-- GitHub command failure: GitHub command failure: <underlying error message>
+- GitHub command failure: Command failed: gh <args>
 
 ## Related tools
 

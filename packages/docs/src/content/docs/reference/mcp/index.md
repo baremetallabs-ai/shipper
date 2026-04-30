@@ -17,7 +17,7 @@ Shipper exposes its workflow operations to AI agents via an MCP server. Each too
 
 - [shipper_create_issue](./shipper_create_issue) — Create a new GitHub issue from a plain-text request. Spawns `shipper new <request> --mode headless`, which runs an agent to research the codebase and draft an issue tagged `shipper:new`. Requires a non-empty request.
 - [shipper_advance](./shipper_advance) — Advance an issue by one workflow stage (shipper next). Dispatches to the appropriate stage command based on the current label. Runs in headless mode — may take several minutes for implementation and PR review stages. Refuses to operate on `shipper:new` issues because grooming requires interactive input.
-- [shipper_adopt](./shipper_adopt) — Adopt an existing GitHub issue into the shipper workflow by adding the shipper:new label. Fails if the target is a PR or already has a shipper label.
+- [shipper_adopt](./shipper_adopt) — Adopt an existing GitHub issue into the shipper workflow by adding the shipper:new label. Fails if the target is a PR; issues that already have a shipper label return a no-op success.
 
 ## Recovery & cleanup
 

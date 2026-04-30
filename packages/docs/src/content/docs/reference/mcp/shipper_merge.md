@@ -39,7 +39,7 @@ Merged PR #17 for issue #42.
 
 - Timed out merge: [timed out] shipper merge --once
 - Failed merge: [exit <code>] shipper merge --once
-- Spawn failure: Worker command failure: <underlying error message>
+- Spawn failure: spawn shipper ENOENT
 
 ## Related tools
 

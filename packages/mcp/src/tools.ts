@@ -1118,7 +1118,7 @@ export const mcpToolDefinitions = [
   defineTool({
     name: 'shipper_adopt',
     description:
-      'Adopt an existing GitHub issue into the shipper workflow by adding the shipper:new label. Fails if the target is a PR or already has a shipper label.',
+      'Adopt an existing GitHub issue into the shipper workflow by adding the shipper:new label. Fails if the target is a PR; issues that already have a shipper label return a no-op success.',
     inputSchema: { issue: issueSchema() },
     annotations: { openWorldHint: true },
     createHandler:

@@ -12,9 +12,9 @@ export type ToolExtras = {
   relatedTools?: ToolName[];
 };
 
-const githubError = 'GitHub command failure: <underlying error message>';
-const sessionLookupError = 'GitHub or session lookup failure: <underlying error message>';
-const spawnFailure = 'Worker command failure: <underlying error message>';
+const githubError = 'Command failed: gh <args>';
+const sessionLookupError = 'Command failed: gh <args>';
+const spawnFailure = 'spawn shipper ENOENT';
 
 export const toolExtras = {
   shipper_list_issues: {

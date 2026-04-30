@@ -47,7 +47,7 @@ Session log: /tmp/shipper/session.log
 - Missing stage transition metadata: Unable to recover the stage transition from post-run metadata.
 - Timed out worker: [timed out] shipper next <issue> --mode headless
 - Failed worker: [exit <code>] shipper next <issue> --mode headless
-- GitHub or session lookup failure: GitHub or session lookup failure: <underlying error message>
+- GitHub or session lookup failure: Command failed: gh <args>
 
 ## Related tools
 

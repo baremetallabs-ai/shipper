@@ -48,7 +48,7 @@ of question text -> your answer (free text).
 - Missing stage transition metadata: Unable to recover the stage transition from post-run metadata.
 - Timed out worker: [timed out] shipper groom <issue> --mode headless
 - Failed worker: [exit <code>] shipper groom <issue> --mode headless
-- GitHub or session lookup failure: GitHub or session lookup failure: <underlying error message>
+- GitHub or session lookup failure: Command failed: gh <args>
 
 ## Related tools
 

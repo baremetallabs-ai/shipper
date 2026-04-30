@@ -53,7 +53,7 @@ Session log: /tmp/shipper/session.log
 - Unavailable stdin: shipper child stdin is unavailable; cannot submit answer.
 - No more events: Shipper child has already completed; no more events.
 - Missing stage transition metadata: Unable to recover the stage transition from post-run metadata.
-- Worker command failure: Worker command failure: <underlying error message>
+- Worker command failure: spawn shipper ENOENT
 
 ## Related tools
 
