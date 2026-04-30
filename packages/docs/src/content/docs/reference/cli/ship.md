@@ -55,6 +55,7 @@ shipper ship --auto --parallel 3
 
 - --disable-mcp and --enable-mcp are mutually exclusive
 - --auto and an explicit issue argument are mutually exclusive
+- An issue argument is required unless --auto is used
 - --auto and --mode are mutually exclusive
 - --parallel <n> requires --auto
 - --parallel <n> must be a positive integer
