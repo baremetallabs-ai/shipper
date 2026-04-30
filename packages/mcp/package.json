@@ -13,7 +13,7 @@
   },
   "scripts": {
     "dev": "tsx --loader ./raw-text-loader.mjs src/index.ts",
-    "build": "npm --prefix ../core run build && tsup",
+    "build": "npm --prefix ../core run build && tsup && node scripts/copy-docs-snapshot.mjs",
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "docs:generate-mcp": "npm --prefix ../core run build && tsx --loader ./raw-text-loader.mjs scripts/generate-mcp-reference.ts",
     "docs:check-mcp": "npm --prefix ../core run build && tsx --loader ./raw-text-loader.mjs scripts/generate-mcp-reference.ts --check",

@@ -29,6 +29,10 @@ const hintExplanations = {
 
 export const toolGroups = [
   {
+    title: 'Documentation',
+    tools: ['shipper_docs_search', 'shipper_docs_get'],
+  },
+  {
     title: 'Inspection (read-only)',
     tools: ['shipper_list_issues', 'shipper_get_issue', 'shipper_get_pr_checks'],
   },

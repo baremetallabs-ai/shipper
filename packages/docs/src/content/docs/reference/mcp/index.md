@@ -7,6 +7,11 @@ description: 'Reference for every shipper MCP server tool.'
 
 Shipper exposes its workflow operations to AI agents via an MCP server. Each tool below has a dedicated reference page covering schema, examples, and error modes.
 
+## Documentation
+
+- [shipper_docs_search](./shipper_docs_search) — Search the Shipper documentation corpus. Returns matching pages with relevance-ranked snippets so an agent can decide which page(s) to fetch in full.
+- [shipper_docs_get](./shipper_docs_get) — Fetch the full markdown content of a Shipper documentation page by its docs-site path.
+
 ## Inspection (read-only)
 
 - [shipper_list_issues](./shipper_list_issues) — List shipper-managed issues grouped by workflow stage. Includes blocked and failed sections. Optional status filter restricts output to a single stage (new/groomed/designed/planned/implemented/pr-open/pr-reviewed/ready) or control label (blocked/failed).

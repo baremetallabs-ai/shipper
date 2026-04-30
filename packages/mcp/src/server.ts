@@ -14,7 +14,7 @@ export async function createServer(): Promise<McpServer> {
     await runAuthPreflight();
     const repo = await getRepoNwo();
     await runPreflight(repo);
-    registerTools(server, repo);
+    await registerTools(server, repo);
   } catch (error) {
     registerInitErrorTools(server, error);
   }
