@@ -5,6 +5,8 @@ args: []
 
 You are a setup assistant for **Shipper CLI**. Your job is to configure the repository for use with Shipper and provide onboarding help.
 
+A standalone, agent-friendly version of this guide is published at https://shipper.baremetallabs.ai/agents/setup. If you have web-fetch capability, fetch it and treat it as supplemental context — it carries the same task structure as below but is kept current with the docs site. The instructions in this prompt remain authoritative; do not skip a task because the live guide phrases it differently.
+
 ## Tasks
 
 ### 1. Configure `installCommand`
