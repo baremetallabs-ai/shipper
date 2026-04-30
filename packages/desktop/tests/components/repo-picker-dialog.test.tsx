@@ -387,6 +387,41 @@ describe('RepoPickerDialog', () => {
     expect(await screen.findByText('octocat/retry')).toBeTruthy();
   });
 
+  it('does not render the empty state while a first search failed', async () => {
+    renderDialog({
+      repos: [],
+      searchRepos: vi.fn().mockRejectedValue(new Error('rate limited')),
+    });
+
+    fireEvent.change(input(), { target: { value: 'abc' } });
+    await advanceDebounce();
+
+    expect(await screen.findByText(/Could not search repositories: rate limited/)).toBeTruthy();
+    expect(screen.queryByText('No repositories match the current search.')).toBeNull();
+  });
+
+  it('hides load more when a new query fails after a paged search', async () => {
+    const searchRepos = vi
+      .fn()
+      .mockResolvedValueOnce({
+        repositories: [{ nameWithOwner: 'octocat/first', group: 'owner' }],
+        pageInfo: { hasNextPage: true, endCursor: 'cursor-1' },
+      })
+      .mockRejectedValueOnce(new Error('rate limited'));
+    renderDialog({ repos: [], searchRepos });
+
+    fireEvent.change(input(), { target: { value: 'octo' } });
+    await advanceDebounce();
+    expect(await screen.findByRole('button', { name: /load more/i })).toBeTruthy();
+
+    fireEvent.change(input(), { target: { value: 'retry' } });
+    await advanceDebounce();
+
+    expect(await screen.findByText(/Could not search repositories: rate limited/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /load more/i })).toBeNull();
+    expect(searchRepos).not.toHaveBeenCalledWith({ query: 'octo', cursor: 'cursor-1' });
+  });
+
   it('loads more, appends de-duplicated results, and retries failed pages with the same cursor', async () => {
     const searchRepos = vi
       .fn()
@@ -419,6 +454,35 @@ describe('RepoPickerDialog', () => {
     });
     expect(screen.getAllByText('octocat/first')).toHaveLength(1);
     expect(searchRepos).toHaveBeenLastCalledWith({ query: 'octo', cursor: 'cursor-1' });
+  });
+
+  it('clears stale load-more loading state when the query changes', async () => {
+    const loadMoreSearch = deferred<RepoPickerSearchResult>();
+    const searchRepos = vi
+      .fn()
+      .mockResolvedValueOnce({
+        repositories: [{ nameWithOwner: 'octocat/first', group: 'owner' }],
+        pageInfo: { hasNextPage: true, endCursor: 'cursor-1' },
+      })
+      .mockReturnValueOnce(loadMoreSearch.promise)
+      .mockResolvedValueOnce({
+        repositories: [{ nameWithOwner: 'octocat/second-query', group: 'owner' }],
+        pageInfo: { hasNextPage: false, endCursor: null },
+      });
+    renderDialog({ repos: [], searchRepos });
+
+    fireEvent.change(input(), { target: { value: 'octo' } });
+    await advanceDebounce();
+    expect(await screen.findByText('octocat/first')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /load more/i }));
+    expect(await screen.findByText('Loading more repositories...')).toBeTruthy();
+
+    fireEvent.change(input(), { target: { value: 'second' } });
+    expect(screen.queryByText('Loading more repositories...')).toBeNull();
+
+    await advanceDebounce();
+    expect(await screen.findByText('octocat/second-query')).toBeTruthy();
   });
 
   it('clearing the input returns to the no-query layout without refetching the initial list', async () => {

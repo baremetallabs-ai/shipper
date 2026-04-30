@@ -184,6 +184,7 @@ export function RepoPickerDialog({
     if (!open || mode === 'initial') {
       searchRequestIdRef.current += 1;
       setIsSearching(false);
+      setIsLoadingMore(false);
       setSearchError(null);
       setLoadMoreError(null);
       return;
@@ -191,6 +192,8 @@ export function RepoPickerDialog({
 
     searchRequestIdRef.current += 1;
     setIsSearching(false);
+    setIsLoadingMore(false);
+    setLoadMoreError(null);
 
     const timeoutId = window.setTimeout(() => {
       runSearch(normalizedQuery);
@@ -206,6 +209,8 @@ export function RepoPickerDialog({
       mode !== 'search' ||
       searchPageInfo.endCursor === null ||
       lastSuccessfulSearchQuery.length === 0 ||
+      normalizedQuery !== lastSuccessfulSearchQuery ||
+      searchError !== null ||
       isLoadingMore
     ) {
       return;
@@ -240,7 +245,14 @@ export function RepoPickerDialog({
           setIsLoadingMore(false);
         }
       });
-  }, [isLoadingMore, lastSuccessfulSearchQuery, mode, searchPageInfo.endCursor]);
+  }, [
+    isLoadingMore,
+    lastSuccessfulSearchQuery,
+    mode,
+    normalizedQuery,
+    searchError,
+    searchPageInfo.endCursor,
+  ]);
 
   const configuredRepoKeys = new Set(repos.map((repo) => toRepoKey(repo)));
   const visibleRepos = mode === 'initial' ? initialRepos : searchRepos;
@@ -280,11 +292,17 @@ export function RepoPickerDialog({
     !configuredRepoKeys.has(queryKey) &&
     !filteredRepos.some((repo) => toRepoKey(repo.nameWithOwner) === queryKey);
   const showDuplicateManual = normalizedQuery.length > 0 && configuredRepoKeys.has(queryKey);
+  const canLoadMoreSearchResults =
+    mode === 'search' &&
+    searchError === null &&
+    normalizedQuery === lastSuccessfulSearchQuery &&
+    searchPageInfo.hasNextPage;
   const showEmpty =
     canRenderResults &&
     !isInitialLoading &&
     !isSearching &&
     !isLoadingMore &&
+    searchError === null &&
     filteredRepos.length === 0 &&
     !showManualAdd &&
     !showDuplicateManual;
@@ -407,7 +425,7 @@ export function RepoPickerDialog({
 
             {canRenderResults &&
             mode === 'search' &&
-            searchPageInfo.hasNextPage &&
+            canLoadMoreSearchResults &&
             !isSearching &&
             !isLoadingMore ? (
               <div className="px-2 py-3">
