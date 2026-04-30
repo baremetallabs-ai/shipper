@@ -28,7 +28,7 @@ export default defineConfig({
         {
           label: 'Reference',
           items: [
-            { label: 'CLI', slug: 'reference/cli' },
+            { label: 'CLI', autogenerate: { directory: 'reference/cli' } },
             { label: 'MCP', slug: 'reference/mcp' },
             { label: 'Settings', slug: 'reference/settings' },
             { label: 'Containers', slug: 'reference/containers' },
