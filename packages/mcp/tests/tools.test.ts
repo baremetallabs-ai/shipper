@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 
 const {
@@ -76,7 +77,7 @@ vi.mock('../src/helpers.js', async () => {
   };
 });
 
-import { registerInitErrorTools, registerTools } from '../src/tools.js';
+import { registerInitErrorTools, registerTools, toolNames } from '../src/tools.js';
 
 type Handler = (args: Record<string, unknown>) => Promise<{
   content: { type: string; text: string }[];
@@ -86,6 +87,7 @@ type Handler = (args: Record<string, unknown>) => Promise<{
 type ToolSchema = Record<string, z.ZodType> | undefined;
 type ToolGetter = ((name: string) => Handler) & {
   getSchema: (name: string) => ToolSchema;
+  getAnnotations: (name: string) => ToolAnnotations | undefined;
   invokeValidated: (
     name: string,
     args: Record<string, unknown>
@@ -94,14 +96,21 @@ type ToolGetter = ((name: string) => Handler) & {
 };
 
 function collectTools(): ToolGetter {
-  const registrations = new Map<string, { handler: Handler; inputSchema: ToolSchema }>();
+  const registrations = new Map<
+    string,
+    { handler: Handler; inputSchema: ToolSchema; annotations?: ToolAnnotations }
+  >();
   const mockServer = {
     registerTool: (
       name: string,
-      config: { inputSchema?: ToolSchema } | undefined,
+      config: { inputSchema?: ToolSchema; annotations?: ToolAnnotations } | undefined,
       handler: Handler
     ) => {
-      registrations.set(name, { handler, inputSchema: config?.inputSchema });
+      registrations.set(name, {
+        handler,
+        inputSchema: config?.inputSchema,
+        annotations: config?.annotations,
+      });
     },
   };
   registerTools(mockServer as unknown as Parameters<typeof registerTools>[0], 'owner/repo');
@@ -115,6 +124,7 @@ function collectTools(): ToolGetter {
 
   const getTool = ((name: string) => getRegistration(name).handler) as ToolGetter;
   getTool.getSchema = (name: string) => getRegistration(name).inputSchema;
+  getTool.getAnnotations = (name: string) => getRegistration(name).annotations;
   getTool.invokeValidated = async (name: string, args: Record<string, unknown>) => {
     const registration = getRegistration(name);
     if (!registration.inputSchema) {
@@ -255,6 +265,48 @@ function withFlag<T>(value: string | undefined, fn: () => T | Promise<T>): Promi
     }
   });
 }
+
+describe('registerTools', () => {
+  it('registers every tool when experimental grooming is enabled and only gated tools otherwise', async () => {
+    await withFlag('1', () => {
+      const getTool = collectTools();
+      expect(getTool.names()).toEqual([...toolNames]);
+    });
+
+    await withFlag(undefined, () => {
+      const getTool = collectTools();
+      expect(getTool.names()).toEqual(
+        toolNames.filter((name) => name !== 'shipper_groom' && name !== 'shipper_answer_question')
+      );
+    });
+  });
+
+  it('registers the expected MCP behavior annotations without false-valued defaults', async () => {
+    await withFlag('1', () => {
+      const getTool = collectTools();
+      const expected = {
+        shipper_list_issues: { readOnlyHint: true, openWorldHint: true },
+        shipper_get_issue: { readOnlyHint: true, openWorldHint: true },
+        shipper_get_pr_checks: { readOnlyHint: true, openWorldHint: true },
+        shipper_advance: { openWorldHint: true },
+        shipper_groom: { openWorldHint: true },
+        shipper_create_issue: { openWorldHint: true },
+        shipper_unblock: { openWorldHint: true, idempotentHint: true },
+        shipper_merge: { openWorldHint: true },
+        shipper_unlock: { openWorldHint: true, idempotentHint: true },
+        shipper_reset: { openWorldHint: true, destructiveHint: true },
+        shipper_adopt: { openWorldHint: true },
+        shipper_answer_question: { openWorldHint: true },
+      } satisfies Record<(typeof toolNames)[number], ToolAnnotations>;
+
+      for (const name of toolNames) {
+        const annotations = getTool.getAnnotations(name);
+        expect(annotations).toEqual(expected[name]);
+        expect(Object.values(annotations ?? {})).not.toContain(false);
+      }
+    });
+  });
+});
 
 describe('shipper_list_issues', () => {
   it('groups issues by stage and renders blocked/failed separately', async () => {

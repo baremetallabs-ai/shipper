@@ -29,7 +29,7 @@ export default defineConfig({
           label: 'Reference',
           items: [
             { label: 'CLI', autogenerate: { directory: 'reference/cli' } },
-            { label: 'MCP', slug: 'reference/mcp' },
+            { label: 'MCP', autogenerate: { directory: 'reference/mcp' } },
             { label: 'Settings', slug: 'reference/settings' },
             { label: 'Containers', slug: 'reference/containers' },
           ],
