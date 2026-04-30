@@ -269,7 +269,9 @@ describe('runAuthPreflight', () => {
     await expect(runAuthPreflight()).rejects.toThrow(/gh auth login/);
     await expect(runAuthPreflight()).rejects.toThrow(/GH_TOKEN/);
     await expect(runAuthPreflight()).rejects.toThrow(/GITHUB_TOKEN/);
-    await expect(runAuthPreflight()).rejects.toThrow(/docs\/containers\.md/);
+    await expect(runAuthPreflight()).rejects.toThrow(
+      /https:\/\/shipper\.baremetallabs\.ai\/reference\/containers\//
+    );
   });
 
   it('does not run setup-git when auth fails', async () => {
