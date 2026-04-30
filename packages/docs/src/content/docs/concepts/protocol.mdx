@@ -31,8 +31,8 @@ Result files use one of three valid verdicts:
 | `fail`   | The stage could not complete and the issue should be marked as failed. |
 
 A crash, timeout, or missing result file is treated as a terminal failure. `reject` is not a command
-failure for `next` or `ship`; it is an interior workflow event as long as the agent actually changes
-the workflow label to the rollback target.
+failure for `next` or `ship`; it is an interior workflow event as long as Shipper can apply the
+rollback transition from the agent's result.
 
 Rollback targets come from `STAGE_TRANSITIONS` in
 `packages/core/src/lib/stage-transitions.ts`. For example, an implementation reject rolls the issue
@@ -40,13 +40,21 @@ back to `shipper:designed`, and a PR review reject rolls it back to `shipper:imp
 
 ## Label transitions
 
-Agents transition issue labels with one atomic `gh issue edit` call that includes every
-`--add-label` and `--remove-label` argument for the stage output. `executeTransition()` in
-`packages/core/src/lib/output-protocol/protocol-actions.ts` builds that single command when applying
-protocol output.
+For result-protocol stages, agents do not transition workflow labels directly. The agent writes the
+result file. Shipper reads that file, resolves the verdict through `STAGE_TRANSITIONS`, and then
+applies the transition.
+
+`executeTransition()` in `packages/core/src/lib/output-protocol/protocol-actions.ts` builds one
+atomic `gh issue edit` call containing every `--add-label` and `--remove-label` argument for the
+resolved transition.
 
 PR-stage labels are mirrored onto the pull request with a separate best-effort `gh pr edit` call.
 The issue label transition is still the source of truth for workflow state.
+
+Some non-result-protocol flows still perform their own GitHub mutations. For example, `shipper new`
+creates the issue and applies `shipper:new`, and grooming updates the issue body/comments as part of
+the prompt-owned workflow. Those direct mutations are separate from the result-file transition
+contract used by downstream stages.
 
 ## MCP loading policy
 

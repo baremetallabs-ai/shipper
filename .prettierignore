@@ -5,6 +5,3 @@ package-lock.json
 src/prompts/
 .claude/
 .shipper/
-.shipper/prompts/
-.shipper/output/
-.shipper/input/
