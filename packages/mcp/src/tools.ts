@@ -1,6 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer, ToolCallback } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { ZodRawShapeCompat } from '@modelcontextprotocol/sdk/server/zod-compat.js';
+import type { ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import {
   BLOCKED_LABEL,
@@ -23,6 +25,7 @@ import {
   gh,
   isClean,
   isLockStale,
+  MCP_GROOMING_FLAG,
   isMcpGroomingEnabled,
   listIssues,
   parseIssueLabelsState,
@@ -67,6 +70,40 @@ const ISSUE_URL_RE = /https:\/\/github\.com\/([^/\s]+\/[^/\s]+)\/issues\/(\d+)/g
 type AdvanceStageName = (typeof STAGE_FOR_LABEL)[keyof typeof STAGE_FOR_LABEL];
 type AdvanceVerdict = 'accept' | 'reject' | 'fail';
 type GhIssueCandidate = { number: number; title?: string; url?: string; createdAt?: string };
+
+export const toolNames = [
+  'shipper_list_issues',
+  'shipper_get_issue',
+  'shipper_get_pr_checks',
+  'shipper_advance',
+  'shipper_groom',
+  'shipper_create_issue',
+  'shipper_unblock',
+  'shipper_merge',
+  'shipper_unlock',
+  'shipper_reset',
+  'shipper_adopt',
+  'shipper_answer_question',
+] as const;
+
+export type ToolName = (typeof toolNames)[number];
+
+type McpInputSchema = ZodRawShapeCompat;
+
+export type McpToolDefinition<InputSchema extends McpInputSchema = McpInputSchema> = {
+  name: ToolName;
+  description: string;
+  inputSchema: InputSchema;
+  annotations?: ToolAnnotations;
+  experimental?: { flag: typeof MCP_GROOMING_FLAG; enabled: () => boolean };
+  createHandler: (repo: string) => ToolCallback<InputSchema>;
+};
+
+function defineTool<const InputSchema extends McpInputSchema>(
+  definition: McpToolDefinition<InputSchema>
+): McpToolDefinition<InputSchema> {
+  return definition;
+}
 
 function textOk(text: string): ToolTextResult {
   return { content: [{ type: 'text', text }] };
@@ -141,7 +178,7 @@ function sanitizeQuestionsForOrchestrator(questions: unknown[]): unknown[] {
 }
 
 function issueSchema(): z.ZodNumber {
-  return z.number().int().positive();
+  return z.number().int().positive().describe('GitHub issue number.');
 }
 
 function agentTimeoutMs(): number {
@@ -625,149 +662,155 @@ function renderChecks(repo: string, pr: number, checks: ReturnType<typeof classi
   return lines.join('\n');
 }
 
-export function registerTools(server: McpServer, repo: string): void {
-  server.registerTool(
-    'shipper_list_issues',
-    {
-      description:
-        'List shipper-managed issues grouped by workflow stage. Includes blocked and failed sections. Optional status filter restricts output to a single stage (new/groomed/designed/planned/implemented/pr-open/pr-reviewed/ready) or control label (blocked/failed).',
-      inputSchema: {
-        status: z.enum(STATUS_FILTER_VALUES as unknown as [string, ...string[]]).optional(),
+export const mcpToolDefinitions = [
+  defineTool({
+    name: 'shipper_list_issues',
+    description:
+      'List shipper-managed issues grouped by workflow stage. Includes blocked and failed sections. Optional status filter restricts output to a single stage (new/groomed/designed/planned/implemented/pr-open/pr-reviewed/ready) or control label (blocked/failed).',
+    inputSchema: {
+      status: z
+        .enum(STATUS_FILTER_VALUES as unknown as [string, ...string[]])
+        .optional()
+        .describe('Workflow stage or control status to filter by.'),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+    createHandler:
+      (repo) =>
+      async ({ status }) => {
+        try {
+          const issues = await listShipperIssuesRaw(repo);
+          return textOk(renderIssueList(issues, status));
+        } catch (err) {
+          return formatToolError(err);
+        }
       },
-    },
-    async ({ status }) => {
-      try {
-        const issues = await listShipperIssuesRaw(repo);
-        return textOk(renderIssueList(issues, status));
-      } catch (err) {
-        return formatToolError(err);
-      }
-    }
-  );
-
-  server.registerTool(
-    'shipper_get_issue',
-    {
-      description:
-        'Get detailed information about a specific issue: title, body, labels, state, author, and (if one exists) the linked open PR number.',
-      inputSchema: { issue: issueSchema() },
-    },
-    async ({ issue }) => {
-      try {
-        const xml = await fetchIssue(repo, String(issue));
-        const pr = await tryResolvePrForIssue(repo, issue);
-        const suffix = pr ? `\n\n<linked-pr number="${pr}"/>` : '';
-        return textOk(`${xml}${suffix}`);
-      } catch (err) {
-        return formatToolError(err);
-      }
-    }
-  );
-
-  server.registerTool(
-    'shipper_get_pr_checks',
-    {
-      description:
-        'Get the CI check status for a pull request: counts and details for failed/pending checks.',
-      inputSchema: { pr: issueSchema() },
-    },
-    async ({ pr }) => {
-      try {
-        const raw = await fetchChecks(repo, String(pr));
-        const classified = classifyChecks(raw);
-        return textOk(renderChecks(repo, pr, classified));
-      } catch (err) {
-        return formatToolError(err);
-      }
-    }
-  );
-
-  server.registerTool(
-    'shipper_advance',
-    {
-      description:
-        'Advance an issue by one workflow stage (shipper next). Dispatches to the appropriate stage command based on the current label. Runs in headless mode — may take several minutes for implementation and PR review stages. Refuses to operate on `shipper:new` issues because grooming requires interactive input.',
-      inputSchema: { issue: issueSchema() },
-    },
-    async ({ issue }) => {
-      try {
-        const sessionRepo = await resolveSessionRepo({ repo });
-        const preIssue = await fetchIssueLabels(repo, issue);
-        const preLabels = preIssue.labels.map((label) => label.name);
-        if (preLabels.includes(NEW_LABEL)) {
-          throw new Error(`Issue #${issue} is at ${NEW_LABEL}. ${GROOM_MANUAL_MESSAGE}`);
+  }),
+  defineTool({
+    name: 'shipper_get_issue',
+    description:
+      'Get detailed information about a specific issue: title, body, labels, state, author, and (if one exists) the linked open PR number.',
+    inputSchema: { issue: issueSchema() },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+    createHandler:
+      (repo) =>
+      async ({ issue }) => {
+        try {
+          const xml = await fetchIssue(repo, String(issue));
+          const pr = await tryResolvePrForIssue(repo, issue);
+          const suffix = pr ? `\n\n<linked-pr number="${pr}"/>` : '';
+          return textOk(`${xml}${suffix}`);
+        } catch (err) {
+          return formatToolError(err);
         }
-
-        const preStageLabel = findCurrentStageLabel(preLabels);
-        const preStage = parseAdvanceStage(preStageLabel);
-        const startedAt = new Date();
-        const args = ['next', String(issue), '--mode', 'headless'];
-        const runner = startShipper(args, { timeoutMs: agentTimeoutMs() });
-
-        const event = await runner.next();
-        if (event.kind === 'deferred') {
-          pendingSessions.set(event.sessionId, {
-            runner,
-            originatingTool: 'shipper_advance',
-            issue,
-            repo,
-            args,
-            preStageLabel,
-            startedAt,
-            repoSlug: sessionRepo.repoSlug,
-          });
-          return formatAwaitingAnswer({
-            sessionId: event.sessionId,
-            questions: event.payload.questions,
-            ...(event.payload.toolUseId !== undefined
-              ? { toolUseId: event.payload.toolUseId }
-              : {}),
-          });
+      },
+  }),
+  defineTool({
+    name: 'shipper_get_pr_checks',
+    description:
+      'Get the CI check status for a pull request: counts and details for failed/pending checks.',
+    inputSchema: {
+      pr: z.number().int().positive().describe('GitHub pull request number.'),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+    createHandler:
+      (repo) =>
+      async ({ pr }) => {
+        try {
+          const raw = await fetchChecks(repo, String(pr));
+          const classified = classifyChecks(raw);
+          return textOk(renderChecks(repo, pr, classified));
+        } catch (err) {
+          return formatToolError(err);
         }
-
-        const result = event.result;
-        const postIssue = await fetchIssueLabels(repo, issue);
-        const postLabels = postIssue.labels.map((label) => label.name);
-        const outcome =
-          resolveAdvanceOutcome(preStageLabel, postLabels) ??
-          resolveNoopAdvanceOutcome(preStageLabel, result);
-        const sessionContext = preStage
-          ? await resolveSessionContext({
-              repoSlug: sessionRepo.repoSlug,
-              issue: String(issue),
-              stage: preStage,
-              since: startedAt,
-            })
-          : {};
-        const prNumber = await tryResolvePrForIssue(repo, issue);
-        return formatAdvanceResult(
-          result,
-          outcome
-            ? {
-                ...outcome,
-                prUrl: prNumber ? `https://github.com/${repo}/pull/${prNumber}` : undefined,
-              }
-            : undefined,
-          {
-            command: `shipper ${args.join(' ')}`,
-            finalMessage: sessionContext.finalMessage,
-            sessionLogPath: sessionContext.sessionLogPath,
+      },
+  }),
+  defineTool({
+    name: 'shipper_advance',
+    description:
+      'Advance an issue by one workflow stage (shipper next). Dispatches to the appropriate stage command based on the current label. Runs in headless mode — may take several minutes for implementation and PR review stages. Refuses to operate on `shipper:new` issues because grooming requires interactive input.',
+    inputSchema: { issue: issueSchema() },
+    annotations: { openWorldHint: true },
+    createHandler:
+      (repo) =>
+      async ({ issue }) => {
+        try {
+          const sessionRepo = await resolveSessionRepo({ repo });
+          const preIssue = await fetchIssueLabels(repo, issue);
+          const preLabels = preIssue.labels.map((label) => label.name);
+          if (preLabels.includes(NEW_LABEL)) {
+            throw new Error(`Issue #${issue} is at ${NEW_LABEL}. ${GROOM_MANUAL_MESSAGE}`);
           }
-        );
-      } catch (err) {
-        return formatToolError(err);
-      }
-    }
-  );
 
-  if (isMcpGroomingEnabled()) {
-    server.registerTool(
-      'shipper_groom',
-      {
-        description:
-          "Run grooming on a `shipper:new` issue in headless mode and bridge AskUserQuestion through MCP so the orchestrator answers the worker's clarifying questions via `shipper_answer_question`.",
-        inputSchema: { issue: issueSchema() },
+          const preStageLabel = findCurrentStageLabel(preLabels);
+          const preStage = parseAdvanceStage(preStageLabel);
+          const startedAt = new Date();
+          const args = ['next', String(issue), '--mode', 'headless'];
+          const runner = startShipper(args, { timeoutMs: agentTimeoutMs() });
+
+          const event = await runner.next();
+          if (event.kind === 'deferred') {
+            pendingSessions.set(event.sessionId, {
+              runner,
+              originatingTool: 'shipper_advance',
+              issue,
+              repo,
+              args,
+              preStageLabel,
+              startedAt,
+              repoSlug: sessionRepo.repoSlug,
+            });
+            return formatAwaitingAnswer({
+              sessionId: event.sessionId,
+              questions: event.payload.questions,
+              ...(event.payload.toolUseId !== undefined
+                ? { toolUseId: event.payload.toolUseId }
+                : {}),
+            });
+          }
+
+          const result = event.result;
+          const postIssue = await fetchIssueLabels(repo, issue);
+          const postLabels = postIssue.labels.map((label) => label.name);
+          const outcome =
+            resolveAdvanceOutcome(preStageLabel, postLabels) ??
+            resolveNoopAdvanceOutcome(preStageLabel, result);
+          const sessionContext = preStage
+            ? await resolveSessionContext({
+                repoSlug: sessionRepo.repoSlug,
+                issue: String(issue),
+                stage: preStage,
+                since: startedAt,
+              })
+            : {};
+          const prNumber = await tryResolvePrForIssue(repo, issue);
+          return formatAdvanceResult(
+            result,
+            outcome
+              ? {
+                  ...outcome,
+                  prUrl: prNumber ? `https://github.com/${repo}/pull/${prNumber}` : undefined,
+                }
+              : undefined,
+            {
+              command: `shipper ${args.join(' ')}`,
+              finalMessage: sessionContext.finalMessage,
+              sessionLogPath: sessionContext.sessionLogPath,
+            }
+          );
+        } catch (err) {
+          return formatToolError(err);
+        }
       },
+  }),
+  defineTool({
+    name: 'shipper_groom',
+    description:
+      "Run grooming on a `shipper:new` issue in headless mode and bridge AskUserQuestion through MCP so the orchestrator answers the worker's clarifying questions via `shipper_answer_question`.",
+    inputSchema: { issue: issueSchema() },
+    annotations: { openWorldHint: true },
+    experimental: { flag: MCP_GROOMING_FLAG, enabled: isMcpGroomingEnabled },
+    createHandler:
+      (repo) =>
       async ({ issue }) => {
         try {
           const sessionRepo = await resolveSessionRepo({ repo });
@@ -823,284 +866,301 @@ export function registerTools(server: McpServer, repo: string): void {
         } catch (err) {
           return formatToolError(err);
         }
-      }
-    );
-  }
-
-  server.registerTool(
-    'shipper_create_issue',
-    {
-      description:
-        'Create a new GitHub issue from a plain-text request. Spawns `shipper new <request> --mode headless`, which runs an agent to research the codebase and draft an issue tagged `shipper:new`. Requires a non-empty request.',
-      inputSchema: { request: z.string().min(1) },
+      },
+  }),
+  defineTool({
+    name: 'shipper_create_issue',
+    description:
+      'Create a new GitHub issue from a plain-text request. Spawns `shipper new <request> --mode headless`, which runs an agent to research the codebase and draft an issue tagged `shipper:new`. Requires a non-empty request.',
+    inputSchema: {
+      request: z.string().min(1).describe('Plain-text request for the issue creation agent.'),
     },
-    async ({ request }) => {
-      try {
-        const sessionRepo = await resolveSessionRepo({ repo });
-        const startedAt = new Date();
-        const args = ['new', request, '--mode', 'headless'];
-        const result = await spawnShipper(args, { timeoutMs: agentTimeoutMs() });
-        const sessionContext = await resolveSessionContext({
-          repoSlug: sessionRepo.repoSlug,
-          issue: 'unlinked',
-          stage: 'new',
-          since: startedAt,
-        });
-        const payload = await resolveCreatedIssuePayload(
-          repo,
-          startedAt,
-          sessionContext.finalMessage
-        );
-        return formatCreateIssueResult(result, payload, {
-          command: 'shipper new <request> --mode headless',
-          finalMessage: sessionContext.finalMessage,
-          sessionLogPath: sessionContext.sessionLogPath,
-        });
-      } catch (err) {
-        return formatToolError(err);
-      }
-    }
-  );
-
-  server.registerTool(
-    'shipper_unblock',
-    {
-      description:
-        'Attempt to unblock a blocked issue (shipper:blocked label). Runs the unblock prompt to check if the blocker is resolved. Headless mode.',
-      inputSchema: { issue: issueSchema() },
-    },
-    async ({ issue }) => {
-      try {
-        const sessionRepo = await resolveSessionRepo({ repo });
-        const preIssue = await fetchIssueLabels(repo, issue);
-        const preLabels = preIssue.labels.map((label) => label.name);
-        const startedAt = new Date();
-        const args = ['unblock', String(issue), '--mode', 'headless'];
-        const result = await spawnShipper(args, { timeoutMs: agentTimeoutMs() });
-        const postIssue = await fetchIssueLabels(repo, issue);
-        const postLabels = postIssue.labels.map((label) => label.name);
-        const sessionContext = await resolveSessionContext({
-          repoSlug: sessionRepo.repoSlug,
-          issue: String(issue),
-          stage: 'unblock',
-          since: startedAt,
-        });
-
-        let verdict = resolveUnblockVerdict(preLabels, postLabels);
-        let reason = '<not recorded>';
+    annotations: { openWorldHint: true },
+    createHandler:
+      (repo) =>
+      async ({ request }) => {
         try {
-          const output = await readResultFile(path.resolve(process.cwd(), '.shipper', 'output'));
-          verdict = mapUnblockVerdict(output.verdict);
-          reason = await readUnblockReason(output.comment);
-        } catch {
-          if (result.timedOut || result.exitCode !== 0) {
-            verdict = undefined;
-          }
+          const sessionRepo = await resolveSessionRepo({ repo });
+          const startedAt = new Date();
+          const args = ['new', request, '--mode', 'headless'];
+          const result = await spawnShipper(args, { timeoutMs: agentTimeoutMs() });
+          const sessionContext = await resolveSessionContext({
+            repoSlug: sessionRepo.repoSlug,
+            issue: 'unlinked',
+            stage: 'new',
+            since: startedAt,
+          });
+          const payload = await resolveCreatedIssuePayload(
+            repo,
+            startedAt,
+            sessionContext.finalMessage
+          );
+          return formatCreateIssueResult(result, payload, {
+            command: 'shipper new <request> --mode headless',
+            finalMessage: sessionContext.finalMessage,
+            sessionLogPath: sessionContext.sessionLogPath,
+          });
+        } catch (err) {
+          return formatToolError(err);
         }
+      },
+  }),
+  defineTool({
+    name: 'shipper_unblock',
+    description:
+      'Attempt to unblock a blocked issue (shipper:blocked label). Runs the unblock prompt to check if the blocker is resolved. Headless mode.',
+    inputSchema: { issue: issueSchema() },
+    annotations: { openWorldHint: true, idempotentHint: true },
+    createHandler:
+      (repo) =>
+      async ({ issue }) => {
+        try {
+          const sessionRepo = await resolveSessionRepo({ repo });
+          const preIssue = await fetchIssueLabels(repo, issue);
+          const preLabels = preIssue.labels.map((label) => label.name);
+          const startedAt = new Date();
+          const args = ['unblock', String(issue), '--mode', 'headless'];
+          const result = await spawnShipper(args, { timeoutMs: agentTimeoutMs() });
+          const postIssue = await fetchIssueLabels(repo, issue);
+          const postLabels = postIssue.labels.map((label) => label.name);
+          const sessionContext = await resolveSessionContext({
+            repoSlug: sessionRepo.repoSlug,
+            issue: String(issue),
+            stage: 'unblock',
+            since: startedAt,
+          });
 
-        return formatUnblockResult(result, verdict ? { verdict, reason } : undefined, {
-          command: `shipper ${args.join(' ')}`,
-          finalMessage: sessionContext.finalMessage,
-          sessionLogPath: sessionContext.sessionLogPath,
-        });
-      } catch (err) {
-        return formatToolError(err);
-      }
-    }
-  );
-
-  server.registerTool(
-    'shipper_merge',
-    {
-      description:
-        'Run the merge queue once for shipper:ready PRs. If an issue number is provided, merges only that PR; otherwise processes all ready PRs. Always runs --once (never polls).',
-      inputSchema: { issue: issueSchema().optional() },
-    },
-    async ({ issue }) => {
-      try {
-        const args = ['merge', '--once'];
-        if (issue !== undefined) args.splice(1, 0, String(issue));
-        const result = await spawnShipper(args, { timeoutMs: FIVE_MINUTES_MS });
-        return formatSpawnResult(result, `shipper ${args.join(' ')}`);
-      } catch (err) {
-        return formatToolError(err);
-      }
-    }
-  );
-
-  server.registerTool(
-    'shipper_unlock',
-    {
-      description:
-        "Release an issue lock. With issue: release that issue's lock. With stale=true: sweep all stale locks across the repo. Exactly one of issue or stale must be provided.",
-      inputSchema: { issue: issueSchema().optional(), stale: z.boolean().optional() },
-    },
-    async ({ issue, stale }) => {
-      try {
-        if (stale && issue !== undefined) {
-          throw new Error('Provide either `issue` or `stale`, not both.');
-        }
-        if (!stale && issue === undefined) {
-          throw new Error('Provide either `issue` or `stale: true`.');
-        }
-
-        if (stale) {
-          const locked = await listIssues(repo, { label: LOCKED_LABEL });
-          if (locked.length === 0) return textOk('No stale locks found.');
-          const lines: string[] = [];
-          let released = 0;
-          let skipped = 0;
-          for (const lockedIssue of locked) {
-            const issueStr = String(lockedIssue.number);
-            if (await isLockStale(repo, issueStr)) {
-              await releaseIssueLock(repo, issueStr);
-              lines.push(`#${issueStr}: stale — released`);
-              released += 1;
-            } else {
-              lines.push(`#${issueStr}: active — skipped`);
-              skipped += 1;
+          let verdict = resolveUnblockVerdict(preLabels, postLabels);
+          let reason = '<not recorded>';
+          try {
+            const output = await readResultFile(path.resolve(process.cwd(), '.shipper', 'output'));
+            verdict = mapUnblockVerdict(output.verdict);
+            reason = await readUnblockReason(output.comment);
+          } catch {
+            if (result.timedOut || result.exitCode !== 0) {
+              verdict = undefined;
             }
           }
-          lines.push(
-            released === 0
-              ? 'No stale locks found.'
-              : `Released ${released} stale lock(s) (${skipped} active lock(s) skipped).`
-          );
-          return textOk(lines.join('\n'));
+
+          return formatUnblockResult(result, verdict ? { verdict, reason } : undefined, {
+            command: `shipper ${args.join(' ')}`,
+            finalMessage: sessionContext.finalMessage,
+            sessionLogPath: sessionContext.sessionLogPath,
+          });
+        } catch (err) {
+          return formatToolError(err);
         }
-
-        await releaseIssueLock(repo, String(issue));
-        return textOk(`Released lock on #${issue}.`);
-      } catch (err) {
-        return formatToolError(err);
-      }
-    }
-  );
-
-  server.registerTool(
-    'shipper_reset',
-    {
-      description:
-        'Reset an issue back to an earlier workflow stage without shelling out to the CLI. Requires an explicit target stage. Supports dry-run preview mode and refuses fresh issue locks.',
-      inputSchema: {
-        issue: issueSchema(),
-        target: z.enum(RESET_TARGET_VALUES),
-        dry_run: z.boolean().optional(),
       },
+  }),
+  defineTool({
+    name: 'shipper_merge',
+    description:
+      'Run the merge queue once for shipper:ready PRs. If an issue number is provided, merges only that PR; otherwise processes all ready PRs. Always runs --once (never polls).',
+    inputSchema: {
+      issue: issueSchema().optional(),
     },
-    async ({ issue, target, dry_run }) => {
-      try {
-        const repoRoot = getResetRepoRoot();
-        const repoName = getWorktreeRepoName(repoRoot);
-
-        if (await isPullRequest(repo, issue)) {
-          throw new Error(`#${issue} is a pull request, not an issue.`);
+    annotations: { openWorldHint: true },
+    createHandler:
+      () =>
+      async ({ issue }) => {
+        try {
+          const args = ['merge', '--once'];
+          if (issue !== undefined) args.splice(1, 0, String(issue));
+          const result = await spawnShipper(args, { timeoutMs: FIVE_MINUTES_MS });
+          return formatSpawnResult(result, `shipper ${args.join(' ')}`);
+        } catch (err) {
+          return formatToolError(err);
         }
+      },
+  }),
+  defineTool({
+    name: 'shipper_unlock',
+    description:
+      "Release an issue lock. With issue: release that issue's lock. With stale=true: sweep all stale locks across the repo. Exactly one of issue or stale must be provided.",
+    inputSchema: {
+      issue: issueSchema().optional(),
+      stale: z
+        .boolean()
+        .optional()
+        .describe('When true, release every stale shipper lock in the repository.'),
+    },
+    annotations: { openWorldHint: true, idempotentHint: true },
+    createHandler:
+      (repo) =>
+      async ({ issue, stale }) => {
+        try {
+          if (stale && issue !== undefined) {
+            throw new Error('Provide either `issue` or `stale`, not both.');
+          }
+          if (!stale && issue === undefined) {
+            throw new Error('Provide either `issue` or `stale: true`.');
+          }
 
-        const issueData = await fetchIssueLabels(repo, issue);
-        if (issueData.state !== 'OPEN') {
-          throw new Error(`Issue #${issue} is closed. Reset only works on open issues.`);
+          if (stale) {
+            const locked = await listIssues(repo, { label: LOCKED_LABEL });
+            if (locked.length === 0) return textOk('No stale locks found.');
+            const lines: string[] = [];
+            let released = 0;
+            let skipped = 0;
+            for (const lockedIssue of locked) {
+              const issueStr = String(lockedIssue.number);
+              if (await isLockStale(repo, issueStr)) {
+                await releaseIssueLock(repo, issueStr);
+                lines.push(`#${issueStr}: stale — released`);
+                released += 1;
+              } else {
+                lines.push(`#${issueStr}: active — skipped`);
+                skipped += 1;
+              }
+            }
+            lines.push(
+              released === 0
+                ? 'No stale locks found.'
+                : `Released ${released} stale lock(s) (${skipped} active lock(s) skipped).`
+            );
+            return textOk(lines.join('\n'));
+          }
+
+          await releaseIssueLock(repo, String(issue));
+          return textOk(`Released lock on #${issue}.`);
+        } catch (err) {
+          return formatToolError(err);
         }
+      },
+  }),
+  defineTool({
+    name: 'shipper_reset',
+    description:
+      'Reset an issue back to an earlier workflow stage without shelling out to the CLI. Requires an explicit target stage. Supports dry-run preview mode and refuses fresh issue locks.',
+    inputSchema: {
+      issue: issueSchema(),
+      target: z.enum(RESET_TARGET_VALUES).describe('Earlier workflow stage to reset the issue to.'),
+      dry_run: z
+        .boolean()
+        .optional()
+        .describe('When true, preview reset cleanup without making changes.'),
+    },
+    annotations: { openWorldHint: true, destructiveHint: true },
+    createHandler:
+      (repo) =>
+      async ({ issue, target, dry_run }) => {
+        try {
+          const repoRoot = getResetRepoRoot();
+          const repoName = getWorktreeRepoName(repoRoot);
 
-        const labels = issueData.labels.map((label) => label.name);
-        const isFailedOnly =
-          labels.includes(FAILED_LABEL) &&
-          !labels.some((label) => STAGE_LABEL_NAMES.includes(label));
+          if (await isPullRequest(repo, issue)) {
+            throw new Error(`#${issue} is a pull request, not an issue.`);
+          }
 
-        if (labels.includes(LOCKED_LABEL) && !(await isLockStale(repo, String(issue)))) {
-          throw new Error(
-            `Issue #${issue} is locked by another shipper instance. Release the lock with shipper_unlock before retrying.`
-          );
-        }
+          const issueData = await fetchIssueLabels(repo, issue);
+          if (issueData.state !== 'OPEN') {
+            throw new Error(`Issue #${issue} is closed. Reset only works on open issues.`);
+          }
 
-        if (!isFailedOnly) {
-          const currentStage = getCurrentStage(labels);
-          const currentIndex = getStageIndex(currentStage.stage);
-          const targetIndex = getStageIndex(target);
-          const sameImplementedStage = currentStage.hasPrLabels && target === 'implemented';
+          const labels = issueData.labels.map((label) => label.name);
+          const isFailedOnly =
+            labels.includes(FAILED_LABEL) &&
+            !labels.some((label) => STAGE_LABEL_NAMES.includes(label));
 
-          if (targetIndex === currentIndex && !sameImplementedStage) {
+          if (labels.includes(LOCKED_LABEL) && !(await isLockStale(repo, String(issue)))) {
             throw new Error(
-              `Error: Issue #${issue} is already at ${getStageLabel(target)}. Reset only works backward.`
+              `Issue #${issue} is locked by another shipper instance. Release the lock with shipper_unlock before retrying.`
             );
           }
 
-          if (targetIndex > currentIndex) {
-            throw new Error(
-              `Error: ${getStageLabel(target)} is ahead of the current stage ${getStageLabel(currentStage.stage)}. Reset only works backward.`
+          if (!isFailedOnly) {
+            const currentStage = getCurrentStage(labels);
+            const currentIndex = getStageIndex(currentStage.stage);
+            const targetIndex = getStageIndex(target);
+            const sameImplementedStage = currentStage.hasPrLabels && target === 'implemented';
+
+            if (targetIndex === currentIndex && !sameImplementedStage) {
+              throw new Error(
+                `Error: Issue #${issue} is already at ${getStageLabel(target)}. Reset only works backward.`
+              );
+            }
+
+            if (targetIndex > currentIndex) {
+              throw new Error(
+                `Error: ${getStageLabel(target)} is ahead of the current stage ${getStageLabel(currentStage.stage)}. Reset only works backward.`
+              );
+            }
+          }
+
+          const scan = await scanArtifacts(
+            issue,
+            repo,
+            target,
+            labels,
+            getResetScanOptions(repoRoot, repoName, dry_run === true)
+          );
+
+          if (isClean(scan)) {
+            return textOk(
+              `Issue #${issue} is already clean for target ${scan.targetLabel}. Nothing to reset.`
             );
           }
+
+          if (dry_run) {
+            return textOk(formatResetPreview(issue, scan));
+          }
+
+          const result = await executeReset(issue, scan, repo, getResetExecutionOptions(repoRoot));
+          const text = formatResetResult(issue, result);
+          return result.hasFailures
+            ? { content: [{ type: 'text', text }], isError: true }
+            : textOk(text);
+        } catch (err) {
+          return formatToolError(err);
         }
-
-        const scan = await scanArtifacts(
-          issue,
-          repo,
-          target,
-          labels,
-          getResetScanOptions(repoRoot, repoName, dry_run === true)
-        );
-
-        if (isClean(scan)) {
-          return textOk(
-            `Issue #${issue} is already clean for target ${scan.targetLabel}. Nothing to reset.`
-          );
-        }
-
-        if (dry_run) {
-          return textOk(formatResetPreview(issue, scan));
-        }
-
-        const result = await executeReset(issue, scan, repo, getResetExecutionOptions(repoRoot));
-        const text = formatResetResult(issue, result);
-        return result.hasFailures
-          ? { content: [{ type: 'text', text }], isError: true }
-          : textOk(text);
-      } catch (err) {
-        return formatToolError(err);
-      }
-    }
-  );
-
-  server.registerTool(
-    'shipper_adopt',
-    {
-      description:
-        'Adopt an existing GitHub issue into the shipper workflow by adding the shipper:new label. Fails if the target is a PR or already has a shipper label.',
-      inputSchema: { issue: issueSchema() },
-    },
-    async ({ issue }) => {
-      try {
-        if (await isPullRequest(repo, issue)) {
-          throw new Error(`#${issue} is a pull request, not an issue.`);
-        }
-        const data = await fetchIssueLabels(repo, issue);
-        const shipperLabels = data.labels
-          .map((l) => l.name)
-          .filter((n) => n.startsWith('shipper:'));
-        if (shipperLabels.length > 0) {
-          return textOk(
-            `Issue #${issue} already has shipper label(s): ${shipperLabels.join(', ')}. No changes made.`
-          );
-        }
-        await gh(['issue', 'edit', String(issue), '-R', repo, '--add-label', 'shipper:new']);
-        return textOk(`Issue #${issue} adopted into shipper workflow.`);
-      } catch (err) {
-        return formatToolError(err);
-      }
-    }
-  );
-
-  if (isMcpGroomingEnabled()) {
-    server.registerTool(
-      'shipper_answer_question',
-      {
-        description:
-          'Provide answers to a paused headless worker that called AskUserQuestion. The worker resumes with the supplied answers and continues until it either defers again (returning another awaiting_answer payload) or completes.',
-        inputSchema: {
-          session_id: z.string().min(1),
-          answers: z.record(z.string(), z.string()),
-        },
       },
+  }),
+  defineTool({
+    name: 'shipper_adopt',
+    description:
+      'Adopt an existing GitHub issue into the shipper workflow by adding the shipper:new label. Fails if the target is a PR or already has a shipper label.',
+    inputSchema: { issue: issueSchema() },
+    annotations: { openWorldHint: true },
+    createHandler:
+      (repo) =>
+      async ({ issue }) => {
+        try {
+          if (await isPullRequest(repo, issue)) {
+            throw new Error(`#${issue} is a pull request, not an issue.`);
+          }
+          const data = await fetchIssueLabels(repo, issue);
+          const shipperLabels = data.labels
+            .map((l) => l.name)
+            .filter((n) => n.startsWith('shipper:'));
+          if (shipperLabels.length > 0) {
+            return textOk(
+              `Issue #${issue} already has shipper label(s): ${shipperLabels.join(', ')}. No changes made.`
+            );
+          }
+          await gh(['issue', 'edit', String(issue), '-R', repo, '--add-label', 'shipper:new']);
+          return textOk(`Issue #${issue} adopted into shipper workflow.`);
+        } catch (err) {
+          return formatToolError(err);
+        }
+      },
+  }),
+  defineTool({
+    name: 'shipper_answer_question',
+    description:
+      'Provide answers to a paused headless worker that called AskUserQuestion. The worker resumes with the supplied answers and continues until it either defers again (returning another awaiting_answer payload) or completes.',
+    inputSchema: {
+      session_id: z
+        .string()
+        .min(1)
+        .describe('Paused shipper worker session id returned by an awaiting_answer response.'),
+      answers: z
+        .record(z.string(), z.string())
+        .describe('Map from question text to the answer to send back to the paused worker.'),
+    },
+    annotations: { openWorldHint: true },
+    experimental: { flag: MCP_GROOMING_FLAG, enabled: isMcpGroomingEnabled },
+    createHandler:
+      (repo) =>
       async ({ session_id, answers }) => {
         try {
           const session = pendingSessions.get(session_id);
@@ -1168,7 +1228,24 @@ export function registerTools(server: McpServer, repo: string): void {
         } catch (err) {
           return formatToolError(err);
         }
-      }
+      },
+  }),
+] as const;
+
+export function registerTools(server: McpServer, repo: string): void {
+  for (const definition of mcpToolDefinitions) {
+    if (definition.experimental && !definition.experimental.enabled()) {
+      continue;
+    }
+
+    server.registerTool<McpInputSchema, McpInputSchema>(
+      definition.name,
+      {
+        description: definition.description,
+        inputSchema: definition.inputSchema,
+        ...(definition.annotations ? { annotations: definition.annotations } : {}),
+      },
+      definition.createHandler(repo) as ToolCallback<McpInputSchema>
     );
   }
 }

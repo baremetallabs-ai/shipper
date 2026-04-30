@@ -17,6 +17,8 @@
     "format:check": "prettier --check .",
     "docs:generate-cli": "npm run docs:generate-cli --workspace=packages/cli",
     "docs:check-cli": "npm run docs:check-cli --workspace=packages/cli",
+    "docs:generate-mcp": "npm run docs:generate-mcp --workspace=packages/mcp",
+    "docs:check-mcp": "npm run docs:check-mcp --workspace=packages/mcp",
     "dev": "npm run dev --workspace=packages/cli --",
     "prepare": "husky"
   },
