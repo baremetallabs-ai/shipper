@@ -51,6 +51,7 @@ Shipper stores workflow state in GitHub labels and stage artifacts in issue bodi
 then runs prompt-driven agents in clean worktrees to move issues through the lifecycle. The docs site
 has the full architecture, state-machine, protocol, CLI, MCP, settings, and container references:
 https://shipper.baremetallabs.ai
+AI agents can pull the full docs corpus via [llms.txt](https://shipper.baremetallabs.ai/llms.txt) and [llms-full.txt](https://shipper.baremetallabs.ai/llms-full.txt).
 
 ## Status & support posture
 
