@@ -26,7 +26,7 @@ const CORPUS_UNAVAILABLE_MESSAGE =
   'Shipper documentation corpus is unavailable. Rebuild @dnsquared/shipper-mcp with the docs snapshot or set SHIPPER_DOCS_PATH to an absolute docs corpus path.';
 
 const EXTENSION_RE = /\.(?:md|mdx)$/;
-const HEADING_RE = /^(#{2,6})\s+(.+)$/;
+const HEADING_RE = /^\s{0,3}(#{1,6})\s+(.+)$/;
 
 async function isDirectory(candidate: string): Promise<boolean> {
   try {
@@ -61,7 +61,11 @@ function normalizeDocsPath(value: string): string {
 }
 
 export function normalizeDocsFetchPath(value: string): string {
-  const normalized = normalizeDocsPath(value);
+  const normalized = value
+    .trim()
+    .replace(/^\/+/, '')
+    .replace(/\/+$/, '')
+    .replace(/\.(?:md|mdx)$/i, '');
   if (!normalized) {
     throw new Error('Documentation page path must not be empty.');
   }
@@ -189,10 +193,8 @@ function stripMdxForSearch(body: string): string {
       inFence
         ? line
         : line
-            .replace(/<\/?[A-Z][A-Za-z0-9_.:-]*(?:\s+[^>]*)?>/g, ' ')
-            .replace(/<\/?[a-z][A-Za-z0-9_.:-]*(?:\s+[^>]*)?>/g, ' ')
+            .replace(/<\/?[A-Za-z][A-Za-z0-9_.:-]*(?:\s*[^>]*)?>/g, ' ')
             .replace(/\{\/\*.*?\*\/\}/g, ' ')
-            .replace(/[{}]/g, ' ')
     );
   }
 
@@ -333,8 +335,25 @@ export async function buildDocsCorpus(source?: ResolvedDocsCorpusRoot): Promise<
     return unavailableCorpus();
   }
 
-  const pages = await loadPages(resolved);
-  const pagesByPath = new Map(pages.map((page) => [page.path, page]));
+  let pages: DocsPage[];
+  try {
+    pages = await loadPages(resolved);
+  } catch {
+    return unavailableCorpus();
+  }
+
+  const pagesByPath = new Map<string, DocsPage>();
+  for (const page of pages) {
+    if (!pagesByPath.has(page.path)) {
+      pagesByPath.set(page.path, page);
+    }
+    if (page.path.endsWith('/index')) {
+      const sectionPath = page.path.slice(0, -'/index'.length);
+      if (sectionPath && !pagesByPath.has(sectionPath)) {
+        pagesByPath.set(sectionPath, page);
+      }
+    }
+  }
   const chunks = pages.flatMap(createChunks);
 
   return {

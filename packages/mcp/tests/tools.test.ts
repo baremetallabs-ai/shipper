@@ -336,9 +336,19 @@ describe('registerTools', () => {
         shipper_answer_question: { openWorldHint: true },
       } satisfies Record<(typeof toolNames)[number], ToolAnnotations>;
 
+      const allowedFalseAnnotations = new Set([
+        'shipper_docs_search:openWorldHint',
+        'shipper_docs_get:openWorldHint',
+      ]);
+
       for (const name of toolNames) {
         const annotations = getTool.getAnnotations(name);
         expect(annotations).toEqual(expected[name]);
+        for (const [hint, value] of Object.entries(annotations ?? {})) {
+          if (value === false) {
+            expect(allowedFalseAnnotations.has(`${name}:${hint}`)).toBe(true);
+          }
+        }
       }
     });
   });
@@ -409,7 +419,7 @@ snippet: Configure a repository so any coding agent can run Shipper reliably.`);
 
     expect(mockDocsSearch).toHaveBeenCalledWith('missing', 25);
     expect(result.isError).toBeUndefined();
-    expect(result.content[0]?.text).toBe('No documentation matches found for query: missing');
+    expect(result.content[0]?.text).toBe('No documentation matches found for query: "missing"');
   });
 
   it('validates limit above 25 at the registered schema boundary', async () => {

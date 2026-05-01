@@ -15,7 +15,7 @@ Use this when an agent needs to discover relevant Shipper docs pages or snippets
 
 - readOnlyHint: true — The tool only reads state and does not intentionally modify the repository.
 - idempotentHint: true — Retrying the same call is expected to be safe once the target state is reached.
-- openWorldHint: false — The tool reaches GitHub or other external systems outside the MCP server.
+- openWorldHint: false — The tool does not reach GitHub or other external systems outside the MCP server.
 
 ## Input schema
 

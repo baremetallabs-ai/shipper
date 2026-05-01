@@ -162,7 +162,7 @@ describe('mcp reference generator', () => {
       '- idempotentHint: true — Retrying the same call is expected to be safe once the target state is reached.'
     );
     expect(docsRendered).toContain(
-      '- openWorldHint: false — The tool reaches GitHub or other external systems outside the MCP server.'
+      '- openWorldHint: false — The tool does not reach GitHub or other external systems outside the MCP server.'
     );
   });
 
