@@ -39,34 +39,63 @@ Normal priority is the default when neither label is present.
 
 ## State transitions
 
-```text
-shipper:new
-  |  groom
-  v
-shipper:groomed
-  |  design
-  v
-shipper:designed
-  |  plan
-  v
-shipper:planned
-  |  implement
-  v
-shipper:implemented
-  |  pr-open
-  v
-shipper:pr-open
-  |  pr-review
-  v
-shipper:pr-reviewed <--+
-  |  pr-remediate      |  reject/resume stays within the overall transition cap
-  +--------------------+
-  |
-  v
-shipper:ready
-  |  merge
-  v
-[issue closed]
+```mermaid
+stateDiagram-v2
+  direction LR
+
+  state "shipper:new" as New
+  state "shipper:groomed" as Groomed
+  state "shipper:designed" as Designed
+  state "shipper:planned" as Planned
+  state "shipper:implemented" as Implemented
+  state "shipper:pr-open" as PrOpen
+  state "shipper:pr-reviewed" as PrReviewed
+  state "shipper:ready" as Ready
+  state "issue closed" as Closed
+
+  [*] --> New
+  New --> Groomed: groom
+  Groomed --> Designed: design accept
+  Designed --> Planned: plan accept
+  Planned --> Implemented: implement accept
+  Implemented --> PrOpen: pr-open accept
+  PrOpen --> PrReviewed: pr-review accept
+  PrReviewed --> Ready: pr-remediate accept
+  Ready --> Closed: PR merged
+  Closed --> [*]
+
+  Groomed --> New: design reject
+  Designed --> Groomed: plan reject
+  Planned --> Designed: implement reject
+  Implemented --> Planned: pr-open reject
+  PrOpen --> Implemented: pr-review reject
+  PrReviewed --> PrOpen: pr-remediate reject
+
+  state "Control labels" as Controls {
+    state "shipper:blocked" as Blocked
+    state "shipper:locked" as Locked
+    state "shipper:failed" as Failed
+
+    [*] --> Blocked: dependency found
+    Blocked --> [*]: unblock accept
+    [*] --> Locked: active run starts
+    Locked --> [*]: release
+    [*] --> Failed: fail, crash, or transition cap
+  }
+
+  Failed --> New: reset --to earlier stage
+
+  note right of Blocked
+    Blocks advancement except new -> groomed.
+  end note
+
+  note right of Locked
+    Soft state during active Shipper runs.
+  end note
+
+  note right of Failed
+    reset can target new, groomed, designed, planned, or implemented.
+  end note
 ```
 
 ### How transitions happen

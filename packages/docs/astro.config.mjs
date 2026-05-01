@@ -1,4 +1,5 @@
 import { defineConfig } from 'astro/config';
+import mermaid from 'astro-mermaid';
 import sitemap from '@astrojs/sitemap';
 import starlight from '@astrojs/starlight';
 import starlightLlmsTxt from 'starlight-llms-txt';
@@ -6,10 +7,11 @@ import starlightLlmsTxt from 'starlight-llms-txt';
 export default defineConfig({
   site: 'https://shipper.baremetallabs.ai',
   integrations: [
+    mermaid(),
     sitemap(),
     starlight({
       title: 'Shipper',
-      pagefind: false,
+      pagefind: true,
       plugins: [
         starlightLlmsTxt({
           customSets: [
@@ -37,6 +39,7 @@ export default defineConfig({
             { label: 'Architecture', slug: 'concepts/architecture' },
             { label: 'State Machine', slug: 'concepts/state-machine' },
             { label: 'Protocol', slug: 'concepts/protocol' },
+            { label: 'Versioning', slug: 'concepts/versioning' },
           ],
         },
         {
