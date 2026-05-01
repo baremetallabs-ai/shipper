@@ -83,7 +83,11 @@ stateDiagram-v2
     [*] --> Failed: fail, crash, or transition cap
   }
 
-  Failed --> New: reset --to earlier stage
+  Failed --> New: reset --to new
+  Failed --> Groomed: reset --to groomed
+  Failed --> Designed: reset --to designed
+  Failed --> Planned: reset --to planned
+  Failed --> Implemented: reset --to implemented
 
   note right of Blocked
     Blocks advancement except new -> groomed.
