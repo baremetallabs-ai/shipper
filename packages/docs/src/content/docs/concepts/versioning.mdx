@@ -1,0 +1,19 @@
+---
+title: Versioning
+description: How Shipper versions itself and these docs.
+---
+
+Shipper publishes a single canonical version of these docs.
+
+That is intentional for now: the project is still small, and breaking changes to public APIs or
+workflow contracts are rare today. A multi-version docs dropdown would add maintenance and reader
+friction before there is enough version skew to justify it at this scale.
+
+We will revisit this decision at the first breaking change to a public API or workflow contract.
+That trigger is compatibility-driven, not calendar-driven, so the docs stay single-version until a
+real migration need exists.
+
+In the meantime, historical information lives in the root
+[`CHANGELOG.md`](https://github.com/dnsquared/shipper-cli/blob/main/CHANGELOG.md) and in
+[GitHub release tags](https://github.com/dnsquared/shipper-cli/releases). Those records describe
+what changed over time while the live docs continue to describe the current supported workflow.
