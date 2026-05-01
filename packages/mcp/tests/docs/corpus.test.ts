@@ -53,6 +53,29 @@ Keep this raw MDX component:
     expect(page.body).toContain('import { Card }');
     expect(page.body).toContain('<Card title="Agent setup">Nested child content</Card>');
     expect(corpus.get('agents/setup.mdx')).toEqual(page);
+    expect(corpus.get('/agents/setup/')).toEqual(page);
+    expect(corpus.get('/agents/setup.md/')).toEqual(page);
+  });
+
+  it('resolves section index pages from docs-site routes', async () => {
+    const root = await makeTempRoot();
+    await writeFixture(
+      root,
+      'reference/mcp/index.md',
+      `---
+title: MCP reference
+---
+
+# MCP reference
+`
+    );
+
+    const corpus = await buildDocsCorpus({ root, source: 'workspace' });
+    const page = corpus.get('reference/mcp');
+
+    expect(page.path).toBe('reference/mcp/index');
+    expect(corpus.get('/reference/mcp/')).toEqual(page);
+    expect(corpus.get('reference/mcp/index.md')).toEqual(page);
   });
 
   it('returns relevance-ordered search matches with one best chunk per page and honors limits', async () => {
@@ -120,6 +143,8 @@ import Thing from './Thing.astro';
 
 <Thing>Visible child text</Thing>
 
+Inline JSON stays readable: {"issue": 735}
+
 \`\`\`sh
 export GH_TOKEN=<token>
 \`\`\`
@@ -129,6 +154,7 @@ export GH_TOKEN=<token>
     const corpus = await buildDocsCorpus({ root, source: 'workspace' });
 
     expect(corpus.search('Visible child', 5)[0]?.path).toBe('agents/setup');
+    expect(corpus.search('Inline JSON', 5)[0]?.snippet).toContain('{"issue": 735}');
     expect(corpus.search('GH_TOKEN', 5)[0]?.snippet).toContain('export GH_TOKEN=<token>');
     expect(corpus.search('Thing astro', 5)).toEqual([]);
   });
@@ -176,6 +202,19 @@ Setup agents here.
     expect(() => corpus.get('/missing/page.md')).toThrow(
       'Documentation page not found for path "/missing/page.md". Call shipper_docs_search to find a valid docs path.'
     );
+  });
+
+  it('keeps the corpus unavailable when a resolved root cannot be loaded', async () => {
+    const root = await makeTempRoot();
+    const fileInsteadOfRoot = path.join(root, 'not-a-directory.md');
+    await writeFile(fileInsteadOfRoot, '# Not a directory\n');
+
+    const corpus = await buildDocsCorpus({ root: fileInsteadOfRoot, source: 'workspace' });
+
+    expect(() => corpus.search('anything', 5)).toThrow(
+      'Shipper documentation corpus is unavailable.'
+    );
+    expect(() => corpus.get('anything')).toThrow('Shipper documentation corpus is unavailable.');
   });
 
   it('resolves sources in workspace, bundled, then env priority order', async () => {

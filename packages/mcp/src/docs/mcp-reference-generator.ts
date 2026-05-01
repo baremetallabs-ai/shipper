@@ -20,12 +20,23 @@ const landingDescription = 'Reference for every shipper MCP server tool.';
 type BehaviorHintName = 'readOnlyHint' | 'destructiveHint' | 'idempotentHint' | 'openWorldHint';
 
 const hintExplanations = {
-  readOnlyHint: 'The tool only reads state and does not intentionally modify the repository.',
-  destructiveHint:
-    'The tool can remove or rewrite workflow artifacts and should be used carefully.',
-  idempotentHint: 'Retrying the same call is expected to be safe once the target state is reached.',
-  openWorldHint: 'The tool reaches GitHub or other external systems outside the MCP server.',
-} as const satisfies Record<BehaviorHintName, string>;
+  readOnlyHint: {
+    true: 'The tool only reads state and does not intentionally modify the repository.',
+    false: 'The tool may intentionally modify repository or workflow state.',
+  },
+  destructiveHint: {
+    true: 'The tool can remove or rewrite workflow artifacts and should be used carefully.',
+    false: 'The tool is not expected to remove or rewrite workflow artifacts.',
+  },
+  idempotentHint: {
+    true: 'Retrying the same call is expected to be safe once the target state is reached.',
+    false: 'Retrying the same call may produce additional side effects.',
+  },
+  openWorldHint: {
+    true: 'The tool reaches GitHub or other external systems outside the MCP server.',
+    false: 'The tool does not reach GitHub or other external systems outside the MCP server.',
+  },
+} as const satisfies Record<BehaviorHintName, Record<'true' | 'false', string>>;
 
 export const toolGroups = [
   {
@@ -192,7 +203,11 @@ function renderBehaviorHints(annotations: ToolAnnotations | undefined): string {
   ).flatMap((hint) =>
     annotations[hint] === undefined
       ? []
-      : [`- ${hint}: ${String(annotations[hint])} — ${hintExplanations[hint]}`]
+      : [
+          `- ${hint}: ${String(annotations[hint])} — ${
+            hintExplanations[hint][String(annotations[hint]) as 'true' | 'false']
+          }`,
+        ]
   );
   return rows.length === 0 ? '' : `## Behavior hints\n\n${rows.join('\n')}\n\n`;
 }

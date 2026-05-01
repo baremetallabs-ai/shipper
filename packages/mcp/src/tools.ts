@@ -757,7 +757,7 @@ export const mcpToolDefinitions = [
         try {
           const matches = context.docsCorpus.search(query, limit ?? 5);
           if (matches.length === 0) {
-            return textOk(`No documentation matches found for query: ${query}`);
+            return textOk(`No documentation matches found for query: ${JSON.stringify(query)}`);
           }
           return textOk(formatDocsSearchMatches(matches));
         } catch (err) {
