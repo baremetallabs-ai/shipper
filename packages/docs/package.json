@@ -8,9 +8,9 @@
     "build": "astro build",
     "preview": "astro preview",
     "type-check": "astro sync && tsc --noEmit",
-    "test": "vitest run",
+    "test": "npm run build && vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "npm run build && vitest run --coverage"
   },
   "dependencies": {
     "@astrojs/sitemap": "^3.7.2",
