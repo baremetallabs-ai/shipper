@@ -41,8 +41,9 @@ describe('groom prompts', () => {
       expect(prompt).toContain('**Low**');
       expect(prompt).toContain('shipper:priority-high');
       expect(prompt).toContain('shipper:priority-low');
-      expect(prompt).toContain('--remove-label "shipper:priority-low"');
-      expect(prompt).toContain('--remove-label "shipper:priority-high"');
+      expect(prompt).toContain(
+        'Choosing `normal` tells the orchestrator to remove both priority labels.'
+      );
     }
   );
 
@@ -59,10 +60,7 @@ describe('groom prompts', () => {
       expect(prompt).toContain(
         'Present the finding to the product owner using the interactive question-asking tool'
       );
-      expect(prompt).toContain(
-        'gh issue close <ISSUE> --reason "not planned" --comment "Closing as duplicate of #<N> — <original issue title>."'
-      );
-      expect(prompt).toContain('--remove-label "shipper:new"');
+      expect(prompt).toContain('Record the duplicate decision in the grooming artifacts');
       expect(prompt).toContain('Reclassify the relationship as **Overlap**');
     }
   );
@@ -75,17 +73,21 @@ describe('groom prompts', () => {
         'utf-8'
       );
 
-      expect(prompt).toContain(
-        'After creating each child issue, post a **scoped grooming comment** on it.'
-      );
-      expect(prompt).toContain('do not copy the entire parent grooming summary');
-      expect(prompt).toContain('Always exclude the **decomposition recommendation** section.');
-      expect(prompt).toContain(
-        'Groomed as part of #<number> — see parent for full grooming context.'
-      );
-      expect(prompt).toContain(
-        'gh issue comment <child_number> --body-file ./.shipper/tmp/child_grooming_comment-<child_number>.md'
-      );
+      expect(prompt).toContain('.shipper/output/result.json');
+      expect(prompt).toContain('.shipper/output/groom-<number>.json');
+      expect(prompt).toContain('body_file');
+      expect(prompt).toContain('grooming_comment_file');
+      expect(prompt).toContain('priority');
+      expect(prompt).toContain('decomposition');
+      expect(prompt).toContain('kind');
+      expect(prompt).toContain('children');
+      expect(prompt).toContain('{{blocking_issue}}');
+      expect(prompt).toContain("excludes the parent's decomposition recommendation section");
+      expect(prompt).not.toContain('gh issue edit');
+      expect(prompt).not.toContain('gh issue comment');
+      expect(prompt).not.toContain('gh issue create');
+      expect(prompt).not.toContain('gh issue close');
+      expect(prompt).not.toContain('.shipper/tmp/');
     }
   );
 });

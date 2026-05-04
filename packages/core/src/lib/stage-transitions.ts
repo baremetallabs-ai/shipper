@@ -18,6 +18,7 @@ export type StageName =
   | 'pr_open'
   | 'pr_review'
   | 'pr_remediate'
+  | 'groom'
   | 'unblock';
 
 export type Verdict = 'accept' | 'reject' | 'fail';
@@ -64,9 +65,13 @@ export const STAGE_TRANSITIONS = {
     accept: READY_LABEL,
     reject: PR_OPEN_LABEL,
   },
-} as const satisfies Record<Exclude<StageName, 'unblock'>, StageTransitionEntry>;
+} as const satisfies Record<Exclude<StageName, 'unblock' | 'groom'>, StageTransitionEntry>;
 
 export function resolveTransition(stage: StageName, verdict: Verdict): LabelTransition {
+  if (stage === 'groom') {
+    throw new Error('groom results must be processed with processGroomResult');
+  }
+
   if (stage === 'unblock') {
     if (verdict === 'accept') {
       return { add: [], remove: [BLOCKED_LABEL] };

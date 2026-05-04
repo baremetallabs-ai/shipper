@@ -24,6 +24,7 @@ const {
   handleAgentCrash,
   postComment,
   postReplies,
+  processGroomResult,
   processResult,
   parseDiffHunks,
   retryOnInvalidOutput,
@@ -114,6 +115,100 @@ describe('output protocol helpers', () => {
       comments: [],
       ...overrides,
     };
+  }
+
+  function groomedBody(summary = 'Summary'): string {
+    return [
+      '# Summary',
+      '',
+      summary,
+      '',
+      '# Requirements',
+      '',
+      '1. Requirement.',
+      '',
+      '# Acceptance Criteria',
+      '',
+      '- [ ] Criterion.',
+      '',
+      '# Related Issues',
+      '',
+      'No relevant issues found.',
+      '',
+      '# Out of Scope',
+      '',
+      'None.',
+      '',
+      '# Open Questions',
+      '',
+      'None.',
+    ].join('\n');
+  }
+
+  function buildGroomManifest(
+    overrides: Partial<{
+      parent: Record<string, unknown>;
+      decomposition: Record<string, unknown>;
+    }> = {}
+  ) {
+    return {
+      parent: {
+        body_file: outputRelative('issue-body-248.md'),
+        priority: 'high',
+        ...overrides.parent,
+      },
+      decomposition: {
+        kind: 'none',
+        children: [],
+        ...overrides.decomposition,
+      },
+    };
+  }
+
+  async function writeValidGroomOutput(
+    manifest = buildGroomManifest(),
+    result: Partial<ResultJson> = {}
+  ): Promise<ResultJson> {
+    const fullResult = buildResult({ groom: outputRelative('groom-248.json'), ...result });
+    await writeResultFile(fullResult);
+    await writeOutputFile('comment-248.md', '## Grooming Summary\n\nSummary.');
+    await writeOutputJson('groom-248.json', manifest);
+    const parent = manifest.parent as Record<string, unknown>;
+    if (typeof parent.body_file === 'string') {
+      await writeOutputFile(path.basename(parent.body_file), groomedBody('Parent body.'));
+    }
+    const parentBlocked = parent.blocked as Record<string, unknown> | undefined;
+    if (typeof parentBlocked?.comment_file === 'string') {
+      await writeOutputFile(path.basename(parentBlocked.comment_file), '## Blocked\n\nBlocked.');
+    }
+    const decomposition = manifest.decomposition as Record<string, unknown>;
+    const children = Array.isArray(decomposition.children) ? decomposition.children : [];
+    for (const [index, child] of children.entries()) {
+      if (typeof child !== 'object' || child === null) {
+        continue;
+      }
+      const childRecord = child as Record<string, unknown>;
+      if (typeof childRecord.body_file === 'string') {
+        await writeOutputFile(
+          path.basename(childRecord.body_file),
+          groomedBody(`Child ${index + 1}.`)
+        );
+      }
+      if (typeof childRecord.grooming_comment_file === 'string') {
+        await writeOutputFile(
+          path.basename(childRecord.grooming_comment_file),
+          `Groomed as part of #248.\n\nChild ${index + 1} context.`
+        );
+      }
+      const blocked = childRecord.blocked as Record<string, unknown> | undefined;
+      if (typeof blocked?.comment_file === 'string') {
+        await writeOutputFile(
+          path.basename(blocked.comment_file),
+          '## Blocked\n\nBlocked until {{blocking_issue}} is done.'
+        );
+      }
+    }
+    return fullResult;
   }
 
   function buildReviewDiffFixture(): string {
@@ -642,6 +737,14 @@ describe('output protocol helpers', () => {
       );
     });
 
+    it('rejects groom manifests on non-groom stages', async () => {
+      await writeResultFile(buildResult({ groom: outputRelative('groom-248.json') }));
+
+      await expect(validateStageOutput(tempDir, 'plan')).rejects.toThrow(
+        'result.groom is only supported for the groom stage'
+      );
+    });
+
     it('rejects pr_open accepts without a pr_spec', async () => {
       await writeResultFile(buildResult());
 
@@ -656,6 +759,41 @@ describe('output protocol helpers', () => {
       await expect(validateStageOutput(tempDir, 'pr_review')).rejects.toThrow(
         'pr_review accept requires a review_payload in result.json'
       );
+    });
+
+    it('rejects groom accepts without a manifest', async () => {
+      await writeResultFile(buildResult());
+
+      await expect(validateStageOutput(tempDir, 'groom')).rejects.toThrow(
+        'groom accept requires a groom manifest in result.json'
+      );
+    });
+
+    it.each(['reject', 'fail'] as const)('rejects groom %s verdict output', async (verdict) => {
+      await writeResultFile(buildResult({ verdict, groom: outputRelative('groom-248.json') }));
+
+      await expect(validateStageOutput(tempDir, 'groom')).rejects.toThrow(
+        'groom output must use verdict accept'
+      );
+    });
+
+    it('rejects invalid groom manifest state', async () => {
+      await writeValidGroomOutput(
+        buildGroomManifest({
+          parent: { body_file: undefined },
+          decomposition: { kind: 'partial', children: [] },
+        })
+      );
+
+      await expect(validateStageOutput(tempDir, 'groom')).rejects.toThrow(
+        "'decomposition.children' must not be empty when kind is partial or full"
+      );
+    });
+
+    it('accepts valid groom output', async () => {
+      const result = await writeValidGroomOutput();
+
+      await expect(validateStageOutput(tempDir, 'groom')).resolves.toEqual(result);
     });
 
     it('treats pr_remediate as schema-only validation', async () => {
@@ -1025,6 +1163,22 @@ describe('output protocol helpers', () => {
   });
 
   describe('processResult', () => {
+    it('rejects groom results before any gh call', async () => {
+      const result = buildResult({ groom: outputRelative('groom-248.json') });
+
+      await expect(
+        processResult({
+          repo: 'owner/repo',
+          issueNumber: '248',
+          stage: 'groom',
+          cwd: tempDir,
+          result,
+        })
+      ).rejects.toThrow('groom results must be processed with processGroomResult');
+
+      expect(ghMock).not.toHaveBeenCalled();
+    });
+
     it('processes a plain result by posting the comment before changing labels', async () => {
       const result = buildResult();
       await writeOutputFile('comment-248.md', 'summary');
@@ -1383,6 +1537,190 @@ describe('output protocol helpers', () => {
       ).rejects.toThrow(`comment path must stay within ${path.join(tempDir, PROTOCOL_OUTPUT_DIR)}`);
 
       expect(ghMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('processGroomResult', () => {
+    it('rewrites the parent, posts the summary, and applies labels last for no decomposition', async () => {
+      const result = await writeValidGroomOutput();
+
+      await expect(
+        processGroomResult({ repo: 'owner/repo', issueNumber: '248', cwd: tempDir, result })
+      ).resolves.toEqual(result);
+
+      expect(ghMock).toHaveBeenNthCalledWith(1, [
+        'issue',
+        'edit',
+        '248',
+        '-R',
+        'owner/repo',
+        '--body-file',
+        outputAbs('issue-body-248.md'),
+      ]);
+      expect(ghMock).toHaveBeenNthCalledWith(2, [
+        'issue',
+        'comment',
+        '248',
+        '-R',
+        'owner/repo',
+        '--body-file',
+        outputAbs('comment-248.md'),
+      ]);
+      expect(ghMock).toHaveBeenNthCalledWith(3, [
+        'issue',
+        'edit',
+        '248',
+        '-R',
+        'owner/repo',
+        '--add-label',
+        'shipper:groomed',
+        '--add-label',
+        'shipper:priority-high',
+        '--remove-label',
+        'shipper:new',
+        '--remove-label',
+        'shipper:priority-low',
+        '--remove-label',
+        'shipper:blocked',
+      ]);
+    });
+
+    it('creates full-replacement children, posts scoped comments, and closes the parent', async () => {
+      const result = await writeValidGroomOutput(
+        buildGroomManifest({
+          parent: { body_file: undefined, priority: 'normal' },
+          decomposition: {
+            kind: 'full',
+            children: [
+              {
+                title: 'feat: child one',
+                body_file: outputRelative('child-1-body.md'),
+                grooming_comment_file: outputRelative('child-1-comment.md'),
+              },
+              {
+                title: 'feat: child two',
+                body_file: outputRelative('child-2-body.md'),
+                grooming_comment_file: outputRelative('child-2-comment.md'),
+                blocked: {
+                  depends_on_child_index: 0,
+                  comment_file: outputRelative('child-2-blocked.md'),
+                },
+              },
+            ],
+          },
+        })
+      );
+      ghMock
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })
+        .mockResolvedValueOnce({ stdout: 'https://github.com/owner/repo/issues/301\n', stderr: '' })
+        .mockResolvedValueOnce({ stdout: 'https://github.com/owner/repo/issues/302\n', stderr: '' })
+        .mockResolvedValue({ stdout: '', stderr: '' });
+
+      await expect(
+        processGroomResult({ repo: 'owner/repo', issueNumber: '248', cwd: tempDir, result })
+      ).resolves.toEqual(result);
+
+      expect(ghMock.mock.calls[1]?.[0]).toEqual([
+        'issue',
+        'create',
+        '-R',
+        'owner/repo',
+        '--title',
+        'feat: child one',
+        '--body-file',
+        outputAbs('child-1-body.md'),
+        '--label',
+        'shipper:groomed',
+      ]);
+      expect(ghMock.mock.calls[2]?.[0]).toContain('shipper:blocked');
+      expect(ghMock.mock.calls.some(([args]) => args.some((arg) => arg.includes('#301')))).toBe(
+        true
+      );
+      expect(ghMock.mock.calls.at(-1)?.[0]?.slice(0, 4)).toEqual(['issue', 'close', '248', '-R']);
+      expect(ghMock.mock.calls.some(([args]) => args[0] === 'issue' && args[1] === 'edit')).toBe(
+        false
+      );
+    });
+
+    it('posts one failure comment and skips parent label transition after partial failure', async () => {
+      const result = await writeValidGroomOutput();
+      ghMock
+        .mockRejectedValueOnce(new Error('body update failed'))
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })
+        .mockResolvedValueOnce({ stdout: '', stderr: '' });
+
+      await expect(
+        processGroomResult({ repo: 'owner/repo', issueNumber: '248', cwd: tempDir, result })
+      ).rejects.toThrow('Groom post-flight failed');
+
+      expect(
+        ghMock.mock.calls.some(
+          ([args]) => args[0] === 'issue' && args[1] === 'edit' && args.includes('--add-label')
+        )
+      ).toBe(false);
+      expect(ghMock.mock.calls.at(-1)?.[0]).toEqual([
+        'issue',
+        'comment',
+        '248',
+        '-R',
+        'owner/repo',
+        '--body',
+        expect.stringContaining('## Groom Post-flight Failure'),
+      ]);
+    });
+
+    it('applies blocked parent state and creates partial-replacement children', async () => {
+      const result = await writeValidGroomOutput(
+        buildGroomManifest({
+          parent: {
+            priority: 'low',
+            blocked: { comment_file: outputRelative('parent-blocked.md') },
+          },
+          decomposition: {
+            kind: 'partial',
+            children: [
+              {
+                title: 'feat: child',
+                body_file: outputRelative('child-body.md'),
+                grooming_comment_file: outputRelative('child-comment.md'),
+              },
+            ],
+          },
+        })
+      );
+      ghMock
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })
+        .mockResolvedValueOnce({ stdout: 'https://github.com/owner/repo/issues/301\n', stderr: '' })
+        .mockResolvedValue({ stdout: '', stderr: '' });
+
+      await expect(
+        processGroomResult({ repo: 'owner/repo', issueNumber: '248', cwd: tempDir, result })
+      ).resolves.toEqual(result);
+
+      expect(ghMock.mock.calls.some(([args]) => args[0] === 'issue' && args[1] === 'create')).toBe(
+        true
+      );
+      expect(
+        ghMock.mock.calls.some(([args]) => args.includes(outputAbs('parent-blocked.md')))
+      ).toBe(true);
+      expect(ghMock.mock.calls.at(-1)?.[0]).toEqual([
+        'issue',
+        'edit',
+        '248',
+        '-R',
+        'owner/repo',
+        '--add-label',
+        'shipper:groomed',
+        '--add-label',
+        'shipper:priority-low',
+        '--add-label',
+        'shipper:blocked',
+        '--remove-label',
+        'shipper:new',
+        '--remove-label',
+        'shipper:priority-high',
+      ]);
     });
   });
 

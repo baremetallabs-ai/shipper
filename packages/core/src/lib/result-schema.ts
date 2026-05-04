@@ -10,6 +10,7 @@ export interface ResultJson {
   pr_spec?: string;
   review_payload?: string;
   replies?: string;
+  groom?: string;
 }
 
 export const VALID_VERDICTS = ['accept', 'reject', 'fail'] as const;
@@ -52,7 +53,7 @@ function validateProtocolPath(field: string, value: unknown, errors: string[]): 
 
 function validateOptionalPath(
   data: Record<string, unknown>,
-  field: 'pr_spec' | 'review_payload' | 'replies',
+  field: 'pr_spec' | 'review_payload' | 'replies' | 'groom',
   errors: string[]
 ): void {
   const value = data[field];
@@ -86,6 +87,7 @@ export function validateResult(data: unknown): ResultJson {
   validateOptionalPath(data, 'pr_spec', errors);
   validateOptionalPath(data, 'review_payload', errors);
   validateOptionalPath(data, 'replies', errors);
+  validateOptionalPath(data, 'groom', errors);
 
   if (errors.length > 0) {
     throw new ResultValidationError(errors);
@@ -106,6 +108,10 @@ export function validateResult(data: unknown): ResultJson {
 
   if (typeof data.replies === 'string') {
     result.replies = data.replies;
+  }
+
+  if (typeof data.groom === 'string') {
+    result.groom = data.groom;
   }
 
   return result;

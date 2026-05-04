@@ -4,11 +4,17 @@ import {
   generateBranchName,
   getRepoRoot,
   getSettings,
+  GroomPostFlightError,
+  handleAgentCrash,
   isMcpGroomingEnabled,
   logger,
+  processGroomResult,
   resolveBaseBranch,
   resolveMode,
+  retryOnInvalidOutput,
   runPrompt,
+  scrubOutputDir,
+  toErrorMessage,
   withIssueLock,
   withStageHooks,
   withWorktree,
@@ -52,8 +58,9 @@ export async function runGroomStage(
             issueNumber: issueStr,
             stage: 'groom',
           },
-          async (wtPath) =>
-            await runPrompt('groom', {
+          async (wtPath) => {
+            await scrubOutputDir(wtPath);
+            const exitCode = await runPrompt('groom', {
               repo,
               issueRef: issueStr,
               cwd: wtPath,
@@ -61,7 +68,49 @@ export async function runGroomStage(
               agent,
               model,
               disableMcp,
-            })
+            });
+
+            if (exitCode !== 0) {
+              const detail = `Agent exited with code ${exitCode}`;
+              logger.error(detail);
+              await handleAgentCrash(
+                repo,
+                issueStr,
+                'groom',
+                detail,
+                `The \`groom\` agent run exited with code ${exitCode}.`
+              );
+              return 1;
+            }
+
+            try {
+              const result = await retryOnInvalidOutput({
+                cwd: wtPath,
+                stage: 'groom',
+                retry: (userInput) =>
+                  runPrompt('groom', {
+                    repo,
+                    issueRef: issueStr,
+                    cwd: wtPath,
+                    mode,
+                    agent,
+                    model,
+                    disableMcp,
+                    userInput,
+                  }),
+              });
+
+              await processGroomResult({ repo, issueNumber: issueStr, cwd: wtPath, result });
+              return 0;
+            } catch (error) {
+              const detail = toErrorMessage(error);
+              logger.error(detail);
+              if (!(error instanceof GroomPostFlightError)) {
+                await handleAgentCrash(repo, issueStr, 'groom', detail);
+              }
+              return 1;
+            }
+          }
         )
     );
   });

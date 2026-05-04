@@ -30,6 +30,60 @@ function restoreStdinIsTTY(): void {
   Reflect.deleteProperty(process.stdin, 'isTTY');
 }
 
+function groomedBody(summary = 'Summary'): string {
+  return [
+    '# Summary',
+    '',
+    summary,
+    '',
+    '# Requirements',
+    '',
+    '1. Requirement.',
+    '',
+    '# Acceptance Criteria',
+    '',
+    '- [ ] Criterion.',
+    '',
+    '# Related Issues',
+    '',
+    'No relevant issues found.',
+    '',
+    '# Out of Scope',
+    '',
+    'None.',
+    '',
+    '# Open Questions',
+    '',
+    'None.',
+  ].join('\n');
+}
+
+async function writeGroomOutput(fake: FakeCore, priority: 'high' | 'normal' | 'low' = 'high') {
+  return await fake.writeStageOutput({
+    result: {
+      verdict: 'accept',
+      groom: '.shipper/output/groom-123.json',
+    },
+    commentBody: '## Grooming Summary\n\nDone.',
+    groom: {
+      path: '.shipper/output/groom-123.json',
+      manifest: {
+        parent: {
+          body_file: '.shipper/output/issue-body-123.md',
+          priority,
+        },
+        decomposition: {
+          kind: 'none',
+          children: [],
+        },
+      },
+      files: {
+        '.shipper/output/issue-body-123.md': groomedBody('Updated parent body.'),
+      },
+    },
+  });
+}
+
 describe('groomCommand', () => {
   let fake: FakeCore;
   let promptCalls: Array<{ name: string; opts: RunPromptOpts }>;
@@ -94,8 +148,9 @@ describe('groomCommand', () => {
 
   it('runs a single issue inside a fake worktree on the generated branch', async () => {
     fake.setIssue('123', { labels: ['shipper:new'], title: 'Single issue' });
-    fake.scriptRunPrompt((name, opts) => {
+    fake.scriptRunPrompt(async (name, opts) => {
       promptCalls.push({ name, opts });
+      await writeGroomOutput(fake);
       return 0;
     });
 
@@ -119,7 +174,17 @@ describe('groomCommand', () => {
     ]);
     expect(fake.state.labelTransitions).toEqual([
       { target: 'issue', number: '123', add: ['shipper:locked'], remove: [] },
+      {
+        target: 'issue',
+        number: '123',
+        add: ['shipper:groomed', 'shipper:priority-high'],
+        remove: ['shipper:new', 'shipper:priority-low', 'shipper:blocked'],
+      },
       { target: 'issue', number: '123', add: [], remove: ['shipper:locked'] },
+    ]);
+    expect(fake.state.issues.get('123')?.body).toContain('Updated parent body.');
+    expect(fake.state.postedComments).toEqual([
+      { target: 'issue', number: '123', body: '## Grooming Summary\n\nDone.' },
     ]);
     expect(process.exitCode).toBe(0);
   });
@@ -131,8 +196,9 @@ describe('groomCommand', () => {
       { number: '101', title: 'First issue' },
       { number: '102', title: 'Second issue' },
     ]);
-    fake.scriptRunPrompt((name, opts) => {
+    fake.scriptRunPrompt(async (name, opts) => {
       promptCalls.push({ name, opts });
+      await writeGroomOutput(fake, 'normal');
       return 0;
     });
 
@@ -151,8 +217,9 @@ describe('groomCommand', () => {
 
   it('forwards disableMcp into the groom prompt invocation', async () => {
     fake.setIssue('123', { labels: ['shipper:new'], title: 'Single issue' });
-    fake.scriptRunPrompt((name, opts) => {
+    fake.scriptRunPrompt(async (name, opts) => {
       promptCalls.push({ name, opts });
+      await writeGroomOutput(fake);
       return 0;
     });
 
@@ -163,6 +230,48 @@ describe('groomCommand', () => {
     ).resolves.toBeUndefined();
 
     expect(promptCalls[0]?.opts.disableMcp).toBe(true);
+  });
+
+  it('retries invalid groom output with a correction message', async () => {
+    fake.setIssue('123', { labels: ['shipper:new'], title: 'Single issue' });
+    fake.scriptRunPrompt(async (name, opts) => {
+      promptCalls.push({ name, opts });
+      if (promptCalls.length === 1) {
+        await fake.writeStageOutput({
+          result: { verdict: 'accept' },
+          commentBody: 'invalid',
+        });
+      } else {
+        await writeGroomOutput(fake, 'normal');
+      }
+      return 0;
+    });
+
+    const { groomCommand } = await import('../../src/commands/groom.js');
+
+    await expect(groomCommand(repo, '123')).resolves.toBeUndefined();
+
+    expect(promptCalls).toHaveLength(2);
+    expect(promptCalls[1]?.opts.userInput).toContain('groom accept requires a groom manifest');
+    expect(fake.state.issues.get('123')?.labels.has('shipper:groomed')).toBe(true);
+    expect(process.exitCode).toBe(0);
+  });
+
+  it('treats a clean exit with no artifacts as an agent failure', async () => {
+    fake.setIssue('123', { labels: ['shipper:new'], title: 'Single issue' });
+    fake.scriptRunPrompt((name, opts) => {
+      promptCalls.push({ name, opts });
+      return 0;
+    });
+
+    const { groomCommand } = await import('../../src/commands/groom.js');
+
+    await expect(groomCommand(repo, '123')).resolves.toBeUndefined();
+
+    expect(fake.state.issues.get('123')?.labels.has('shipper:new')).toBe(true);
+    expect(fake.state.issues.get('123')?.labels.has('shipper:groomed')).toBe(false);
+    expect(fake.state.postedComments.at(-1)?.body).toContain('## Agent Failure');
+    expect(process.exitCode).toBe(1);
   });
 
   it('throws explicitly headless grooming before doing any work', async () => {

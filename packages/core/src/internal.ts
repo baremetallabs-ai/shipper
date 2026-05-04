@@ -133,7 +133,17 @@ export {
   createPrFromSpec,
   createPrFromSpecWithMetadata,
   formatCorrectionMessage,
+  processGroomResult,
+  readGroomManifest,
   submitReviewPayload,
+} from './lib/output-protocol/index.js';
+export type {
+  GroomBlocked,
+  GroomChildIssue,
+  GroomDecompositionKind,
+  GroomManifest,
+  GroomParent,
+  GroomPriority,
 } from './lib/output-protocol/index.js';
 export { checkShipperDir } from './lib/prerequisites.js';
 export type { PromptCommand } from './lib/prompt-runner.js';

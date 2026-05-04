@@ -218,6 +218,10 @@ export async function processResult(opts: {
   result: ResultJson;
   prNumber?: string;
 }): Promise<ResultJson> {
+  if (opts.stage === 'groom') {
+    throw new Error('groom results must be processed with processGroomResult');
+  }
+
   const { result } = opts;
   const commentPath = resolveOutputPath(opts.cwd, result.comment, 'comment path');
   let createdPr: PrSpecResult | undefined;

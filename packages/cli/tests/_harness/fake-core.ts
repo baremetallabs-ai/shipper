@@ -23,6 +23,9 @@ type GhHandler = (
 interface FakeIssueRecord {
   number: string;
   title: string;
+  body: string;
+  state: 'OPEN' | 'CLOSED';
+  url: string;
   labels: Set<string>;
   comments: string[];
   timeline: string[];
@@ -94,6 +97,8 @@ interface FakeState {
 
 interface SetIssueInit {
   title?: string;
+  body?: string;
+  state?: 'OPEN' | 'CLOSED';
   labels?: string[];
   comments?: string[];
   timeline?: string[];
@@ -116,8 +121,8 @@ interface SetRunInit {
 }
 
 interface WriteStageOutputOptions {
-  result: Omit<ResultJson, 'comment' | 'replies' | 'pr_spec' | 'review_payload'> &
-    Partial<Pick<ResultJson, 'comment' | 'replies' | 'pr_spec' | 'review_payload'>>;
+  result: Omit<ResultJson, 'comment' | 'replies' | 'pr_spec' | 'review_payload' | 'groom'> &
+    Partial<Pick<ResultJson, 'comment' | 'replies' | 'pr_spec' | 'review_payload' | 'groom'>>;
   commentBody?: string;
   replies?: Record<string, string>;
   prSpec?: {
@@ -132,6 +137,11 @@ interface WriteStageOutputOptions {
   reviewPayload?: {
     path?: string;
     payload: unknown;
+  };
+  groom?: {
+    path?: string;
+    manifest: unknown;
+    files?: Record<string, string>;
   };
 }
 
@@ -194,6 +204,9 @@ function createIssue(number: string, init: SetIssueInit = {}): FakeIssueRecord {
   return {
     number,
     title: init.title ?? `Issue ${number}`,
+    body: init.body ?? '',
+    state: init.state ?? 'OPEN',
+    url: `https://github.com/owner/repo/issues/${number}`,
     labels: new Set(init.labels ?? []),
     comments: [...(init.comments ?? [])],
     timeline: [...(init.timeline ?? [])],
@@ -390,6 +403,9 @@ export function createFakeCore(): CreateFakeCore {
         JSON.stringify({
           number: Number(issueNumber),
           title: issue.title,
+          body: issue.body,
+          state: issue.state,
+          url: issue.url,
           labels: [...issue.labels],
         })
       );
@@ -413,7 +429,18 @@ export function createFakeCore(): CreateFakeCore {
         }
       }
 
-      recordLabelEdit('issue', issueNumber, issue.labels, add, remove);
+      const body = await maybeReadBodyFile(args, options);
+      const title = getFlagValue(args, '--title');
+      if (body) {
+        issue.body = body;
+      }
+      if (title) {
+        issue.title = title;
+      }
+
+      if (add.length > 0 || remove.length > 0) {
+        recordLabelEdit('issue', issueNumber, issue.labels, add, remove);
+      }
       if (add.includes('shipper:locked')) {
         issue.timeline.push(new Date().toISOString());
       }
@@ -429,6 +456,44 @@ export function createFakeCore(): CreateFakeCore {
       const body = await maybeReadBodyFile(args, options);
       issue.comments.push(body);
       state.postedComments.push({ target: 'issue', number: issueNumber, body });
+      return toResponse();
+    }
+
+    if (args[0] === 'issue' && args[1] === 'create') {
+      const repo = getFlagValue(args, '-R');
+      const title = getFlagValue(args, '--title');
+      const body = await maybeReadBodyFile(args, options);
+      if (!repo || !title) {
+        throw new Error(`Unsupported issue create args: ${args.join(' ')}`);
+      }
+
+      const nextNumber =
+        Math.max(0, ...[...state.issues.keys()].map((value) => Number.parseInt(value, 10) || 0)) +
+        1;
+      const issueNumber = String(nextNumber);
+      const issue = createIssue(issueNumber, { title, body });
+      issue.url = `https://github.com/${repo}/issues/${issueNumber}`;
+      for (let i = 0; i < args.length; i++) {
+        if (args[i] === '--label' && args[i + 1]) {
+          issue.labels.add(args[i + 1] as string);
+        }
+      }
+      state.issues.set(issueNumber, issue);
+      return toResponse(issue.url);
+    }
+
+    if (args[0] === 'issue' && args[1] === 'close') {
+      const issueNumber = args[2];
+      if (!issueNumber) {
+        throw new Error('Missing issue number');
+      }
+      const issue = ensureIssue(issueNumber);
+      issue.state = 'CLOSED';
+      const comment = getFlagValue(args, '--comment');
+      if (comment) {
+        issue.comments.push(comment);
+        state.postedComments.push({ target: 'issue', number: issueNumber, body: comment });
+      }
       return toResponse();
     }
 
@@ -803,6 +868,22 @@ export function createFakeCore(): CreateFakeCore {
         result.review_payload = reviewPayloadPath;
       } else if (options.result.review_payload) {
         result.review_payload = options.result.review_payload;
+      }
+
+      if (options.groom) {
+        const groomPath =
+          options.groom.path ?? options.result.groom ?? '.shipper/output/groom.json';
+        for (const [filePath, body] of Object.entries(options.groom.files ?? {})) {
+          await writeFile(path.join(wtPath, filePath), body, 'utf-8');
+        }
+        await writeFile(
+          path.join(wtPath, groomPath),
+          JSON.stringify(options.groom.manifest, null, 2),
+          'utf-8'
+        );
+        result.groom = groomPath;
+      } else if (options.result.groom) {
+        result.groom = options.result.groom;
       }
 
       await writeFile(

@@ -6,7 +6,7 @@ args:
   - --permission-mode
   - acceptEdits
   - --allowedTools
-  - Task,Bash(gh label list *),Bash(gh issue list *),Bash(gh issue view *),Bash(gh issue edit *),Bash(gh issue comment *),Bash(gh issue create *),Bash(gh issue close *),WebSearch
+  - Task,Bash(gh label list *),Bash(gh issue list *),Bash(gh issue view *),WebSearch
 append-issue: true
 ---
 
@@ -91,9 +91,10 @@ Before proceeding to Phase 3, check whether any issue from the Phase 2 scan was 
 
 1. Present the finding to the product owner using the interactive question-asking tool. Identify the original issue by number and title, explain why the current issue appears to be a duplicate, and ask for explicit confirmation before taking action.
 2. **If the product owner confirms the duplicate:**
-   - Close the issue with a comment: `gh issue close <ISSUE> --reason "not planned" --comment "Closing as duplicate of #<N> — <original issue title>."`
-   - Remove `shipper:new` if present: `gh issue edit <ISSUE> --remove-label "shipper:new"`
-   - **Stop.** Do not proceed to Phase 3 or Phase 4. No grooming questions are asked, no grooming summary comment is posted, and no `shipper:groomed` label is added.
+   - Record the duplicate decision in the grooming artifacts rather than mutating GitHub directly.
+   - Produce a normal groomed parent body whose summary and out-of-scope sections state that the issue is a confirmed duplicate of #<N>.
+   - Produce a grooming summary comment documenting the duplicate decision.
+   - Use `decomposition.kind: "none"` and priority `normal` unless the product owner explicitly chose another priority.
 3. **If the product owner rejects the duplicate finding:**
    - Reclassify the relationship as **Overlap** in the Phase 2 results.
    - Proceed to Phase 3 as normal.
@@ -175,85 +176,64 @@ Reportable items include:
 
 ---
 
-## GitHub actions (must do)
+## Output artifacts (must do)
 
-After producing the final artifacts, you must update GitHub using repo-local temp files and `--body-file`:
+After producing the final groomed content, create ignored files under `.shipper/output/`. These files are absent from a clean worktree; create them during every run. Do not use temp directories for protocol artifacts.
 
-### Update the existing issue
+Never run mutating GitHub commands. Shipper will update the parent issue, create child issues, post comments, close full-replacement parents, and apply `shipper:groomed`, `shipper:blocked`, `shipper:priority-high`, and `shipper:priority-low` labels after you exit.
 
-1. Unless the parent will be fully replaced by child issues later in Phase 4, save the updated issue body to `.shipper/tmp/issue_body-<number>.md` (using the issue number).
-2. Unless the parent will be fully replaced by child issues later in Phase 4, update the issue: `gh issue edit <ISSUE> --body-file ./.shipper/tmp/issue_body-<number>.md`
-3. If grooming changed the scope or nature of the issue (e.g., a bug report became a feature request, or scope expanded/narrowed significantly), update the title to match: `gh issue edit <ISSUE> --title "<new title>"`. Use conventional commit format (`fix:`, `feat:`, `refactor:`, etc.). The title is the first thing downstream stages read — if it contradicts the body, it will mislead them.
-4. Save the grooming summary comment to `.shipper/tmp/grooming_comment-<number>.md` (using the issue number).
-5. Post the comment: `gh issue comment <ISSUE> --body-file ./.shipper/tmp/grooming_comment-<number>.md`
+Create `.shipper/output/result.json`:
 
-6. If the parent remains open after grooming, update labels — **conditional on whether it is still blocked after Phase 2 and decomposition decisions:**
+```json
+{
+  "verdict": "accept",
+  "comment": ".shipper/output/grooming-comment-<number>.md",
+  "groom": ".shipper/output/groom-<number>.json"
+}
+```
 
-   **If the parent is not blocked by any hard conflict, dependency, or sibling-ordering constraint:**
-   - Add `shipper:groomed`, remove `shipper:new` / `shipper:blocked` (if present)
-   - Use `gh issue edit <ISSUE> --add-label "shipper:groomed" --remove-label "shipper:new" --remove-label "shipper:blocked"`
-   - If the product owner chose **high** priority, also run: `gh issue edit <ISSUE> --add-label "shipper:priority-high" --remove-label "shipper:priority-low"`
-   - If the product owner chose **low** priority, also run: `gh issue edit <ISSUE> --add-label "shipper:priority-low" --remove-label "shipper:priority-high"`
-   - If the product owner chose **normal** priority, also run: `gh issue edit <ISSUE> --remove-label "shipper:priority-high" --remove-label "shipper:priority-low"` (this is a no-op if neither label exists)
+Create the grooming summary comment at the `comment` path. Create the groom manifest at the `groom` path:
 
-   **If the parent is still blocked by a hard conflict, dependency, or sibling-ordering constraint:**
-   - Add both `shipper:groomed` and `shipper:blocked`, remove `shipper:new`
-   - Use `gh issue edit <ISSUE> --add-label "shipper:groomed" --add-label "shipper:blocked" --remove-label "shipper:new"`
-   - If the product owner chose **high** priority, also run: `gh issue edit <ISSUE> --add-label "shipper:priority-high" --remove-label "shipper:priority-low"`
-   - If the product owner chose **low** priority, also run: `gh issue edit <ISSUE> --add-label "shipper:priority-low" --remove-label "shipper:priority-high"`
-   - If the product owner chose **normal** priority, also run: `gh issue edit <ISSUE> --remove-label "shipper:priority-high" --remove-label "shipper:priority-low"` (this is a no-op if neither label exists)
-   - Post a separate `## Blocked` comment after the grooming summary comment, referencing the conflicting/dependent issue number(s) and stating the unblock condition. Save it to `.shipper/tmp/blocked_comment-<number>.md` and post with `gh issue comment <ISSUE> --body-file ./.shipper/tmp/blocked_comment-<number>.md`. Example format:
+```json
+{
+  "parent": {
+    "title": "optional replacement title",
+    "body_file": ".shipper/output/issue-body-<number>.md",
+    "priority": "high",
+    "blocked": {
+      "comment_file": ".shipper/output/blocked-comment-<number>.md"
+    }
+  },
+  "decomposition": {
+    "kind": "partial",
+    "children": [
+      {
+        "title": "fix(scope): child title",
+        "body_file": ".shipper/output/child-<number>-1-body.md",
+        "grooming_comment_file": ".shipper/output/child-<number>-1-grooming-comment.md",
+        "priority": "normal",
+        "blocked": {
+          "depends_on_child_index": 0,
+          "comment_file": ".shipper/output/child-<number>-1-blocked.md"
+        }
+      }
+    ]
+  }
+}
+```
 
-     ```
-     ## Blocked
+Use only `high`, `normal`, or `low` for priority. Choosing `normal` tells the orchestrator to remove both priority labels.
 
-     Blocked until #<N> is closed — <brief explanation of why this issue cannot proceed>.
-     ```
+### Decomposition encoding
 
-   - The issue body update and grooming summary comment are still posted (grooming work is preserved).
+- `none`: `children: []`; parent `body_file` is required; parent remains open.
+- `partial`: `children` is non-empty; parent `body_file` is required and contains only remaining parent scope.
+- `full`: `children` is non-empty; omit parent `body_file`; Shipper closes the parent after creating children.
 
-**If a later step fails after earlier steps succeeded:** Report which steps completed successfully and which failed, so the user can assess the state. For example, if the issue body was updated but the label change failed, tell the user the body is already updated and they may need to manually adjust the label.
+Every parent or child body file must contain the standard groomed issue headings: `# Summary`, `# Requirements`, `# Acceptance Criteria`, `# Related Issues`, `# Out of Scope`, and `# Open Questions`.
 
-### If you recommend splitting into additional issues
+Every child issue needs a groomed body file and a scoped grooming comment file. The scoped comment carries forward only context relevant to that child, includes a back-reference to the parent issue, and excludes the parent's decomposition recommendation section.
 
-If your decomposition recommendation includes additional issues, you must create them:
+Every blocked comment file must start with `## Blocked`. For sibling dependencies, set `depends_on_child_index` to the prerequisite child's zero-based index and include `{{blocking_issue}}` where Shipper should insert the created issue reference.
 
-1. **Present the decomposition plan for confirmation.** Before creating any child issues, present your decomposition plan to the product owner using the interactive question-asking tool. Include the proposed number of child issues, each with its title and a one-line scope description. Offer structured options: "Approve this decomposition," "I want to modify it," or "Skip decomposition — keep as single issue." If the product owner wants modifications, update the plan, re-present the revised plan, and explicitly re-ask for approval; repeat this loop until they either approve or choose to skip. If they choose "Skip decomposition — keep as single issue," immediately exit the decomposition flow: do not perform steps 2–5 below, do not create any child issues, and proceed with the parent issue as a single-PR recommendation in the main grooming flow. Only continue to step 2 after receiving an explicit "Approve this decomposition" confirmation.
-
-2. For each new issue, write its body to its own file under `./.shipper/tmp/` (e.g. `split_issue-<number>-1.md`, `split_issue-<number>-2.md`), where `<number>` is the parent issue number.
-3. Create each new issue using `gh issue create --title "<TITLE>" --body-file <FILE> --label "shipper:groomed"`.
-   - These child issues must start in the **groomed** status, since they are written with full groomed-quality content during decomposition.
-   - Each child issue body **must** include all groomed-format sections (`Summary`, `Requirements`, `Acceptance Criteria`, `Related Issues`, `Out of Scope`, `Open Questions`) and must not be a placeholder, because child issues will skip the grooming stage.
-   - If this issue depends on another sibling being completed first, also add `shipper:blocked`: `--label "shipper:groomed" --label "shipper:blocked"`.
-   - For each blocked issue, post a comment starting with `## Blocked` that explains the unblock condition in natural language. Example: `## Blocked\n\nBlocked until #35 is merged — reset's branch cleanup depends on the shipper/ prefix convention being in place.`
-   - The original issue can also receive `shipper:blocked` if grooming determines a sibling should go first. In that case, add the label and post the blocking-condition comment on the original issue too.
-   - After creating each child issue, post a **scoped grooming comment** on it. This carries forward relevant context from the parent's grooming summary so downstream stages have the rationale behind product decisions without navigating back to the parent:
-     - Create `.shipper/tmp/child_grooming_comment-<child_number>.md` for the child issue.
-     - From the parent's grooming summary, extract only the portions relevant to this child's scope: applicable cross-issue findings, key decisions, and rationale/context. Use judgment; do not copy the entire parent grooming summary.
-     - Always exclude the **decomposition recommendation** section.
-     - Include a back-reference line: `Groomed as part of #<number> — see parent for full grooming context.`
-     - Post it with `gh issue comment <child_number> --body-file ./.shipper/tmp/child_grooming_comment-<child_number>.md`.
-4. After creating them, include the created URLs in your final response, and (optionally) add them as links in the original issue comment if appropriate.
-5. **Handle the parent issue** after creating child issues:
-
-   **If the child issues collectively cover the parent's entire original scope (full replacement):**
-   - Post a comment on the parent issue listing and linking to all created child issues (e.g., "Decomposed into #X, #Y, #Z."). Save to `./.shipper/tmp/decomposition_comment-<number>.md` and post with `gh issue comment <ISSUE> --body-file ./.shipper/tmp/decomposition_comment-<number>.md`.
-   - Close the parent issue: `gh issue close <ISSUE>`
-   - Do NOT rewrite the parent issue body. The closing comment serves as the decomposition record.
-   - In this full-replacement path, do NOT generate `.shipper/tmp/issue_body-<number>.md`, do NOT run `gh issue edit` on the parent, and skip the parent-label update step above.
-
-   **If the child issues cover only part of the parent's scope (partial replacement):**
-   - Rewrite the parent issue body in the standard groomed format (`Summary`, `Requirements`, `Acceptance Criteria`, `Related Issues`, `Out of Scope`, `Open Questions`) so it reflects only the remaining scope not covered by child issues.
-   - Then follow the earlier issue-body update steps for the parent.
-   - If the parent is not blocked after grooming, it stays open with the `shipper:groomed` label.
-   - If the parent is still blocked (for example, because of a hard dependency/conflict or because a sibling must be completed first), it stays open with both `shipper:groomed` and `shipper:blocked` labels, and `shipper:new` is removed.
-
-   Use your judgment to determine which scenario applies based on whether the created child issues collectively cover the parent's entire original scope.
-
----
-
-## Stop conditions
-
-- If any GitHub update/create command fails, report the error **and which prior steps (if any) already completed** (e.g., "the issue body was updated but the label change failed").
-
----
+If a correction message says previous output was invalid, repair only `.shipper/output` artifacts. Do not restart product questioning or ask the product owner to repeat decisions already answered.

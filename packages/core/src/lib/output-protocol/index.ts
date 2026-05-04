@@ -17,6 +17,24 @@ export {
 } from './protocol-validation.js';
 
 export {
+  GroomPostFlightError,
+  processGroomResult,
+  readGroomManifest,
+  replaceBlockingIssuePlaceholder,
+  priorityLabelsForGroomPriority,
+} from './groom.js';
+
+export type {
+  GroomBlocked,
+  GroomChildIssue,
+  GroomDecompositionKind,
+  GroomManifest,
+  GroomParent,
+  GroomPriority,
+  LoadedGroomManifest,
+} from './groom.js';
+
+export {
   createPrFromSpec,
   createPrFromSpecWithMetadata,
   executeTransition,

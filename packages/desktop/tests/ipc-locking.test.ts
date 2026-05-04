@@ -1223,7 +1223,7 @@ describe('desktop IPC locking', () => {
     );
   });
 
-  it('acquires the issue lock before spawning a groom PTY', async () => {
+  it('spawns groom through the CLI orchestrator in the cloned repo', async () => {
     await loadHandlers();
     const handler = getHandler('pty-spawn-shipper-groom');
 
@@ -1240,96 +1240,55 @@ describe('desktop IPC locking', () => {
     );
 
     expect(result.sessionId).toEqual(expect.any(String));
-    expect(state.acquireIssueLockMock).toHaveBeenCalledWith('owner/repo', '42');
-    expect(state.ensureRepoCloneForWorktreeMock).toHaveBeenCalledWith('owner/repo');
-    expect(state.ensureRepoCloneMock).not.toHaveBeenCalled();
-    expect(state.createDesktopGroomWorktreeMock).toHaveBeenCalledWith({
-      repoRoot: '/tmp/repo',
-      issueNumber: '42',
-      baseBranch: 'main',
-    });
+    expect(state.ensureRepoCloneMock).toHaveBeenCalledWith('owner/repo');
     expect(state.ptySpawnMock).toHaveBeenCalledWith(
       expect.any(String),
-      'codex',
-      ['groom', '42'],
+      'shipper',
+      ['groom', '42', '--mode', 'interactive'],
       expect.objectContaining({
         cols: 120,
         rows: 40,
-        cwd: '/tmp/groom-wt',
-        initialInput: undefined,
+        cwd: '/tmp/repo',
       })
     );
-    expect(state.acquireIssueLockMock.mock.invocationCallOrder[0]).toBeLessThan(
-      state.ptySpawnMock.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER
-    );
-
-    const sessionId: unknown = state.ptySpawnMock.mock.calls[0]?.[0];
-    if (typeof sessionId !== 'string') {
-      throw new Error('Expected groom spawn session ID.');
-    }
-    state.exitCallbacks.get(sessionId)?.();
+    expect(state.buildPromptCommandMock).not.toHaveBeenCalled();
+    expect(state.createDesktopGroomWorktreeMock).not.toHaveBeenCalled();
+    expect(state.acquireIssueLockMock).not.toHaveBeenCalled();
+    expect(state.releaseIssueLockMock).not.toHaveBeenCalled();
   });
 
-  it('builds the groom prompt with the detached worktree path as cwd', async () => {
+  it('allows different issues in the same repo to spawn groom CLI PTYs in the clone', async () => {
     await loadHandlers();
-    const handler = getHandler('pty-spawn-shipper-groom');
-
-    await handler(
-      {},
-      {
-        repo: 'owner/repo',
-        issueNumber: 42,
-        cols: 120,
-        rows: 40,
-      }
-    );
-
-    expect(state.buildPromptCommandMock).toHaveBeenCalledWith('groom', {
-      issueRef: '42',
-      repo: 'owner/repo',
-      cwd: '/tmp/groom-wt',
-      mode: 'interactive',
-    });
-  });
-
-  it('allows different issues in the same repo to spawn groom PTYs in different worktrees', async () => {
-    await loadHandlers();
-    state.createDesktopGroomWorktreeMock
-      .mockResolvedValueOnce({
-        wtPath: '/tmp/groom-wt-42',
-        cleanup: state.desktopGroomCleanupMock,
-      })
-      .mockResolvedValueOnce({
-        wtPath: '/tmp/groom-wt-43',
-        cleanup: state.desktopGroomCleanupMock,
-      });
     const handler = getHandler('pty-spawn-shipper-groom');
 
     await handler({}, { repo: 'owner/repo', issueNumber: 42, cols: 120, rows: 40 });
     await handler({}, { repo: 'owner/repo', issueNumber: 43, cols: 120, rows: 40 });
 
-    expect(state.createDesktopGroomWorktreeMock).toHaveBeenNthCalledWith(1, {
-      repoRoot: '/tmp/repo',
-      issueNumber: '42',
-      baseBranch: 'main',
-    });
-    expect(state.createDesktopGroomWorktreeMock).toHaveBeenNthCalledWith(2, {
-      repoRoot: '/tmp/repo',
-      issueNumber: '43',
-      baseBranch: 'main',
-    });
-    expect(getPtySpawnCwds()).toEqual(['/tmp/groom-wt-42', '/tmp/groom-wt-43']);
+    expect(state.ptySpawnMock).toHaveBeenNthCalledWith(
+      1,
+      expect.any(String),
+      'shipper',
+      ['groom', '42', '--mode', 'interactive'],
+      expect.objectContaining({ cwd: '/tmp/repo' })
+    );
+    expect(state.ptySpawnMock).toHaveBeenNthCalledWith(
+      2,
+      expect.any(String),
+      'shipper',
+      ['groom', '43', '--mode', 'interactive'],
+      expect.objectContaining({ cwd: '/tmp/repo' })
+    );
+    expect(state.ensureRepoCloneMock).toHaveBeenCalledTimes(2);
+    expect(state.ensureRepoCloneForWorktreeMock).not.toHaveBeenCalled();
+    expect(getPtySpawnCwds()).toEqual(['/tmp/repo', '/tmp/repo']);
   });
 
-  it('serializes groom clone preparation and worktree creation per repo without blocking active groom sessions', async () => {
+  it('serializes groom clone preparation per repo without blocking active groom sessions', async () => {
     await loadHandlers();
-    const firstWorktree = deferred<{ wtPath: string; cleanup: () => Promise<void> }>();
-    state.createDesktopGroomWorktreeMock
-      .mockReturnValueOnce(firstWorktree.promise)
-      .mockResolvedValueOnce({
-        wtPath: '/tmp/groom-wt-43',
-        cleanup: state.desktopGroomCleanupMock,
-      });
+    const firstClone = deferred<string>();
+    state.ensureRepoCloneMock
+      .mockReturnValueOnce(firstClone.promise)
+      .mockResolvedValueOnce('/tmp/repo');
     const handler = getHandler('pty-spawn-shipper-groom');
 
     const first = handler({}, { repo: 'owner/repo', issueNumber: 42, cols: 120, rows: 40 });
@@ -1337,131 +1296,14 @@ describe('desktop IPC locking', () => {
     const second = handler({}, { repo: 'owner/repo', issueNumber: 43, cols: 120, rows: 40 });
     await flushMicrotasks();
 
-    expect(state.ensureRepoCloneForWorktreeMock).toHaveBeenCalledTimes(1);
-    expect(state.createDesktopGroomWorktreeMock).toHaveBeenCalledTimes(1);
-
-    firstWorktree.resolve({
-      wtPath: '/tmp/groom-wt-42',
-      cleanup: state.desktopGroomCleanupMock,
-    });
+    expect(state.ensureRepoCloneMock).toHaveBeenCalledTimes(1);
+    firstClone.resolve('/tmp/repo');
 
     await first;
     await second;
 
-    expect(state.ensureRepoCloneForWorktreeMock).toHaveBeenCalledTimes(2);
-    expect(state.createDesktopGroomWorktreeMock).toHaveBeenCalledTimes(2);
-    expect(getPtySpawnCwds()).toEqual(['/tmp/groom-wt-42', '/tmp/groom-wt-43']);
-  });
-
-  it('releases the groom lock and removes the worktree when the PTY session exits', async () => {
-    await loadHandlers();
-    const handler = getHandler('pty-spawn-shipper-groom');
-
-    const result = parseSessionResult(
-      await handler(
-        {},
-        {
-          repo: 'owner/repo',
-          issueNumber: 42,
-          cols: 120,
-          rows: 40,
-        }
-      )
-    );
-
-    state.exitCallbacks.get(result.sessionId)?.();
-    await Promise.resolve();
-
-    expect(state.releaseIssueLockMock).toHaveBeenCalledWith('owner/repo', '42');
-    expect(state.desktopGroomCleanupMock).toHaveBeenCalledTimes(1);
-  });
-
-  it('logs groom cleanup failures on PTY exit', async () => {
-    await loadHandlers();
-    const handler = getHandler('pty-spawn-shipper-groom');
-    state.releaseIssueLockMock.mockRejectedValueOnce(new Error('release failed'));
-
-    const result = parseSessionResult(
-      await handler(
-        {},
-        {
-          repo: 'owner/repo',
-          issueNumber: 42,
-          cols: 120,
-          rows: 40,
-        }
-      )
-    );
-
-    state.exitCallbacks.get(result.sessionId)?.();
-    await flushMicrotasks();
-
-    expect(warnMock).toHaveBeenCalledWith(
-      '[shipper] Failed to clean up groom session after session exit',
-      expect.any(Error)
-    );
-  });
-
-  it('releases the groom lock and removes the worktree when prompt building fails', async () => {
-    await loadHandlers();
-    const handler = getHandler('pty-spawn-shipper-groom');
-    state.buildPromptCommandMock.mockRejectedValueOnce(new Error('prompt failed'));
-
-    await expect(
-      handler({}, { repo: 'owner/repo', issueNumber: 42, cols: 120, rows: 40 })
-    ).rejects.toThrow('prompt failed');
-
-    expect(state.releaseIssueLockMock).toHaveBeenCalledWith('owner/repo', '42');
-    expect(state.desktopGroomCleanupMock).toHaveBeenCalledTimes(1);
-    expect(state.ptySpawnMock).not.toHaveBeenCalled();
-  });
-
-  it('uses the configured base branch for groom worktrees without resolving the default branch', async () => {
-    await loadHandlers();
-    state.getSettingsMock.mockReturnValue({ lockTimeoutMinutes: 30, defaultBaseBranch: 'develop' });
-    const handler = getHandler('pty-spawn-shipper-groom');
-
-    await handler({}, { repo: 'owner/repo', issueNumber: 42, cols: 120, rows: 40 });
-
-    expect(state.resolveBaseBranchMock).not.toHaveBeenCalled();
-    expect(state.createDesktopGroomWorktreeMock).toHaveBeenCalledWith({
-      repoRoot: '/tmp/repo',
-      issueNumber: '42',
-      baseBranch: 'develop',
-    });
-  });
-
-  it('forwards initialInput from buildPromptCommand into PTY spawn', async () => {
-    await loadHandlers();
-    state.buildPromptCommandMock.mockResolvedValueOnce({
-      command: 'copilot',
-      args: ['--model', 'gpt-5'],
-      cwd: '/tmp/groom-wt',
-      initialInput: 'seed prompt',
-    });
-    const handler = getHandler('pty-spawn-shipper-groom');
-
-    await handler(
-      {},
-      {
-        repo: 'owner/repo',
-        issueNumber: 42,
-        cols: 120,
-        rows: 40,
-      }
-    );
-
-    expect(state.ptySpawnMock).toHaveBeenCalledWith(
-      expect.any(String),
-      'copilot',
-      ['--model', 'gpt-5'],
-      expect.objectContaining({
-        cols: 120,
-        rows: 40,
-        cwd: '/tmp/groom-wt',
-        initialInput: 'seed prompt',
-      })
-    );
+    expect(state.ensureRepoCloneMock).toHaveBeenCalledTimes(2);
+    expect(getPtySpawnCwds()).toEqual(['/tmp/repo', '/tmp/repo']);
   });
 
   it('spawns a setup PTY with the fresh-setup opening input when .shipper is absent', async () => {
@@ -1598,7 +1440,7 @@ describe('desktop IPC locking', () => {
     expect(getPtySpawnCwds()).toEqual(['/tmp/repo-a', '/tmp/repo-b']);
   });
 
-  it('allows groom and setup for the same repo to run concurrently in separate directories', async () => {
+  it('allows groom and setup for the same repo to run in the same clone path', async () => {
     await loadHandlers();
     const groomHandler = getHandler('pty-spawn-shipper-groom');
     const setupHandler = getHandler('pty-spawn-shipper-setup');
@@ -1606,15 +1448,17 @@ describe('desktop IPC locking', () => {
     await groomHandler({}, { repo: 'owner/repo', issueNumber: 42, cols: 120, rows: 40 });
     await setupHandler({}, { repo: 'owner/repo', cols: 120, rows: 40 });
 
-    expect(state.ensureRepoCloneForWorktreeMock).toHaveBeenCalledWith('owner/repo');
-    expect(state.ensureRepoCloneMock).toHaveBeenCalledTimes(1);
-    expect(getPtySpawnCwds()).toEqual(['/tmp/groom-wt', '/tmp/repo']);
+    expect(state.ensureRepoCloneForWorktreeMock).not.toHaveBeenCalled();
+    expect(state.ensureRepoCloneMock).toHaveBeenCalledTimes(2);
+    expect(getPtySpawnCwds()).toEqual(['/tmp/repo', '/tmp/repo']);
   });
 
   it('serializes groom and setup canonical repo preparation for the same repo', async () => {
     await loadHandlers();
-    const firstWorktree = deferred<{ wtPath: string; cleanup: () => Promise<void> }>();
-    state.createDesktopGroomWorktreeMock.mockReturnValueOnce(firstWorktree.promise);
+    const firstClone = deferred<string>();
+    state.ensureRepoCloneMock
+      .mockReturnValueOnce(firstClone.promise)
+      .mockResolvedValueOnce('/tmp/repo');
     const groomHandler = getHandler('pty-spawn-shipper-groom');
     const setupHandler = getHandler('pty-spawn-shipper-setup');
 
@@ -1623,103 +1467,28 @@ describe('desktop IPC locking', () => {
     const setup = setupHandler({}, { repo: 'owner/repo', cols: 120, rows: 40 });
     await flushMicrotasks();
 
-    expect(state.ensureRepoCloneForWorktreeMock).toHaveBeenCalledTimes(1);
-    expect(state.createDesktopGroomWorktreeMock).toHaveBeenCalledTimes(1);
-    expect(state.ensureRepoCloneMock).not.toHaveBeenCalled();
-
-    firstWorktree.resolve({
-      wtPath: '/tmp/groom-wt',
-      cleanup: state.desktopGroomCleanupMock,
-    });
+    expect(state.ensureRepoCloneMock).toHaveBeenCalledTimes(1);
+    expect(state.createDesktopGroomWorktreeMock).not.toHaveBeenCalled();
+    firstClone.resolve('/tmp/repo');
 
     await groom;
     await setup;
 
-    expect(state.ensureRepoCloneMock).toHaveBeenCalledTimes(1);
-    expect(getPtySpawnCwds()).toEqual(['/tmp/groom-wt', '/tmp/repo']);
+    expect(state.ensureRepoCloneMock).toHaveBeenCalledTimes(2);
+    expect(getPtySpawnCwds()).toEqual(['/tmp/repo', '/tmp/repo']);
   });
 
-  it('does not start groom when lock acquisition fails', async () => {
+  it('does not start groom when clone preparation fails before PTY spawn', async () => {
     await loadHandlers();
     const handler = getHandler('pty-spawn-shipper-groom');
-    state.acquireIssueLockMock.mockRejectedValueOnce(
-      new Error('Issue #42 is locked by another shipper instance.')
-    );
-
-    await expect(
-      handler({}, { repo: 'owner/repo', issueNumber: 42, cols: 120, rows: 40 })
-    ).rejects.toThrow('Issue #42 is locked by another shipper instance.');
-    expect(state.ensureRepoCloneForWorktreeMock).not.toHaveBeenCalled();
-    expect(state.createDesktopGroomWorktreeMock).not.toHaveBeenCalled();
-    expect(state.ptySpawnMock).not.toHaveBeenCalled();
-  });
-
-  it('releases the groom lock when clone preparation fails before PTY spawn', async () => {
-    await loadHandlers();
-    const handler = getHandler('pty-spawn-shipper-groom');
-    state.ensureRepoCloneForWorktreeMock.mockRejectedValueOnce(new Error('clone failed'));
+    state.ensureRepoCloneMock.mockRejectedValueOnce(new Error('clone failed'));
 
     await expect(
       handler({}, { repo: 'owner/repo', issueNumber: 42, cols: 120, rows: 40 })
     ).rejects.toThrow('clone failed');
+    expect(state.ensureRepoCloneForWorktreeMock).not.toHaveBeenCalled();
+    expect(state.createDesktopGroomWorktreeMock).not.toHaveBeenCalled();
     expect(state.ptySpawnMock).not.toHaveBeenCalled();
-    expect(state.releaseIssueLockMock).toHaveBeenCalledWith('owner/repo', '42');
-    expect(state.desktopGroomCleanupMock).not.toHaveBeenCalled();
-  });
-
-  it('releases the groom lock and stops the heartbeat when PTY spawn fails', async () => {
-    vi.useFakeTimers();
-    await loadHandlers();
-    const handler = getHandler('pty-spawn-shipper-groom');
-    state.ptySpawnMock.mockImplementationOnce(() => {
-      throw new Error('spawn failed');
-    });
-
-    await expect(
-      handler({}, { repo: 'owner/repo', issueNumber: 42, cols: 120, rows: 40 })
-    ).rejects.toThrow('spawn failed');
-    expect(state.releaseIssueLockMock).toHaveBeenCalledWith('owner/repo', '42');
-    expect(state.desktopGroomCleanupMock).toHaveBeenCalledTimes(1);
-
-    await vi.advanceTimersByTimeAsync(10 * 60_000);
-    expect(state.renewIssueLockMock).not.toHaveBeenCalled();
-  });
-
-  it('renews the groom lock heartbeat until the PTY exits', async () => {
-    vi.useFakeTimers();
-    await loadHandlers();
-    const handler = getHandler('pty-spawn-shipper-groom');
-
-    const result = parseSessionResult(
-      await handler(
-        {},
-        {
-          repo: 'owner/repo',
-          issueNumber: 42,
-          cols: 120,
-          rows: 40,
-        }
-      )
-    );
-
-    await vi.advanceTimersByTimeAsync(10 * 60_000);
-
-    expect(state.renewIssueLockMock).toHaveBeenCalledWith(
-      'owner/repo',
-      '42',
-      expect.objectContaining({ value: false })
-    );
-
-    const cancelled = state.renewIssueLockMock.mock.calls[0]?.[2];
-    if (!cancelled) {
-      throw new Error('Expected heartbeat cancelled flag.');
-    }
-
-    state.exitCallbacks.get(result.sessionId)?.();
-    expect(cancelled.value).toBe(true);
-
-    await vi.advanceTimersByTimeAsync(10 * 60_000);
-    expect(state.renewIssueLockMock).toHaveBeenCalledTimes(1);
   });
 
   it('acquires the issue lock before executing a reset', async () => {
