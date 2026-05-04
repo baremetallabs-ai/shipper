@@ -1642,6 +1642,62 @@ describe('output protocol helpers', () => {
       );
     });
 
+    it('keeps the full-replacement parent open when an earlier post-flight write fails', async () => {
+      const result = await writeValidGroomOutput(
+        buildGroomManifest({
+          parent: { body_file: undefined, priority: 'normal' },
+          decomposition: {
+            kind: 'full',
+            children: [
+              {
+                title: 'feat: child one',
+                body_file: outputRelative('child-1-body.md'),
+                grooming_comment_file: outputRelative('child-1-comment.md'),
+              },
+              {
+                title: 'feat: child two',
+                body_file: outputRelative('child-2-body.md'),
+                grooming_comment_file: outputRelative('child-2-comment.md'),
+              },
+            ],
+          },
+        })
+      );
+      ghMock.mockImplementation((args) => {
+        if (args[0] === 'issue' && args[1] === 'create') {
+          return Promise.resolve({
+            stdout: args.includes('feat: child one')
+              ? 'https://github.com/owner/repo/issues/301\n'
+              : 'https://github.com/owner/repo/issues/302\n',
+            stderr: '',
+          });
+        }
+        if (args[0] === 'issue' && args[1] === 'comment' && args[2] === '301') {
+          return Promise.reject(new Error('child comment failed'));
+        }
+        return Promise.resolve({ stdout: '', stderr: '' });
+      });
+
+      await expect(
+        processGroomResult({ repo: 'owner/repo', issueNumber: '248', cwd: tempDir, result })
+      ).rejects.toThrow('Groom post-flight failed');
+
+      expect(ghMock.mock.calls.some(([args]) => args[0] === 'issue' && args[1] === 'close')).toBe(
+        false
+      );
+      expect(ghMock.mock.calls.at(-1)?.[0]).toEqual([
+        'issue',
+        'comment',
+        '248',
+        '-R',
+        'owner/repo',
+        '--body',
+        expect.stringContaining(
+          'close parent issue: one or more earlier post-flight operations failed'
+        ),
+      ]);
+    });
+
     it('posts one failure comment and skips parent label transition after partial failure', async () => {
       const result = await writeValidGroomOutput();
       ghMock
