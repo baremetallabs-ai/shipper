@@ -71,9 +71,9 @@ function mockSpawnResult(opts: { code?: number; stderr?: string; error?: Error }
 }
 
 async function flushHookStart(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
+  for (let i = 0; i < 10; i += 1) {
+    await Promise.resolve();
+  }
 }
 
 beforeEach(() => {
@@ -268,6 +268,34 @@ describe('runPreHook', () => {
     onSpy.mockRestore();
     removeListenerSpy.mockRestore();
   });
+
+  it('registers only one process signal listener while hooks run concurrently', async () => {
+    const firstChild = createHookChild({ pid: 4325 });
+    const secondChild = createHookChild({ pid: 4326 });
+    spawnMock.mockReturnValueOnce(firstChild).mockReturnValueOnce(secondChild);
+    const onSpy = vi.spyOn(process, 'on').mockImplementation(() => process);
+    const removeListenerSpy = vi.spyOn(process, 'removeListener').mockImplementation(() => process);
+
+    const firstPromise = runPreHook('design', { SHIPPER_STAGE: 'design' });
+    const secondPromise = runPreHook('plan', { SHIPPER_STAGE: 'plan' });
+    await flushHookStart();
+
+    expect(onSpy.mock.calls.filter(([event]) => event === 'SIGINT')).toHaveLength(1);
+    expect(onSpy.mock.calls.filter(([event]) => event === 'SIGTERM')).toHaveLength(1);
+
+    firstChild.emit('close', 0);
+    await expect(firstPromise).resolves.toBeUndefined();
+    expect(removeListenerSpy.mock.calls.filter(([event]) => event === 'SIGINT')).toHaveLength(0);
+    expect(removeListenerSpy.mock.calls.filter(([event]) => event === 'SIGTERM')).toHaveLength(0);
+
+    secondChild.emit('close', 0);
+    await expect(secondPromise).resolves.toBeUndefined();
+    expect(removeListenerSpy.mock.calls.filter(([event]) => event === 'SIGINT')).toHaveLength(1);
+    expect(removeListenerSpy.mock.calls.filter(([event]) => event === 'SIGTERM')).toHaveLength(1);
+
+    onSpy.mockRestore();
+    removeListenerSpy.mockRestore();
+  });
 });
 
 describe('runPostHook', () => {
@@ -296,6 +324,32 @@ describe('runPostHook', () => {
     expect(warnMock).toHaveBeenCalledWith(
       '[shipper]   Warning: post-implement hook timed out after 1 minute'
     );
+  });
+
+  it('throws when a post hook is cancelled', async () => {
+    vi.useFakeTimers();
+    const child = createHookChild({ pid: 5322 });
+    spawnMock.mockReturnValueOnce(child);
+    let sigintListener: (() => void) | undefined;
+    const onSpy = vi.spyOn(process, 'on').mockImplementation((event, listener) => {
+      if (event === 'SIGINT') {
+        sigintListener = listener as () => void;
+      }
+      return process;
+    });
+    const removeListenerSpy = vi.spyOn(process, 'removeListener').mockImplementation(() => process);
+
+    const promise = runPostHook('implement', { SHIPPER_STAGE: 'implement' });
+    await flushHookStart();
+
+    sigintListener?.();
+    await vi.advanceTimersByTimeAsync(2_000);
+    child.emit('close', null);
+
+    await expect(promise).rejects.toThrow('post-implement hook cancelled');
+
+    onSpy.mockRestore();
+    removeListenerSpy.mockRestore();
   });
 });
 
@@ -368,6 +422,30 @@ describe('runWorktreeHook', () => {
     expect(warnMock).toHaveBeenCalledWith(
       '[shipper]   Warning: Worktree teardown hook timed out after 1 minute'
     );
+  });
+
+  it('throws when worktree teardown is cancelled', async () => {
+    vi.useFakeTimers();
+    const child = createHookChild({ pid: 6323 });
+    spawnMock.mockReturnValueOnce(child);
+    const onSpy = vi.spyOn(process, 'on').mockImplementation(() => process);
+    const removeListenerSpy = vi.spyOn(process, 'removeListener').mockImplementation(() => process);
+
+    const promise = runWorktreeHook('worktree-teardown', env, cwd);
+    await flushHookStart();
+
+    const signalListener = onSpy.mock.calls.find(([event]) => event === 'SIGTERM')?.[1] as
+      | (() => void)
+      | undefined;
+    expect(signalListener).toBeDefined();
+    signalListener?.();
+    await vi.advanceTimersByTimeAsync(2_000);
+    child.emit('close', null);
+
+    await expect(promise).rejects.toThrow('Worktree teardown hook cancelled');
+
+    onSpy.mockRestore();
+    removeListenerSpy.mockRestore();
   });
 });
 

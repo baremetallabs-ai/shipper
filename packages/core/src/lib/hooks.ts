@@ -17,13 +17,20 @@ const WORKTREE_HOOK_META = {
     label: 'Worktree teardown',
     exitBlocking: false,
     timeoutBlocking: false,
-    cancelBlocking: false,
   },
 } as const;
 
 type WorktreeHookEvent = keyof typeof WORKTREE_HOOK_META;
 type HookProcessErrorKind = 'exit' | 'timeout' | 'cancelled';
 type HookSignal = 'SIGTERM' | 'SIGKILL';
+
+const activeSignalHandlers = new Set<() => void>();
+
+const handleProcessSignal = () => {
+  for (const handler of activeSignalHandlers) {
+    handler();
+  }
+};
 
 class HookProcessError extends Error {
   kind: HookProcessErrorKind;
@@ -50,7 +57,6 @@ class HookProcessError extends Error {
 interface HookRunBehavior {
   exitBlocking: boolean;
   timeoutBlocking: boolean;
-  cancelBlocking?: boolean;
   cwd?: string;
   resultLabel?: string;
 }
@@ -79,6 +85,23 @@ function formatHookProcessError(err: HookProcessError): string {
 
 function formatMinutes(minutes: number): string {
   return `${minutes} minute${minutes === 1 ? '' : 's'}`;
+}
+
+function addHookSignalHandler(handler: () => void): void {
+  const shouldRegister = activeSignalHandlers.size === 0;
+  activeSignalHandlers.add(handler);
+  if (!shouldRegister) return;
+
+  process.on('SIGINT', handleProcessSignal);
+  process.on('SIGTERM', handleProcessSignal);
+}
+
+function removeHookSignalHandler(handler: () => void): void {
+  activeSignalHandlers.delete(handler);
+  if (activeSignalHandlers.size > 0) return;
+
+  process.removeListener('SIGINT', handleProcessSignal);
+  process.removeListener('SIGTERM', handleProcessSignal);
 }
 
 function runHookProcess(
@@ -137,8 +160,7 @@ function runHookProcess(
         clearTimeout(graceTimer);
         graceTimer = undefined;
       }
-      process.removeListener('SIGINT', onSignal);
-      process.removeListener('SIGTERM', onSignal);
+      removeHookSignalHandler(onSignal);
     };
 
     if (!childStderr) {
@@ -147,8 +169,7 @@ function runHookProcess(
       return;
     }
 
-    process.on('SIGINT', onSignal);
-    process.on('SIGTERM', onSignal);
+    addHookSignalHandler(onSignal);
     if (timeoutMinutes > 0) {
       timeoutTimer = setTimeout(() => {
         beginTermination('timeout');
@@ -201,14 +222,11 @@ export async function runAdvisoryHook(
   command: string,
   env: Record<string, string>,
   cwd?: string,
-  options: Partial<
-    Pick<HookRunBehavior, 'exitBlocking' | 'timeoutBlocking' | 'cancelBlocking'>
-  > = {}
+  options: Partial<Pick<HookRunBehavior, 'exitBlocking' | 'timeoutBlocking'>> = {}
 ): Promise<void> {
   const behavior = {
     exitBlocking: false,
     timeoutBlocking: false,
-    cancelBlocking: false,
     ...options,
   };
   try {
@@ -223,7 +241,7 @@ export async function runAdvisoryHook(
     const shouldThrow =
       (err.kind === 'exit' && behavior.exitBlocking) ||
       (err.kind === 'timeout' && behavior.timeoutBlocking) ||
-      (err.kind === 'cancelled' && behavior.cancelBlocking);
+      err.kind === 'cancelled';
 
     if (shouldThrow) {
       throw new Error(message);
@@ -288,7 +306,7 @@ async function runFileHook(
     const shouldThrow =
       (err.kind === 'exit' && options.exitBlocking) ||
       (err.kind === 'timeout' && options.timeoutBlocking) ||
-      (err.kind === 'cancelled' && (options.cancelBlocking ?? options.timeoutBlocking));
+      err.kind === 'cancelled';
 
     if (shouldThrow) {
       throw new Error(message);
@@ -333,7 +351,6 @@ export async function runWorktreeHook(
   await runFileHook(hookPath, meta.label, env, {
     exitBlocking: meta.exitBlocking,
     timeoutBlocking: meta.timeoutBlocking,
-    cancelBlocking: 'cancelBlocking' in meta ? meta.cancelBlocking : undefined,
     cwd,
     resultLabel: meta.label,
   });

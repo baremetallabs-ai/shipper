@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 import { installDeferBridge } from './defer-bridge.js';
 import { runAdvisoryHook, runWorktreeHook } from './hooks.js';
 import { createLogger, logger } from './logger.js';
-import { toErrorMessage } from './errors.js';
+import { toError, toErrorMessage } from './errors.js';
 import { getSettings } from './settings.js';
 import {
   execAsync,
@@ -235,10 +235,18 @@ async function withWorktreeDefault<T>(
   let cleanupPromise: Promise<void> | undefined;
   const cleanup = async () => {
     cleanupPromise ??= (async () => {
+      let teardownError: Error | undefined;
       try {
-        await runWorktreeHook('worktree-teardown', hookEnv, wtPath);
+        try {
+          await runWorktreeHook('worktree-teardown', hookEnv, wtPath);
+        } catch (err) {
+          teardownError = toError(err);
+        }
         await removeWorktree(opts.repoRoot, wtPath);
         worktreeLogger.worktreeStep('teardown complete');
+        if (teardownError) {
+          throw teardownError;
+        }
       } finally {
         for (const [key, value] of originalEnv) {
           if (value === undefined) {
@@ -267,7 +275,6 @@ async function withWorktreeDefault<T>(
       await runAdvisoryHook('Install dependencies', installCommand, hookEnv, wtPath, {
         exitBlocking: false,
         timeoutBlocking: true,
-        cancelBlocking: true,
       });
     }
 

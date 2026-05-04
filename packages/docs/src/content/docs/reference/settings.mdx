@@ -37,5 +37,6 @@ unless `commands.default.disableMcp`, a per-stage setting, `.shipper/settings.lo
 one-run CLI flag overrides it.
 
 Settings precedence is: built-in defaults -> `.shipper/settings.json` ->
-`.shipper/settings.local.json`. MCP loading can also be overridden by one-run CLI flags
-(`--disable-mcp` / `--enable-mcp`).
+`.shipper/settings.local.json`. Prompt-running commands can also override `agent`, `model`, `mode`,
+and MCP loading for one run with CLI flags such as `--agent`, `--model`, `--mode`,
+`--disable-mcp`, and `--enable-mcp`.

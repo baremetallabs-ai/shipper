@@ -525,7 +525,7 @@ describe('withWorktree', () => {
       'npm ci',
       expect.any(Object),
       expectedWtPath,
-      { exitBlocking: false, timeoutBlocking: true, cancelBlocking: true }
+      { exitBlocking: false, timeoutBlocking: true }
     );
   });
 
@@ -797,6 +797,40 @@ describe('withWorktree', () => {
     expect(process.env.XDG_CACHE_HOME).toBe('/before-install-timeout-xdg-cache');
   });
 
+  it('cleans up when the install command is cancelled before setup or callback', async () => {
+    process.env.NPM_CONFIG_CACHE = '/before-install-cancel';
+    process.env.XDG_CACHE_HOME = '/before-install-cancel-xdg-cache';
+    getSettingsMock.mockReturnValue({
+      installCommand: 'npm ci',
+    });
+    runAdvisoryHookMock.mockRejectedValueOnce(new Error('Install dependencies hook cancelled'));
+    const callback = vi.fn<() => Promise<void>>(() => Promise.resolve());
+
+    await expect(withWorktree(defaultOpts, callback)).rejects.toThrow(
+      'Install dependencies hook cancelled'
+    );
+
+    expect(callback).not.toHaveBeenCalled();
+    expect(runWorktreeHookMock).not.toHaveBeenCalledWith(
+      'worktree-setup',
+      expect.any(Object),
+      expectedWtPath
+    );
+    expect(runWorktreeHookMock).toHaveBeenCalledWith(
+      'worktree-teardown',
+      expect.any(Object),
+      expectedWtPath
+    );
+    expect(gitArgsFromSpawnCalls()).toContainEqual([
+      'worktree',
+      'remove',
+      '--force',
+      expectedWtPath,
+    ]);
+    expect(process.env.NPM_CONFIG_CACHE).toBe('/before-install-cancel');
+    expect(process.env.XDG_CACHE_HOME).toBe('/before-install-cancel-xdg-cache');
+  });
+
   it('cleans up when worktree setup times out before the callback', async () => {
     process.env.NPM_CONFIG_CACHE = '/before-setup-timeout';
     process.env.XDG_CACHE_HOME = '/before-setup-timeout-xdg-cache';
@@ -857,5 +891,29 @@ describe('withWorktree', () => {
     ]);
     expect(process.env.NPM_CONFIG_CACHE).toBe('/before-setup-cancel');
     expect(process.env.XDG_CACHE_HOME).toBe('/before-setup-cancel-xdg-cache');
+  });
+
+  it('removes the worktree and restores env when teardown is cancelled', async () => {
+    process.env.NPM_CONFIG_CACHE = '/before-teardown-cancel';
+    process.env.XDG_CACHE_HOME = '/before-teardown-cancel-xdg-cache';
+    runWorktreeHookMock.mockImplementation((event: string) => {
+      if (event === 'worktree-teardown') {
+        return Promise.reject(new Error('Worktree teardown hook cancelled'));
+      }
+      return Promise.resolve();
+    });
+
+    await expect(withWorktree(defaultOpts, () => Promise.resolve('ok'))).rejects.toThrow(
+      'Worktree teardown hook cancelled'
+    );
+
+    expect(gitArgsFromSpawnCalls()).toContainEqual([
+      'worktree',
+      'remove',
+      '--force',
+      expectedWtPath,
+    ]);
+    expect(process.env.NPM_CONFIG_CACHE).toBe('/before-teardown-cancel');
+    expect(process.env.XDG_CACHE_HOME).toBe('/before-teardown-cancel-xdg-cache');
   });
 });
