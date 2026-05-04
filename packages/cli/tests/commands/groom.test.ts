@@ -274,6 +274,43 @@ describe('groomCommand', () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it('posts an agent-failure comment when the groom post-flight failure comment cannot be posted', async () => {
+    fake.setIssue('123', { labels: ['shipper:new'], title: 'Single issue' });
+    fake.stubGh((args) => {
+      if (args[0] === 'issue' && args[1] === 'edit' && args[2] === '123') {
+        if (args.includes('--body-file')) {
+          throw new Error('body update failed');
+        }
+      }
+      if (args[0] === 'issue' && args[1] === 'comment' && args[2] === '123') {
+        const bodyIndex = args.indexOf('--body');
+        const body = bodyIndex === -1 ? undefined : args[bodyIndex + 1];
+        if (typeof body === 'string' && body.includes('## Groom Post-flight Failure')) {
+          throw new Error('failure comment failed');
+        }
+      }
+      return undefined;
+    });
+    fake.scriptRunPrompt(async (name, opts) => {
+      promptCalls.push({ name, opts });
+      await writeGroomOutput(fake);
+      return 0;
+    });
+
+    const { groomCommand } = await import('../../src/commands/groom.js');
+
+    await expect(groomCommand(repo, '123')).resolves.toBeUndefined();
+
+    expect(fake.state.issues.get('123')?.labels.has('shipper:new')).toBe(true);
+    expect(fake.state.issues.get('123')?.labels.has('shipper:groomed')).toBe(false);
+    expect(fake.state.postedComments.map((comment) => comment.body)).toEqual([
+      '## Grooming Summary\n\nDone.',
+      expect.stringContaining('## Agent Failure'),
+    ]);
+    expect(fake.state.postedComments.at(-1)?.body).toContain('failure comment failed');
+    expect(process.exitCode).toBe(1);
+  });
+
   it('throws explicitly headless grooming before doing any work', async () => {
     const { groomCommand } = await import('../../src/commands/groom.js');
 

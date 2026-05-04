@@ -105,7 +105,7 @@ export async function runGroomStage(
             } catch (error) {
               const detail = toErrorMessage(error);
               logger.error(detail);
-              if (!(error instanceof GroomPostFlightError)) {
+              if (!(error instanceof GroomPostFlightError) || !error.failureCommentPosted) {
                 await handleAgentCrash(repo, issueStr, 'groom', detail);
               }
               return 1;

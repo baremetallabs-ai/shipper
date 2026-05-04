@@ -77,11 +77,13 @@ interface ChildCreation {
 
 export class GroomPostFlightError extends Error {
   readonly steps: StepRecord[];
+  readonly failureCommentPosted: boolean;
 
-  constructor(message: string, steps: StepRecord[]) {
+  constructor(message: string, steps: StepRecord[], opts: { failureCommentPosted?: boolean } = {}) {
     super(message);
     this.name = 'GroomPostFlightError';
     this.steps = steps;
+    this.failureCommentPosted = opts.failureCommentPosted ?? false;
   }
 }
 
@@ -568,6 +570,7 @@ export async function processGroomResult(opts: {
   }
 
   const commentPath = resolveOutputPath(cwd, result.comment, 'comment path');
+  await readFile(commentPath, 'utf-8');
   const { manifest, files } = await readGroomManifest(cwd, result.groom);
   const steps: StepRecord[] = [];
   const children: Array<ChildCreation | undefined> = [];
@@ -769,9 +772,12 @@ export async function processGroomResult(opts: {
   } catch (error) {
     throw new GroomPostFlightError(
       `Groom post-flight failed, and posting the failure comment also failed: ${toErrorMessage(error)}`,
-      steps
+      steps,
+      { failureCommentPosted: false }
     );
   }
 
-  throw new GroomPostFlightError('Groom post-flight failed; posted failure comment', steps);
+  throw new GroomPostFlightError('Groom post-flight failed; posted failure comment', steps, {
+    failureCommentPosted: true,
+  });
 }
