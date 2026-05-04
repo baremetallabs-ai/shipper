@@ -264,7 +264,11 @@ async function withWorktreeDefault<T>(
   try {
     if (installCommand) {
       worktreeLogger.worktreeStep('installing dependencies');
-      await runAdvisoryHook('Install dependencies', installCommand, hookEnv, wtPath);
+      await runAdvisoryHook('Install dependencies', installCommand, hookEnv, wtPath, {
+        exitBlocking: false,
+        timeoutBlocking: true,
+        cancelBlocking: true,
+      });
     }
 
     worktreeLogger.worktreeStep('running setup hooks');

@@ -29,7 +29,17 @@ under `.shipper/hooks/`.
    A `post-<stage>` hook warns on failure and lets the stage result continue. `worktree-setup` and
    `worktree-teardown` also warn on failure and continue.
 
-4. Create an executable hook.
+4. Configure the hard timeout when needed.
+
+   Shipper enforces `hookTimeoutMinutes` from `.shipper/settings.json`, with local overrides from
+   `.shipper/settings.local.json`. The default is `10` minutes. Set it to `0` to disable hook
+   timeout enforcement.
+
+   When a timeout fires, `pre-<stage>`, `worktree-setup`, and the worktree dependency install
+   command abort the run or worktree creation. `post-<stage>` and `worktree-teardown` warn and
+   continue.
+
+5. Create an executable hook.
 
    ```sh
    mkdir -p .shipper/hooks
@@ -37,7 +47,7 @@ under `.shipper/hooks/`.
    chmod +x .shipper/hooks/pre-implement
    ```
 
-5. Read hook context from environment variables.
+6. Read hook context from environment variables.
 
    Stage hooks receive:
    - `SHIPPER_STAGE`
@@ -47,7 +57,7 @@ under `.shipper/hooks/`.
    Worktree hooks also receive:
    - `SHIPPER_WORKTREE_PATH`
 
-6. Check related reference material.
+7. Check related reference material.
 
    Use [Reference > MCP](/reference/mcp/) for agent tool details and
    [Reference > CLI](/reference/cli/) for command details.

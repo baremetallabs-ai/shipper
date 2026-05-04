@@ -52,6 +52,23 @@ describe('formatSpawnResult', () => {
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toContain('[timed out]');
   });
+
+  it('formats an inner hook timeout as a completed non-zero result', () => {
+    const result = formatSpawnResult(
+      {
+        exitCode: 1,
+        stdout: '',
+        stderr: 'Worktree setup hook timed out after 1 minute',
+        timedOut: false,
+      },
+      'shipper next 42 --mode headless'
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain('[exit 1]');
+    expect(result.content[0]?.text).not.toContain('[timed out]');
+    expect(result.content[0]?.text).toContain('Worktree setup hook timed out after 1 minute');
+  });
 });
 
 describe('tool-specific result formatters', () => {
