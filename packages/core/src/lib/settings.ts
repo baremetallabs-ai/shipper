@@ -28,6 +28,7 @@ export interface Settings {
   prReviewWait: PrReviewWait;
   lockTimeoutMinutes: number;
   agentTimeoutMinutes: number;
+  hookTimeoutMinutes: number;
   commands: {
     default: CommandConfig & { agent: AgentName };
     [step: string]: CommandConfig | undefined;
@@ -43,6 +44,7 @@ export const DEFAULTS: Settings = {
   prReviewWait: { mode: 'checks', maxDurationMinutes: 30 },
   lockTimeoutMinutes: 30,
   agentTimeoutMinutes: 60,
+  hookTimeoutMinutes: 10,
   commands: {
     default: { agent: 'claude' as const },
     groom: { disableMcp: true },
@@ -55,6 +57,7 @@ export const SETTING_DESCRIPTIONS: Record<string, string> = {
     'PR review wait strategy: { mode: "timer", durationMinutes: number } | { mode: "checks", minDurationMinutes?: number, maxDurationMinutes?: number }',
   lockTimeoutMinutes: 'stale lock timeout (minutes) before auto-clearing shipper:locked',
   agentTimeoutMinutes: 'agent process timeout in headless mode (minutes); 0 to disable',
+  hookTimeoutMinutes: 'file-based hook and worktree install timeout (minutes); 0 to disable',
   commands:
     'per-command settings map (e.g. { "default": { "agent": "claude" }, "groom": { "mode": "headless" } })',
   'commands.default.agent':
@@ -153,6 +156,7 @@ export async function loadSettings(): Promise<void> {
     validateModel(config?.model, command);
     validateDisableMcp(config?.disableMcp, command);
   }
+  validateHookTimeoutMinutes(settings.hookTimeoutMinutes);
 
   for (const command of Object.keys(settings.commands)) {
     if (command !== 'default' && !KNOWN_PROMPT_COMMANDS.has(command)) {
@@ -260,6 +264,20 @@ function validateDisableMcp(disableMcp: unknown, step: string): boolean {
   }
 
   throw new Error(`Invalid disableMcp for step "${step}". Must be a boolean.`);
+}
+
+function validateHookTimeoutMinutes(hookTimeoutMinutes: unknown): number {
+  if (
+    typeof hookTimeoutMinutes === 'number' &&
+    Number.isFinite(hookTimeoutMinutes) &&
+    hookTimeoutMinutes >= 0
+  ) {
+    return hookTimeoutMinutes;
+  }
+
+  throw new Error(
+    'Invalid hookTimeoutMinutes. Must be a finite number greater than or equal to 0.'
+  );
 }
 
 async function readSettingsFile(filepath: string): Promise<Partial<Settings>> {

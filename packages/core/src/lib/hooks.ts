@@ -3,49 +3,156 @@ import { access, constants, stat } from 'node:fs/promises';
 import { performance } from 'node:perf_hooks';
 import path from 'node:path';
 import { createLogger, getLogCaptureStream, logger } from './logger.js';
+import { getSettings } from './settings.js';
 
 const HOOKS_DIR = path.join('.shipper', 'hooks');
+const HOOK_KILL_GRACE_MS = 2_000;
 const WORKTREE_HOOK_META = {
   'worktree-setup': {
     label: 'Worktree setup',
+    exitBlocking: false,
+    timeoutBlocking: true,
   },
   'worktree-teardown': {
     label: 'Worktree teardown',
+    exitBlocking: false,
+    timeoutBlocking: false,
+    cancelBlocking: false,
   },
 } as const;
 
 type WorktreeHookEvent = keyof typeof WORKTREE_HOOK_META;
+type HookProcessErrorKind = 'exit' | 'timeout' | 'cancelled';
+type HookSignal = 'SIGTERM' | 'SIGKILL';
 
-function extractExecError(err: unknown): { code: number | 'unknown'; stderr: string } {
-  const rawStatus = err && typeof err === 'object' && 'status' in err ? err.status : undefined;
-  const code = typeof rawStatus === 'number' ? rawStatus : 'unknown';
-  const stderr = err && typeof err === 'object' && 'stderr' in err ? String(err.stderr).trim() : '';
-  return { code, stderr };
+class HookProcessError extends Error {
+  kind: HookProcessErrorKind;
+  code?: number | 'unknown';
+  stderr: string;
+  label: string;
+  timeoutMinutes?: number;
+
+  constructor(
+    kind: HookProcessErrorKind,
+    label: string,
+    options: { code?: number | 'unknown'; stderr?: string; timeoutMinutes?: number } = {}
+  ) {
+    super(`Hook process ${kind}`);
+    this.name = 'HookProcessError';
+    this.kind = kind;
+    this.code = options.code;
+    this.stderr = options.stderr ?? '';
+    this.label = label;
+    this.timeoutMinutes = options.timeoutMinutes;
+  }
 }
 
-function spawnAsync(
+interface HookRunBehavior {
+  exitBlocking: boolean;
+  timeoutBlocking: boolean;
+  cancelBlocking?: boolean;
+  cwd?: string;
+  resultLabel?: string;
+}
+
+interface HookProcessOptions {
+  cwd?: string;
+  env: Record<string, string>;
+  label: string;
+  shell?: boolean;
+}
+
+function formatHookProcessError(err: HookProcessError): string {
+  if (err.kind === 'timeout') {
+    const timeoutMinutes = err.timeoutMinutes ?? getSettings().hookTimeoutMinutes;
+    return `${err.label} hook timed out after ${formatMinutes(timeoutMinutes)}`;
+  }
+
+  if (err.kind === 'cancelled') {
+    return `${err.label} hook cancelled`;
+  }
+
+  return `${err.label} hook exited with code ${err.code ?? 'unknown'}${
+    err.stderr ? ': ' + err.stderr : ''
+  }`;
+}
+
+function formatMinutes(minutes: number): string {
+  return `${minutes} minute${minutes === 1 ? '' : 's'}`;
+}
+
+function runHookProcess(
   command: string,
   args: string[],
-  options: {
-    cwd?: string;
-    env: Record<string, string>;
-    shell?: boolean;
-  }
+  options: HookProcessOptions
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const stderrChunks: string[] = [];
     const captureStream = getLogCaptureStream();
+    const timeoutMinutes = getSettings().hookTimeoutMinutes;
+    let settled = false;
+    let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
+    let graceTimer: ReturnType<typeof setTimeout> | undefined;
+    let pendingFailureKind: Exclude<HookProcessErrorKind, 'exit'> | undefined;
     const child = spawn(command, args, {
       stdio: captureStream ? ['inherit', 'pipe', 'pipe'] : ['inherit', 'inherit', 'pipe'],
       env: { ...process.env, ...options.env },
       cwd: options.cwd,
       shell: options.shell,
+      detached: process.platform !== 'win32',
     });
     const childStderr = child.stderr;
 
+    const killChild = (signal: HookSignal) => {
+      if (!child.pid || process.platform === 'win32') {
+        child.kill(signal);
+        return;
+      }
+
+      try {
+        process.kill(-child.pid, signal);
+      } catch {
+        child.kill(signal);
+      }
+    };
+
+    const beginTermination = (kind: Exclude<HookProcessErrorKind, 'exit'>) => {
+      pendingFailureKind ??= kind;
+      killChild('SIGTERM');
+      graceTimer ??= setTimeout(() => {
+        killChild('SIGKILL');
+      }, HOOK_KILL_GRACE_MS);
+    };
+
+    const onSignal = () => {
+      beginTermination('cancelled');
+    };
+
+    const cleanup = () => {
+      if (timeoutTimer) {
+        clearTimeout(timeoutTimer);
+        timeoutTimer = undefined;
+      }
+      if (graceTimer) {
+        clearTimeout(graceTimer);
+        graceTimer = undefined;
+      }
+      process.removeListener('SIGINT', onSignal);
+      process.removeListener('SIGTERM', onSignal);
+    };
+
     if (!childStderr) {
+      cleanup();
       reject(new Error(`Failed to capture stderr for ${command}`));
       return;
+    }
+
+    process.on('SIGINT', onSignal);
+    process.on('SIGTERM', onSignal);
+    if (timeoutMinutes > 0) {
+      timeoutTimer = setTimeout(() => {
+        beginTermination('timeout');
+      }, timeoutMinutes * 60_000);
     }
 
     child.stdout?.on('data', (chunk: Buffer | string) => {
@@ -58,20 +165,33 @@ function spawnAsync(
       stderrChunks.push(chunk.toString());
     });
 
-    child.on('error', reject);
+    child.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(err);
+    });
     child.on('close', (code) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      const stderr = stderrChunks.join('').trim();
+      if (pendingFailureKind) {
+        reject(new HookProcessError(pendingFailureKind, options.label, { stderr, timeoutMinutes }));
+        return;
+      }
+
       if (code === 0) {
         resolve();
         return;
       }
 
-      const err = new Error(`Process exited with code ${code ?? 'unknown'}`) as Error & {
-        status: number | 'unknown';
-        stderr: string;
-      };
-      err.status = code ?? 'unknown';
-      err.stderr = stderrChunks.join('').trim();
-      reject(err);
+      reject(
+        new HookProcessError('exit', options.label, {
+          code: code ?? 'unknown',
+          stderr,
+        })
+      );
     });
   });
 }
@@ -80,14 +200,36 @@ export async function runAdvisoryHook(
   label: string,
   command: string,
   env: Record<string, string>,
-  cwd?: string
+  cwd?: string,
+  options: Partial<
+    Pick<HookRunBehavior, 'exitBlocking' | 'timeoutBlocking' | 'cancelBlocking'>
+  > = {}
 ): Promise<void> {
+  const behavior = {
+    exitBlocking: false,
+    timeoutBlocking: false,
+    cancelBlocking: false,
+    ...options,
+  };
   try {
-    await spawnAsync(command, [], { env, cwd, shell: true });
+    await runHookProcess(command, [], { env, cwd, shell: true, label });
     logger.log(`  ${label} hook completed.`);
   } catch (err) {
-    const { code, stderr } = extractExecError(err);
-    logger.warn(`  Warning: ${label} hook exited with code ${code}${stderr ? ': ' + stderr : ''}`);
+    if (!(err instanceof HookProcessError)) {
+      throw err;
+    }
+
+    const message = formatHookProcessError(err);
+    const shouldThrow =
+      (err.kind === 'exit' && behavior.exitBlocking) ||
+      (err.kind === 'timeout' && behavior.timeoutBlocking) ||
+      (err.kind === 'cancelled' && behavior.cancelBlocking);
+
+    if (shouldThrow) {
+      throw new Error(message);
+    }
+
+    logger.warn(`  Warning: ${message}`);
   }
 }
 
@@ -121,7 +263,7 @@ async function runFileHook(
   hookPath: string,
   label: string,
   env: Record<string, string>,
-  options: { blocking: boolean; cwd?: string; resultLabel?: string }
+  options: HookRunBehavior
 ): Promise<void> {
   if (!(await hookExists(hookPath))) return;
 
@@ -131,14 +273,24 @@ async function runFileHook(
   }
 
   try {
-    await spawnAsync(hookPath, [], { env, cwd: options.cwd });
+    await runHookProcess(hookPath, [], {
+      env,
+      cwd: options.cwd,
+      label: options.resultLabel ?? label,
+    });
     logger.log(`  ${label} hook completed.`);
   } catch (err) {
-    const { code, stderr } = extractExecError(err);
-    const resultLabel = options.resultLabel ?? label;
-    const message = `${resultLabel} hook exited with code ${code}${stderr ? ': ' + stderr : ''}`;
+    if (!(err instanceof HookProcessError)) {
+      throw err;
+    }
 
-    if (options.blocking) {
+    const message = formatHookProcessError(err);
+    const shouldThrow =
+      (err.kind === 'exit' && options.exitBlocking) ||
+      (err.kind === 'timeout' && options.timeoutBlocking) ||
+      (err.kind === 'cancelled' && (options.cancelBlocking ?? options.timeoutBlocking));
+
+    if (shouldThrow) {
       throw new Error(message);
     }
 
@@ -148,14 +300,16 @@ async function runFileHook(
 
 export async function runPreHook(stage: string, env: Record<string, string>): Promise<void> {
   await runFileHook(path.resolve(HOOKS_DIR, `pre-${stage}`), `Pre-${stage}`, env, {
-    blocking: true,
+    exitBlocking: true,
+    timeoutBlocking: true,
     resultLabel: `pre-${stage}`,
   });
 }
 
 export async function runPostHook(stage: string, env: Record<string, string>): Promise<void> {
   await runFileHook(path.resolve(HOOKS_DIR, `post-${stage}`), `Post-${stage}`, env, {
-    blocking: false,
+    exitBlocking: false,
+    timeoutBlocking: false,
     resultLabel: `post-${stage}`,
   });
 }
@@ -177,7 +331,9 @@ export async function runWorktreeHook(
   }
 
   await runFileHook(hookPath, meta.label, env, {
-    blocking: false,
+    exitBlocking: meta.exitBlocking,
+    timeoutBlocking: meta.timeoutBlocking,
+    cancelBlocking: 'cancelBlocking' in meta ? meta.cancelBlocking : undefined,
     cwd,
     resultLabel: meta.label,
   });

@@ -3,12 +3,18 @@ import { EventEmitter } from 'node:events';
 import path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-type HookChild = EventEmitter & { stderr: EventEmitter };
+type HookChild = EventEmitter & {
+  stderr: EventEmitter;
+  stdout?: EventEmitter;
+  pid?: number;
+  kill: ReturnType<typeof vi.fn<(signal?: string | number) => boolean>>;
+};
 
 const spawnMock =
   vi.fn<(command: string, args?: string[], options?: Record<string, unknown>) => HookChild>();
 const statMock = vi.fn<(path: string) => Promise<unknown>>();
 const accessMock = vi.fn<(path: string, mode?: number) => Promise<void>>();
+const getSettingsMock = vi.fn<() => { hookTimeoutMinutes: number }>();
 
 vi.mock('node:child_process', async () => {
   const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
@@ -24,15 +30,29 @@ vi.mock('node:fs/promises', async () => {
   };
 });
 
+vi.mock('../../src/lib/settings.js', () => ({
+  getSettings: (...args: unknown[]) => getSettingsMock(...args),
+}));
+
 const logMock = vi.spyOn(console, 'log').mockImplementation(() => {});
 const warnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
 const errorMock = vi.spyOn(console, 'error').mockImplementation(() => {});
 
+function createHookChild(opts: { pid?: number } = {}): HookChild {
+  const child = new EventEmitter() as HookChild;
+  child.stderr = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.kill = vi.fn(() => true);
+  if (opts.pid !== undefined) {
+    child.pid = opts.pid;
+  }
+  return child;
+}
+
 function mockSpawnResult(opts: { code?: number; stderr?: string; error?: Error } = {}): void {
   const { code = 0, stderr = '', error } = opts;
   spawnMock.mockImplementationOnce(() => {
-    const child = new EventEmitter() as EventEmitter & { stderr: EventEmitter };
-    child.stderr = new EventEmitter();
+    const child = createHookChild();
 
     globalThis.queueMicrotask(() => {
       if (error) {
@@ -50,16 +70,25 @@ function mockSpawnResult(opts: { code?: number; stderr?: string; error?: Error }
   });
 }
 
+async function flushHookStart(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 beforeEach(() => {
   spawnMock.mockReset();
   statMock.mockReset();
   accessMock.mockReset();
+  getSettingsMock.mockReset();
   logMock.mockClear();
   warnMock.mockClear();
   errorMock.mockClear();
   errorMock.mockImplementation(() => {});
   statMock.mockResolvedValue({});
   accessMock.mockResolvedValue(undefined);
+  getSettingsMock.mockReturnValue({ hookTimeoutMinutes: 10 });
+  vi.useRealTimers();
 });
 
 const { runAdvisoryHook, runPreHook, runPostHook, runWorktreeHook, withStageHooks } =
@@ -92,6 +121,35 @@ describe('runAdvisoryHook', () => {
       '[shipper]   Warning: Test hook exited with code 2: boom'
     );
   });
+
+  it('throws on timeout when configured as timeout-blocking but warns on non-zero exit', async () => {
+    vi.useFakeTimers();
+    getSettingsMock.mockReturnValue({ hookTimeoutMinutes: 1 });
+    const child = createHookChild({ pid: 1234 });
+    spawnMock.mockReturnValueOnce(child);
+
+    const timeoutPromise = runAdvisoryHook('Install dependencies', 'npm ci', {}, '/tmp/worktree', {
+      timeoutBlocking: true,
+    });
+    await flushHookStart();
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+    child.emit('close', null);
+
+    await expect(timeoutPromise).rejects.toThrow(
+      'Install dependencies hook timed out after 1 minute'
+    );
+
+    vi.useRealTimers();
+    mockSpawnResult({ code: 2, stderr: 'network failed' });
+    await runAdvisoryHook('Install dependencies', 'npm ci', {}, '/tmp/worktree', {
+      timeoutBlocking: true,
+    });
+    expect(warnMock).toHaveBeenCalledWith(
+      '[shipper]   Warning: Install dependencies hook exited with code 2: network failed'
+    );
+  });
 });
 
 describe('runPreHook', () => {
@@ -121,6 +179,95 @@ describe('runPreHook', () => {
       'pre-groom hook exited with code 1: hook failed'
     );
   });
+
+  it('kills a pending hook on timeout and rejects with the configured limit', async () => {
+    vi.useFakeTimers();
+    getSettingsMock.mockReturnValue({ hookTimeoutMinutes: 1 });
+    const child = createHookChild({ pid: 4321 });
+    spawnMock.mockReturnValueOnce(child);
+
+    const promise = runPreHook('implement', { SHIPPER_STAGE: 'implement' });
+    await flushHookStart();
+
+    expect(spawnMock.mock.calls[0]?.[2]).toEqual(expect.objectContaining({ detached: true }));
+    expect(child.kill).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+
+    child.emit('close', null);
+    await expect(promise).rejects.toThrow('pre-implement hook timed out after 1 minute');
+  });
+
+  it('uses the default ten minute timeout in timeout messages', async () => {
+    vi.useFakeTimers();
+    getSettingsMock.mockReturnValue({ hookTimeoutMinutes: 10 });
+    const child = createHookChild({ pid: 4322 });
+    spawnMock.mockReturnValueOnce(child);
+
+    const promise = runPreHook('plan', { SHIPPER_STAGE: 'plan' });
+    await flushHookStart();
+
+    await vi.advanceTimersByTimeAsync(10 * 60_000 - 1);
+    expect(child.kill).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+    child.emit('close', null);
+
+    await expect(promise).rejects.toThrow('pre-plan hook timed out after 10 minutes');
+  });
+
+  it('does not install a timeout when hookTimeoutMinutes is 0', async () => {
+    vi.useFakeTimers();
+    getSettingsMock.mockReturnValue({ hookTimeoutMinutes: 0 });
+    const child = createHookChild({ pid: 4323 });
+    spawnMock.mockReturnValueOnce(child);
+
+    const promise = runPreHook('design', { SHIPPER_STAGE: 'design' });
+    await flushHookStart();
+
+    await vi.advanceTimersByTimeAsync(10 * 60_000 + 2_000);
+    expect(child.kill).not.toHaveBeenCalled();
+
+    child.emit('close', 0);
+    await expect(promise).resolves.toBeUndefined();
+  });
+
+  it('kills a pending hook on SIGINT and removes temporary signal listeners', async () => {
+    vi.useFakeTimers();
+    getSettingsMock.mockReturnValue({ hookTimeoutMinutes: 1 });
+    const child = createHookChild({ pid: 4324 });
+    spawnMock.mockReturnValueOnce(child);
+    let sigintListener: (() => void) | undefined;
+    const onSpy = vi.spyOn(process, 'on').mockImplementation((event, listener) => {
+      if (event === 'SIGINT') {
+        sigintListener = listener as () => void;
+      }
+      return process;
+    });
+    const removeListenerSpy = vi.spyOn(process, 'removeListener').mockImplementation(() => process);
+
+    const promise = runPreHook('groom', { SHIPPER_STAGE: 'groom' });
+    await flushHookStart();
+
+    sigintListener?.();
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+
+    child.emit('close', null);
+    await expect(promise).rejects.toThrow('pre-groom hook cancelled');
+    expect(removeListenerSpy).toHaveBeenCalledWith('SIGINT', expect.any(Function));
+    expect(removeListenerSpy).toHaveBeenCalledWith('SIGTERM', expect.any(Function));
+
+    onSpy.mockRestore();
+    removeListenerSpy.mockRestore();
+  });
 });
 
 describe('runPostHook', () => {
@@ -131,6 +278,23 @@ describe('runPostHook', () => {
 
     expect(warnMock).toHaveBeenCalledWith(
       '[shipper]   Warning: post-groom hook exited with code 3: post failed'
+    );
+  });
+
+  it('warns without throwing when the hook times out', async () => {
+    vi.useFakeTimers();
+    getSettingsMock.mockReturnValue({ hookTimeoutMinutes: 1 });
+    const child = createHookChild({ pid: 5321 });
+    spawnMock.mockReturnValueOnce(child);
+
+    const promise = runPostHook('implement', { SHIPPER_STAGE: 'implement' });
+    await flushHookStart();
+    await vi.advanceTimersByTimeAsync(60_000);
+    child.emit('close', null);
+
+    await expect(promise).resolves.toBeUndefined();
+    expect(warnMock).toHaveBeenCalledWith(
+      '[shipper]   Warning: post-implement hook timed out after 1 minute'
     );
   });
 });
@@ -164,6 +328,47 @@ describe('runWorktreeHook', () => {
     expect(spawnMock).not.toHaveBeenCalled();
     expect(warnMock).not.toHaveBeenCalled();
   });
+
+  it('keeps worktree setup non-zero exits advisory', async () => {
+    mockSpawnResult({ code: 1, stderr: 'setup failed' });
+
+    await runWorktreeHook('worktree-setup', env, cwd);
+
+    expect(warnMock).toHaveBeenCalledWith(
+      '[shipper]   Warning: Worktree setup hook exited with code 1: setup failed'
+    );
+  });
+
+  it('throws when worktree setup times out', async () => {
+    vi.useFakeTimers();
+    getSettingsMock.mockReturnValue({ hookTimeoutMinutes: 1 });
+    const child = createHookChild({ pid: 6321 });
+    spawnMock.mockReturnValueOnce(child);
+
+    const promise = runWorktreeHook('worktree-setup', env, cwd);
+    await flushHookStart();
+    await vi.advanceTimersByTimeAsync(60_000);
+    child.emit('close', null);
+
+    await expect(promise).rejects.toThrow('Worktree setup hook timed out after 1 minute');
+  });
+
+  it('warns without throwing when worktree teardown times out', async () => {
+    vi.useFakeTimers();
+    getSettingsMock.mockReturnValue({ hookTimeoutMinutes: 1 });
+    const child = createHookChild({ pid: 6322 });
+    spawnMock.mockReturnValueOnce(child);
+
+    const promise = runWorktreeHook('worktree-teardown', env, cwd);
+    await flushHookStart();
+    await vi.advanceTimersByTimeAsync(60_000);
+    child.emit('close', null);
+
+    await expect(promise).resolves.toBeUndefined();
+    expect(warnMock).toHaveBeenCalledWith(
+      '[shipper]   Warning: Worktree teardown hook timed out after 1 minute'
+    );
+  });
 });
 
 describe('withStageHooks', () => {
@@ -178,8 +383,7 @@ describe('withStageHooks', () => {
     });
 
     spawnMock.mockImplementation((command: string) => {
-      const child = new EventEmitter() as HookChild;
-      child.stderr = new EventEmitter();
+      const child = createHookChild();
       globalThis.queueMicrotask(() => {
         if (command.includes('pre-groom')) {
           callOrder.push('pre');

@@ -48,6 +48,7 @@ describe('loadSettings', () => {
       prReviewWait: { mode: 'checks', maxDurationMinutes: 30 },
       lockTimeoutMinutes: 30,
       agentTimeoutMinutes: 60,
+      hookTimeoutMinutes: 10,
       commands: { default: { agent: 'claude' }, groom: { disableMcp: true } },
       merge: { requirePassingChecks: true },
     });
@@ -255,6 +256,7 @@ describe('loadSettings', () => {
       prReviewWait: { mode: 'checks', maxDurationMinutes: 30 },
       lockTimeoutMinutes: 30,
       agentTimeoutMinutes: 60,
+      hookTimeoutMinutes: 10,
       commands: { default: { agent: 'claude' }, groom: { disableMcp: true } },
       merge: { requirePassingChecks: true },
     });
@@ -354,6 +356,7 @@ describe('getSettings', () => {
       prReviewWait: { mode: 'checks', maxDurationMinutes: 30 },
       lockTimeoutMinutes: 30,
       agentTimeoutMinutes: 60,
+      hookTimeoutMinutes: 10,
       commands: { default: { agent: 'claude' }, groom: { disableMcp: true } },
       merge: { requirePassingChecks: true },
     });
@@ -488,6 +491,78 @@ describe('agentTimeoutMinutes', () => {
     const { loadSettings, getSettings } = await loadModule();
     await loadSettings();
     expect(getSettings().agentTimeoutMinutes).toBe(0);
+  });
+});
+
+describe('hookTimeoutMinutes', () => {
+  const validationMessage =
+    'Invalid hookTimeoutMinutes. Must be a finite number greater than or equal to 0.';
+
+  it('defaults to 10', async () => {
+    readFileMock.mockImplementation((p: string) => {
+      throw enoent(p);
+    });
+    const { loadSettings, getSettings } = await loadModule();
+    await loadSettings();
+    expect(getSettings().hookTimeoutMinutes).toBe(10);
+  });
+
+  it('can be overridden via settings file', async () => {
+    readFileMock.mockImplementation((p: string) => {
+      if (p === settingsPath) return '{"hookTimeoutMinutes": 5}';
+      throw enoent(p);
+    });
+    const { loadSettings, getSettings } = await loadModule();
+    await loadSettings();
+    expect(getSettings().hookTimeoutMinutes).toBe(5);
+  });
+
+  it('can be overridden via local settings file', async () => {
+    readFileMock.mockImplementation((p: string) => {
+      if (p === settingsPath) return '{"hookTimeoutMinutes": 10}';
+      if (p === localPath) return '{"hookTimeoutMinutes": 1}';
+      throw enoent(p);
+    });
+    const { loadSettings, getSettings } = await loadModule();
+    await loadSettings();
+    expect(getSettings().hookTimeoutMinutes).toBe(1);
+  });
+
+  it('can be set to 0 to disable', async () => {
+    readFileMock.mockImplementation((p: string) => {
+      if (p === settingsPath) return '{"hookTimeoutMinutes": 0}';
+      throw enoent(p);
+    });
+    const { loadSettings, getSettings } = await loadModule();
+    await loadSettings();
+    expect(getSettings().hookTimeoutMinutes).toBe(0);
+  });
+
+  it('throws on negative values', async () => {
+    readFileMock.mockImplementation((p: string) => {
+      if (p === settingsPath) return '{"hookTimeoutMinutes": -1}';
+      throw enoent(p);
+    });
+    const { loadSettings } = await loadModule();
+    await expect(loadSettings()).rejects.toThrow(validationMessage);
+  });
+
+  it('throws on non-finite values', async () => {
+    readFileMock.mockImplementation((p: string) => {
+      if (p === settingsPath) return '{"hookTimeoutMinutes": 1e999}';
+      throw enoent(p);
+    });
+    const { loadSettings } = await loadModule();
+    await expect(loadSettings()).rejects.toThrow(validationMessage);
+  });
+
+  it('throws on string values', async () => {
+    readFileMock.mockImplementation((p: string) => {
+      if (p === settingsPath) return '{"hookTimeoutMinutes": "1"}';
+      throw enoent(p);
+    });
+    const { loadSettings } = await loadModule();
+    await expect(loadSettings()).rejects.toThrow(validationMessage);
   });
 });
 

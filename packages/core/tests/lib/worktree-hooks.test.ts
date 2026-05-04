@@ -17,7 +17,13 @@ const accessMock = vi.fn<(path: string) => Promise<void>>();
 const mkdirMock = vi.fn<(path: string, options?: Record<string, unknown>) => Promise<void>>();
 const runAdvisoryHookMock =
   vi.fn<
-    (label: string, command: string, env: Record<string, string>, cwd?: string) => Promise<void>
+    (
+      label: string,
+      command: string,
+      env: Record<string, string>,
+      cwd?: string,
+      options?: Record<string, unknown>
+    ) => Promise<void>
   >();
 const runWorktreeHookMock =
   vi.fn<(event: string, env: Record<string, string>, cwd: string) => Promise<void>>();
@@ -514,6 +520,13 @@ describe('withWorktree', () => {
       'callback',
       'worktree-teardown',
     ]);
+    expect(runAdvisoryHookMock).toHaveBeenCalledWith(
+      'Install dependencies',
+      'npm ci',
+      expect.any(Object),
+      expectedWtPath,
+      { exitBlocking: false, timeoutBlocking: true, cancelBlocking: true }
+    );
   });
 
   it('omits the install marker when no install command is configured', async () => {
@@ -746,5 +759,103 @@ describe('withWorktree', () => {
 
     onSpy.mockRestore();
     removeListenerSpy.mockRestore();
+  });
+
+  it('cleans up when the install command times out before setup or callback', async () => {
+    process.env.NPM_CONFIG_CACHE = '/before-install-timeout';
+    process.env.XDG_CACHE_HOME = '/before-install-timeout-xdg-cache';
+    getSettingsMock.mockReturnValue({
+      installCommand: 'npm ci',
+    });
+    runAdvisoryHookMock.mockRejectedValueOnce(
+      new Error('Install dependencies hook timed out after 1 minute')
+    );
+    const callback = vi.fn<() => Promise<void>>(() => Promise.resolve());
+
+    await expect(withWorktree(defaultOpts, callback)).rejects.toThrow(
+      'Install dependencies hook timed out after 1 minute'
+    );
+
+    expect(callback).not.toHaveBeenCalled();
+    expect(runWorktreeHookMock).not.toHaveBeenCalledWith(
+      'worktree-setup',
+      expect.any(Object),
+      expectedWtPath
+    );
+    expect(runWorktreeHookMock).toHaveBeenCalledWith(
+      'worktree-teardown',
+      expect.any(Object),
+      expectedWtPath
+    );
+    expect(gitArgsFromSpawnCalls()).toContainEqual([
+      'worktree',
+      'remove',
+      '--force',
+      expectedWtPath,
+    ]);
+    expect(process.env.NPM_CONFIG_CACHE).toBe('/before-install-timeout');
+    expect(process.env.XDG_CACHE_HOME).toBe('/before-install-timeout-xdg-cache');
+  });
+
+  it('cleans up when worktree setup times out before the callback', async () => {
+    process.env.NPM_CONFIG_CACHE = '/before-setup-timeout';
+    process.env.XDG_CACHE_HOME = '/before-setup-timeout-xdg-cache';
+    runWorktreeHookMock.mockImplementation((event: string) => {
+      if (event === 'worktree-setup') {
+        return Promise.reject(new Error('Worktree setup hook timed out after 10 minutes'));
+      }
+      return Promise.resolve();
+    });
+    const callback = vi.fn<() => Promise<void>>(() => Promise.resolve());
+
+    await expect(withWorktree(defaultOpts, callback)).rejects.toThrow(
+      'Worktree setup hook timed out after 10 minutes'
+    );
+
+    expect(callback).not.toHaveBeenCalled();
+    expect(runWorktreeHookMock).toHaveBeenCalledWith(
+      'worktree-teardown',
+      expect.any(Object),
+      expectedWtPath
+    );
+    expect(gitArgsFromSpawnCalls()).toContainEqual([
+      'worktree',
+      'remove',
+      '--force',
+      expectedWtPath,
+    ]);
+    expect(process.env.NPM_CONFIG_CACHE).toBe('/before-setup-timeout');
+    expect(process.env.XDG_CACHE_HOME).toBe('/before-setup-timeout-xdg-cache');
+  });
+
+  it('cleans up when worktree setup is cancelled before the callback', async () => {
+    process.env.NPM_CONFIG_CACHE = '/before-setup-cancel';
+    process.env.XDG_CACHE_HOME = '/before-setup-cancel-xdg-cache';
+    runWorktreeHookMock.mockImplementation((event: string) => {
+      if (event === 'worktree-setup') {
+        return Promise.reject(new Error('Worktree setup hook cancelled'));
+      }
+      return Promise.resolve();
+    });
+    const callback = vi.fn<() => Promise<void>>(() => Promise.resolve());
+
+    await expect(withWorktree(defaultOpts, callback)).rejects.toThrow(
+      'Worktree setup hook cancelled'
+    );
+
+    expect(callback).not.toHaveBeenCalled();
+    expect(runWorktreeHookMock).toHaveBeenCalledWith(
+      'worktree-teardown',
+      expect.any(Object),
+      expectedWtPath
+    );
+    expect(gitArgsFromSpawnCalls()).toContainEqual([
+      'worktree',
+      'remove',
+      '--force',
+      expectedWtPath,
+    ]);
+    expect(process.env.NPM_CONFIG_CACHE).toBe('/before-setup-cancel');
+    expect(process.env.XDG_CACHE_HOME).toBe('/before-setup-cancel-xdg-cache');
   });
 });
