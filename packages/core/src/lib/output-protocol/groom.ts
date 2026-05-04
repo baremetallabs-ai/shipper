@@ -739,14 +739,12 @@ export async function processGroomResult(opts: {
       manifest.decomposition.children.length > 0 &&
       children.filter(Boolean).length === manifest.decomposition.children.length;
     if (!allChildrenCreated) {
-      skip('post parent decomposition comment', 'not all children were created');
       skip('close parent issue', 'not all children were created');
+    } else if (hasFailed()) {
+      skip('close parent issue', 'one or more earlier post-flight operations failed');
     } else {
       const childList = children.filter((child): child is ChildCreation => child !== undefined);
       const body = decompositionComment(childList);
-      await run('post parent decomposition comment', () =>
-        gh(['issue', 'comment', issueNumber, '-R', repo, '--body', body]).then(() => undefined)
-      );
       await run('close parent issue', () =>
         gh(['issue', 'close', issueNumber, '-R', repo, '--comment', body]).then(() => undefined)
       );
