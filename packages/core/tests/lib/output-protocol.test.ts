@@ -796,6 +796,16 @@ describe('output protocol helpers', () => {
       await expect(validateStageOutput(tempDir, 'groom')).resolves.toEqual(result);
     });
 
+    it('rejects groom output when the top-level comment file is missing', async () => {
+      await writeValidGroomOutput();
+      await rm(outputAbs('comment-248.md'));
+
+      await expect(validateStageOutput(tempDir, 'groom')).rejects.toThrow(
+        'groom comment file does not exist or cannot be read'
+      );
+      expect(ghMock).not.toHaveBeenCalled();
+    });
+
     it('treats pr_remediate as schema-only validation', async () => {
       const result = buildResult();
       await writeResultFile(result);
@@ -1583,6 +1593,16 @@ describe('output protocol helpers', () => {
         '--remove-label',
         'shipper:blocked',
       ]);
+    });
+
+    it('rejects missing top-level groom comments before any GitHub writes', async () => {
+      const result = await writeValidGroomOutput();
+      await rm(outputAbs('comment-248.md'));
+
+      await expect(
+        processGroomResult({ repo: 'owner/repo', issueNumber: '248', cwd: tempDir, result })
+      ).rejects.toThrow('ENOENT');
+      expect(ghMock).not.toHaveBeenCalled();
     });
 
     it('creates full-replacement children, posts scoped comments, and closes the parent', async () => {

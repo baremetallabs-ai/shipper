@@ -166,6 +166,25 @@ async function readJsonFile(filePath: string, label: string): Promise<unknown> {
   }
 }
 
+async function assertReadableOutputFile(
+  cwd: string,
+  relativePath: string,
+  label: string
+): Promise<void> {
+  let abs: string;
+  try {
+    abs = resolveOutputPath(cwd, relativePath, label);
+  } catch (error) {
+    throw new Error(toErrorMessage(error));
+  }
+
+  try {
+    await readFile(abs, 'utf-8');
+  } catch (error) {
+    throw new Error(`${label} does not exist or cannot be read: ${abs}: ${toErrorMessage(error)}`);
+  }
+}
+
 export async function readPrSpec(
   cwd: string,
   specPath: string
@@ -378,6 +397,7 @@ export async function validateStageOutput(
     if (!result.groom) {
       throw new Error('groom accept requires a groom manifest in result.json');
     }
+    await assertReadableOutputFile(cwd, result.comment, 'groom comment file');
     await readGroomManifest(cwd, result.groom);
     return result;
   }
