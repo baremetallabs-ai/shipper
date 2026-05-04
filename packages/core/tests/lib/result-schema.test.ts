@@ -31,6 +31,7 @@ describe('validateResult', () => {
         pr_spec: '.shipper/output/pr-spec.json',
         review_payload: '.shipper/output/review.json',
         replies: '.shipper/output/replies',
+        groom: '.shipper/output/groom-248.json',
       })
     ).toEqual({
       verdict: 'accept',
@@ -38,6 +39,7 @@ describe('validateResult', () => {
       pr_spec: '.shipper/output/pr-spec.json',
       review_payload: '.shipper/output/review.json',
       replies: '.shipper/output/replies',
+      groom: '.shipper/output/groom-248.json',
     });
   });
 
@@ -111,9 +113,10 @@ describe('validateResult', () => {
         pr_spec: false,
         review_payload: 1,
         replies: [],
+        groom: {},
       })
     ).toThrowError(
-      "Invalid result.json:\n- 'pr_spec' must be a string path\n- 'review_payload' must be a string path\n- 'replies' must be a string path"
+      "Invalid result.json:\n- 'pr_spec' must be a string path\n- 'review_payload' must be a string path\n- 'replies' must be a string path\n- 'groom' must be a string path"
     );
   });
 
@@ -125,9 +128,10 @@ describe('validateResult', () => {
         pr_spec: '/tmp/pr-spec.json',
         review_payload: 'review.json',
         replies: '../replies',
+        groom: '.shipper/input/groom.json',
       })
     ).toThrowError(
-      "Invalid result.json:\n- 'pr_spec' must be a relative path under .shipper/output\n- 'review_payload' must be a relative path under .shipper/output\n- 'replies' must be a relative path under .shipper/output"
+      "Invalid result.json:\n- 'pr_spec' must be a relative path under .shipper/output\n- 'review_payload' must be a relative path under .shipper/output\n- 'replies' must be a relative path under .shipper/output\n- 'groom' must be a relative path under .shipper/output"
     );
   });
 });

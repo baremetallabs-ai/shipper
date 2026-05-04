@@ -3,17 +3,7 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 
 import { ipcMain } from 'electron';
-import {
-  acquireIssueLock,
-  buildPromptCommand,
-  createDesktopGroomWorktree,
-  ensureRepoClone,
-  ensureRepoCloneForWorktree,
-  getSettings,
-  releaseIssueLock,
-  renewIssueLock,
-  resolveBaseBranch,
-} from '@dnsquared/shipper-core';
+import { buildPromptCommand, ensureRepoClone } from '@dnsquared/shipper-core';
 
 import type { PtyManager } from '../pty-manager.js';
 import { isPositiveInteger, parseRepo } from './shared.js';
@@ -106,84 +96,23 @@ export function registerPtyHandlers(ptyManager: PtyManager): void {
       throw new Error('Invalid pty-spawn-shipper-groom payload.');
     }
 
-    const issueNumber = String(parsedPayload.issueNumber);
-    await acquireIssueLock(parsedPayload.repo, issueNumber);
-    const heartbeatCancelled = { value: false };
-    let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
-    let lockReleased = false;
-    let cleanupPromise: Promise<void> | null = null;
-    let groomWorktree: Awaited<ReturnType<typeof createDesktopGroomWorktree>> | null = null;
+    const repoPath = await runWithRepoPreparationQueue(parsedPayload.repo, async () => {
+      return await ensureRepoClone(parsedPayload.repo);
+    });
 
-    const cleanupGroomSession = async (): Promise<void> => {
-      cleanupPromise ??= (async () => {
-        heartbeatCancelled.value = true;
-        if (heartbeatTimer !== null) {
-          clearInterval(heartbeatTimer);
-          heartbeatTimer = null;
-        }
-
-        try {
-          if (!lockReleased) {
-            lockReleased = true;
-            await releaseIssueLock(parsedPayload.repo, issueNumber);
-          }
-        } finally {
-          await groomWorktree?.cleanup();
-        }
-      })();
-
-      await cleanupPromise;
-    };
-
-    try {
-      const settings = getSettings();
-      groomWorktree = await runWithRepoPreparationQueue(parsedPayload.repo, async () => {
-        const repoRoot = await ensureRepoCloneForWorktree(parsedPayload.repo);
-        const configuredBaseBranch = settings.defaultBaseBranch;
-        const baseBranch = configuredBaseBranch ?? (await resolveBaseBranch(parsedPayload.repo));
-        return await createDesktopGroomWorktree({ repoRoot, issueNumber, baseBranch });
-      });
-
-      const cmd = await buildPromptCommand('groom', {
-        issueRef: issueNumber,
-        repo: parsedPayload.repo,
-        cwd: groomWorktree.wtPath,
-        mode: 'interactive',
-      });
-
-      const heartbeatMs = (settings.lockTimeoutMinutes / 3) * 60_000;
-      heartbeatTimer = setInterval(() => {
-        void renewIssueLock(parsedPayload.repo, issueNumber, heartbeatCancelled);
-      }, heartbeatMs);
-
-      const sessionId = randomUUID();
-      ptyManager.spawn(sessionId, cmd.command, cmd.args, {
+    const sessionId = randomUUID();
+    ptyManager.spawn(
+      sessionId,
+      'shipper',
+      ['groom', String(parsedPayload.issueNumber), '--mode', 'interactive'],
+      {
         cols: parsedPayload.cols,
         rows: parsedPayload.rows,
-        cwd: cmd.cwd ?? groomWorktree.wtPath,
-        initialInput: cmd.initialInput,
-      });
-      ptyManager.onSessionExit(sessionId, () => {
-        void cleanupGroomSession().catch((cleanupError: unknown) => {
-          console.warn(
-            '[shipper] Failed to clean up groom session after session exit',
-            cleanupError
-          );
-        });
-      });
-
-      return { sessionId };
-    } catch (error) {
-      try {
-        await cleanupGroomSession();
-      } catch (cleanupError) {
-        console.warn(
-          '[shipper] Failed to clean up groom session after spawn failure',
-          cleanupError
-        );
+        cwd: repoPath,
       }
-      throw error;
-    }
+    );
+
+    return { sessionId };
   });
 
   ipcMain.handle('pty-spawn-shipper-setup', async (_event, payload: unknown) => {

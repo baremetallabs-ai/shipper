@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** Groom prompt overrides at `.shipper/prompts/groom/<agent>.md` must now emit `.shipper/output/result.json` plus a groom manifest. Shipper performs all groom GitHub writes after the agent exits; overrides that still perform direct issue mutations or fail to emit the new artifacts are treated as failed groom runs.
+
 ### Added
 
 - Starlight docs site with generated CLI and MCP reference pages.

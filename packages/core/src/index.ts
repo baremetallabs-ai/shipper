@@ -90,16 +90,27 @@ export { executeMerge, getLinkedIssueNumber, postMerge } from './lib/merge-execu
 export { parseDiffHunks } from './lib/output-protocol/index.js';
 export {
   executeTransition,
+  GroomPostFlightError,
   handleAgentCrash,
   postComment,
   postReplies,
+  processGroomResult,
   processResult,
+  readGroomManifest,
   retryOnInvalidOutput,
   scrubOutputDir,
   setupProtocolDirs,
   truncateLargeInput,
   validateStageOutput,
   writeContextFile,
+} from './lib/output-protocol/index.js';
+export type {
+  GroomBlocked,
+  GroomChildIssue,
+  GroomDecompositionKind,
+  GroomManifest,
+  GroomParent,
+  GroomPriority,
 } from './lib/output-protocol/index.js';
 export { __installFakeTransports } from './lib/testing-seams.js';
 export {

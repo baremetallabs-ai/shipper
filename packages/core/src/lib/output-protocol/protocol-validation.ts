@@ -6,6 +6,7 @@ import { PROTOCOL_OUTPUT_DIR, resolveOutputPath } from './protocol-io.js';
 import { toErrorMessage } from '../errors.js';
 import { readResultFile, ResultValidationError, type ResultJson } from '../result-schema.js';
 import type { StageName } from '../stage-transitions.js';
+import { readGroomManifest } from './groom.js';
 
 const REVIEW_VALID_FILES_DISPLAY_LIMIT = 50;
 
@@ -355,6 +356,30 @@ export async function validateStageOutput(
     throw new Error(
       `result.review_payload is only supported for the pr_review stage (got ${stage})`
     );
+  }
+
+  if (result.groom && stage !== 'groom') {
+    throw new Error(`result.groom is only supported for the groom stage (got ${stage})`);
+  }
+
+  if (stage === 'groom') {
+    if (result.pr_spec) {
+      throw new Error('result.pr_spec is not supported for the groom stage');
+    }
+    if (result.review_payload) {
+      throw new Error('result.review_payload is not supported for the groom stage');
+    }
+    if (result.replies) {
+      throw new Error('result.replies is not supported for the groom stage');
+    }
+    if (result.verdict !== 'accept') {
+      throw new Error('groom output must use verdict accept');
+    }
+    if (!result.groom) {
+      throw new Error('groom accept requires a groom manifest in result.json');
+    }
+    await readGroomManifest(cwd, result.groom);
+    return result;
   }
 
   if (result.verdict === 'accept' && stage === 'pr_open' && !result.pr_spec) {

@@ -143,4 +143,10 @@ describe('resolveTransition', () => {
       resolveTransition('unknown' as StageName, 'accept');
     }).toThrow('Unknown stage: unknown');
   });
+
+  it('throws a clear error for groom results', () => {
+    expect(() => {
+      resolveTransition('groom', 'accept');
+    }).toThrow('groom results must be processed with processGroomResult');
+  });
 });
