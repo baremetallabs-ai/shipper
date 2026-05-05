@@ -201,6 +201,22 @@ describe('PtyManager.onSessionExit', () => {
     expect(killSpy).not.toHaveBeenCalled();
   });
 
+  it('does not publish finalizing when a groom finalize request cannot be written', async () => {
+    const manager = new PtyManager();
+    const parentDir = await mkdtemp(path.join(tmpdir(), 'shipper-pty-test-'));
+    tempDirs.push(parentDir);
+    const invalidControlDir = path.join(parentDir, 'not-a-directory');
+    await writeFile(invalidControlDir, 'not a directory', 'utf-8');
+    spawnSession(manager, 'groom', { kind: 'groom', controlDir: invalidControlDir });
+
+    await expect(manager.finalize('groom')).rejects.toThrow();
+
+    await expect(manager.getCloseState('groom')).resolves.toEqual({
+      state: 'requires-discard-confirmation',
+    });
+    expect(killSpy).not.toHaveBeenCalled();
+  });
+
   it('finalizes setup with SIGTERM and force-kills after the grace timeout', async () => {
     vi.useFakeTimers();
     const manager = new PtyManager();
@@ -211,6 +227,16 @@ describe('PtyManager.onSessionExit', () => {
     expect(killSpy).toHaveBeenCalledWith(ptyProcess.pid, 'SIGTERM');
     await vi.advanceTimersByTimeAsync(DESKTOP_AGENT_GRACE_TIMEOUT_MS);
     expect(killSpy).toHaveBeenCalledWith(ptyProcess.pid, 'SIGKILL');
+  });
+
+  it('removes a groom control directory when the PTY exits', async () => {
+    const manager = new PtyManager();
+    const controlDir = await createControlDir(true);
+    const ptyProcess = spawnSession(manager, 'groom', { kind: 'groom', controlDir });
+
+    ptyProcess.triggerExit(0);
+
+    await expect(access(controlDir)).rejects.toThrow();
   });
 
   it('force-kills immediately', () => {

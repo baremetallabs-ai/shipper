@@ -117,13 +117,13 @@ export async function runGroomStage(
               disableMcp,
             });
 
-            if (exitCode !== 0) {
-              const desktopFinalizeRequested =
-                desktopControlDir !== null && (await isDesktopFinalizeRequested(desktopControlDir));
-              if (desktopFinalizeRequested) {
-                return await processGroomOutput(false);
-              }
+            const desktopFinalizeRequested =
+              desktopControlDir !== null && (await isDesktopFinalizeRequested(desktopControlDir));
+            if (desktopFinalizeRequested) {
+              return await processGroomOutput(false);
+            }
 
+            if (exitCode !== 0) {
               const detail = `Agent exited with code ${exitCode}`;
               logger.error(detail);
               await handleAgentCrash(

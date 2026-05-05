@@ -361,6 +361,9 @@ export class PtyManager {
       }
 
       clearTimeout(entry.gracefulKillTimer);
+      if (entry.controlDir) {
+        rmSync(entry.controlDir, { recursive: true, force: true });
+      }
       this.sessions.delete(id);
       const exitCb = this.exitCallbacks.get(id);
       if (exitCb) {
@@ -434,13 +437,13 @@ export class PtyManager {
       return;
     }
 
-    entry.status = 'finalizing';
-    this.sendStatus(id, entry.status);
-
     if (entry.kind === 'groom') {
-      if (entry.controlDir) {
-        await requestDesktopFinalize(entry.controlDir);
+      if (!entry.controlDir) {
+        throw new Error(`Session "${id}" does not have a desktop control directory.`);
       }
+      await requestDesktopFinalize(entry.controlDir);
+      entry.status = 'finalizing';
+      this.sendStatus(id, entry.status);
       return;
     }
 
@@ -450,6 +453,8 @@ export class PtyManager {
       return;
     }
 
+    entry.status = 'finalizing';
+    this.sendStatus(id, entry.status);
     entry.gracefulKillTimer = setTimeout(() => {
       if (this.sessions.has(id)) {
         try {
@@ -546,6 +551,9 @@ export class PtyManager {
       waiters.add(cleanup);
       this.exitWaiters.set(sessionId, waiters);
       const timeout = setTimeout(cleanup, timeoutMs);
+      if (!this.sessions.has(sessionId)) {
+        cleanup();
+      }
     });
   }
 }

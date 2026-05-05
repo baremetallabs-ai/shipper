@@ -52,7 +52,7 @@ describe('PipelineEmptyState', () => {
       />
     );
 
-    expect(String(container.innerHTML)).toContain('animate-spin');
+    expect(container.innerHTML).toContain('animate-spin');
   });
 
   it('renders the initialize CTA and preserves the disabled rule', () => {

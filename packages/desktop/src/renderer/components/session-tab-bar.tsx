@@ -18,6 +18,20 @@ const STATUS_DOT_CLASS: Record<TerminalSessionStatus, string> = {
   exited: 'bg-muted-foreground',
 };
 
+const STATUS_LABEL: Record<TerminalSessionStatus, string> = {
+  running: 'running',
+  waiting: 'waiting',
+  finalizing: 'finalizing',
+  exited: 'exited',
+};
+
+const CLOSE_ACTION_LABEL: Record<TerminalSessionStatus, string> = {
+  running: 'Close',
+  waiting: 'Close',
+  finalizing: 'Force-kill',
+  exited: 'Dismiss',
+};
+
 export function SessionTabBar({
   sessions,
   activeSessionId,
@@ -29,6 +43,7 @@ export function SessionTabBar({
       {sessions.map((session) => {
         const isActive = session.id === activeSessionId;
         const waitingAttention = session.status === 'waiting' && !isActive;
+        const statusLabel = STATUS_LABEL[session.status];
 
         return (
           <div
@@ -48,11 +63,13 @@ export function SessionTabBar({
               onClick={() => {
                 onSelectSession(session.id);
               }}
+              aria-label={`${session.label} (${statusLabel})`}
             >
               <span
                 className={cn('size-2 shrink-0 rounded-full', STATUS_DOT_CLASS[session.status])}
                 aria-hidden="true"
               />
+              <span className="sr-only">{statusLabel}</span>
               <span className="block max-w-52 truncate">{session.label}</span>
             </button>
             <button
@@ -65,7 +82,7 @@ export function SessionTabBar({
                     ? 'border-warning/20 hover:bg-warning/10'
                     : 'border-border hover:bg-accent hover:text-accent-foreground'
               )}
-              aria-label={`Close ${session.label}`}
+              aria-label={`${CLOSE_ACTION_LABEL[session.status]} ${session.label} (${statusLabel})`}
               onClick={(event) => {
                 event.stopPropagation();
                 onCloseSession(session.id);

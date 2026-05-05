@@ -310,6 +310,37 @@ describe('groomCommand', () => {
     expect(process.exitCode).toBe(0);
   });
 
+  it('does not retry invalid output after a clean desktop-finalized prompt exit', async () => {
+    const controlDir = await enableDesktopControl();
+    fake.setIssue('123', { labels: ['shipper:new'], title: 'Single issue' });
+    fake.scriptRunPrompt(async (name, opts) => {
+      promptCalls.push({ name, opts });
+      if (promptCalls.length === 1) {
+        await fake.writeStageOutput({
+          result: { verdict: 'accept' },
+          commentBody: 'invalid',
+        });
+        await core.requestDesktopFinalize(controlDir);
+      } else {
+        await writeGroomOutput(fake);
+      }
+      return 0;
+    });
+
+    const { groomCommand } = await import('../../src/commands/groom.js');
+
+    await expect(groomCommand(repo, '123')).resolves.toBeUndefined();
+
+    expect(promptCalls).toHaveLength(1);
+    expect(fake.state.issues.get('123')?.labels.has('shipper:new')).toBe(true);
+    expect(fake.state.issues.get('123')?.labels.has('shipper:groomed')).toBe(false);
+    expect(fake.state.postedComments.at(-1)?.body).toContain('## Agent Failure');
+    expect(fake.state.postedComments.at(-1)?.body).toContain(
+      'groom accept requires a groom manifest'
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
   it('fails desktop-finalized groom without result.json and does not retry', async () => {
     const controlDir = await enableDesktopControl();
     fake.setIssue('123', { labels: ['shipper:new'], title: 'Single issue' });

@@ -65,8 +65,8 @@ describe('TerminalDrawer', () => {
 
     const toggleButton = screen.getByRole('button', { name: 'Close terminal drawer' });
 
-    expect(String(container.innerHTML)).toContain('aria-expanded="true"');
-    expect(String(container.innerHTML)).toContain('aria-controls="terminal-drawer-panel"');
+    expect(container.innerHTML).toContain('aria-expanded="true"');
+    expect(container.innerHTML).toContain('aria-controls="terminal-drawer-panel"');
 
     fireEvent.click(toggleButton);
     fireEvent.click(screen.getByRole('button', { name: 'groom - #12' }));
@@ -95,8 +95,8 @@ describe('TerminalDrawer', () => {
     const toggleButton = screen.getByRole('button', { name: 'Open terminal drawer' });
 
     expect(toggleButton).toBeTruthy();
-    expect(String(container.innerHTML)).toContain('aria-expanded="false"');
-    expect(String(container.innerHTML)).toContain('aria-hidden="true"');
-    expect(String(container.innerHTML)).toContain('inert=""');
+    expect(container.innerHTML).toContain('aria-expanded="false"');
+    expect(container.innerHTML).toContain('aria-hidden="true"');
+    expect(container.innerHTML).toContain('inert=""');
   });
 });
