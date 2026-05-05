@@ -52,7 +52,7 @@ The rendered GitHub issue body must begin this section with this exact line, bef
 <!-- prettier-ignore -->
 *Non-binding intake interpretation: grooming may validate, revise, or discard these assumptions. The Request section remains the source of truth.*
 
-Your product-level inferences, assumptions, gap-filling, inferred scope, and expected outcomes go here as tentative intake-stage context — user-facing behavior, scope assumptions, expected outcomes. Frame everything as an assumption: "Assuming this means…", "I think this implies…", "This probably refers to…". **No technical content in this section:** no file paths, module or component names, class/function names, API shapes, data schemas, library or technology choices, or implementation approaches. Technical pointers belong in Starting Point or Relevant Documentation. If you have nothing to add beyond the request after the marker, write "None — the request is self-contained."
+Your product-level inferences, assumptions, gap-filling, inferred scope, and expected outcomes go here as tentative intake-stage context (e.g., user-facing behavior). Frame everything as an assumption: "Assuming this means…", "I think this implies…", "This probably refers to…". **No technical content in this section:** no file paths, module or component names, class/function names, API shapes, data schemas, library or technology choices, or implementation approaches. Technical pointers belong in Starting Point or Relevant Documentation. If you have nothing to add beyond the request after the marker, write "None — the request is self-contained."
 
 # Starting Point (optional — include only if codebase research surfaced obvious entry points)
 

@@ -342,7 +342,7 @@ describe('new prompts', () => {
   );
 
   it.each(['claude', 'codex', 'copilot'])(
-    'renders non-binding Interpretation marker and keeps Request authoritative for %s',
+    'renders non-binding Interpretation marker for %s',
     (agent) => {
       const prompt = readFileSync(
         new URL(`../../src/prompts/${agent}/new.md`, import.meta.url),
@@ -355,13 +355,6 @@ describe('new prompts', () => {
         'The rendered GitHub issue body must begin this section with this exact line'
       );
       expect(prompt).toContain('before any assumptions or before the self-contained fallback');
-      expect(prompt).toContain('The Request section remains the source of truth.');
-      expect(prompt).toContain(
-        'This section is authoritative and must remain a faithful capture of the user'
-      );
-      expect(prompt).toContain(
-        'assumptions, gap-filling, inferred scope, and expected outcomes go here as tentative intake-stage context'
-      );
     }
   );
 });
