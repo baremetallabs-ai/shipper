@@ -13,6 +13,7 @@ const state = vi.hoisted(() => ({
   spawnShipperGroomMock: vi.fn(),
   spawnBackgroundShipMock: vi.fn(),
   requestAutoShipHaltMock: vi.fn(),
+  actionQueueDrawerProps: null as Record<string, unknown> | null,
 }));
 
 vi.mock('../../src/renderer/hooks/use-repos.js', () => ({
@@ -43,7 +44,10 @@ vi.mock('../../src/renderer/lib/shipper-api.js', () => ({
 }));
 
 vi.mock('../../src/renderer/components/action-queue-drawer.js', () => ({
-  ActionQueueDrawer: () => null,
+  ActionQueueDrawer: (props: Record<string, unknown>) => {
+    state.actionQueueDrawerProps = props;
+    return null;
+  },
 }));
 
 vi.mock('../../src/renderer/components/adopt-dialog.js', () => ({
@@ -196,6 +200,7 @@ function resetMockState(): void {
   state.spawnShipperGroomMock.mockReset();
   state.spawnBackgroundShipMock.mockReset();
   state.requestAutoShipHaltMock.mockReset();
+  state.actionQueueDrawerProps = null;
   state.reposState = {
     activeRepo: 'owner/repo',
     autoMergeRepos: new Set<string>(),
@@ -318,6 +323,7 @@ function createBackgroundShipCommand(
     command: 'ship',
     repo: 'owner/repo',
     status: 'running',
+    stateChangedAt: Date.parse('2026-04-03T12:00:00.000Z'),
     title: 'Ship #42',
     detail: 'Shipping #42...',
     output: '',
@@ -605,6 +611,58 @@ describe('App setup launch', () => {
     });
 
     expect(screen.getByRole('button', { name: 'Ship issue 42' })).toHaveProperty('disabled', false);
+  });
+
+  it('passes stateChangedAt into action queue commands for all background command kinds', () => {
+    const stateChangedAtById = new Map([
+      ['bg-new', Date.parse('2026-04-03T12:00:00.000Z')],
+      ['bg-ship', Date.parse('2026-04-03T12:01:00.000Z')],
+      ['bg-init', Date.parse('2026-04-03T12:02:00.000Z')],
+      ['bg-unblock', Date.parse('2026-04-03T12:03:00.000Z')],
+    ]);
+    state.backgroundState = {
+      ...state.backgroundState,
+      backgroundCommands: [
+        createBackgroundShipCommand({
+          id: 'bg-new',
+          command: 'new',
+          title: 'New issue',
+          issueNumber: undefined,
+          stateChangedAt: stateChangedAtById.get('bg-new'),
+        }),
+        createBackgroundShipCommand({
+          id: 'bg-ship',
+          command: 'ship',
+          title: 'Ship #42',
+          stateChangedAt: stateChangedAtById.get('bg-ship'),
+        }),
+        createBackgroundShipCommand({
+          id: 'bg-init',
+          command: 'init',
+          title: 'Init repo',
+          issueNumber: undefined,
+          stateChangedAt: stateChangedAtById.get('bg-init'),
+        }),
+        createBackgroundShipCommand({
+          id: 'bg-unblock',
+          command: 'unblock',
+          title: 'Unblock #43',
+          issueNumber: 43,
+          stateChangedAt: stateChangedAtById.get('bg-unblock'),
+        }),
+      ],
+    };
+
+    render(<App />);
+
+    const commands = state.actionQueueDrawerProps?.commands as
+      | Array<{ id: string; command: string; stateChangedAt: number }>
+      | undefined;
+    expect(commands).toHaveLength(4);
+    expect(commands?.map((command) => command.command)).toEqual(['new', 'ship', 'init', 'unblock']);
+    for (const command of commands ?? []) {
+      expect(command.stateChangedAt).toBe(stateChangedAtById.get(command.id));
+    }
   });
 
   it('does not clear pending Ship feedback for stale commands from the same issue', async () => {

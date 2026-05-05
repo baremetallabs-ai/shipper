@@ -267,6 +267,7 @@ export interface BackgroundCommandState {
   command: BackgroundCommandKind;
   repo: string;
   status: BackgroundCommandStatus;
+  stateChangedAt: number;
   title: string;
   detail: string;
   output: string;

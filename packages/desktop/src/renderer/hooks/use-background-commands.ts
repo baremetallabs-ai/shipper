@@ -23,6 +23,7 @@ import { MAX_AUTO_SHIP_CONSECUTIVE_FAILURES } from '../lib/constants.js';
 import type {
   ActiveShippingCommand,
   BackgroundCommandKind,
+  BackgroundCommandStatus,
   BackgroundCommandState,
   BackgroundLogViewerState,
   BackgroundRetryPayload,
@@ -38,6 +39,15 @@ function getLatestOutputLine(output: string): string | null {
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
   return lines.at(-1) ?? null;
+}
+
+type DisplayedBackgroundState = BackgroundCommandStatus | 'cancelled';
+
+function getDisplayedBackgroundState(
+  status: BackgroundCommandStatus,
+  cancelled: boolean
+): DisplayedBackgroundState {
+  return status === 'failed' && cancelled ? 'cancelled' : status;
 }
 
 function isActiveShippingCommand(
@@ -513,6 +523,14 @@ export function useBackgroundCommands({
     const origin = event.meta?.origin ?? previousCommand?.origin;
     const autoShipHalted = event.meta?.autoShipHalted ?? previousCommand?.autoShipHalted ?? false;
     const retriable = event.meta?.retriable ?? previousCommand?.retriable ?? false;
+    const previousDisplayedState = previousCommand
+      ? getDisplayedBackgroundState(previousCommand.status, previousCommand.cancelled)
+      : null;
+    const nextDisplayedState = getDisplayedBackgroundState(event.status, cancelled);
+    const stateChangedAt =
+      previousCommand && previousDisplayedState === nextDisplayedState
+        ? previousCommand.stateChangedAt
+        : Date.now();
     const autoShipEnabled = autoShipRepos.has(event.repo);
     const pausePending =
       event.command === 'ship' && event.status === 'running'
@@ -527,6 +545,7 @@ export function useBackgroundCommands({
       command: event.command,
       repo: event.repo,
       status: event.status,
+      stateChangedAt,
       title: getBackgroundTitle(event.command, event.repo, issueNumber, merge),
       detail: getBackgroundDetail({
         command: event.command,

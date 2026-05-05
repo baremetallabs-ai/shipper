@@ -112,6 +112,7 @@ export default function App(): JSX.Element {
         id: command.id,
         command: command.command,
         status: command.status,
+        stateChangedAt: command.stateChangedAt,
         title: command.title,
         repo: command.repo,
         detail: command.detail,

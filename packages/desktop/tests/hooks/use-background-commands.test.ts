@@ -12,7 +12,12 @@ import {
 } from '@dnsquared/shipper-core';
 import type { IssuePipelineBridge, IssueListResult } from '../../src/renderer/types.js';
 import { useBackgroundCommands } from '../../src/renderer/hooks/use-background-commands.js';
-import { createMockShipperApi, flushHookEffects } from './test-utils.js';
+import {
+  createMockShipperApi,
+  flushHookEffects,
+  setupHookTestTimers,
+  teardownHookTestTimers,
+} from './test-utils.js';
 import { MAX_AUTO_SHIP_CONSECUTIVE_FAILURES } from '../../src/renderer/lib/constants.js';
 
 function createIssue(number: number, labels: string[] = [PLANNED_LABEL]) {
@@ -94,6 +99,78 @@ describe('useBackgroundCommands', () => {
       expect(result.current.logViewer.open).toBe(true);
       expect(result.current.logViewer.content).toBe('complete log output');
     });
+  });
+
+  it('anchors stateChangedAt to displayed background state transitions', async () => {
+    setupHookTestTimers('2026-04-03T12:00:00.000Z');
+    try {
+      const shipper = createMockShipperApi();
+      shipper.install();
+      const { result } = renderHook(() =>
+        useBackgroundCommands({
+          activeRepo: 'owner/repo',
+          autoMergeRepos: new Set(),
+          checkInitState: vi.fn(() => Promise.resolve(undefined)),
+          pipelineBridgeRef: { current: createPipelineBridge() },
+        })
+      );
+      await flushHookEffects();
+
+      const queuedAt = Date.parse('2026-04-03T12:00:00.000Z');
+      shipper.emitBackgroundStatus({
+        sessionId: 'ship-state-time',
+        command: 'ship',
+        repo: 'owner/repo',
+        status: 'queued',
+        meta: { issueNumber: 11, merge: false },
+      });
+      await flushHookEffects();
+      expect(result.current.backgroundCommands[0]?.stateChangedAt).toBe(queuedAt);
+
+      const runningAt = Date.parse('2026-04-03T12:00:30.000Z');
+      vi.setSystemTime(new Date(runningAt));
+      shipper.emitBackgroundStatus({
+        sessionId: 'ship-state-time',
+        command: 'ship',
+        repo: 'owner/repo',
+        status: 'running',
+        meta: { issueNumber: 11, merge: false },
+      });
+      await flushHookEffects();
+      expect(result.current.backgroundCommands[0]?.stateChangedAt).toBe(runningAt);
+
+      vi.setSystemTime(new Date('2026-04-03T12:01:00.000Z'));
+      shipper.emitBackgroundStatus({
+        sessionId: 'ship-state-time',
+        command: 'ship',
+        repo: 'owner/repo',
+        status: 'running',
+        meta: { issueNumber: 11, merge: false, pausePending: true },
+      });
+      await flushHookEffects();
+      expect(result.current.backgroundCommands[0]?.stateChangedAt).toBe(runningAt);
+
+      const cancelledAt = Date.parse('2026-04-03T12:02:00.000Z');
+      vi.setSystemTime(new Date(cancelledAt));
+      shipper.emitBackgroundStatus({
+        sessionId: 'ship-state-time',
+        command: 'ship',
+        repo: 'owner/repo',
+        status: 'failed',
+        exitCode: 130,
+        meta: { issueNumber: 11, merge: false, cancelled: true },
+      });
+      await flushHookEffects();
+      expect(result.current.backgroundCommands[0]).toEqual(
+        expect.objectContaining({
+          status: 'failed',
+          cancelled: true,
+          stateChangedAt: cancelledAt,
+        })
+      );
+    } finally {
+      teardownHookTestTimers();
+    }
   });
 
   it('retries failed commands from toast payloads and removes the old command entry', async () => {

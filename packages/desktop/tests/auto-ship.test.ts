@@ -303,12 +303,14 @@ describe('selectNextAutoShipIssue', () => {
 
 describe('getActiveShipIssueNumbers', () => {
   it('returns queued and running ship issue numbers for the matching repo only', () => {
+    const stateChangedAt = Date.parse('2026-04-03T12:00:00.000Z');
     const commands: BackgroundCommandState[] = [
       {
         id: 'ship-queued',
         command: 'ship',
         repo: 'owner/repo',
         status: 'queued',
+        stateChangedAt,
         title: 'Ship #51',
         detail: 'Queued',
         output: '',
@@ -320,6 +322,7 @@ describe('getActiveShipIssueNumbers', () => {
         command: 'ship',
         repo: 'owner/repo',
         status: 'running',
+        stateChangedAt,
         title: 'Ship #52',
         detail: 'Running',
         output: '',
@@ -331,6 +334,7 @@ describe('getActiveShipIssueNumbers', () => {
         command: 'ship',
         repo: 'owner/repo',
         status: 'complete',
+        stateChangedAt,
         title: 'Ship #53',
         detail: 'Complete',
         output: '',
@@ -342,6 +346,7 @@ describe('getActiveShipIssueNumbers', () => {
         command: 'ship',
         repo: 'owner/repo',
         status: 'failed',
+        stateChangedAt,
         title: 'Ship #54',
         detail: 'Failed',
         output: '',
@@ -353,6 +358,7 @@ describe('getActiveShipIssueNumbers', () => {
         command: 'ship',
         repo: 'owner/repo',
         status: 'running',
+        stateChangedAt,
         title: 'Ship #55',
         detail: 'Cancelled',
         output: '',
@@ -364,6 +370,7 @@ describe('getActiveShipIssueNumbers', () => {
         command: 'ship',
         repo: 'owner/other',
         status: 'queued',
+        stateChangedAt,
         title: 'Ship #56',
         detail: 'Queued',
         output: '',
@@ -375,6 +382,7 @@ describe('getActiveShipIssueNumbers', () => {
         command: 'new',
         repo: 'owner/repo',
         status: 'running',
+        stateChangedAt,
         title: 'New issue',
         detail: 'Running',
         output: '',
@@ -385,6 +393,7 @@ describe('getActiveShipIssueNumbers', () => {
         command: 'unblock',
         repo: 'owner/repo',
         status: 'running',
+        stateChangedAt,
         title: 'Unblock #57',
         detail: 'Running',
         output: '',
