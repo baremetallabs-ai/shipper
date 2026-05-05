@@ -18,6 +18,17 @@ interface PtyExitEvent {
   exitCode: number | null;
 }
 
+type PtyCloseState =
+  | { state: 'finalizable' }
+  | { state: 'requires-discard-confirmation' }
+  | { state: 'finalizing' }
+  | { state: 'exited' };
+
+interface PtyStatusEvent {
+  sessionId: string;
+  status: 'running' | 'waiting' | 'finalizing' | 'exited';
+}
+
 type BackgroundCommand = 'new' | 'ship' | 'init' | 'unblock';
 type BackgroundStatus = 'queued' | 'running' | 'complete' | 'failed' | 'paused';
 
@@ -105,7 +116,10 @@ const shipperAPI = {
     ipcRenderer.invoke('pty-write', { sessionId, data }),
   ptyResize: (sessionId: string, cols: number, rows: number) =>
     ipcRenderer.invoke('pty-resize', { sessionId, cols, rows }),
-  ptyKill: (sessionId: string) => ipcRenderer.invoke('pty-kill', { sessionId }),
+  ptyCloseState: (sessionId: string): Promise<PtyCloseState> =>
+    ipcRenderer.invoke('pty-close-state', { sessionId }) as Promise<PtyCloseState>,
+  ptyFinalize: (sessionId: string) => ipcRenderer.invoke('pty-finalize', { sessionId }),
+  ptyForceKill: (sessionId: string) => ipcRenderer.invoke('pty-force-kill', { sessionId }),
 
   onPtyOutput: (callback: (data: PtyOutputEvent) => void) => {
     const handler = (_event: IpcRendererEvent, data: PtyOutputEvent): void => {
@@ -123,6 +137,15 @@ const shipperAPI = {
     ipcRenderer.on('pty-exit', handler);
     return () => {
       ipcRenderer.removeListener('pty-exit', handler);
+    };
+  },
+  onPtyStatus: (callback: (data: PtyStatusEvent) => void) => {
+    const handler = (_event: IpcRendererEvent, data: PtyStatusEvent): void => {
+      callback(data);
+    };
+    ipcRenderer.on('pty-status', handler);
+    return () => {
+      ipcRenderer.removeListener('pty-status', handler);
     };
   },
   onBackgroundStatus: (callback: (data: BackgroundStatusEvent) => void) => {

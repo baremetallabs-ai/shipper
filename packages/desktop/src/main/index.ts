@@ -13,6 +13,7 @@ import { registerPauseStateHandlers } from './handlers/pause-state.js';
 import { registerPrerequisiteHandlers } from './handlers/prerequisites.js';
 import { registerPtyHandlers } from './handlers/pty.js';
 import { registerResetHandlers } from './handlers/reset.js';
+import { registerQuitCoordinator } from './quit-coordinator.js';
 
 const ptyManager = new PtyManager();
 const backgroundManager = new BackgroundManager();
@@ -37,10 +38,7 @@ function createWindow(): BrowserWindow {
   ptyManager.setWindow(window);
   backgroundManager.setWindow(window);
 
-  window.on('close', () => {
-    ptyManager.destroyAll();
-    backgroundManager.destroyAll();
-  });
+  registerQuitCoordinator({ app, window, ptyManager, backgroundManager });
 
   window.once('ready-to-show', () => {
     window.show();

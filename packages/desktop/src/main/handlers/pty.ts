@@ -1,9 +1,15 @@
 import { existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { mkdir } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { ipcMain } from 'electron';
-import { buildPromptCommand, ensureRepoClone } from '@dnsquared/shipper-core';
+import {
+  SHIPPER_DESKTOP_CONTROL_DIR_ENV,
+  buildPromptCommand,
+  ensureRepoClone,
+} from '@dnsquared/shipper-core';
 
 import type { PtyManager } from '../pty-manager.js';
 import { isPositiveInteger, parseRepo } from './shared.js';
@@ -61,6 +67,30 @@ function parseSpawnShipperGroomPayload(value: unknown): SpawnShipperGroomPayload
   };
 }
 
+function parseSessionIdPayload(value: unknown, channel: string): string {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('sessionId' in value) ||
+    typeof value.sessionId !== 'string'
+  ) {
+    throw new Error(`Invalid ${channel} payload.`);
+  }
+
+  return value.sessionId;
+}
+
+function getPtyEnv(extra?: Record<string, string>): Record<string, string> {
+  return {
+    ...Object.fromEntries(
+      Object.entries(process.env).filter((entry): entry is [string, string] => {
+        return typeof entry[1] === 'string';
+      })
+    ),
+    ...extra,
+  };
+}
+
 export function registerPtyHandlers(ptyManager: PtyManager): void {
   const activeSetupRepos = new Set<string>();
   const repoPreparationQueues = new Map<string, Promise<void>>();
@@ -101,6 +131,8 @@ export function registerPtyHandlers(ptyManager: PtyManager): void {
     });
 
     const sessionId = randomUUID();
+    const controlDir = path.join(tmpdir(), 'shipper-pty', sessionId);
+    await mkdir(controlDir, { recursive: true });
     ptyManager.spawn(
       sessionId,
       'shipper',
@@ -109,6 +141,12 @@ export function registerPtyHandlers(ptyManager: PtyManager): void {
         cols: parsedPayload.cols,
         rows: parsedPayload.rows,
         cwd: repoPath,
+        env: getPtyEnv({ [SHIPPER_DESKTOP_CONTROL_DIR_ENV]: controlDir }),
+        kind: 'groom',
+        label: `groom — #${parsedPayload.issueNumber}`,
+        repo: parsedPayload.repo,
+        issueNumber: parsedPayload.issueNumber,
+        controlDir,
       }
     );
 
@@ -153,6 +191,9 @@ export function registerPtyHandlers(ptyManager: PtyManager): void {
         rows: parsedPayload.rows,
         cwd: cmd.cwd ?? repoPath,
         initialInput: cmd.initialInput,
+        kind: 'setup',
+        label: `setup — ${parsedPayload.repo}`,
+        repo: parsedPayload.repo,
       });
       ptyManager.onSessionExit(sessionId, clearSetupActive);
 
@@ -195,16 +236,18 @@ export function registerPtyHandlers(ptyManager: PtyManager): void {
     ptyManager.resize(payload.sessionId, payload.cols, payload.rows);
   });
 
-  ipcMain.handle('pty-kill', (_event, payload: unknown) => {
-    if (
-      typeof payload !== 'object' ||
-      payload === null ||
-      !('sessionId' in payload) ||
-      typeof payload.sessionId !== 'string'
-    ) {
-      throw new Error('Invalid pty-kill payload.');
-    }
+  ipcMain.handle('pty-close-state', async (_event, payload: unknown) => {
+    const sessionId = parseSessionIdPayload(payload, 'pty-close-state');
+    return await ptyManager.getCloseState(sessionId);
+  });
 
-    ptyManager.kill(payload.sessionId);
+  ipcMain.handle('pty-finalize', async (_event, payload: unknown) => {
+    const sessionId = parseSessionIdPayload(payload, 'pty-finalize');
+    await ptyManager.finalize(sessionId);
+  });
+
+  ipcMain.handle('pty-force-kill', (_event, payload: unknown) => {
+    const sessionId = parseSessionIdPayload(payload, 'pty-force-kill');
+    ptyManager.forceKill(sessionId);
   });
 }

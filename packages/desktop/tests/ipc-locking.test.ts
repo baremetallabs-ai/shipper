@@ -41,7 +41,11 @@ const state = vi.hoisted(() => ({
   ptyOnSessionExitMock: vi.fn(),
   ptyWriteMock: vi.fn(),
   ptyResizeMock: vi.fn(),
-  ptyKillMock: vi.fn(),
+  ptyGetCloseStateMock: vi.fn(),
+  ptyFinalizeMock: vi.fn(),
+  ptyForceKillMock: vi.fn(),
+  ptyListLiveWorkflowSessionsMock: vi.fn(),
+  ptyCloseLiveWorkflowSessionsForQuitMock: vi.fn(),
   ptyDestroyAllMock: vi.fn(),
   appWhenReadyMock: vi.fn(),
   appOnMock: vi.fn(),
@@ -50,10 +54,12 @@ const state = vi.hoisted(() => ({
   browserWindowOnMock: vi.fn(),
   browserWindowOnceMock: vi.fn(),
   browserWindowShowMock: vi.fn(),
+  browserWindowCloseMock: vi.fn(),
   browserWindowLoadUrlMock: vi.fn(),
   browserWindowLoadFileMock: vi.fn(),
   browserWindowGetAllWindowsMock: vi.fn(),
   shellOpenExternalMock: vi.fn<(url: string) => Promise<void>>(),
+  dialogShowMessageBoxMock: vi.fn(),
   webContentsSendMock: vi.fn(),
   webContentsOnMock: vi.fn(),
   webContentsGetUrlMock: vi.fn(),
@@ -132,6 +138,7 @@ vi.mock('@dnsquared/shipper-core', async () => {
     renewIssueLock: state.renewIssueLockMock,
     resolveBaseBranch: state.resolveBaseBranchMock,
     scanArtifacts: state.scanArtifactsMock,
+    SHIPPER_DESKTOP_CONTROL_DIR_ENV: 'SHIPPER_DESKTOP_CONTROL_DIR',
     STAGE_LABEL_NAMES: stageLabels,
     toError,
     toErrorMessage,
@@ -152,6 +159,7 @@ vi.mock('electron', () => {
     on = state.browserWindowOnMock;
     once = state.browserWindowOnceMock;
     show = state.browserWindowShowMock;
+    close = state.browserWindowCloseMock;
     loadURL = state.browserWindowLoadUrlMock;
     loadFile = state.browserWindowLoadFileMock;
   }
@@ -170,6 +178,9 @@ vi.mock('electron', () => {
     shell: {
       openExternal: state.shellOpenExternalMock,
     },
+    dialog: {
+      showMessageBox: state.dialogShowMessageBoxMock,
+    },
   };
 });
 
@@ -183,7 +194,11 @@ vi.mock('../src/main/pty-manager.js', () => ({
     };
     write = state.ptyWriteMock;
     resize = state.ptyResizeMock;
-    kill = state.ptyKillMock;
+    getCloseState = state.ptyGetCloseStateMock;
+    finalize = state.ptyFinalizeMock;
+    forceKill = state.ptyForceKillMock;
+    listLiveWorkflowSessions = state.ptyListLiveWorkflowSessionsMock;
+    closeLiveWorkflowSessionsForQuit = state.ptyCloseLiveWorkflowSessionsForQuitMock;
     destroyAll = state.ptyDestroyAllMock;
   },
 }));
@@ -235,6 +250,7 @@ async function loadHandlers(): Promise<Map<string, IpcHandler>> {
   state.appWhenReadyMock.mockResolvedValue(undefined);
   state.appGetPathMock.mockImplementation(() => mockUserDataPath);
   state.browserWindowGetAllWindowsMock.mockReturnValue([]);
+  state.browserWindowCloseMock.mockReset();
   state.browserWindowLoadUrlMock.mockResolvedValue(undefined);
   state.browserWindowLoadFileMock.mockResolvedValue(undefined);
   state.shellOpenExternalMock.mockReset();
@@ -293,6 +309,17 @@ async function loadHandlers(): Promise<Map<string, IpcHandler>> {
   state.backgroundRemoveQueuedSessionMock.mockReset();
   state.backgroundGetOutputMock.mockResolvedValue('');
   state.backgroundDestroyAllMock.mockReset();
+  state.ptyGetCloseStateMock.mockReset();
+  state.ptyGetCloseStateMock.mockResolvedValue({ state: 'finalizable' });
+  state.ptyFinalizeMock.mockReset();
+  state.ptyFinalizeMock.mockResolvedValue(undefined);
+  state.ptyForceKillMock.mockReset();
+  state.ptyListLiveWorkflowSessionsMock.mockReset();
+  state.ptyListLiveWorkflowSessionsMock.mockReturnValue([]);
+  state.ptyCloseLiveWorkflowSessionsForQuitMock.mockReset();
+  state.ptyCloseLiveWorkflowSessionsForQuitMock.mockResolvedValue(undefined);
+  state.dialogShowMessageBoxMock.mockReset();
+  state.dialogShowMessageBoxMock.mockResolvedValue({ response: 1 });
 
   await import('../src/main/index.ts');
   await Promise.resolve();
@@ -1189,13 +1216,54 @@ describe('desktop IPC locking', () => {
     rmSync(emptyRepoPath, { recursive: true, force: true });
   });
 
-  it('destroys both the PTY and background managers when the window closes', async () => {
+  it('destroys both the PTY and background managers when the window closes with no live workflow sessions', async () => {
     await loadHandlers();
 
-    state.browserWindowEventHandlers.get('close')?.();
+    state.browserWindowEventHandlers.get('close')?.({ preventDefault: vi.fn() });
 
     expect(state.ptyDestroyAllMock).toHaveBeenCalledTimes(1);
     expect(state.backgroundDestroyAllMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels app close when live workflow quit confirmation is canceled', async () => {
+    await loadHandlers();
+    const preventDefault = vi.fn();
+    state.ptyListLiveWorkflowSessionsMock.mockReturnValueOnce([
+      { sessionId: 'pty-1', label: 'groom — #42', kind: 'groom', status: 'running' },
+    ]);
+    state.dialogShowMessageBoxMock.mockResolvedValueOnce({ response: 1 });
+
+    state.browserWindowEventHandlers.get('close')?.({ preventDefault });
+    await flushMicrotasks();
+
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    expect(state.dialogShowMessageBoxMock).toHaveBeenCalledTimes(1);
+    expect(state.ptyCloseLiveWorkflowSessionsForQuitMock).not.toHaveBeenCalled();
+    expect(state.backgroundDestroyAllMock).not.toHaveBeenCalled();
+    expect(state.browserWindowCloseMock).not.toHaveBeenCalled();
+  });
+
+  it('drains live workflow sessions and retries close after quit confirmation', async () => {
+    await loadHandlers();
+    const preventDefault = vi.fn();
+    state.ptyListLiveWorkflowSessionsMock.mockReturnValueOnce([
+      { sessionId: 'pty-1', label: 'groom — #42', kind: 'groom', status: 'running' },
+      { sessionId: 'pty-2', label: 'setup — owner/repo', kind: 'setup', status: 'running' },
+    ]);
+    state.dialogShowMessageBoxMock.mockResolvedValueOnce({ response: 0 });
+
+    state.browserWindowEventHandlers.get('close')?.({ preventDefault });
+    await flushMicrotasks();
+
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    const dialogOptions = state.dialogShowMessageBoxMock.mock.calls[0]?.[1] as
+      | { detail?: string }
+      | undefined;
+    expect(dialogOptions?.detail).toContain('groom — #42');
+    expect(dialogOptions?.detail).toContain('setup — owner/repo');
+    expect(state.ptyCloseLiveWorkflowSessionsForQuitMock).toHaveBeenCalledTimes(1);
+    expect(state.backgroundDestroyAllMock).toHaveBeenCalledTimes(1);
+    expect(state.browserWindowCloseMock).toHaveBeenCalledTimes(1);
   });
 
   it('forwards bg-request-pause and bg-remove-queued-session payloads to the background manager', async () => {
@@ -1249,8 +1317,17 @@ describe('desktop IPC locking', () => {
         cols: 120,
         rows: 40,
         cwd: '/tmp/repo',
+        kind: 'groom',
+        label: 'groom — #42',
+        repo: 'owner/repo',
+        issueNumber: 42,
       })
     );
+    const spawnOptions = state.ptySpawnMock.mock.calls[0]?.[3] as
+      | { env?: Record<string, string>; controlDir?: string }
+      | undefined;
+    expect(typeof spawnOptions?.controlDir).toBe('string');
+    expect(spawnOptions?.env?.SHIPPER_DESKTOP_CONTROL_DIR).toBe(spawnOptions?.controlDir);
     expect(state.buildPromptCommandMock).not.toHaveBeenCalled();
     expect(state.createDesktopGroomWorktreeMock).not.toHaveBeenCalled();
     expect(state.acquireIssueLockMock).not.toHaveBeenCalled();
@@ -1335,6 +1412,9 @@ describe('desktop IPC locking', () => {
       rows: 40,
       cwd: repoPath,
       initialInput: 'seed prompt',
+      kind: 'setup',
+      label: 'setup — owner/repo',
+      repo: 'owner/repo',
     });
     expect(state.acquireIssueLockMock).not.toHaveBeenCalled();
     expect(state.renewIssueLockMock).not.toHaveBeenCalled();
@@ -1373,6 +1453,9 @@ describe('desktop IPC locking', () => {
       rows: 40,
       cwd: repoPath,
       initialInput: 'seed prompt',
+      kind: 'setup',
+      label: 'setup — owner/repo',
+      repo: 'owner/repo',
     });
     expect(state.acquireIssueLockMock).not.toHaveBeenCalled();
     expect(state.renewIssueLockMock).not.toHaveBeenCalled();
@@ -1489,6 +1572,32 @@ describe('desktop IPC locking', () => {
     expect(state.ensureRepoCloneForWorktreeMock).not.toHaveBeenCalled();
     expect(state.createDesktopGroomWorktreeMock).not.toHaveBeenCalled();
     expect(state.ptySpawnMock).not.toHaveBeenCalled();
+  });
+
+  it('forwards explicit PTY lifecycle IPC handlers', async () => {
+    await loadHandlers();
+
+    await expect(getHandler('pty-close-state')({}, { sessionId: 'pty-1' })).resolves.toEqual({
+      state: 'finalizable',
+    });
+    await getHandler('pty-finalize')({}, { sessionId: 'pty-1' });
+    getHandler('pty-force-kill')({}, { sessionId: 'pty-1' });
+
+    expect(state.ptyGetCloseStateMock).toHaveBeenCalledWith('pty-1');
+    expect(state.ptyFinalizeMock).toHaveBeenCalledWith('pty-1');
+    expect(state.ptyForceKillMock).toHaveBeenCalledWith('pty-1');
+  });
+
+  it('validates explicit PTY lifecycle IPC payloads', async () => {
+    await loadHandlers();
+
+    await expect(getHandler('pty-close-state')({}, { sessionId: 1 })).rejects.toThrow(
+      'Invalid pty-close-state payload.'
+    );
+    await expect(getHandler('pty-finalize')({}, null)).rejects.toThrow(
+      'Invalid pty-finalize payload.'
+    );
+    expect(() => getHandler('pty-force-kill')({}, {})).toThrow('Invalid pty-force-kill payload.');
   });
 
   it('acquires the issue lock before executing a reset', async () => {
@@ -1954,7 +2063,9 @@ describe('desktop IPC locking', () => {
         'pty-spawn-shipper-setup',
         'pty-write',
         'pty-resize',
-        'pty-kill',
+        'pty-close-state',
+        'pty-finalize',
+        'pty-force-kill',
         'bg-spawn-new',
         'bg-spawn-ship',
         'bg-spawn-init',

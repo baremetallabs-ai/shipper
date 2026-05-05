@@ -14,6 +14,7 @@ interface SessionTabBarProps {
 const STATUS_DOT_CLASS: Record<TerminalSessionStatus, string> = {
   running: 'bg-success',
   waiting: 'bg-warning',
+  finalizing: 'bg-primary',
   exited: 'bg-muted-foreground',
 };
 

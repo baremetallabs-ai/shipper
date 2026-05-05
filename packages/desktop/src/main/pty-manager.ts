@@ -14,6 +14,30 @@ import path from 'node:path';
 import type { BrowserWindow } from 'electron';
 import * as bundledPty from 'node-pty';
 import type * as NodePty from 'node-pty';
+import {
+  DESKTOP_AGENT_GRACE_TIMEOUT_MS,
+  DESKTOP_WRAPPER_DRAIN_TIMEOUT_MS,
+  hasDesktopResultArtifact,
+  requestDesktopFinalize,
+} from '@dnsquared/shipper-core';
+
+export type PtyWorkflowKind = 'groom' | 'setup';
+type PtyLifecycleStatus = 'running' | 'finalizing';
+
+export type PtyCloseState =
+  | { state: 'finalizable' }
+  | { state: 'requires-discard-confirmation' }
+  | { state: 'finalizing' }
+  | { state: 'exited' };
+
+export interface PtyWorkflowSessionSummary {
+  sessionId: string;
+  label: string;
+  kind: PtyWorkflowKind;
+  repo?: string;
+  issueNumber?: number;
+  status: PtyLifecycleStatus;
+}
 
 export interface PtySpawnOptions {
   cols: number;
@@ -21,15 +45,26 @@ export interface PtySpawnOptions {
   cwd?: string;
   env?: Record<string, string>;
   initialInput?: string;
+  kind?: PtyWorkflowKind;
+  label?: string;
+  repo?: string;
+  issueNumber?: number;
+  controlDir?: string;
 }
 
 interface PtySessionEntry {
   ptyProcess: NodePty.IPty;
   sequence: number;
   pendingBytes: number[];
+  status: PtyLifecycleStatus;
+  kind?: PtyWorkflowKind;
+  label?: string;
+  repo?: string;
+  issueNumber?: number;
+  controlDir?: string;
+  gracefulKillTimer?: ReturnType<typeof setTimeout>;
 }
 
-const GRACE_TIMEOUT_MS = 5_000;
 const NODE_PTY_CACHE_MARKER = '.shipper-node-pty-cache.json';
 const require = createRequire(import.meta.url);
 
@@ -257,6 +292,7 @@ function drainPendingUtf8(pending: number[], flush: boolean): string {
 export class PtyManager {
   private sessions = new Map<string, PtySessionEntry>();
   private exitCallbacks = new Map<string, () => void>();
+  private exitWaiters = new Map<string, Set<() => void>>();
   private window: BrowserWindow | null = null;
 
   setWindow(win: BrowserWindow): void {
@@ -284,6 +320,12 @@ export class PtyManager {
       ptyProcess,
       sequence: 0,
       pendingBytes: [],
+      status: 'running',
+      kind: options.kind,
+      label: options.label,
+      repo: options.repo,
+      issueNumber: options.issueNumber,
+      controlDir: options.controlDir,
     };
 
     this.sessions.set(id, entry);
@@ -318,12 +360,14 @@ export class PtyManager {
         });
       }
 
+      clearTimeout(entry.gracefulKillTimer);
       this.sessions.delete(id);
       const exitCb = this.exitCallbacks.get(id);
       if (exitCb) {
         this.exitCallbacks.delete(id);
         exitCb();
       }
+      this.resolveExitWaiters(id);
       this.window?.webContents.send('pty-exit', {
         sessionId: id,
         exitCode,
@@ -344,19 +388,69 @@ export class PtyManager {
   }
 
   kill(id: string): void {
+    this.forceKill(id);
+  }
+
+  forceKill(id: string): void {
     const entry = this.sessions.get(id);
     if (!entry) return;
 
+    clearTimeout(entry.gracefulKillTimer);
+    entry.gracefulKillTimer = undefined;
+
     try {
-      // Explicitly send SIGTERM — node-pty's default .kill() sends SIGHUP,
-      // which Claude Code may ignore during its shutdown/update-check phase.
-      process.kill(entry.ptyProcess.pid, 'SIGTERM');
+      process.kill(entry.ptyProcess.pid, 'SIGKILL');
     } catch {
       // Already exited.
     }
+  }
 
-    // If it hasn't exited after a grace period, force-kill.
-    setTimeout(() => {
+  async getCloseState(id: string): Promise<PtyCloseState> {
+    const entry = this.sessions.get(id);
+    if (!entry) {
+      return { state: 'exited' };
+    }
+
+    if (entry.status === 'finalizing') {
+      return { state: 'finalizing' };
+    }
+
+    if (entry.kind === 'setup') {
+      return { state: 'finalizable' };
+    }
+
+    if (entry.kind === 'groom' && entry.controlDir) {
+      return (await hasDesktopResultArtifact(entry.controlDir))
+        ? { state: 'finalizable' }
+        : { state: 'requires-discard-confirmation' };
+    }
+
+    return { state: 'requires-discard-confirmation' };
+  }
+
+  async finalize(id: string): Promise<void> {
+    const entry = this.sessions.get(id);
+    if (!entry || entry.status === 'finalizing') {
+      return;
+    }
+
+    entry.status = 'finalizing';
+    this.sendStatus(id, entry.status);
+
+    if (entry.kind === 'groom') {
+      if (entry.controlDir) {
+        await requestDesktopFinalize(entry.controlDir);
+      }
+      return;
+    }
+
+    try {
+      process.kill(entry.ptyProcess.pid, 'SIGTERM');
+    } catch {
+      return;
+    }
+
+    entry.gracefulKillTimer = setTimeout(() => {
       if (this.sessions.has(id)) {
         try {
           process.kill(entry.ptyProcess.pid, 'SIGKILL');
@@ -364,12 +458,94 @@ export class PtyManager {
           // Process already gone.
         }
       }
-    }, GRACE_TIMEOUT_MS);
+    }, DESKTOP_AGENT_GRACE_TIMEOUT_MS);
+  }
+
+  listLiveWorkflowSessions(): PtyWorkflowSessionSummary[] {
+    const summaries: PtyWorkflowSessionSummary[] = [];
+    for (const [sessionId, entry] of this.sessions) {
+      if (entry.kind !== 'groom' && entry.kind !== 'setup') {
+        continue;
+      }
+
+      summaries.push({
+        sessionId,
+        label: entry.label ?? sessionId,
+        kind: entry.kind,
+        repo: entry.repo,
+        issueNumber: entry.issueNumber,
+        status: entry.status,
+      });
+    }
+    return summaries;
+  }
+
+  async closeLiveWorkflowSessionsForQuit(): Promise<void> {
+    const sessions = this.listLiveWorkflowSessions();
+    await Promise.all(
+      sessions.map(async (session) => {
+        const closeState = await this.getCloseState(session.sessionId);
+        if (closeState.state === 'finalizable') {
+          await this.finalize(session.sessionId);
+          return;
+        }
+
+        if (closeState.state === 'requires-discard-confirmation') {
+          this.forceKill(session.sessionId);
+        }
+      })
+    );
+
+    const timeoutMs = DESKTOP_AGENT_GRACE_TIMEOUT_MS + DESKTOP_WRAPPER_DRAIN_TIMEOUT_MS;
+    await Promise.all(sessions.map((session) => this.waitForExit(session.sessionId, timeoutMs)));
+
+    for (const session of sessions) {
+      if (this.sessions.has(session.sessionId)) {
+        this.forceKill(session.sessionId);
+      }
+    }
   }
 
   destroyAll(): void {
     for (const [id] of this.sessions) {
-      this.kill(id);
+      this.forceKill(id);
     }
+  }
+
+  private sendStatus(sessionId: string, status: PtyLifecycleStatus): void {
+    this.window?.webContents.send('pty-status', { sessionId, status });
+  }
+
+  private resolveExitWaiters(sessionId: string): void {
+    const waiters = this.exitWaiters.get(sessionId);
+    if (!waiters) {
+      return;
+    }
+    this.exitWaiters.delete(sessionId);
+    for (const resolve of waiters) {
+      resolve();
+    }
+  }
+
+  private async waitForExit(sessionId: string, timeoutMs: number): Promise<void> {
+    if (!this.sessions.has(sessionId)) {
+      return;
+    }
+
+    await new Promise<void>((resolve) => {
+      const waiters = this.exitWaiters.get(sessionId) ?? new Set<() => void>();
+      const cleanup = (): void => {
+        clearTimeout(timeout);
+        waiters.delete(cleanup);
+        if (waiters.size === 0) {
+          this.exitWaiters.delete(sessionId);
+        }
+        resolve();
+      };
+
+      waiters.add(cleanup);
+      this.exitWaiters.set(sessionId, waiters);
+      const timeout = setTimeout(cleanup, timeoutMs);
+    });
   }
 }

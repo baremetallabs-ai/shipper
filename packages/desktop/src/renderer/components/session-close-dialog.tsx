@@ -1,6 +1,6 @@
 import type { JSX } from 'react';
 
-import type { TerminalSession } from '../types.js';
+import type { PendingTerminalClose } from '../types.js';
 import { Button } from './ui/button.js';
 import {
   Dialog,
@@ -12,30 +12,35 @@ import {
 } from './ui/dialog.js';
 
 interface SessionCloseDialogProps {
-  session: TerminalSession | null;
+  pendingClose: PendingTerminalClose | null;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
 }
 
 export function SessionCloseDialog({
-  session,
+  pendingClose,
   onOpenChange,
   onConfirm,
 }: SessionCloseDialogProps): JSX.Element {
+  const title =
+    pendingClose?.reason === 'force-kill-finalizing'
+      ? 'Force-kill finalizing session?'
+      : 'Discard terminal progress?';
+  const description =
+    pendingClose?.reason === 'force-kill-finalizing'
+      ? 'Post-session processing may not complete.'
+      : pendingClose
+        ? `No result.json exists yet for "${pendingClose.session.label}". Closing will terminate the agent and discard progress.`
+        : 'Closing this session will remove its tab.';
+  const confirmLabel =
+    pendingClose?.reason === 'force-kill-finalizing' ? 'Force kill' : 'Discard progress';
+
   return (
-    <Dialog open={session !== null} onOpenChange={onOpenChange}>
+    <Dialog open={pendingClose !== null} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>
-            {session?.status === 'exited' ? 'Close terminal tab?' : 'Close live terminal session?'}
-          </DialogTitle>
-          <DialogDescription>
-            {session
-              ? session.status === 'exited'
-                ? `"${session.label}" has already exited. Closing will remove its tab.`
-                : `Closing "${session.label}" will kill the live process and remove its tab.`
-              : 'Closing this session will remove its tab.'}
-          </DialogDescription>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         <DialogFooter>
           <Button
@@ -47,12 +52,8 @@ export function SessionCloseDialog({
           >
             Cancel
           </Button>
-          <Button
-            type="button"
-            variant={session?.status === 'exited' ? 'default' : 'destructive'}
-            onClick={onConfirm}
-          >
-            {session?.status === 'exited' ? 'Close tab' : 'Kill session'}
+          <Button type="button" variant="destructive" onClick={onConfirm}>
+            {confirmLabel}
           </Button>
         </DialogFooter>
       </DialogContent>

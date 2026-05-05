@@ -4,7 +4,7 @@ import type { ComponentRef, Dispatch, RefObject, SetStateAction } from 'react';
 import { toErrorMessage } from '@dnsquared/shipper-core';
 
 import { getShipperApi } from '../lib/shipper-api.js';
-import type { TerminalSession } from '../types.js';
+import type { PendingTerminalClose, TerminalCloseReason, TerminalSession } from '../types.js';
 
 function getNextActiveSessionId(
   sessions: TerminalSession[],
@@ -53,7 +53,7 @@ interface UseTerminalSessionsOptions {
 export interface UseTerminalSessionsResult {
   sessions: TerminalSession[];
   activeSessionId: string | null;
-  pendingCloseSession: TerminalSession | null;
+  pendingClose: PendingTerminalClose | null;
   drawerOpen: boolean;
   hasSession: boolean;
   contentPaneRef: RefObject<ComponentRef<'div'> | null>;
@@ -80,7 +80,10 @@ export function useTerminalSessions({
 }: UseTerminalSessionsOptions): UseTerminalSessionsResult {
   const [sessions, setSessions] = useState<TerminalSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [pendingCloseSessionId, setPendingCloseSessionId] = useState<string | null>(null);
+  const [pendingCloseState, setPendingCloseState] = useState<{
+    sessionId: string;
+    reason: TerminalCloseReason;
+  } | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const contentPaneRef = useRef<ComponentRef<'div'> | null>(null);
   const toggleButtonRef = useRef<ComponentRef<'button'> | null>(null);
@@ -91,9 +94,16 @@ export function useTerminalSessions({
 
   const hasSession = sessions.length > 0;
   const pendingCloseSession =
-    pendingCloseSessionId === null
+    pendingCloseState === null
       ? null
-      : (sessions.find((session) => session.id === pendingCloseSessionId) ?? null);
+      : (sessions.find((session) => session.id === pendingCloseState.sessionId) ?? null);
+  const pendingClose =
+    pendingCloseState === null || pendingCloseSession === null
+      ? null
+      : ({
+          session: pendingCloseSession,
+          reason: pendingCloseState.reason,
+        } satisfies PendingTerminalClose);
 
   useEffect(() => {
     sessionsRef.current = sessions;
@@ -141,6 +151,11 @@ export function useTerminalSessions({
 
   useEffect(() => {
     const unsubscribe = getShipperApi().onPtyExit((event) => {
+      if (event.exitCode === 0) {
+        removeSession(event.sessionId);
+        return;
+      }
+
       setSessions((currentSessions) => {
         const sessionIndex = currentSessions.findIndex(
           (session) => session.id === event.sessionId && session.status !== 'exited'
@@ -164,10 +179,34 @@ export function useTerminalSessions({
   }, []);
 
   useEffect(() => {
-    if (pendingCloseSessionId !== null && pendingCloseSession === null) {
-      setPendingCloseSessionId(null);
+    const unsubscribe = getShipperApi().onPtyStatus((event) => {
+      setSessions((currentSessions) => {
+        const sessionIndex = currentSessions.findIndex(
+          (session) => session.id === event.sessionId && session.status !== 'exited'
+        );
+        if (sessionIndex < 0) {
+          return currentSessions;
+        }
+
+        const session = currentSessions[sessionIndex];
+        if (!session || session.status === event.status) {
+          return currentSessions;
+        }
+
+        const nextSessions = [...currentSessions];
+        nextSessions[sessionIndex] = { ...session, status: event.status };
+        return nextSessions;
+      });
+    });
+
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    if (pendingCloseState !== null && pendingCloseSession === null) {
+      setPendingCloseState(null);
     }
-  }, [pendingCloseSession, pendingCloseSessionId]);
+  }, [pendingCloseSession, pendingCloseState]);
 
   useEffect(() => {
     if (sessions.length === 0) {
@@ -238,7 +277,7 @@ export function useTerminalSessions({
     lastOutputAtBySessionRef.current.delete(sessionId);
     setSessions(remainingSessions);
     setActiveSessionId(nextActiveSessionId);
-    setPendingCloseSessionId((current) => (current === sessionId ? null : current));
+    setPendingCloseState((current) => (current?.sessionId === sessionId ? null : current));
 
     if (remainingSessions.length === 0) {
       setDrawerOpen(false);
@@ -287,7 +326,7 @@ export function useTerminalSessions({
 
   function handlePendingCloseOpenChange(open: boolean): void {
     if (!open) {
-      setPendingCloseSessionId(null);
+      setPendingCloseState(null);
     }
   }
 
@@ -297,6 +336,25 @@ export function useTerminalSessions({
 
   function handleSelectSession(sessionId: string): void {
     setActiveSessionId(sessionId);
+  }
+
+  function setSessionStatus(sessionId: string, status: TerminalSession['status']): void {
+    setSessions((currentSessions) => {
+      const sessionIndex = currentSessions.findIndex((session) => session.id === sessionId);
+      if (sessionIndex < 0) {
+        return currentSessions;
+      }
+
+      const session = currentSessions[sessionIndex];
+      if (!session || session.status === status) {
+        return currentSessions;
+      }
+
+      const nextSessions = [...currentSessions];
+      nextSessions[sessionIndex] = { ...session, status };
+      sessionsRef.current = nextSessions;
+      return nextSessions;
+    });
   }
 
   function handleCloseSession(sessionId: string): void {
@@ -310,7 +368,38 @@ export function useTerminalSessions({
       return;
     }
 
-    setPendingCloseSessionId(sessionId);
+    if (session.status === 'finalizing') {
+      setPendingCloseState({ sessionId, reason: 'force-kill-finalizing' });
+      return;
+    }
+
+    void (async () => {
+      try {
+        const closeState = await getShipperApi().ptyCloseState(sessionId);
+        switch (closeState.state) {
+          case 'finalizable':
+            await getShipperApi().ptyFinalize(sessionId);
+            setSessionStatus(sessionId, 'finalizing');
+            break;
+          case 'requires-discard-confirmation':
+            setPendingCloseState({ sessionId, reason: 'discard-progress' });
+            break;
+          case 'finalizing':
+            setPendingCloseState({ sessionId, reason: 'force-kill-finalizing' });
+            break;
+          case 'exited':
+            removeSession(sessionId);
+            break;
+          default: {
+            const exhaustiveCheck: never = closeState;
+            throw new Error(`Unsupported close state: ${JSON.stringify(exhaustiveCheck)}`);
+          }
+        }
+      } catch (error) {
+        const message = toErrorMessage(error);
+        setFetchError(`Failed to close terminal session: ${message}`);
+      }
+    })();
   }
 
   function handleSessionInput(sessionId: string): void {
@@ -343,26 +432,22 @@ export function useTerminalSessions({
   }
 
   async function handleConfirmCloseSession(): Promise<void> {
-    const session = pendingCloseSessionId
-      ? (sessionsRef.current.find(
-          (currentSession) => currentSession.id === pendingCloseSessionId
-        ) ?? null)
+    const pending = pendingCloseState;
+    const session = pending
+      ? (sessionsRef.current.find((currentSession) => currentSession.id === pending.sessionId) ??
+        null)
       : null;
-    if (!session) {
-      setPendingCloseSessionId(null);
-      return;
-    }
-
-    if (session.status === 'exited') {
-      setPendingCloseSessionId(null);
-      removeSession(session.id);
+    if (!session || !pending) {
+      setPendingCloseState(null);
       return;
     }
 
     try {
-      await getShipperApi().ptyKill(session.id);
-      setPendingCloseSessionId(null);
-      removeSession(session.id);
+      await getShipperApi().ptyForceKill(session.id);
+      setPendingCloseState(null);
+      if (pending.reason === 'discard-progress') {
+        removeSession(session.id);
+      }
     } catch (error) {
       const message = toErrorMessage(error);
       setFetchError(`Failed to close terminal session: ${message}`);
@@ -372,7 +457,7 @@ export function useTerminalSessions({
   return {
     sessions,
     activeSessionId,
-    pendingCloseSession,
+    pendingClose,
     drawerOpen,
     hasSession,
     contentPaneRef,

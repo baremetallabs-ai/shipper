@@ -87,6 +87,17 @@ export interface PtyExitEvent {
   exitCode: number | null;
 }
 
+export type PtyCloseState =
+  | { state: 'finalizable' }
+  | { state: 'requires-discard-confirmation' }
+  | { state: 'finalizing' }
+  | { state: 'exited' };
+
+export interface PtyStatusEvent {
+  sessionId: string;
+  status: TerminalSessionStatus;
+}
+
 export interface ShipperApi {
   checkPrerequisites: () => Promise<Prerequisites>;
   getConfig: () => Promise<AppConfig>;
@@ -157,9 +168,12 @@ export interface ShipperApi {
   getBackgroundOutput: (sessionId: string) => Promise<string>;
   ptyWrite: (sessionId: string, data: string) => Promise<void>;
   ptyResize: (sessionId: string, cols: number, rows: number) => Promise<void>;
-  ptyKill: (sessionId: string) => Promise<void>;
+  ptyCloseState: (sessionId: string) => Promise<PtyCloseState>;
+  ptyFinalize: (sessionId: string) => Promise<void>;
+  ptyForceKill: (sessionId: string) => Promise<void>;
   onPtyOutput: (callback: (data: PtyOutputEvent) => void) => () => void;
   onPtyExit: (callback: (data: PtyExitEvent) => void) => () => void;
+  onPtyStatus: (callback: (data: PtyStatusEvent) => void) => () => void;
   onBackgroundStatus: (callback: (data: BackgroundStatusPayload) => void) => () => void;
   onBackgroundOutput: (callback: (data: BackgroundOutputPayload) => void) => () => void;
 }
@@ -183,7 +197,7 @@ export interface BackgroundCommandsBridge {
   clearAutoShipStateForRepo: (repo: string) => void;
 }
 
-export type TerminalSessionStatus = 'running' | 'waiting' | 'exited';
+export type TerminalSessionStatus = 'running' | 'waiting' | 'finalizing' | 'exited';
 
 export interface TerminalSession {
   id: string;
@@ -191,6 +205,13 @@ export interface TerminalSession {
   status: TerminalSessionStatus;
   repo?: string;
   issueNumber?: number;
+}
+
+export type TerminalCloseReason = 'discard-progress' | 'force-kill-finalizing';
+
+export interface PendingTerminalClose {
+  session: TerminalSession;
+  reason: TerminalCloseReason;
 }
 
 export interface ResetSelection {

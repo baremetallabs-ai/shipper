@@ -81,6 +81,17 @@ interface PtyExitEvent {
   exitCode: number | null;
 }
 
+type PtyCloseState =
+  | { state: 'finalizable' }
+  | { state: 'requires-discard-confirmation' }
+  | { state: 'finalizing' }
+  | { state: 'exited' };
+
+interface PtyStatusEvent {
+  sessionId: string;
+  status: 'running' | 'waiting' | 'finalizing' | 'exited';
+}
+
 type BackgroundCommand = 'new' | 'ship' | 'init' | 'unblock';
 type BackgroundStatus = 'queued' | 'running' | 'complete' | 'failed' | 'paused';
 
@@ -191,9 +202,12 @@ interface ShipperAPI {
   getBackgroundOutput: (sessionId: string) => Promise<string>;
   ptyWrite: (sessionId: string, data: string) => Promise<void>;
   ptyResize: (sessionId: string, cols: number, rows: number) => Promise<void>;
-  ptyKill: (sessionId: string) => Promise<void>;
+  ptyCloseState: (sessionId: string) => Promise<PtyCloseState>;
+  ptyFinalize: (sessionId: string) => Promise<void>;
+  ptyForceKill: (sessionId: string) => Promise<void>;
   onPtyOutput: (callback: (data: PtyOutputEvent) => void) => () => void;
   onPtyExit: (callback: (data: PtyExitEvent) => void) => () => void;
+  onPtyStatus: (callback: (data: PtyStatusEvent) => void) => () => void;
   onBackgroundStatus: (callback: (data: BackgroundStatusEvent) => void) => () => void;
   onBackgroundOutput: (callback: (data: BackgroundOutputEvent) => void) => () => void;
 }

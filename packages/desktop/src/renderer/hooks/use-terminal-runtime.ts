@@ -6,7 +6,7 @@ import '@xterm/xterm/css/xterm.css';
 
 import { getShipperApi } from '../lib/shipper-api.js';
 
-type TerminalStatus = 'running' | 'waiting' | 'exited';
+type TerminalStatus = 'running' | 'waiting' | 'finalizing' | 'exited';
 
 interface UseTerminalRuntimeOptions {
   sessionId: string;
