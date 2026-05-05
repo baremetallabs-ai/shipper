@@ -2,6 +2,9 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { parseFrontmatter } from '../../src/lib/frontmatter.js';
 
+const nonBindingIntakeMarker =
+  '*Non-binding intake interpretation: grooming may validate, revise, or discard these assumptions. The Request section remains the source of truth.*';
+
 const expectedRelevantDocumentationSection = `# Relevant Documentation (optional — include only if relevant docs are found)
 
 Scan the repository for documentation files (e.g., README.md, docs/, CONTRIBUTING.md, CHANGELOG.md) relevant to the request, then list the 3-5 most relevant entries. For each, label as:
@@ -88,6 +91,35 @@ describe('groom prompts', () => {
       expect(prompt).not.toContain('gh issue create');
       expect(prompt).not.toContain('gh issue close');
       expect(prompt).not.toContain('.shipper/tmp/');
+    }
+  );
+
+  it.each(['claude', 'codex', 'copilot'])(
+    'treats intake interpretation as tentative context for %s',
+    (agent) => {
+      const prompt = readFileSync(
+        new URL(`../../src/prompts/${agent}/groom.md`, import.meta.url),
+        'utf-8'
+      );
+
+      expect(prompt).toContain(
+        'Treat the `# Request` section as the authoritative source of truth for user intent.'
+      );
+      expect(prompt).toContain(
+        'Treat `# Interpretation`, `Assumptions`, and similar intake-stage sections as tentative, non-binding context.'
+      );
+      expect(prompt).toContain(
+        'Do not promote intake assumptions into `# Requirements` or `# Acceptance Criteria` unless they are explicit in `# Request` or confirmed by the product owner during grooming.'
+      );
+      expect(prompt).toContain(
+        'If an intake assumption is load-bearing for the eventual requirements and is a product-level decision, validate or revise it through Phase 3 questions.'
+      );
+      expect(prompt).toContain(
+        'If a load-bearing intake assumption is not a product-level decision, surface it in `# Open Questions` for engineering/design instead of making it a requirement.'
+      );
+      expect(prompt).toContain(
+        'Set aside non-load-bearing or obviously irrelevant intake assumptions without auditing every assumption one by one.'
+      );
     }
   );
 });
@@ -286,13 +318,16 @@ describe('new prompts', () => {
         'You **must read the codebase** (`Read`, `Glob`, `Grep`) to ground the issue before writing the Interpretation section.'
       );
       expect(prompt).toContain(
-        "Capture the user's request as faithfully as possible without adding requirements or expanding scope beyond what they said."
+        "Capture the user's request as faithfully as possible without adding requirements, inferred scope, gap-filling, or expected outcomes beyond what they said."
+      );
+      expect(prompt).toContain(
+        "This section is authoritative and must remain a faithful capture of the user's original words and intent."
       );
       expect(prompt).toContain(
         'Keep this section product-oriented: if the original request includes technical references, restate the intent without carrying those details into this section.'
       );
       expect(prompt).toContain(
-        'Your product-level inferences, assumptions, and gap-filling go here — user-facing behavior, scope assumptions, expected outcomes.'
+        'Your product-level inferences, assumptions, gap-filling, inferred scope, and expected outcomes go here as tentative intake-stage context'
       );
       expect(prompt).toContain(
         '**No technical content in this section:** no file paths, module or component names, class/function names, API shapes, data schemas, library or technology choices, or implementation approaches.'
@@ -302,6 +337,30 @@ describe('new prompts', () => {
       );
       expect(prompt).toContain(
         'Technical references — file paths, module or component names, class/function names, API shapes, data schemas, and library or technology choices — are permitted **only** in the Starting Point and Relevant Documentation sections. The Request and Interpretation sections must stay product-oriented.'
+      );
+    }
+  );
+
+  it.each(['claude', 'codex', 'copilot'])(
+    'renders non-binding Interpretation marker and keeps Request authoritative for %s',
+    (agent) => {
+      const prompt = readFileSync(
+        new URL(`../../src/prompts/${agent}/new.md`, import.meta.url),
+        'utf-8'
+      );
+
+      expect(prompt).toContain('# Interpretation');
+      expect(prompt).toContain(nonBindingIntakeMarker);
+      expect(prompt).toContain(
+        'The rendered GitHub issue body must begin this section with this exact line'
+      );
+      expect(prompt).toContain('before any assumptions or before the self-contained fallback');
+      expect(prompt).toContain('The Request section remains the source of truth.');
+      expect(prompt).toContain(
+        'This section is authoritative and must remain a faithful capture of the user'
+      );
+      expect(prompt).toContain(
+        'assumptions, gap-filling, inferred scope, and expected outcomes go here as tentative intake-stage context'
       );
     }
   );
