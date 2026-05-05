@@ -1,3 +1,10 @@
+# `git push` exports GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE / GIT_OBJECT_DIRECTORY /
+# GIT_ALTERNATE_OBJECT_DIRECTORIES into the hook process. Those leak into npm
+# subprocesses and break tests that spawn their own `git` (notably the worktree
+# integration tests in packages/core). Unset them so the test suite sees a clean
+# environment, matching what `npm run test` does outside a push.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
+
 npm run lint
 npm run format:check
 npm run type-check
