@@ -74,7 +74,7 @@ jobs:
         run: npm run build --workspace=packages/desktop
 
       - name: Package desktop app
-        run: npx electron-builder --mac --arm64
+        run: npx electron-builder --mac --arm64 --publish never
         working-directory: packages/desktop
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
