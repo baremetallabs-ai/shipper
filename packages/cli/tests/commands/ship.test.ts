@@ -41,9 +41,10 @@ vi.mock('node:fs', async () => {
   };
 });
 
-vi.mock('@dnsquared/shipper-core', async () => {
-  const actual =
-    await vi.importActual<typeof import('@dnsquared/shipper-core')>('@dnsquared/shipper-core');
+vi.mock('@baremetallabs-ai/shipper-core', async () => {
+  const actual = await vi.importActual<typeof import('@baremetallabs-ai/shipper-core')>(
+    '@baremetallabs-ai/shipper-core'
+  );
   return {
     ...actual,
     logger: {

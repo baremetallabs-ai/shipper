@@ -36,7 +36,7 @@ import {
   scanArtifacts,
   toErrorMessage,
   tryResolvePrForIssue,
-} from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
 import {
   formatAdvanceResult,
   formatCreateIssueResult,

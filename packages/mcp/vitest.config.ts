@@ -7,7 +7,7 @@ const packageRoot = fileURLToPath(new URL('.', import.meta.url));
 export default defineConfig({
   resolve: {
     alias: {
-      '@dnsquared/shipper-core': path.resolve(packageRoot, '../core/src/index.ts'),
+      '@baremetallabs-ai/shipper-core': path.resolve(packageRoot, '../core/src/index.ts'),
     },
   },
   assetsInclude: ['**/*.md', '**/*.sh'],

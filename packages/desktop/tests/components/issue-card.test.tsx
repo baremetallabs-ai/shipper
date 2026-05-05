@@ -14,7 +14,7 @@ import {
   type ListIssueItem,
   type TokenUsage,
   type WorkflowStage,
-} from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
 import type { DragSource } from '../../src/renderer/hooks/use-drag-drop.js';
 import {
   IssueCard,

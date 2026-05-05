@@ -9,7 +9,7 @@ import {
   runPrompt,
   type AgentName,
   type CommandMode,
-} from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
 import { confirm } from '../lib/confirm.js';
 
 export async function setupCommand(

@@ -97,7 +97,7 @@
           "status": "completed"
         }
       ],
-      "url": "https://github.com/dnsquared/shipper-cli/actions/runs/24586116623/job/71896005763"
+      "url": "https://github.com/baremetallabs-ai/shipper/actions/runs/24586116623/job/71896005763"
     },
     {
       "completedAt": "2026-04-17T20:53:28Z",
@@ -204,7 +204,7 @@
           "status": "completed"
         }
       ],
-      "url": "https://github.com/dnsquared/shipper-cli/actions/runs/24586116623/job/71896005764"
+      "url": "https://github.com/baremetallabs-ai/shipper/actions/runs/24586116623/job/71896005764"
     }
   ]
 }

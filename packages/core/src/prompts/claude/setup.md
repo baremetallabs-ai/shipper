@@ -227,7 +227,7 @@ For other package managers, set a worktree-local cache path in `.shipper/setting
 
 ### Session debugging
 
-Every Shipper agent run writes a metadata sidecar under `~/.shipper/sessions/<owner>-<repo>/` (the slug uses `-` as the separator, so `dnsquared/shipper-cli` becomes `dnsquared-shipper-cli`). Some runs also write a transcript file with the same basename:
+Every Shipper agent run writes a metadata sidecar under `~/.shipper/sessions/<owner>-<repo>/` (the slug uses `-` as the separator, so `baremetallabs-ai/shipper` becomes `baremetallabs-ai-shipper`). Some runs also write a transcript file with the same basename:
 
 - `<issue>-<stage>-<timestamp>.meta.json` — a small sidecar with run metadata.
 - `<issue>-<stage>-<timestamp>.jsonl` — the full agent transcript, when transcript logging is enabled for that run.

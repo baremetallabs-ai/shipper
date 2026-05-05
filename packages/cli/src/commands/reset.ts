@@ -23,7 +23,7 @@ import {
   toErrorMessage,
   type ResetResult,
   type WorkflowStage,
-} from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
 
 const IMPLEMENTED_STAGE_INDEX = STAGE_LABEL_NAMES.indexOf(IMPLEMENTED_LABEL);
 const RESETTABLE_STAGE_LABELS = STAGE_LABEL_NAMES.slice(0, IMPLEMENTED_STAGE_INDEX + 1);

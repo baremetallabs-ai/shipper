@@ -1,4 +1,4 @@
-import { isLockStale, listIssues, logger, releaseIssueLock } from '@dnsquared/shipper-core';
+import { isLockStale, listIssues, logger, releaseIssueLock } from '@baremetallabs-ai/shipper-core';
 
 function printUsage(): void {
   logger.error('Usage: shipper unlock <issue>');

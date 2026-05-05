@@ -70,9 +70,10 @@ const state = vi.hoisted(() => ({
 
 const warnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-vi.mock('@dnsquared/shipper-core', async () => {
-  const { isPlainObject, toError, toErrorMessage } =
-    await vi.importActual<typeof import('@dnsquared/shipper-core')>('@dnsquared/shipper-core');
+vi.mock('@baremetallabs-ai/shipper-core', async () => {
+  const { isPlainObject, toError, toErrorMessage } = await vi.importActual<
+    typeof import('@baremetallabs-ai/shipper-core')
+  >('@baremetallabs-ai/shipper-core');
   const stages = ['new', 'groomed', 'designed', 'planned', 'implemented'] as const;
   const stageLabels = stages.map((stage) => `shipper:${stage}`);
 

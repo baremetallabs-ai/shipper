@@ -1,4 +1,4 @@
-import { gh, isPlainObject, toErrorMessage } from '@dnsquared/shipper-core';
+import { gh, isPlainObject, toErrorMessage } from '@baremetallabs-ai/shipper-core';
 
 export interface AdoptIssuePayload {
   repo: string;

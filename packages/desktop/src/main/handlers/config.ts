@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { app, ipcMain } from 'electron';
-import { gh, isPlainObject, toErrorMessage } from '@dnsquared/shipper-core';
+import { gh, isPlainObject, toErrorMessage } from '@baremetallabs-ai/shipper-core';
 
 import { parseRepo } from './shared.js';
 

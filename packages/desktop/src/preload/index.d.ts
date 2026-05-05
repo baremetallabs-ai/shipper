@@ -1,4 +1,4 @@
-import type { ListIssueItem, TokenUsage } from '@dnsquared/shipper-core';
+import type { ListIssueItem, TokenUsage } from '@baremetallabs-ai/shipper-core';
 
 interface CheckResult {
   ok: boolean;

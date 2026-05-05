@@ -98,7 +98,7 @@ describe('configureExternalLinks', () => {
     const sameOriginEvent = { preventDefault: vi.fn() };
     const mailtoEvent = { preventDefault: vi.fn() };
 
-    handler(externalEvent, 'https://github.com/dnsquared/shipper/issues/627');
+    handler(externalEvent, 'https://github.com/baremetallabs-ai/shipper/issues/627');
     handler(sameOriginEvent, 'http://localhost:3000/settings');
     handler(mailtoEvent, 'mailto:test@example.com');
 
@@ -109,7 +109,7 @@ describe('configureExternalLinks', () => {
     expect(mailtoEvent.preventDefault).not.toHaveBeenCalled();
     expect(state.openExternalMock).toHaveBeenCalledTimes(1);
     expect(state.openExternalMock).toHaveBeenCalledWith(
-      'https://github.com/dnsquared/shipper/issues/627'
+      'https://github.com/baremetallabs-ai/shipper/issues/627'
     );
   });
 

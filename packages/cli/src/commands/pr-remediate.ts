@@ -37,8 +37,8 @@ import {
   withStageHooks,
   withWorktree,
   writeContextFile,
-} from '@dnsquared/shipper-core';
-import type { AgentName, CommandMode, PrReviewWait } from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
+import type { AgentName, CommandMode, PrReviewWait } from '@baremetallabs-ai/shipper-core';
 import type { StageRunResult } from './stage-result.js';
 
 const ZERO_CHECKS_GRACE_MS = 30_000;

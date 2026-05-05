@@ -19,7 +19,7 @@ import {
   DESKTOP_WRAPPER_DRAIN_TIMEOUT_MS,
   hasDesktopResultArtifact,
   requestDesktopFinalize,
-} from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
 
 export type PtyWorkflowKind = 'groom' | 'setup';
 type PtyLifecycleStatus = 'running' | 'finalizing';

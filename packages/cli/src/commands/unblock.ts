@@ -1,4 +1,4 @@
-import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
+import type { AgentName, CommandMode } from '@baremetallabs-ai/shipper-core';
 import {
   logger,
   parseIssueStateTitle,
@@ -14,7 +14,7 @@ import {
   toErrorMessage,
   withIssueLock,
   writeContextFile,
-} from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
 
 function extractIssueRefs(issueXml: string, issueStr: string): string[] {
   const refs = new Set<string>();

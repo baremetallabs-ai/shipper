@@ -1,4 +1,4 @@
-import type { AgentName } from '@dnsquared/shipper-core';
+import type { AgentName } from '@baremetallabs-ai/shipper-core';
 import { shipOneIssue } from './commands/ship-execute.js';
 
 interface WorkerRunMessage {

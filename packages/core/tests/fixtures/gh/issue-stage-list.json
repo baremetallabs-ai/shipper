@@ -33,7 +33,7 @@
       }
     ],
     "number": 637,
-    "title": "Curate @dnsquared/shipper-core public API and guard internals with ESLint"
+    "title": "Curate @baremetallabs-ai/shipper-core public API and guard internals with ESLint"
   },
   {
     "labels": [

@@ -35,7 +35,7 @@ import {
   LOCKED_LABEL,
   PAUSED_EXIT_CODE,
   RETRIABLE_FAILURE_EXIT_CODE,
-} from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
 
 class MockStream extends EventEmitter {
   emitData(chunk: string): void {

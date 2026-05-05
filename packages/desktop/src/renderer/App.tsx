@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { JSX } from 'react';
 
-import { toErrorMessage } from '@dnsquared/shipper-core';
+import { toErrorMessage } from '@baremetallabs-ai/shipper-core';
 
 import { ActionQueueDrawer } from './components/action-queue-drawer.js';
 import { AdoptDialog } from './components/adopt-dialog.js';

@@ -7,7 +7,7 @@ import {
   NEW_LABEL,
   STAGE_LABEL_NAMES,
   type ListIssueItem,
-} from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
 
 import { AUTO_SHIP_PRIORITY_LABELS, MAX_AUTO_SHIP_CONSECUTIVE_FAILURES } from './constants.js';
 import { getShipperApi } from './shipper-api.js';

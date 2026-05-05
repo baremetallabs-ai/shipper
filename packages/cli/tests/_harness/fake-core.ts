@@ -8,10 +8,10 @@ import {
   type PRChecksLine,
   type ResultJson,
   type RunPromptOpts,
-} from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
 
 type AggregateSessionUsageResult = Awaited<
-  ReturnType<(typeof import('@dnsquared/shipper-core'))['aggregateSessionUsage']>
+  ReturnType<(typeof import('@baremetallabs-ai/shipper-core'))['aggregateSessionUsage']>
 >;
 
 type GhResponse = { stdout: string; stderr: string };

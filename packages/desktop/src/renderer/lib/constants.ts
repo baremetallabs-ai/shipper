@@ -8,7 +8,7 @@ import {
   PR_REVIEWED_LABEL,
   READY_LABEL,
   type WorkflowStage,
-} from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
 
 export const repoPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 

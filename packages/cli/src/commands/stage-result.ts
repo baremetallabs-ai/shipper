@@ -1,1 +1,1 @@
-export type { StageRunResult } from '@dnsquared/shipper-core';
+export type { StageRunResult } from '@baremetallabs-ai/shipper-core';

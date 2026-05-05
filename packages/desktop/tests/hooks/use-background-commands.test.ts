@@ -9,7 +9,7 @@ import {
   PLANNED_LABEL,
   PR_REVIEWED_LABEL,
   READY_LABEL,
-} from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
 import type { IssuePipelineBridge, IssueListResult } from '../../src/renderer/types.js';
 import { useBackgroundCommands } from '../../src/renderer/hooks/use-background-commands.js';
 import {

@@ -9,15 +9,14 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-          registry-url: https://npm.pkg.github.com
-          scope: '@dnsquared'
+          registry-url: https://registry.npmjs.org
+          scope: '@baremetallabs-ai'
       - run: npm ci
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
@@ -44,17 +43,17 @@ jobs:
           CORE_NAME="$(node -p "require('./packages/core/package.json').name")"
           CORE_VERSION="$(node -p "require('./packages/core/package.json').version")"
 
-          if npm view "${CORE_NAME}@${CORE_VERSION}" version --registry=https://npm.pkg.github.com >/dev/null 2>&1; then
+          if npm view "${CORE_NAME}@${CORE_VERSION}" version >/dev/null 2>&1; then
             echo "${CORE_NAME}@${CORE_VERSION} already published"
           else
             npm publish --workspace=packages/core
           fi
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - run: npm publish --workspace=packages/cli
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   publish-desktop:
     runs-on: macos-latest

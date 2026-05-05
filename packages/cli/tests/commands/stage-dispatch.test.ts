@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { StageRunResult } from '@dnsquared/shipper-core';
+import type { StageRunResult } from '@baremetallabs-ai/shipper-core';
 
 import { createFakeCore } from '../_harness/fake-core.js';
 

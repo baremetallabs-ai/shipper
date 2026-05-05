@@ -12,7 +12,7 @@ import {
   withWorktree,
   type AgentName,
   type CommandMode,
-} from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
 
 const execFileAsync = promisify(execFile);
 const MAX_BRANCH_GENERATION_ATTEMPTS = 10;

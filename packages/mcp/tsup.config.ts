@@ -5,7 +5,7 @@ const pkg = JSON.parse(readFileSync('./package.json', 'utf-8')) as { version: st
 
 export default defineConfig({
   entry: ['src/index.ts'],
-  noExternal: ['@dnsquared/shipper-core'],
+  noExternal: ['@baremetallabs-ai/shipper-core'],
   format: ['esm'],
   dts: true,
   splitting: false,

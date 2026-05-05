@@ -24,8 +24,8 @@ import {
   withStageHooks,
   withWorktree,
   writeDesktopControlState,
-} from '@dnsquared/shipper-core';
-import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
+import type { AgentName, CommandMode } from '@baremetallabs-ai/shipper-core';
 import type { StageRunResult } from './stage-result.js';
 import { printAutoSummary, type AutoResult } from './ship-auto.js';
 

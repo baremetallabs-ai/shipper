@@ -42,7 +42,7 @@ Configure a repository so coding agents can run Shipper reliably.
 ## Error modes
 
 - Unknown path: Documentation page not found for path "<path>". Call shipper_docs_search to find a valid docs path.
-- Corpus unavailable or read failure: Shipper documentation corpus is unavailable. Rebuild @dnsquared/shipper-mcp with the docs snapshot or set SHIPPER_DOCS_PATH to an absolute docs corpus path.
+- Corpus unavailable or read failure: Shipper documentation corpus is unavailable. Rebuild @baremetallabs-ai/shipper-mcp with the docs snapshot or set SHIPPER_DOCS_PATH to an absolute docs corpus path.
 
 ## Related tools
 

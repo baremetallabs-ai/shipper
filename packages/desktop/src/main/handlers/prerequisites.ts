@@ -4,7 +4,7 @@ import {
   checkGhInstalled,
   checkLabels,
   toErrorMessage,
-} from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
 
 import { parseRepoPayload } from './shared.js';
 

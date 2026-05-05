@@ -7,7 +7,7 @@ import {
   FAILED_LABEL,
   LOCKED_LABEL,
   parseIssueTitleLabelsList,
-} from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
 
 const VALID_SHORT_NAMES = [
   ...STAGE_LABEL_NAMES.map((label) => label.replace('shipper:', '')),

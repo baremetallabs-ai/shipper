@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
-import type { WorkflowStage } from '@dnsquared/shipper-core';
+import type { WorkflowStage } from '@baremetallabs-ai/shipper-core';
 
 interface ConfigPayload {
   repos: string[];

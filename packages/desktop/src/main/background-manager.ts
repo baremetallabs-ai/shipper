@@ -7,7 +7,7 @@ import {
   LOCKED_LABEL,
   PAUSED_EXIT_CODE,
   RETRIABLE_FAILURE_EXIT_CODE,
-} from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
 
 type BackgroundChildProcess = ChildProcessByStdio<null, Readable, Readable>;
 

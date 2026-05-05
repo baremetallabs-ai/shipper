@@ -6,7 +6,7 @@ import {
   READY_LABEL,
   type ListIssueItem,
   type WorkflowStage,
-} from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
 
 import { useDragDrop } from '../hooks/use-drag-drop.js';
 import { COLUMN_RESET_STAGE, PIPELINE_COLUMNS } from '../lib/constants.js';

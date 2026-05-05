@@ -23,7 +23,7 @@ type DocsChunk = {
 };
 
 const CORPUS_UNAVAILABLE_MESSAGE =
-  'Shipper documentation corpus is unavailable. Rebuild @dnsquared/shipper-mcp with the docs snapshot or set SHIPPER_DOCS_PATH to an absolute docs corpus path.';
+  'Shipper documentation corpus is unavailable. Rebuild @baremetallabs-ai/shipper-mcp with the docs snapshot or set SHIPPER_DOCS_PATH to an absolute docs corpus path.';
 
 const EXTENSION_RE = /\.(?:md|mdx)$/;
 const HEADING_RE = /^\s{0,3}(#{1,6})\s+(.+)$/;

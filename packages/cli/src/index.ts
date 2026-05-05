@@ -1,6 +1,6 @@
 import { CommanderError } from 'commander';
 import { writeSync } from 'node:fs';
-import { logger } from '@dnsquared/shipper-core';
+import { logger } from '@baremetallabs-ai/shipper-core';
 import { createProgram } from './program.js';
 
 const program = createProgram();

@@ -7,8 +7,8 @@ import {
   resolveBaseBranch,
   runStageScaffold,
   simpleInvoker,
-} from '@dnsquared/shipper-core';
-import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
+import type { AgentName, CommandMode } from '@baremetallabs-ai/shipper-core';
 import type { StageRunResult } from './stage-result.js';
 
 export async function runPlanStage(

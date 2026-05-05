@@ -37,7 +37,7 @@ export default defineConfig({
     root: 'src/renderer',
     resolve: {
       alias: {
-        '@dnsquared/shipper-core': resolve(__dirname, '../core/src/browser.ts'),
+        '@baremetallabs-ai/shipper-core': resolve(__dirname, '../core/src/browser.ts'),
       },
     },
     build: {

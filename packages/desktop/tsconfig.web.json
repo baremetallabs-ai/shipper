@@ -9,7 +9,7 @@
     "moduleResolution": "bundler",
     "noEmit": true,
     "paths": {
-      "@dnsquared/shipper-core": ["../core/src/browser.ts"]
+      "@baremetallabs-ai/shipper-core": ["../core/src/browser.ts"]
     },
     "types": ["vite/client"]
   },

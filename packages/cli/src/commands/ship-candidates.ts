@@ -18,8 +18,8 @@ import {
   NEW_LABEL,
   BLOCKED_LABEL,
   LOCKED_LABEL,
-} from '@dnsquared/shipper-core';
-import type { AgentName } from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
+import type { AgentName } from '@baremetallabs-ai/shipper-core';
 import { prepareUnblockContext } from './unblock.js';
 import { formatLogDisplayPath } from './ship-execute.js';
 

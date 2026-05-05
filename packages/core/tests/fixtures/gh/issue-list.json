@@ -18,7 +18,7 @@
     "number": 641,
     "state": "OPEN",
     "title": "Update contributor docs to reflect the four-package monorepo and fix stale Vitest guidance",
-    "url": "https://github.com/dnsquared/shipper-cli/issues/641"
+    "url": "https://github.com/baremetallabs-ai/shipper/issues/641"
   },
   {
     "author": {
@@ -32,7 +32,7 @@
     "number": 640,
     "state": "CLOSED",
     "title": "Add regular macOS CI validation for the desktop packaging path",
-    "url": "https://github.com/dnsquared/shipper-cli/issues/640"
+    "url": "https://github.com/baremetallabs-ai/shipper/issues/640"
   },
   {
     "author": {
@@ -53,7 +53,7 @@
     "number": 639,
     "state": "OPEN",
     "title": "Replace ambient env-var contract between ship parent and child with explicit runtime context",
-    "url": "https://github.com/dnsquared/shipper-cli/issues/639"
+    "url": "https://github.com/baremetallabs-ai/shipper/issues/639"
   },
   {
     "author": {
@@ -80,7 +80,7 @@
     "number": 638,
     "state": "OPEN",
     "title": "Consolidate gh CLI JSON parsing into a single validation layer",
-    "url": "https://github.com/dnsquared/shipper-cli/issues/638"
+    "url": "https://github.com/baremetallabs-ai/shipper/issues/638"
   },
   {
     "author": {
@@ -100,8 +100,8 @@
     ],
     "number": 637,
     "state": "OPEN",
-    "title": "Curate @dnsquared/shipper-core public API and guard internals with ESLint",
-    "url": "https://github.com/dnsquared/shipper-cli/issues/637"
+    "title": "Curate @baremetallabs-ai/shipper-core public API and guard internals with ESLint",
+    "url": "https://github.com/baremetallabs-ai/shipper/issues/637"
   },
   {
     "author": {
@@ -122,7 +122,7 @@
     "number": 636,
     "state": "OPEN",
     "title": "Collapse the triple-wrapped option plumbing for prompt-running commands",
-    "url": "https://github.com/dnsquared/shipper-cli/issues/636"
+    "url": "https://github.com/baremetallabs-ai/shipper/issues/636"
   },
   {
     "author": {
@@ -136,7 +136,7 @@
     "number": 635,
     "state": "CLOSED",
     "title": "Lock renewal race: remove-and-re-add heartbeat lets concurrent acquires steal the lock",
-    "url": "https://github.com/dnsquared/shipper-cli/issues/635"
+    "url": "https://github.com/baremetallabs-ai/shipper/issues/635"
   },
   {
     "author": {
@@ -157,7 +157,7 @@
     "number": 634,
     "state": "OPEN",
     "title": "Replace desktop renderer deep imports into core with the package barrel, and guard with ESLint",
-    "url": "https://github.com/dnsquared/shipper-cli/issues/634"
+    "url": "https://github.com/baremetallabs-ai/shipper/issues/634"
   },
   {
     "author": {
@@ -178,7 +178,7 @@
     "number": 633,
     "state": "OPEN",
     "title": "Extract shared rebase-retry helper from worktree transport",
-    "url": "https://github.com/dnsquared/shipper-cli/issues/633"
+    "url": "https://github.com/baremetallabs-ai/shipper/issues/633"
   },
   {
     "author": {
@@ -199,6 +199,6 @@
     "number": 632,
     "state": "OPEN",
     "title": "Reduce CLI command test reliance on wholesale core mocks",
-    "url": "https://github.com/dnsquared/shipper-cli/issues/632"
+    "url": "https://github.com/baremetallabs-ai/shipper/issues/632"
   }
 ]

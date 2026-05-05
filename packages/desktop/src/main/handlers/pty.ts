@@ -9,7 +9,7 @@ import {
   SHIPPER_DESKTOP_CONTROL_DIR_ENV,
   buildPromptCommand,
   ensureRepoClone,
-} from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
 
 import type { PtyManager } from '../pty-manager.js';
 import { isPositiveInteger, parseRepo } from './shared.js';

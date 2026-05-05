@@ -1,6 +1,6 @@
 import type { WriteStream } from 'node:fs';
-import { executeMerge, gh, parseQueuedPrList } from '@dnsquared/shipper-core';
-import type { Logger, QueuedPR } from '@dnsquared/shipper-core';
+import { executeMerge, gh, parseQueuedPrList } from '@baremetallabs-ai/shipper-core';
+import type { Logger, QueuedPR } from '@baremetallabs-ai/shipper-core';
 
 const MERGE_FAILURE_PREFIX = 'Merge failed for PR #';
 

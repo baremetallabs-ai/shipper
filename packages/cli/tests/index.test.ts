@@ -12,9 +12,10 @@ const { mockLoggerError, mockLoggerLog, mockLoggerWarn } = vi.hoisted(() => ({
   }),
 }));
 
-vi.mock('@dnsquared/shipper-core', async () => {
-  const { toError, toErrorMessage } =
-    await vi.importActual<typeof import('@dnsquared/shipper-core')>('@dnsquared/shipper-core');
+vi.mock('@baremetallabs-ai/shipper-core', async () => {
+  const { toError, toErrorMessage } = await vi.importActual<
+    typeof import('@baremetallabs-ai/shipper-core')
+  >('@baremetallabs-ai/shipper-core');
 
   return {
     runAuthPreflight: vi.fn(),
@@ -86,7 +87,7 @@ import {
   warnTrackedOutputFiles,
   loadSettings,
   getRepoNwo,
-} from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
 
 const mockShipCommand = vi.mocked(shipCommand);
 const mockNextCommand = vi.mocked(nextCommand);

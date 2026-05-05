@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import * as core from '@dnsquared/shipper-core';
+import * as core from '@baremetallabs-ai/shipper-core';
 
 const { existsSyncMock, mkdirSyncMock, writeFileSyncMock } = vi.hoisted(() => ({
   existsSyncMock: vi.fn<(path: string) => boolean>(),

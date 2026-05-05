@@ -6,7 +6,7 @@ import {
   PR_REVIEWED_LABEL,
   toErrorMessage,
   type ListIssueItem,
-} from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
 
 import {
   getActiveShipIssueNumbers,

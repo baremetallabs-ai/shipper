@@ -21,7 +21,7 @@ import {
   type MergeQueueSearchNode,
   type PrViewForMerge,
   type QueuedPR,
-} from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
 
 interface MergeOptions {
   interval: string;
