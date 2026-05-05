@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
+import type { ComponentRef } from 'react';
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 
@@ -27,7 +28,7 @@ export function useTerminalRuntime({
   visible,
   onInput,
 }: UseTerminalRuntimeOptions) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
+  const containerRef = useRef<ComponentRef<'div'> | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const sessionIdRef = useRef(sessionId);
@@ -155,13 +156,13 @@ export function useTerminalRuntime({
 
     // Forward keyboard input to the PTY.
     const dataDisposable = terminal.onData((data) => {
-      if (statusRef.current === 'exited') return;
+      if (statusRef.current === 'exited' || statusRef.current === 'finalizing') return;
       onInputRef.current?.();
       void getShipperApi().ptyWrite(sessionIdRef.current, data);
     });
 
     // Debounced resize on container changes.
-    const observer = new ResizeObserver(() => {
+    const observer = new globalThis.ResizeObserver(() => {
       if (resizeTimerRef.current !== null) {
         globalThis.clearTimeout(resizeTimerRef.current);
       }

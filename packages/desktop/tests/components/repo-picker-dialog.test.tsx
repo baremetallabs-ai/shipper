@@ -109,15 +109,12 @@ function renderRejectedDialog({
 }
 
 function expectTextBefore(first: string, second: string): void {
-  // The desktop test tsconfig is Node-based, but this file runs under jsdom.
-  /* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call */
   const entries = Array.from(
     screen.getByRole('dialog').querySelectorAll('[cmdk-group-heading], [data-slot="command-item"]')
   ).map((entry) => {
     const text = entry.textContent;
     return typeof text === 'string' ? text.trim() : '';
   });
-  /* eslint-enable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call */
   const firstIndex = entries.indexOf(first);
   const secondIndex = entries.indexOf(second);
 
@@ -351,8 +348,6 @@ describe('RepoPickerDialog', () => {
     await advanceDebounce();
 
     expect(screen.getByText('octocat/previous')).toBeTruthy();
-    // The desktop test tsconfig is Node-based, but this file runs under jsdom.
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
     expect(screen.getByRole('dialog').querySelector('.animate-spin')).not.toBeNull();
   });
 
