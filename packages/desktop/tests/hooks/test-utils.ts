@@ -7,6 +7,7 @@ import type {
   Prerequisites,
   ShipperApi,
   TimelineLabelEvent,
+  PtyStatusEvent,
 } from '../../src/renderer/types.js';
 
 interface PtyOutputPayload {
@@ -25,6 +26,7 @@ type EventCallbackMap = {
   backgroundOutput: ((event: BackgroundOutputPayload) => void) | null;
   ptyOutput: ((event: PtyOutputPayload) => void) | null;
   ptyExit: ((event: PtyExitPayload) => void) | null;
+  ptyStatus: ((event: PtyStatusEvent) => void) | null;
 };
 
 const defaultPrerequisites: Prerequisites = {
@@ -52,6 +54,7 @@ export interface MockShipperApiController {
   emitBackgroundOutput: (event: BackgroundOutputPayload) => void;
   emitPtyOutput: (event: PtyOutputPayload) => void;
   emitPtyExit: (event: PtyExitPayload) => void;
+  emitPtyStatus: (event: PtyStatusEvent) => void;
 }
 
 export function createMockShipperApi(): MockShipperApiController {
@@ -60,6 +63,7 @@ export function createMockShipperApi(): MockShipperApiController {
     backgroundOutput: null,
     ptyOutput: null,
     ptyExit: null,
+    ptyStatus: null,
   };
 
   const api: ShipperApi = {
@@ -118,7 +122,9 @@ export function createMockShipperApi(): MockShipperApiController {
     getBackgroundOutput: vi.fn(() => Promise.resolve('')),
     ptyWrite: vi.fn(() => Promise.resolve()),
     ptyResize: vi.fn(() => Promise.resolve()),
-    ptyKill: vi.fn(() => Promise.resolve()),
+    ptyCloseState: vi.fn(() => Promise.resolve({ state: 'finalizable' })),
+    ptyFinalize: vi.fn(() => Promise.resolve()),
+    ptyForceKill: vi.fn(() => Promise.resolve()),
     onPtyOutput: vi.fn((callback: (event: PtyOutputPayload) => void) => {
       callbacks.ptyOutput = callback;
       return createUnsubscribe(callbacks, 'ptyOutput', callback);
@@ -126,6 +132,10 @@ export function createMockShipperApi(): MockShipperApiController {
     onPtyExit: vi.fn((callback: (event: PtyExitPayload) => void) => {
       callbacks.ptyExit = callback;
       return createUnsubscribe(callbacks, 'ptyExit', callback);
+    }),
+    onPtyStatus: vi.fn((callback: (event: PtyStatusEvent) => void) => {
+      callbacks.ptyStatus = callback;
+      return createUnsubscribe(callbacks, 'ptyStatus', callback);
     }),
     onBackgroundStatus: vi.fn((callback: (event: BackgroundStatusPayload) => void) => {
       callbacks.backgroundStatus = callback;
@@ -165,6 +175,11 @@ export function createMockShipperApi(): MockShipperApiController {
     emitPtyExit(event) {
       act(() => {
         callbacks.ptyExit?.(event);
+      });
+    },
+    emitPtyStatus(event) {
+      act(() => {
+        callbacks.ptyStatus?.(event);
       });
     },
   };

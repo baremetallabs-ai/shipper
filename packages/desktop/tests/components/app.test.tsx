@@ -304,7 +304,7 @@ function resetMockState(): void {
     handleToggleDrawer: vi.fn(),
     hasSession: false,
     openRunningSession: vi.fn(),
-    pendingCloseSession: null,
+    pendingClose: null,
     sessions: [],
     toggleButtonRef: { current: null },
   };

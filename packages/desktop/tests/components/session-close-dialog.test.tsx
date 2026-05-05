@@ -17,36 +17,41 @@ function createSession(overrides: Partial<TerminalSession> = {}): TerminalSessio
 }
 
 describe('SessionCloseDialog', () => {
-  it('renders the live-session copy and confirms closure', () => {
+  it('renders discard-progress copy and confirms closure', () => {
     const onConfirm = vi.fn();
     const onOpenChange = vi.fn();
 
     render(
       <SessionCloseDialog
-        session={createSession()}
+        pendingClose={{ session: createSession(), reason: 'discard-progress' }}
         onOpenChange={onOpenChange}
         onConfirm={onConfirm}
       />
     );
 
-    expect(screen.getByText('Close live terminal session?')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Kill session' }));
+    expect(screen.getByText('Discard terminal progress?')).toBeTruthy();
+    expect(screen.getByText(/No result\.json exists yet/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Discard progress' }));
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
     expect(onConfirm).toHaveBeenCalledTimes(1);
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
-  it('renders exited-session copy and uses the close-tab label', () => {
+  it('renders force-kill copy and uses the force-kill label', () => {
     render(
       <SessionCloseDialog
-        session={createSession({ status: 'exited', label: 'groom - #99' })}
+        pendingClose={{
+          session: createSession({ status: 'finalizing', label: 'groom - #99' }),
+          reason: 'force-kill-finalizing',
+        }}
         onOpenChange={vi.fn()}
         onConfirm={vi.fn()}
       />
     );
 
-    expect(screen.getByText('Close terminal tab?')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Close tab' })).toBeTruthy();
+    expect(screen.getByText('Force-kill finalizing session?')).toBeTruthy();
+    expect(screen.getByText('Post-session processing may not complete.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Force kill' })).toBeTruthy();
   });
 });

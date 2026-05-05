@@ -385,7 +385,7 @@ export default function App(): JSX.Element {
           onConfirm={pipelineState.handleUnlockDialogConfirm}
         />
         <SessionCloseDialog
-          session={terminalState.pendingCloseSession}
+          pendingClose={terminalState.pendingClose}
           onOpenChange={terminalState.handlePendingCloseOpenChange}
           onConfirm={() => {
             void terminalState.handleConfirmCloseSession();
