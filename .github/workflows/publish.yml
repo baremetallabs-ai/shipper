@@ -9,6 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -46,14 +47,10 @@ jobs:
           if npm view "${CORE_NAME}@${CORE_VERSION}" version >/dev/null 2>&1; then
             echo "${CORE_NAME}@${CORE_VERSION} already published"
           else
-            npm publish --workspace=packages/core
+            npm publish --workspace=packages/core --provenance
           fi
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - run: npm publish --workspace=packages/cli
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - run: npm publish --workspace=packages/cli --provenance
 
   publish-desktop:
     runs-on: macos-latest
