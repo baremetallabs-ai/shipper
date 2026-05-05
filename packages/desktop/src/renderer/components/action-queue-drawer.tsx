@@ -130,6 +130,10 @@ function formatAbsoluteStateChangeTime(stateChangedAt: number): string {
   }).format(new Date(stateChangedAt));
 }
 
+function isActiveStatus(status: ActionQueueStatus): boolean {
+  return status === 'queued' || status === 'running';
+}
+
 function StatusIcon({ status }: { status: ActionQueueStatus }): JSX.Element {
   if (status === 'running') {
     return <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />;
@@ -153,13 +157,24 @@ export function ActionQueueDrawer({
 }: ActionQueueDrawerProps): JSX.Element {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [now, setNow] = useState(() => Date.now());
-  const activeCount = commands.filter(
-    (command) => command.status === 'queued' || command.status === 'running'
-  ).length;
-  const hasActiveRows = commands.some(
-    (command) => command.status === 'queued' || command.status === 'running'
-  );
+  const [terminalNow, setTerminalNow] = useState(() => Date.now());
+  const activeCount = commands.filter((command) => isActiveStatus(command.status)).length;
+  const hasActiveRows = commands.some((command) => isActiveStatus(command.status));
   const hasClearable = commands.length > activeCount;
+  const stateChangeSignature = useMemo(
+    () =>
+      commands
+        .map((command) =>
+          [
+            command.id,
+            command.status,
+            command.cancelled ? 'cancelled' : 'active',
+            command.stateChangedAt,
+          ].join(':')
+        )
+        .join('|'),
+    [commands]
+  );
   const commandIndexById = useMemo(
     () => new Map(commands.map((command, index) => [command.id, index])),
     [commands]
@@ -215,6 +230,14 @@ export function ActionQueueDrawer({
     };
   }, [hasActiveRows, open]);
 
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    setTerminalNow(Date.now());
+  }, [open, stateChangeSignature]);
+
   return (
     <>
       <div
@@ -240,98 +263,111 @@ export function ActionQueueDrawer({
               </Button>
             ) : null}
           </div>
-          <div className="flex-1 overflow-y-auto" aria-live="polite">
+          <div className="flex-1 overflow-y-auto">
             {sortedCommands.length === 0 ? (
               <div className="px-4 py-6 text-sm text-muted-foreground">No active actions</div>
             ) : (
-              sortedCommands.map((item) => (
-                <article
-                  key={item.id}
-                  className="flex items-start gap-3 border-b border-border px-3 py-3"
-                >
-                  <div className="mt-0.5 rounded-full bg-muted p-1 text-muted-foreground">
-                    <StatusIcon status={item.status} />
-                  </div>
-                  <div className="min-w-0 flex-1 space-y-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="truncate text-sm font-medium text-foreground">{item.title}</p>
-                      <Badge variant="outline" className="uppercase tracking-[0.12em]">
-                        {getCommandLabel(item.command)}
-                      </Badge>
-                      <Badge variant={getStatusBadgeVariant(item.status)}>
-                        {getStatusLabel(item.status, item.cancelled)}
-                      </Badge>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <time
-                            dateTime={new Date(item.stateChangedAt).toISOString()}
-                            className="text-xs text-muted-foreground"
-                          >
-                            {formatRelativeStateChangeTime(item.stateChangedAt, now)}
-                          </time>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          {formatAbsoluteStateChangeTime(item.stateChangedAt)}
-                        </TooltipContent>
-                      </Tooltip>
-                      {item.workflowStage ? (
-                        <Badge variant="default" className="text-[10px]">
-                          {item.workflowStage}
+              sortedCommands.map((item) => {
+                const referenceNow = isActiveStatus(item.status) ? now : terminalNow;
+                const relativeTime = formatRelativeStateChangeTime(
+                  item.stateChangedAt,
+                  referenceNow
+                );
+                const absoluteTime = formatAbsoluteStateChangeTime(item.stateChangedAt);
+
+                return (
+                  <article
+                    key={item.id}
+                    className="flex items-start gap-3 border-b border-border px-3 py-3"
+                  >
+                    <div className="mt-0.5 rounded-full bg-muted p-1 text-muted-foreground">
+                      <StatusIcon status={item.status} />
+                    </div>
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="truncate text-sm font-medium text-foreground">{item.title}</p>
+                        <Badge variant="outline" className="uppercase tracking-[0.12em]">
+                          {getCommandLabel(item.command)}
                         </Badge>
+                        <span aria-live="polite" aria-atomic="true">
+                          <Badge variant={getStatusBadgeVariant(item.status)}>
+                            {getStatusLabel(item.status, item.cancelled)}
+                          </Badge>
+                        </span>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              className="rounded-sm text-xs text-muted-foreground outline-none underline-offset-2 hover:text-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                              aria-label={`${relativeTime}; state changed ${absoluteTime}`}
+                              title={absoluteTime}
+                            >
+                              <time dateTime={new Date(item.stateChangedAt).toISOString()}>
+                                {relativeTime}
+                              </time>
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent>{absoluteTime}</TooltipContent>
+                        </Tooltip>
+                        {item.workflowStage ? (
+                          <Badge variant="default" className="text-[10px]">
+                            {item.workflowStage}
+                          </Badge>
+                        ) : null}
+                      </div>
+                      <p className="truncate text-xs text-muted-foreground">{item.repo}</p>
+                      {item.detail ? (
+                        <p className="truncate text-xs text-muted-foreground">{item.detail}</p>
                       ) : null}
+                      <div className="flex flex-wrap items-center gap-1">
+                        {item.canShowLogs ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-xs"
+                            onClick={() => {
+                              onShowLogs(item.id);
+                            }}
+                          >
+                            Logs
+                          </Button>
+                        ) : null}
+                        {item.canCancel ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="size-7 text-muted-foreground hover:text-destructive"
+                            aria-label={`Stop ${item.title}`}
+                            onClick={() => {
+                              onCancel(item.id);
+                            }}
+                          >
+                            <Square className="size-3.5 fill-current" />
+                          </Button>
+                        ) : null}
+                        {item.status === 'failed' ||
+                        item.status === 'complete' ||
+                        item.status === 'paused' ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="size-7 text-muted-foreground"
+                            aria-label={`Dismiss ${item.title}`}
+                            onClick={() => {
+                              onDismiss(item.id);
+                            }}
+                          >
+                            <X className="size-3.5" />
+                          </Button>
+                        ) : null}
+                      </div>
                     </div>
-                    <p className="truncate text-xs text-muted-foreground">{item.repo}</p>
-                    {item.detail ? (
-                      <p className="truncate text-xs text-muted-foreground">{item.detail}</p>
-                    ) : null}
-                    <div className="flex flex-wrap items-center gap-1">
-                      {item.canShowLogs ? (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 px-2 text-xs"
-                          onClick={() => {
-                            onShowLogs(item.id);
-                          }}
-                        >
-                          Logs
-                        </Button>
-                      ) : null}
-                      {item.canCancel ? (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="size-7 text-muted-foreground hover:text-destructive"
-                          aria-label={`Stop ${item.title}`}
-                          onClick={() => {
-                            onCancel(item.id);
-                          }}
-                        >
-                          <Square className="size-3.5 fill-current" />
-                        </Button>
-                      ) : null}
-                      {item.status === 'failed' ||
-                      item.status === 'complete' ||
-                      item.status === 'paused' ? (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="size-7 text-muted-foreground"
-                          aria-label={`Dismiss ${item.title}`}
-                          onClick={() => {
-                            onDismiss(item.id);
-                          }}
-                        >
-                          <X className="size-3.5" />
-                        </Button>
-                      ) : null}
-                    </div>
-                  </div>
-                </article>
-              ))
+                  </article>
+                );
+              })
             )}
           </div>
         </div>

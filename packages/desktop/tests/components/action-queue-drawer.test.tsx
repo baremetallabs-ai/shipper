@@ -71,22 +71,26 @@ describe('ActionQueueDrawer', () => {
     expect(screen.getByText('3d ago')).toBeTruthy();
   });
 
-  it('reveals the absolute state-change timestamp from the relative label', () => {
+  it('reveals the absolute state-change timestamp from the focusable relative label', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(baseNow));
     const stateChangedAt = Date.parse('2026-04-03T11:59:30.000Z');
+    const absoluteTime = new Intl.DateTimeFormat(undefined, {
+      dateStyle: 'medium',
+      timeStyle: 'medium',
+    }).format(new Date(stateChangedAt));
 
     renderDrawer([createCommand({ stateChangedAt })]);
-    fireEvent.pointerEnter(screen.getByText('30s ago'));
+    const relativeTimeButton = screen.getByRole('button', {
+      name: `30s ago; state changed ${absoluteTime}`,
+    });
 
-    expect(
-      screen.getByText(
-        new Intl.DateTimeFormat(undefined, {
-          dateStyle: 'medium',
-          timeStyle: 'medium',
-        }).format(new Date(stateChangedAt))
-      )
-    ).toBeTruthy();
+    fireEvent.focus(relativeTimeButton);
+
+    expect(screen.getByText(absoluteTime)).toBeTruthy();
+
+    fireEvent.blur(relativeTimeButton);
+    expect(screen.queryByText(absoluteTime)).toBeNull();
   });
 
   it('ticks active row labels while open without receiving new command props', () => {
@@ -160,6 +164,35 @@ describe('ActionQueueDrawer', () => {
     });
 
     expect(screen.getByText('Just now')).toBeTruthy();
+  });
+
+  it('does not tick terminal row labels when active rows refresh', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(baseNow));
+
+    renderDrawer([
+      createCommand({
+        id: 'running',
+        title: 'Running command',
+        status: 'running',
+        stateChangedAt: baseNow,
+      }),
+      createCommand({
+        id: 'complete',
+        title: 'Complete command',
+        status: 'complete',
+        canCancel: false,
+        stateChangedAt: baseNow,
+      }),
+    ]);
+    expect(screen.getAllByText('Just now')).toHaveLength(2);
+
+    act(() => {
+      vi.advanceTimersByTime(30_000);
+    });
+
+    expect(screen.getByRole('button', { name: /^30s ago; state changed/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^Just now; state changed/ })).toBeTruthy();
   });
 
   it('renders relative labels for New, Ship, Init, and Unblock rows', () => {
