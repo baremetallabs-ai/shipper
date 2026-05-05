@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron';
-import { gh, isLockStale, LOCKED_LABEL, toErrorMessage } from '@dnsquared/shipper-core';
+import { gh, isLockStale, LOCKED_LABEL, toErrorMessage } from '@baremetallabs-ai/shipper-core';
 
 import { parseAdoptIssuePayload } from './shared.js';
 

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PRChecksLine } from '@dnsquared/shipper-core';
+import type { PRChecksLine } from '@baremetallabs-ai/shipper-core';
 
 import { createFakeCore } from '../_harness/fake-core.js';
 import { lookupPR, mergeCommand } from '../../src/commands/merge.js';

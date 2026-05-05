@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import * as core from '@dnsquared/shipper-core';
-import { runPrompt } from '@dnsquared/shipper-core';
-import type { RunPromptOpts } from '@dnsquared/shipper-core';
+import * as core from '@baremetallabs-ai/shipper-core';
+import { runPrompt } from '@baremetallabs-ai/shipper-core';
+import type { RunPromptOpts } from '@baremetallabs-ai/shipper-core';
 
 import { createFakeCore } from '../_harness/fake-core.js';
 

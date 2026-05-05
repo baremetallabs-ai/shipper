@@ -4,8 +4,8 @@ import { mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { logger, releaseIssueLock } from '@dnsquared/shipper-core';
-import type { AgentName } from '@dnsquared/shipper-core';
+import { logger, releaseIssueLock } from '@baremetallabs-ai/shipper-core';
+import type { AgentName } from '@baremetallabs-ai/shipper-core';
 import {
   attemptUnblock,
   printUnblockSummary,

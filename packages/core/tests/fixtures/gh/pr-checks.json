@@ -1,13 +1,13 @@
 [
   {
     "bucket": "pass",
-    "link": "https://github.com/dnsquared/shipper-cli/actions/runs/24586116623/job/71896005764",
+    "link": "https://github.com/baremetallabs-ai/shipper/actions/runs/24586116623/job/71896005764",
     "name": "check",
     "state": "SUCCESS"
   },
   {
     "bucket": "pass",
-    "link": "https://github.com/dnsquared/shipper-cli/actions/runs/24586116623/job/71896005763",
+    "link": "https://github.com/baremetallabs-ai/shipper/actions/runs/24586116623/job/71896005763",
     "name": "desktop-macos",
     "state": "SUCCESS"
   }

@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { app, ipcMain } from 'electron';
-import { ensureRepoClone, gh, isPlainObject, toErrorMessage } from '@dnsquared/shipper-core';
+import { ensureRepoClone, gh, isPlainObject, toErrorMessage } from '@baremetallabs-ai/shipper-core';
 
 import type { BackgroundManager } from '../background-manager.js';
 import { isPositiveInteger, parseAdoptIssuePayload, parseRepo } from './shared.js';

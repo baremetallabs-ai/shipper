@@ -2,7 +2,7 @@ import { LoaderCircle, PlusCircle, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { JSX } from 'react';
 
-import { toErrorMessage } from '@dnsquared/shipper-core';
+import { toErrorMessage } from '@baremetallabs-ai/shipper-core';
 import { Alert, AlertDescription, AlertTitle } from './ui/alert.js';
 import { Button } from './ui/button.js';
 import {

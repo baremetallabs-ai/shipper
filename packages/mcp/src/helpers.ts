@@ -1,6 +1,10 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import type { ArtifactScan, DeferMarkerPayload, ResetResult } from '@dnsquared/shipper-core';
-import { DEFER_MARKER_PREFIX, parseDeferMarker, toErrorMessage } from '@dnsquared/shipper-core';
+import type { ArtifactScan, DeferMarkerPayload, ResetResult } from '@baremetallabs-ai/shipper-core';
+import {
+  DEFER_MARKER_PREFIX,
+  parseDeferMarker,
+  toErrorMessage,
+} from '@baremetallabs-ai/shipper-core';
 
 export interface SpawnResult {
   exitCode: number;

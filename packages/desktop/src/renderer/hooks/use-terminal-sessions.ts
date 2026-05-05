@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ComponentRef, Dispatch, RefObject, SetStateAction } from 'react';
 
-import { toErrorMessage } from '@dnsquared/shipper-core';
+import { toErrorMessage } from '@baremetallabs-ai/shipper-core';
 
 import { getShipperApi } from '../lib/shipper-api.js';
 import type { PendingTerminalClose, TerminalCloseReason, TerminalSession } from '../types.js';

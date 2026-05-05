@@ -10,7 +10,7 @@ import {
   type ListIssueItem,
   type TokenUsage,
   type WorkflowStage,
-} from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
 
 import {
   POST_IMPLEMENTATION_LABELS,

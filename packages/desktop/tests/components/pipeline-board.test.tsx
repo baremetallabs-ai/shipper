@@ -15,7 +15,7 @@ import {
   PR_REVIEWED_LABEL,
   READY_LABEL,
   type TokenUsage,
-} from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
 import { PipelineBoard } from '../../src/renderer/components/pipeline-board.js';
 import { PIPELINE_COLUMNS } from '../../src/renderer/lib/constants.js';
 import type {

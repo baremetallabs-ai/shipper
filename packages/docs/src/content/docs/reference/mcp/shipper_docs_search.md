@@ -45,7 +45,7 @@ snippet: Configure a repository so any coding agent can run Shipper reliably...
 
 ## Error modes
 
-- Corpus unavailable or read failure: Shipper documentation corpus is unavailable. Rebuild @dnsquared/shipper-mcp with the docs snapshot or set SHIPPER_DOCS_PATH to an absolute docs corpus path.
+- Corpus unavailable or read failure: Shipper documentation corpus is unavailable. Rebuild @baremetallabs-ai/shipper-mcp with the docs snapshot or set SHIPPER_DOCS_PATH to an absolute docs corpus path.
 
 ## Related tools
 

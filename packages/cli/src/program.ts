@@ -1,10 +1,15 @@
 import { Argument, Command, Option } from 'commander';
-import { runAuthPreflight, runPreflight } from '@dnsquared/shipper-core';
-import { getRepoNwo } from '@dnsquared/shipper-core';
-import { loadSettings, logger, type AgentName, type CommandMode } from '@dnsquared/shipper-core';
-import { CLI_VERSION, checkVersionFreshness } from '@dnsquared/shipper-core';
-import { toErrorMessage } from '@dnsquared/shipper-core';
-import { warnTrackedOutputFiles } from '@dnsquared/shipper-core';
+import { runAuthPreflight, runPreflight } from '@baremetallabs-ai/shipper-core';
+import { getRepoNwo } from '@baremetallabs-ai/shipper-core';
+import {
+  loadSettings,
+  logger,
+  type AgentName,
+  type CommandMode,
+} from '@baremetallabs-ai/shipper-core';
+import { CLI_VERSION, checkVersionFreshness } from '@baremetallabs-ai/shipper-core';
+import { toErrorMessage } from '@baremetallabs-ai/shipper-core';
+import { warnTrackedOutputFiles } from '@baremetallabs-ai/shipper-core';
 import { initCommand } from './commands/init.js';
 import { newCommand } from './commands/new.js';
 import { adoptCommand, adoptAllCommand } from './commands/adopt.js';

@@ -14,7 +14,7 @@ import {
   PRIORITY_LOW_LABEL,
   READY_LABEL,
   type ListIssueItem,
-} from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
 import {
   getActiveShipIssueNumbers,
   getBackgroundDetail,

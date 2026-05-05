@@ -9,7 +9,7 @@ export default defineConfig({
   plugins: [shipperCoreTextAssetsPlugin()],
   resolve: {
     alias: {
-      '@dnsquared/shipper-core': path.resolve(packageRoot, '../core/src/index.ts'),
+      '@baremetallabs-ai/shipper-core': path.resolve(packageRoot, '../core/src/index.ts'),
     },
   },
   test: {

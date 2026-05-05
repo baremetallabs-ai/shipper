@@ -1,5 +1,10 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { getRepoNwo, loadSettings, runAuthPreflight, runPreflight } from '@dnsquared/shipper-core';
+import {
+  getRepoNwo,
+  loadSettings,
+  runAuthPreflight,
+  runPreflight,
+} from '@baremetallabs-ai/shipper-core';
 import { resolveAndEnterRepoDir } from './repo-dir.js';
 import { registerInitErrorTools, registerTools } from './tools.js';
 

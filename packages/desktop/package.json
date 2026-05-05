@@ -1,8 +1,16 @@
 {
-  "name": "@dnsquared/shipper-desktop",
-  "version": "2.0.0",
+  "name": "@baremetallabs-ai/shipper-desktop",
+  "version": "3.0.0",
   "description": "Desktop app for Shipper workflow orchestration",
-  "author": "dnsquared",
+  "homepage": "https://shipper.baremetallabs.ai",
+  "bugs": {
+    "url": "https://github.com/baremetallabs-ai/shipper/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/baremetallabs-ai/shipper.git"
+  },
+  "author": "Bare Metal Labs AI",
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
@@ -19,7 +27,7 @@
     "dist": "electron-builder"
   },
   "dependencies": {
-    "@dnsquared/shipper-core": "2.0.0",
+    "@baremetallabs-ai/shipper-core": "3.0.0",
     "@radix-ui/react-dialog": "^1.1.14",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
     "@radix-ui/react-tooltip": "^1.2.7",

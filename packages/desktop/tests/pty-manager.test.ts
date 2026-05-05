@@ -7,7 +7,7 @@ import {
   DESKTOP_AGENT_GRACE_TIMEOUT_MS,
   DESKTOP_FINALIZE_SENTINEL_FILE,
   writeDesktopControlState,
-} from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
 
 vi.mock('node-pty', () => ({
   spawn: vi.fn(),

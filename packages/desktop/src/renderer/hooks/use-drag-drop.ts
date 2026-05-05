@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-import type { ListIssueItem, WorkflowStage } from '@dnsquared/shipper-core';
+import type { ListIssueItem, WorkflowStage } from '@baremetallabs-ai/shipper-core';
 
 export type DragSource =
   | {

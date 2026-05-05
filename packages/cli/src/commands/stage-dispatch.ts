@@ -9,8 +9,8 @@ import {
   READY_LABEL,
   logger,
   tryResolvePrForIssue,
-} from '@dnsquared/shipper-core';
-import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
+import type { AgentName, CommandMode } from '@baremetallabs-ai/shipper-core';
 import { runDesignStage } from './design.js';
 import { runGroomStage } from './groom.js';
 import { runImplementStage } from './implement.js';

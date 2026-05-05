@@ -15,7 +15,7 @@ import {
   STAGE_LABEL_NAMES,
   toErrorMessage,
   type WorkflowStage,
-} from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
 
 import { isPositiveInteger, loadResetIssue, parseRepo, type RawResetIssueData } from './shared.js';
 

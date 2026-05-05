@@ -6,7 +6,7 @@ import {
   NEW_LABEL,
   toErrorMessage,
   type ListIssueItem,
-} from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
 
 import { syncWorkflowStageCacheForRepo } from '../lib/app-utils.js';
 import { getShipperApi } from '../lib/shipper-api.js';

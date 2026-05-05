@@ -1,4 +1,4 @@
-import type { ListIssueItem, TokenUsage, WorkflowStage } from '@dnsquared/shipper-core';
+import type { ListIssueItem, TokenUsage, WorkflowStage } from '@baremetallabs-ai/shipper-core';
 
 export interface CheckResult {
   ok: boolean;

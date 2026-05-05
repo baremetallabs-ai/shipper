@@ -10,7 +10,7 @@ import {
   toErrorMessage,
   type ListIssueItem,
   type TokenUsage,
-} from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
 
 import {
   isPositiveInteger,

@@ -10,7 +10,7 @@ import {
   NEW_LABEL,
   PLANNED_LABEL,
   type TokenUsage,
-} from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
 import { useIssuePipeline } from '../../src/renderer/hooks/use-issue-pipeline.js';
 import type { PipelineIssue } from '../../src/renderer/types.js';
 import {

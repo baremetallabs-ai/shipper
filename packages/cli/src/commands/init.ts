@@ -18,7 +18,7 @@ import {
   checkGitHubRemote,
   runAuthPreflight,
   toErrorMessage,
-} from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
 
 const execFileAsync = promisify(execFile);
 

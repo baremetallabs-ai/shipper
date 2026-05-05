@@ -83,7 +83,7 @@ describe('ghJson', () => {
     ghMock.mockResolvedValueOnce({ stdout: readFixture('issue-view.json'), stderr: '' });
 
     const parsed = await ghJson(
-      ['issue', 'view', '638', '-R', 'dnsquared/shipper-cli', '--json', 'number,title'],
+      ['issue', 'view', '638', '-R', 'baremetallabs-ai/shipper', '--json', 'number,title'],
       parseIssue
     );
 

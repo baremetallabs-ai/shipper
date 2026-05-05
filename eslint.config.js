@@ -100,14 +100,14 @@ export default [
         {
           patterns: [
             {
-              group: ['@dnsquared/shipper-core/*'],
+              group: ['@baremetallabs-ai/shipper-core/*'],
               message:
-                'Import from @dnsquared/shipper-core. Deep subpaths are not part of the public API.',
+                'Import from @baremetallabs-ai/shipper-core. Deep subpaths are not part of the public API.',
             },
             {
               group: ['**/core/src/**', '**/packages/core/src/**'],
               message:
-                'Do not reach into packages/core/src from outside the core package. Import from @dnsquared/shipper-core.',
+                'Do not reach into packages/core/src from outside the core package. Import from @baremetallabs-ai/shipper-core.',
             },
           ],
         },
@@ -116,9 +116,9 @@ export default [
         'error',
         {
           selector:
-            "CallExpression[callee.object.name='vi'][callee.property.name=/^(mock|doMock|importActual|importMock)$/] > Literal:first-child[value=/(@dnsquared\\/shipper-core\\/|core\\/src\\/|packages\\/core\\/src\\/)/]",
+            "CallExpression[callee.object.name='vi'][callee.property.name=/^(mock|doMock|importActual|importMock)$/] > Literal:first-child[value=/(@baremetallabs-ai\\/shipper-core\\/|core\\/src\\/|packages\\/core\\/src\\/)/]",
           message:
-            'Vitest module strings must use @dnsquared/shipper-core, not deep core paths or subpaths.',
+            'Vitest module strings must use @baremetallabs-ai/shipper-core, not deep core paths or subpaths.',
         },
       ],
     },
@@ -132,14 +132,14 @@ export default [
         {
           patterns: [
             {
-              group: ['@dnsquared/shipper-core/*'],
+              group: ['@baremetallabs-ai/shipper-core/*'],
               message:
-                'Import from @dnsquared/shipper-core. Deep subpaths are not part of the public API.',
+                'Import from @baremetallabs-ai/shipper-core. Deep subpaths are not part of the public API.',
             },
             {
               group: ['**/core/src/**', '**/packages/core/src/**'],
               message:
-                'Do not reach into packages/core/src from outside the core package. Import from @dnsquared/shipper-core.',
+                'Do not reach into packages/core/src from outside the core package. Import from @baremetallabs-ai/shipper-core.',
             },
           ],
         },
@@ -148,9 +148,9 @@ export default [
         'error',
         {
           selector:
-            "CallExpression[callee.object.name='vi'][callee.property.name=/^(mock|doMock|importActual|importMock)$/] > Literal:first-child[value=/(@dnsquared\\/shipper-core\\/|core\\/src\\/|packages\\/core\\/src\\/)/]",
+            "CallExpression[callee.object.name='vi'][callee.property.name=/^(mock|doMock|importActual|importMock)$/] > Literal:first-child[value=/(@baremetallabs-ai\\/shipper-core\\/|core\\/src\\/|packages\\/core\\/src\\/)/]",
           message:
-            'Vitest module strings must use @dnsquared/shipper-core, not deep core paths or subpaths.',
+            'Vitest module strings must use @baremetallabs-ai/shipper-core, not deep core paths or subpaths.',
         },
       ],
     },

@@ -3,7 +3,7 @@ import {
   logger,
   parseIssueNumberLabels,
   parseIssueNumberLabelsList,
-} from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
 
 export async function adoptCommand(issue: string): Promise<void> {
   const cleanRef = issue.replace(/^#/, '');

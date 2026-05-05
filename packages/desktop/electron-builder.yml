@@ -1,4 +1,4 @@
-appId: com.dnsquared.shipper
+appId: ai.baremetallabs.shipper
 productName: Shipper
 electronVersion: 41.3.0
 

@@ -30,14 +30,11 @@ repeatable GitHub-backed workflow instead of another manual prompt thread.
 ## 30-second quickstart
 
 ```bash
-npm install -g @dnsquared/shipper-cli
+npm install -g @baremetallabs-ai/shipper-cli
 shipper init
 shipper new "your idea"
 shipper ship --auto
 ```
-
-Until the separate public npm-scope migration lands, installs from `@dnsquared/shipper-cli` require
-a `.npmrc` configured with a GitHub Packages auth token.
 
 ## Maturity & scope
 
@@ -56,6 +53,6 @@ AI agents can pull the full docs corpus via [llms.txt](https://shipper.baremetal
 ## Status & support posture
 
 This is a personal project. Support is best-effort, PRs are welcome, and there is no SLA. Use the
-[GitHub issue tracker](https://github.com/dnsquared/shipper-cli/issues) for bugs and requests.
+[GitHub issue tracker](https://github.com/baremetallabs-ai/shipper/issues) for bugs and requests.
 
 Apache 2.0 — see LICENSE

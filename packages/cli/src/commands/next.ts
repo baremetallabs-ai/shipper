@@ -9,8 +9,8 @@ import {
   parseIssueNumberLabels,
   resolveRef,
   withIssueLock,
-} from '@dnsquared/shipper-core';
-import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
+import type { AgentName, CommandMode } from '@baremetallabs-ai/shipper-core';
 import { runStageForLabel } from './stage-dispatch.js';
 import { getCurrentWorkflowLabel } from './workflow-label.js';
 

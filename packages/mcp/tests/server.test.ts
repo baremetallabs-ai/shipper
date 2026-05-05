@@ -30,7 +30,7 @@ vi.mock('@modelcontextprotocol/sdk/server/mcp.js', () => ({
   },
 }));
 
-vi.mock('@dnsquared/shipper-core', () => ({
+vi.mock('@baremetallabs-ai/shipper-core', () => ({
   getRepoNwo: () => mockGetRepoNwo(),
   loadSettings: () => mockLoadSettings(),
   runAuthPreflight: () => mockRunAuthPreflight(),

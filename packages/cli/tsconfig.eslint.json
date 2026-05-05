@@ -2,7 +2,7 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "paths": {
-      "@dnsquared/shipper-core": ["../core/src/index.ts"]
+      "@baremetallabs-ai/shipper-core": ["../core/src/index.ts"]
     }
   },
   "include": ["src/**/*", "scripts/**/*", "tests/**/*"],

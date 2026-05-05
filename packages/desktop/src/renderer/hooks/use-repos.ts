@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, RefObject, SetStateAction } from 'react';
 
-import { toErrorMessage } from '@dnsquared/shipper-core';
+import { toErrorMessage } from '@baremetallabs-ai/shipper-core';
 
 import { getShipperApi } from '../lib/shipper-api.js';
 import { repoPattern } from '../lib/constants.js';

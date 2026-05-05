@@ -1,13 +1,13 @@
 import { access, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import * as core from '@dnsquared/shipper-core';
+import * as core from '@baremetallabs-ai/shipper-core';
 import type {
   PRChecksLine,
   PrReviewWait,
   ResultJson,
   RunPromptOpts,
-} from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
 
 import { createFakeCore } from '../_harness/fake-core.js';
 import {

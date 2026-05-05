@@ -5,7 +5,7 @@ import {
   PRIORITY_LABEL_NAMES,
   gh,
   logger,
-} from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
 
 export async function getCurrentWorkflowLabel(
   repo: string,

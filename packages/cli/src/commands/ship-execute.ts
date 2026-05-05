@@ -19,8 +19,8 @@ import {
   PR_REVIEWED_LABEL,
   READY_LABEL,
   type QueuedPR,
-} from '@dnsquared/shipper-core';
-import type { AgentName, CommandMode, Logger } from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
+import type { AgentName, CommandMode, Logger } from '@baremetallabs-ai/shipper-core';
 import { buildReadyCheck } from './pr-remediate.js';
 import { isRetriableMergeFailure, mergePr, resolvePrForIssue } from './ship-merge.js';
 import { runStageForLabel } from './stage-dispatch.js';

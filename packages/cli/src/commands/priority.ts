@@ -5,7 +5,7 @@ import {
   PRIORITY_HIGH_LABEL,
   PRIORITY_LOW_LABEL,
   STAGE_LABEL_NAMES,
-} from '@dnsquared/shipper-core';
+} from '@baremetallabs-ai/shipper-core';
 
 function printUsage(): void {
   logger.error('Usage: shipper priority <issue> <high|normal|low>');

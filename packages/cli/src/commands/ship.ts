@@ -1,8 +1,12 @@
 import { existsSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { logger, PAUSED_EXIT_CODE, RETRIABLE_FAILURE_EXIT_CODE } from '@dnsquared/shipper-core';
-import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
+import {
+  logger,
+  PAUSED_EXIT_CODE,
+  RETRIABLE_FAILURE_EXIT_CODE,
+} from '@baremetallabs-ai/shipper-core';
+import type { AgentName, CommandMode } from '@baremetallabs-ai/shipper-core';
 import { shipAutoParallel, shipAutoSequential } from './ship-auto.js';
 import { formatLogDisplayPath, formatLogTimestamp, shipOneIssue } from './ship-execute.js';
 

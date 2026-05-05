@@ -3,7 +3,7 @@
   "compilerOptions": {
     "composite": false,
     "paths": {
-      "@dnsquared/shipper-core": ["../core/src/index.ts"]
+      "@baremetallabs-ai/shipper-core": ["../core/src/index.ts"]
     }
   },
   "include": ["src/main/**/*", "src/preload/**/*", "tests/**/*"]
