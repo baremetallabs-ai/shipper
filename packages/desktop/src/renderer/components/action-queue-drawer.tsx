@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { JSX } from 'react';
 import {
   ChevronLeft,
@@ -13,6 +13,7 @@ import {
 import { cn } from '../lib/utils.js';
 import { Badge } from './ui/badge.js';
 import { Button } from './ui/button.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip.js';
 
 export type ActionQueueCommand = 'new' | 'ship' | 'init' | 'unblock';
 export type ActionQueueStatus = 'queued' | 'running' | 'complete' | 'failed' | 'paused';
@@ -21,6 +22,7 @@ export interface ActionQueueItem {
   id: string;
   command: ActionQueueCommand;
   status: ActionQueueStatus;
+  stateChangedAt: number;
   title: string;
   repo: string;
   detail?: string;
@@ -97,6 +99,37 @@ function getCommandLabel(command: ActionQueueCommand): string {
   }
 }
 
+function formatRelativeStateChangeTime(stateChangedAt: number, now: number): string {
+  const elapsedSeconds = Math.max(0, Math.floor((now - stateChangedAt) / 1000));
+
+  if (elapsedSeconds < 10) {
+    return 'Just now';
+  }
+
+  if (elapsedSeconds < 60) {
+    return `${elapsedSeconds}s ago`;
+  }
+
+  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+  if (elapsedMinutes < 60) {
+    return `${elapsedMinutes}m ago`;
+  }
+
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) {
+    return `${elapsedHours}h ago`;
+  }
+
+  return `${Math.floor(elapsedHours / 24)}d ago`;
+}
+
+function formatAbsoluteStateChangeTime(stateChangedAt: number): string {
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'medium',
+  }).format(new Date(stateChangedAt));
+}
+
 function StatusIcon({ status }: { status: ActionQueueStatus }): JSX.Element {
   if (status === 'running') {
     return <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />;
@@ -119,9 +152,13 @@ export function ActionQueueDrawer({
   onDismiss,
 }: ActionQueueDrawerProps): JSX.Element {
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const activeCount = commands.filter(
     (command) => command.status === 'queued' || command.status === 'running'
   ).length;
+  const hasActiveRows = commands.some(
+    (command) => command.status === 'queued' || command.status === 'running'
+  );
   const hasClearable = commands.length > activeCount;
   const commandIndexById = useMemo(
     () => new Map(commands.map((command, index) => [command.id, index])),
@@ -157,6 +194,26 @@ export function ActionQueueDrawer({
 
     panel.setAttribute('inert', '');
   }, [open]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    setNow(Date.now());
+
+    if (!hasActiveRows) {
+      return;
+    }
+
+    const intervalId = globalThis.setInterval(() => {
+      setNow(Date.now());
+    }, 30_000);
+
+    return () => {
+      globalThis.clearInterval(intervalId);
+    };
+  }, [hasActiveRows, open]);
 
   return (
     <>
@@ -204,6 +261,19 @@ export function ActionQueueDrawer({
                       <Badge variant={getStatusBadgeVariant(item.status)}>
                         {getStatusLabel(item.status, item.cancelled)}
                       </Badge>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <time
+                            dateTime={new Date(item.stateChangedAt).toISOString()}
+                            className="text-xs text-muted-foreground"
+                          >
+                            {formatRelativeStateChangeTime(item.stateChangedAt, now)}
+                          </time>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          {formatAbsoluteStateChangeTime(item.stateChangedAt)}
+                        </TooltipContent>
+                      </Tooltip>
                       {item.workflowStage ? (
                         <Badge variant="default" className="text-[10px]">
                           {item.workflowStage}
