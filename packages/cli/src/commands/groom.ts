@@ -1,23 +1,29 @@
+import path from 'node:path';
 import type { ReadStream } from 'node:tty';
 import {
+  PROTOCOL_OUTPUT_DIR,
   autoSelectIssue,
   generateBranchName,
   getRepoRoot,
   getSettings,
   GroomPostFlightError,
   handleAgentCrash,
+  isDesktopFinalizeRequested,
   isMcpGroomingEnabled,
   logger,
   processGroomResult,
+  resolveDesktopControlDir,
   resolveBaseBranch,
   resolveMode,
   retryOnInvalidOutput,
   runPrompt,
   scrubOutputDir,
   toErrorMessage,
+  validateStageOutput,
   withIssueLock,
   withStageHooks,
   withWorktree,
+  writeDesktopControlState,
 } from '@dnsquared/shipper-core';
 import type { AgentName, CommandMode } from '@dnsquared/shipper-core';
 import type { StageRunResult } from './stage-result.js';
@@ -60,6 +66,47 @@ export async function runGroomStage(
           },
           async (wtPath) => {
             await scrubOutputDir(wtPath);
+            const desktopControlDir = resolveDesktopControlDir();
+            if (desktopControlDir) {
+              await writeDesktopControlState(desktopControlDir, {
+                stage: 'groom',
+                worktreePath: wtPath,
+                outputDir: path.resolve(wtPath, PROTOCOL_OUTPUT_DIR),
+              });
+            }
+
+            const processGroomOutput = async (allowRetry: boolean): Promise<number> => {
+              try {
+                const result = allowRetry
+                  ? await retryOnInvalidOutput({
+                      cwd: wtPath,
+                      stage: 'groom',
+                      retry: (userInput) =>
+                        runPrompt('groom', {
+                          repo,
+                          issueRef: issueStr,
+                          cwd: wtPath,
+                          mode,
+                          agent,
+                          model,
+                          disableMcp,
+                          userInput,
+                        }),
+                    })
+                  : await validateStageOutput(wtPath, 'groom');
+
+                await processGroomResult({ repo, issueNumber: issueStr, cwd: wtPath, result });
+                return 0;
+              } catch (error) {
+                const detail = toErrorMessage(error);
+                logger.error(detail);
+                if (!(error instanceof GroomPostFlightError) || !error.failureCommentPosted) {
+                  await handleAgentCrash(repo, issueStr, 'groom', detail);
+                }
+                return 1;
+              }
+            };
+
             const exitCode = await runPrompt('groom', {
               repo,
               issueRef: issueStr,
@@ -71,6 +118,12 @@ export async function runGroomStage(
             });
 
             if (exitCode !== 0) {
+              const desktopFinalizeRequested =
+                desktopControlDir !== null && (await isDesktopFinalizeRequested(desktopControlDir));
+              if (desktopFinalizeRequested) {
+                return await processGroomOutput(false);
+              }
+
               const detail = `Agent exited with code ${exitCode}`;
               logger.error(detail);
               await handleAgentCrash(
@@ -83,33 +136,7 @@ export async function runGroomStage(
               return 1;
             }
 
-            try {
-              const result = await retryOnInvalidOutput({
-                cwd: wtPath,
-                stage: 'groom',
-                retry: (userInput) =>
-                  runPrompt('groom', {
-                    repo,
-                    issueRef: issueStr,
-                    cwd: wtPath,
-                    mode,
-                    agent,
-                    model,
-                    disableMcp,
-                    userInput,
-                  }),
-              });
-
-              await processGroomResult({ repo, issueNumber: issueStr, cwd: wtPath, result });
-              return 0;
-            } catch (error) {
-              const detail = toErrorMessage(error);
-              logger.error(detail);
-              if (!(error instanceof GroomPostFlightError) || !error.failureCommentPosted) {
-                await handleAgentCrash(repo, issueStr, 'groom', detail);
-              }
-              return 1;
-            }
+            return await processGroomOutput(true);
           }
         )
     );

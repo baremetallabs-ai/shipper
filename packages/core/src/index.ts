@@ -14,6 +14,20 @@ export {
   rerunFailedChecks,
 } from './lib/checks.js';
 export { toError, toErrorMessage } from './lib/errors.js';
+export type { DesktopControlState } from './lib/desktop-control.js';
+export {
+  DESKTOP_AGENT_GRACE_TIMEOUT_MS,
+  DESKTOP_CONTROL_STATE_FILE,
+  DESKTOP_FINALIZE_SENTINEL_FILE,
+  DESKTOP_WRAPPER_DRAIN_TIMEOUT_MS,
+  SHIPPER_DESKTOP_CONTROL_DIR_ENV,
+  hasDesktopResultArtifact,
+  isDesktopFinalizeRequested,
+  readDesktopControlState,
+  requestDesktopFinalize,
+  resolveDesktopControlDir,
+  writeDesktopControlState,
+} from './lib/desktop-control.js';
 export { PAUSED_EXIT_CODE, RETRIABLE_FAILURE_EXIT_CODE } from './lib/exit-codes.js';
 export { MCP_GROOMING_FLAG, isMcpGroomingEnabled } from './lib/feature-flags.js';
 export { gh } from './lib/gh.js';
@@ -94,6 +108,7 @@ export {
   handleAgentCrash,
   postComment,
   postReplies,
+  PROTOCOL_OUTPUT_DIR,
   processGroomResult,
   processResult,
   readGroomManifest,

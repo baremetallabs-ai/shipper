@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as core from '@dnsquared/shipper-core';
 import type { RunPromptOpts } from '@dnsquared/shipper-core';
@@ -87,6 +90,8 @@ async function writeGroomOutput(fake: FakeCore, priority: 'high' | 'normal' | 'l
 describe('groomCommand', () => {
   let fake: FakeCore;
   let promptCalls: Array<{ name: string; opts: RunPromptOpts }>;
+  let desktopControlDir: string | undefined;
+  let previousDesktopControlDir: string | undefined;
 
   const stubDefaultBranch = (branch = 'main'): void => {
     fake.stubGh((args) => {
@@ -134,6 +139,8 @@ describe('groomCommand', () => {
     fake = createFakeCore();
     fake.install();
     promptCalls = [];
+    desktopControlDir = undefined;
+    previousDesktopControlDir = process.env[core.SHIPPER_DESKTOP_CONTROL_DIR_ENV];
     process.exitCode = undefined;
     setStdinIsTTY(true);
     stubDefaultBranch();
@@ -141,10 +148,24 @@ describe('groomCommand', () => {
 
   afterEach(async () => {
     process.exitCode = undefined;
+    if (previousDesktopControlDir === undefined) {
+      Reflect.deleteProperty(process.env, core.SHIPPER_DESKTOP_CONTROL_DIR_ENV);
+    } else {
+      process.env[core.SHIPPER_DESKTOP_CONTROL_DIR_ENV] = previousDesktopControlDir;
+    }
+    if (desktopControlDir) {
+      await rm(desktopControlDir, { recursive: true, force: true });
+    }
     restoreStdinIsTTY();
     vi.restoreAllMocks();
     await fake.dispose();
   });
+
+  async function enableDesktopControl(): Promise<string> {
+    desktopControlDir = await mkdtemp(path.join(tmpdir(), 'shipper-desktop-control-'));
+    process.env[core.SHIPPER_DESKTOP_CONTROL_DIR_ENV] = desktopControlDir;
+    return desktopControlDir;
+  }
 
   it('runs a single issue inside a fake worktree on the generated branch', async () => {
     fake.setIssue('123', { labels: ['shipper:new'], title: 'Single issue' });
@@ -255,6 +276,58 @@ describe('groomCommand', () => {
     expect(promptCalls[1]?.opts.userInput).toContain('groom accept requires a groom manifest');
     expect(fake.state.issues.get('123')?.labels.has('shipper:groomed')).toBe(true);
     expect(process.exitCode).toBe(0);
+  });
+
+  it('processes desktop-finalized groom output once after a non-zero prompt exit', async () => {
+    const controlDir = await enableDesktopControl();
+    fake.setIssue('123', { labels: ['shipper:new'], title: 'Single issue' });
+    fake.scriptRunPrompt(async (name, opts) => {
+      promptCalls.push({ name, opts });
+      await writeGroomOutput(fake);
+      await core.requestDesktopFinalize(controlDir);
+      return 143;
+    });
+
+    const { groomCommand } = await import('../../src/commands/groom.js');
+
+    await expect(groomCommand(repo, '123')).resolves.toBeUndefined();
+
+    expect(promptCalls).toHaveLength(1);
+    expect(fake.state.labelTransitions).toEqual([
+      { target: 'issue', number: '123', add: ['shipper:locked'], remove: [] },
+      {
+        target: 'issue',
+        number: '123',
+        add: ['shipper:groomed', 'shipper:priority-high'],
+        remove: ['shipper:new', 'shipper:priority-low', 'shipper:blocked'],
+      },
+      { target: 'issue', number: '123', add: [], remove: ['shipper:locked'] },
+    ]);
+    expect(fake.state.issues.get('123')?.body).toContain('Updated parent body.');
+    expect(fake.state.postedComments).toEqual([
+      { target: 'issue', number: '123', body: '## Grooming Summary\n\nDone.' },
+    ]);
+    expect(process.exitCode).toBe(0);
+  });
+
+  it('fails desktop-finalized groom without result.json and does not retry', async () => {
+    const controlDir = await enableDesktopControl();
+    fake.setIssue('123', { labels: ['shipper:new'], title: 'Single issue' });
+    fake.scriptRunPrompt(async (name, opts) => {
+      promptCalls.push({ name, opts });
+      await core.requestDesktopFinalize(controlDir);
+      return 143;
+    });
+
+    const { groomCommand } = await import('../../src/commands/groom.js');
+
+    await expect(groomCommand(repo, '123')).resolves.toBeUndefined();
+
+    expect(promptCalls).toHaveLength(1);
+    expect(fake.state.issues.get('123')?.labels.has('shipper:new')).toBe(true);
+    expect(fake.state.issues.get('123')?.labels.has('shipper:groomed')).toBe(false);
+    expect(fake.state.postedComments.at(-1)?.body).toContain('## Agent Failure');
+    expect(process.exitCode).toBe(1);
   });
 
   it('treats a clean exit with no artifacts as an agent failure', async () => {

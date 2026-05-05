@@ -13,6 +13,11 @@ import {
   setAnswersEnv,
   writeAnswersFile,
 } from './defer-loop.js';
+import {
+  DESKTOP_AGENT_GRACE_TIMEOUT_MS,
+  SHIPPER_DESKTOP_CONTROL_DIR_ENV,
+  isDesktopFinalizeRequested,
+} from './desktop-control.js';
 import { StreamJsonDeferConsumer } from './defer-stream.js';
 import { toError, toErrorMessage } from './errors.js';
 import { parseFrontmatter } from './frontmatter.js';
@@ -148,6 +153,7 @@ interface SpawnAsyncOpts {
    * from the MCP parent) isn't shared with the worker claude process.
    */
   stdinIgnore?: boolean;
+  desktopFinalize?: { controlDir: string; graceMs: number };
 }
 
 function spawnAsync(command: string, args: string[], opts: SpawnAsyncOpts): Promise<number> {
@@ -262,7 +268,15 @@ function spawnAsync(command: string, args: string[], opts: SpawnAsyncOpts): Prom
 
     let killTimer: ReturnType<typeof setTimeout> | undefined;
     let graceTimer: ReturnType<typeof setTimeout> | undefined;
+    let finalizePollTimer: ReturnType<typeof setInterval> | undefined;
+    let finalizeGraceTimer: ReturnType<typeof setTimeout> | undefined;
+    let finalizeSignalSent = false;
     let timedOut = false;
+
+    const clearFinalizeTimers = (): void => {
+      clearInterval(finalizePollTimer);
+      clearTimeout(finalizeGraceTimer);
+    };
 
     if (opts.timeoutMs && opts.timeoutMs > 0) {
       const timeoutMs = opts.timeoutMs;
@@ -277,9 +291,36 @@ function spawnAsync(command: string, args: string[], opts: SpawnAsyncOpts): Prom
       }, timeoutMs);
     }
 
+    if (opts.desktopFinalize) {
+      const { controlDir, graceMs } = opts.desktopFinalize;
+      finalizePollTimer = setInterval(() => {
+        if (finalizeSignalSent) {
+          return;
+        }
+
+        void isDesktopFinalizeRequested(controlDir)
+          .then((requested) => {
+            if (!requested || finalizeSignalSent) {
+              return;
+            }
+
+            finalizeSignalSent = true;
+            child.kill('SIGTERM');
+            finalizeGraceTimer = setTimeout(() => {
+              child.kill('SIGKILL');
+            }, graceMs);
+            clearInterval(finalizePollTimer);
+          })
+          .catch(() => {
+            // A transient filesystem error should not fail the agent run.
+          });
+      }, 500);
+    }
+
     child.on('error', (err) => {
       clearTimeout(killTimer);
       clearTimeout(graceTimer);
+      clearFinalizeTimers();
       stdinCleanup?.();
       reject(toError(err));
     });
@@ -287,6 +328,7 @@ function spawnAsync(command: string, args: string[], opts: SpawnAsyncOpts): Prom
     const handleClose = async (code: number | null): Promise<void> => {
       clearTimeout(killTimer);
       clearTimeout(graceTimer);
+      clearFinalizeTimers();
       stdinCleanup?.();
       if (logCompletion) {
         outputLogStream?.end();
@@ -655,6 +697,13 @@ async function runPromptDefault(name: string, opts: RunPromptOpts): Promise<numb
       ...(spawnLogFile !== undefined ? { logFile: spawnLogFile } : {}),
       ...(initialInput !== undefined ? { initialInput } : {}),
     };
+    const desktopControlDir = process.env[SHIPPER_DESKTOP_CONTROL_DIR_ENV];
+    if (desktopControlDir) {
+      baseSpawnOpts.desktopFinalize = {
+        controlDir: desktopControlDir,
+        graceMs: DESKTOP_AGENT_GRACE_TIMEOUT_MS,
+      };
+    }
     const useDeferLoop = agent === 'claude' && effectiveMode === 'headless';
     const exitCode = useDeferLoop
       ? await spawnClaudeWithDeferLoop(
