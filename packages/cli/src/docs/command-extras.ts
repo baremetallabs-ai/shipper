@@ -49,7 +49,11 @@ export const commandExtras: Record<CommandPath, CommandExtras> = {
       { code: 0, when: 'Repository configuration files are written successfully.' },
       { code: 1, when: 'Validation, setup, git commit, or git push fails.' },
     ],
-    constraints: ['--push requires --autocommit'],
+    constraints: [
+      '--push requires --autocommit',
+      'shipper init writes or refreshes .shipper/settings.json cliVersion; rerun it after ' +
+        'intentional packages/cli/package.json version bumps in this repository to satisfy the fingerprint guard',
+    ],
   },
   setup: {
     examples: [
