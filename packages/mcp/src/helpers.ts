@@ -54,18 +54,24 @@ interface UnblockPayload {
 
 const MISSING_FINAL_MESSAGE_LINE =
   'No final message was captured in this run. See session log for details.';
-const DEFAULT_MISSING_CREATED_ISSUE_DETAIL =
+export const DEFAULT_MISSING_CREATED_ISSUE_DETAIL =
   'The new agent exited successfully but did not record created_issue in .shipper/output/result.json. Inspect the session log to see whether an issue was created.';
+export const MISSING_CREATED_ISSUE_RESULT_FILE_DETAIL =
+  'The new agent exited successfully but Shipper did not persist .shipper/output/result.json into session metadata. Inspect the session log to see whether an issue was created.';
+export const MISSING_CREATE_ISSUE_SESSION_METADATA_DETAIL =
+  'The new agent exited successfully but Shipper could not find session metadata for this issue-creation run. Inspect the agent output and session logs to see whether an issue was created.';
+export const INVALID_CREATED_ISSUE_RESULT_DETAIL =
+  'The new agent exited successfully and Shipper found a persisted result file, but it could not be read or validated as a created_issue result.';
 const STDERR_TAIL_LIMIT = 4_096;
 
 export async function spawnShipper(
   args: string[],
-  opts: { timeoutMs: number }
+  opts: { timeoutMs: number; env?: Record<string, string | undefined> }
 ): Promise<SpawnResult> {
   return new Promise((resolve, reject) => {
     const child = spawn('shipper', args, {
       cwd: process.cwd(),
-      env: process.env,
+      env: opts.env ? { ...process.env, ...opts.env } : process.env,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 

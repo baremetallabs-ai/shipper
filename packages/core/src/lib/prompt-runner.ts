@@ -19,16 +19,22 @@ import {
   isDesktopFinalizeRequested,
 } from './desktop-control.js';
 import { StreamJsonDeferConsumer } from './defer-stream.js';
-import { toError, toErrorMessage } from './errors.js';
+import { hasErrorCode, toError, toErrorMessage } from './errors.js';
 import { parseFrontmatter } from './frontmatter.js';
 import { fetchIssue, fetchPR } from './github.js';
 import { agentPrompts } from './prompts.js';
 import {
+  PROTOCOL_OUTPUT_DIR,
   PROTOCOL_INPUT_DISPLAY_DIR,
   TRUNCATION_THRESHOLD_BYTES,
   writeContextFile,
 } from './output-protocol/protocol-io.js';
-import { getSessionPaths, resolveSessionRepo, writeSessionMeta } from './session.js';
+import {
+  getSessionPaths,
+  resolveSessionRepo,
+  SHIPPER_SESSION_RUN_ID_ENV,
+  writeSessionMeta,
+} from './session.js';
 import {
   getSettings,
   resolveAgent,
@@ -646,7 +652,7 @@ async function persistPromptResult(
     return undefined;
   }
 
-  const source = path.join(cwd, '.shipper', 'output', 'result.json');
+  const source = path.join(cwd, PROTOCOL_OUTPUT_DIR, 'result.json');
   try {
     await copyFile(source, destination);
     return destination;
@@ -680,6 +686,7 @@ async function runPromptDefault(name: string, opts: RunPromptOpts): Promise<numb
   let metaFile: string | undefined;
   let resultFile: string | undefined;
   let sessionTimestamp: Date | undefined;
+  const runId = process.env[SHIPPER_SESSION_RUN_ID_ENV] || undefined;
 
   try {
     sessionRepo = await resolveSessionRepo({ repo: opts.repo, cwd: opts.cwd });
@@ -765,6 +772,7 @@ async function runPromptDefault(name: string, opts: RunPromptOpts): Promise<numb
           exitCode,
           logFile: spawnLogFile,
           resultFile: persistedResultFile,
+          runId,
           usage,
         });
       } catch (err) {
@@ -777,10 +785,6 @@ async function runPromptDefault(name: string, opts: RunPromptOpts): Promise<numb
     logger.error(`Error: Failed to spawn ${agent}: ${toErrorMessage(err)}`);
     return 1;
   }
-}
-
-function hasErrorCode(error: unknown, code: string): boolean {
-  return typeof error === 'object' && error !== null && 'code' in error && error.code === code;
 }
 
 let runPromptImpl: typeof runPromptDefault = runPromptDefault;

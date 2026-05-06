@@ -17,3 +17,12 @@ export function toErrorMessage(error: unknown): string {
     return 'Unknown error';
   }
 }
+
+export function hasErrorCode(error: unknown, code: string | readonly string[]): boolean {
+  if (typeof error !== 'object' || error === null || !('code' in error)) {
+    return false;
+  }
+
+  const codes = Array.isArray(code) ? code : [code];
+  return codes.includes(String(error.code));
+}

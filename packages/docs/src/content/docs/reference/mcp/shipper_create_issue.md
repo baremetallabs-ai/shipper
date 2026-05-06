@@ -43,7 +43,7 @@ Session log: /tmp/shipper/session.log
 
 ## Error modes
 
-- Missing created issue metadata: The new agent exited successfully but did not record created_issue in .shipper/output/result.json. Inspect the session log to see whether an issue was created.
+- Missing or invalid created issue metadata: On exit 0, Shipper returns an error if the matching session metadata, persisted result file, or valid created_issue record is missing. Inspect the session log to see whether an issue was created.
 - Timed out worker: [timed out] shipper new <request> --mode headless
 - Failed worker: [exit <code>] shipper new <request> --mode headless
 

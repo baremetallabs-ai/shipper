@@ -13,7 +13,7 @@ export {
   fetchChecks,
   rerunFailedChecks,
 } from './lib/checks.js';
-export { toError, toErrorMessage } from './lib/errors.js';
+export { hasErrorCode, toError, toErrorMessage } from './lib/errors.js';
 export type { DesktopControlState } from './lib/desktop-control.js';
 export {
   DESKTOP_AGENT_GRACE_TIMEOUT_MS,
@@ -168,6 +168,7 @@ export {
   aggregateSessionUsage,
   findLatestSessionMeta,
   resolveSessionRepo,
+  SHIPPER_SESSION_RUN_ID_ENV,
 } from './lib/session.js';
 export type {
   GitStatusEntry,

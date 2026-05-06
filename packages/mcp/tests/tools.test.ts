@@ -54,6 +54,14 @@ vi.mock('node:fs/promises', async () => {
   };
 });
 
+vi.mock('node:crypto', async () => {
+  const actual = await vi.importActual<typeof import('node:crypto')>('node:crypto');
+  return {
+    ...actual,
+    randomUUID: () => '00000000-0000-4000-8000-000000000000',
+  };
+});
+
 vi.mock('@baremetallabs-ai/shipper-core', async () => {
   const actual = await vi.importActual<typeof import('@baremetallabs-ai/shipper-core')>(
     '@baremetallabs-ai/shipper-core'
@@ -1317,6 +1325,20 @@ describe('shipper_create_issue', () => {
     expect(text).not.toContain('--- stdout ---');
     expect(text).not.toContain('response_item');
     expect(text.length).toBeLessThan(8192);
+    expect(mockSpawnShipper).toHaveBeenCalledWith(
+      ['new', 'Improve MCP output', '--mode', 'headless'],
+      {
+        timeoutMs: 60 * 60 * 1000,
+        env: { SHIPPER_SESSION_RUN_ID: '00000000-0000-4000-8000-000000000000' },
+      }
+    );
+    expect(mockFindLatestSessionMeta).toHaveBeenCalledWith(
+      expect.objectContaining({
+        issue: 'unlinked',
+        stage: 'new',
+        runId: '00000000-0000-4000-8000-000000000000',
+      })
+    );
     expect(mockReadNewResultFile).toHaveBeenCalledWith('/tmp/create.result.json');
     expect(mockGh).not.toHaveBeenCalled();
   });
@@ -1424,10 +1446,31 @@ describe('shipper_create_issue', () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toContain(
-      'did not record created_issue in .shipper/output/result.json'
+      'did not persist .shipper/output/result.json into session metadata'
     );
     expect(result.content[0]?.text).toContain('Created the issue and wrote a summary.');
     expect(result.content[0]?.text).toContain('Session log: /tmp/fallback.jsonl');
+    expect(mockReadNewResultFile).not.toHaveBeenCalled();
+    expect(mockGh).not.toHaveBeenCalled();
+  });
+
+  it('fails after an exit-0 run when no matching session metadata is found', async () => {
+    mockSpawnShipper.mockResolvedValue({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      timedOut: false,
+    });
+    mockFindLatestSessionMeta.mockResolvedValue(undefined);
+
+    const getTool = await collectTools();
+    const result = await getTool('shipper_create_issue')({ request: 'No session meta' });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain(
+      'could not find session metadata for this issue-creation run'
+    );
+    expect(result.content[0]?.text).toContain('Session log: <not found>');
     expect(mockReadNewResultFile).not.toHaveBeenCalled();
     expect(mockGh).not.toHaveBeenCalled();
   });
@@ -1462,7 +1505,7 @@ describe('shipper_create_issue', () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toContain(
-      'did not record created_issue in .shipper/output/result.json'
+      'could not be read or validated as a created_issue result'
     );
     expect(result.content[0]?.text).toContain(
       "Invalid result.json at /tmp/ambiguous.result.json:\n- 'created_issue.number' must be a positive integer"
@@ -1502,7 +1545,7 @@ describe('shipper_create_issue', () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toContain(
-      'did not record created_issue in .shipper/output/result.json'
+      'could not be read or validated as a created_issue result'
     );
     expect(result.content[0]?.text).toContain(
       'Failed to parse /tmp/create-gh-failure.result.json: Unexpected token'

@@ -1,7 +1,8 @@
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 
-import { toErrorMessage } from './errors.js';
+import { hasErrorCode, toErrorMessage } from './errors.js';
+import { PROTOCOL_OUTPUT_DIR } from './output-protocol/protocol-io.js';
 import type { Verdict } from './stage-transitions.js';
 
 export interface ResultJson {
@@ -24,7 +25,6 @@ export interface NewResultJson {
 }
 
 export const VALID_VERDICTS = ['accept', 'reject', 'fail'] as const;
-const PROTOCOL_OUTPUT_DIR = path.join('.shipper', 'output');
 
 export class ResultValidationError extends Error {
   readonly errors: string[];
@@ -165,8 +165,8 @@ export function validateNewResult(data: unknown): NewResultJson {
   return {
     created_issue: {
       number: createdIssue.number,
-      title: createdIssue.title.trim(),
-      url: createdIssue.url.trim(),
+      title: createdIssue.title,
+      url: createdIssue.url,
     },
   };
 }
@@ -179,7 +179,7 @@ async function readJsonResultFile<T>(
   try {
     raw = await readFile(resultPath, 'utf-8');
   } catch (error) {
-    if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') {
+    if (hasErrorCode(error, 'ENOENT')) {
       throw new Error(`Missing result.json at ${resultPath}`);
     }
 
