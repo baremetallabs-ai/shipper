@@ -1,5 +1,7 @@
+import { error as writeError } from 'node:console';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import process from 'node:process';
 
 const settingsPath = '.shipper/settings.json';
 const cliPackagePath = 'packages/cli/package.json';
@@ -12,7 +14,7 @@ function readJson(relativePath) {
     return JSON.parse(readFileSync(filePath, 'utf8'));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error(`Unable to read ${relativePath}: ${message}`);
+    writeError(`Unable to read ${relativePath}: ${message}`);
     process.exitCode = 1;
     return undefined;
   }
@@ -38,7 +40,7 @@ if (recorded !== undefined && cliVersion !== undefined && recorded === cliVersio
   process.exit();
 }
 
-console.error(`Shipper CLI version fingerprint drift detected
+writeError(`Shipper CLI version fingerprint drift detected
 
 ${settingsPath} cliVersion: ${recordedDisplay}
 ${cliPackagePath} version: ${cliVersionDisplay}
