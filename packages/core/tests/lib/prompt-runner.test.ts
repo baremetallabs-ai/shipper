@@ -159,6 +159,7 @@ vi.mock('../../src/lib/prompts.js', () => ({
 }));
 
 vi.mock('../../src/lib/session.js', () => ({
+  SHIPPER_SESSION_RUN_ID_ENV: 'SHIPPER_SESSION_RUN_ID',
   resolveSessionRepo: (...args: unknown[]) => resolveSessionRepoMock(...args),
   getSessionPaths: (...args: unknown[]) => getSessionPathsMock(...args),
   writeSessionMeta: (...args: unknown[]) => writeSessionMetaMock(...args),
@@ -1326,6 +1327,32 @@ describe('runPrompt', () => {
         resultFile,
       })
     );
+  });
+
+  it('records the inherited session run id in session metadata', async () => {
+    const previousRunId = process.env.SHIPPER_SESSION_RUN_ID;
+    process.env.SHIPPER_SESSION_RUN_ID = 'mcp-create-issue-run';
+    resolveModeMock.mockReturnValue('headless');
+    readFileMock.mockResolvedValueOnce(makePrompt('claude'));
+    mockSpawnResult();
+
+    try {
+      await expect(
+        runPrompt('new', { mode: 'headless', repo: 'owner/repo', cwd: '/tmp/new-worktree' })
+      ).resolves.toBe(0);
+
+      expect(writeSessionMetaMock.mock.calls[0]?.[1]).toMatchObject({
+        issue: 'unlinked',
+        stage: 'new',
+        runId: 'mcp-create-issue-run',
+      });
+    } finally {
+      if (previousRunId === undefined) {
+        delete process.env.SHIPPER_SESSION_RUN_ID;
+      } else {
+        process.env.SHIPPER_SESSION_RUN_ID = previousRunId;
+      }
+    }
   });
 
   it('omits resultFile metadata when the worktree result file is absent', async () => {

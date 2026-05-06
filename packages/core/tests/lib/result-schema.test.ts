@@ -157,6 +157,24 @@ describe('validateNewResult', () => {
     });
   });
 
+  it('preserves created_issue title and url bytes while validating trimmed non-blank values', () => {
+    expect(
+      validateNewResult({
+        created_issue: {
+          number: 42,
+          title: '  Keep exact title  ',
+          url: ' https://github.com/owner/repo/issues/42 ',
+        },
+      })
+    ).toEqual({
+      created_issue: {
+        number: 42,
+        title: '  Keep exact title  ',
+        url: ' https://github.com/owner/repo/issues/42 ',
+      },
+    });
+  });
+
   it('rejects non-object input', () => {
     expect(() => validateNewResult('bad')).toThrowError(
       new ResultValidationError(['result.json must be a JSON object'])

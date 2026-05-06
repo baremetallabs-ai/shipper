@@ -189,9 +189,9 @@ Session log: /tmp/shipper/session.log`,
     },
     errorModes: [
       {
-        name: 'Missing created issue metadata',
+        name: 'Missing or invalid created issue metadata',
         message:
-          'The new agent exited successfully but did not record created_issue in .shipper/output/result.json. Inspect the session log to see whether an issue was created.',
+          'On exit 0, Shipper returns an error if the matching session metadata, persisted result file, or valid created_issue record is missing. Inspect the session log to see whether an issue was created.',
       },
       {
         name: 'Timed out worker',

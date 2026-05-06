@@ -162,6 +162,7 @@ export {
   getSessionDir,
   getSessionPaths,
   resolveSessionRepo,
+  SHIPPER_SESSION_RUN_ID_ENV,
   writeSessionMeta,
 } from './lib/session.js';
 export type { CommandConfig, MergeSettings, Settings } from './lib/settings.js';

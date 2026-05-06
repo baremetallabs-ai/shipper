@@ -674,6 +674,53 @@ describe('findLatestSessionMeta', () => {
     }
   });
 
+  it('filters by run id when supplied so concurrent sessions do not collide', async () => {
+    const tempHome = mkdtempSync(path.join(tmpdir(), 'session-home-'));
+    mockHomeDir.value = tempHome;
+    const sessionDir = getSessionDir('owner-repo');
+
+    try {
+      writeSessionMetaSync(
+        path.join(sessionDir, 'unlinked-new-2026-03-15T04-00-00-000Z.meta.json'),
+        buildMeta({
+          issue: 'unlinked',
+          stage: 'new',
+          timestamp: '2026-03-15T04:00:00.000Z',
+          logFile: '/tmp/first.jsonl',
+          resultFile: '/tmp/first.result.json',
+          runId: 'run-a',
+        })
+      );
+      writeSessionMetaSync(
+        path.join(sessionDir, 'unlinked-new-2026-03-15T05-00-00-000Z.meta.json'),
+        buildMeta({
+          issue: 'unlinked',
+          stage: 'new',
+          timestamp: '2026-03-15T05:00:00.000Z',
+          logFile: '/tmp/second.jsonl',
+          resultFile: '/tmp/second.result.json',
+          runId: 'run-b',
+        })
+      );
+
+      await expect(
+        findLatestSessionMeta({
+          repoSlug: 'owner-repo',
+          issue: 'unlinked',
+          stage: 'new',
+          since: new Date('2026-03-15T00:00:00.000Z'),
+          runId: 'run-a',
+        })
+      ).resolves.toMatchObject({
+        runId: 'run-a',
+        logFile: '/tmp/first.jsonl',
+        resultFile: '/tmp/first.result.json',
+      });
+    } finally {
+      rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
   it('ignores malformed sidecars and invalid timestamps', async () => {
     const tempHome = mkdtempSync(path.join(tmpdir(), 'session-home-'));
     mockHomeDir.value = tempHome;
@@ -737,6 +784,7 @@ function buildMeta(overrides: {
   exitCode?: number;
   logFile?: string;
   resultFile?: string;
+  runId?: string;
   usage?: Record<string, unknown>;
 }): Record<string, unknown> {
   return {
@@ -749,6 +797,7 @@ function buildMeta(overrides: {
     exitCode: overrides.exitCode ?? 0,
     ...(overrides.logFile ? { logFile: overrides.logFile } : {}),
     ...(overrides.resultFile ? { resultFile: overrides.resultFile } : {}),
+    ...(overrides.runId ? { runId: overrides.runId } : {}),
     ...(overrides.usage ? { usage: overrides.usage } : {}),
   };
 }

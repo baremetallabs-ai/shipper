@@ -2,9 +2,12 @@ import { execFile } from 'node:child_process';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { toError } from './errors.js';
+import { hasErrorCode, toError } from './errors.js';
 import { logger } from './logger.js';
 import type { TokenUsage } from './usage.js';
+
+export const SHIPPER_SESSION_RUN_ID_ENV = 'SHIPPER_SESSION_RUN_ID';
+
 const UNLINKED_REPO = '_unlinked';
 
 export interface SessionMeta {
@@ -17,6 +20,7 @@ export interface SessionMeta {
   exitCode: number;
   logFile?: string;
   resultFile?: string;
+  runId?: string;
   usage?: TokenUsage;
 }
 
@@ -135,6 +139,7 @@ export async function findLatestSessionMeta(opts: {
   issue: string;
   stage: string;
   since: Date;
+  runId?: string;
 }): Promise<SessionMeta | undefined> {
   const sessionDir = getSessionDir(opts.repoSlug);
   let entries: string[];
@@ -162,6 +167,10 @@ export async function findLatestSessionMeta(opts: {
     }
 
     if (!isSessionMeta(parsed) || parsed.issue !== opts.issue || parsed.stage !== opts.stage) {
+      continue;
+    }
+
+    if (opts.runId !== undefined && parsed.runId !== opts.runId) {
       continue;
     }
 
@@ -321,8 +330,4 @@ function sumTokenUsage(current: TokenUsage | undefined, next: TokenUsage): Token
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
-}
-
-function hasErrorCode(error: unknown, code: string): boolean {
-  return typeof error === 'object' && error !== null && 'code' in error && error.code === code;
 }

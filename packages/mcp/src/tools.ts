@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { McpServer, ToolCallback } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -35,6 +36,7 @@ import {
   releaseIssueLock,
   resolveSessionRepo,
   scanArtifacts,
+  SHIPPER_SESSION_RUN_ID_ENV,
   toErrorMessage,
   tryResolvePrForIssue,
 } from '@baremetallabs-ai/shipper-core';
@@ -46,6 +48,9 @@ import {
   formatSpawnResult,
   formatToolError,
   formatUnblockResult,
+  INVALID_CREATED_ISSUE_RESULT_DETAIL,
+  MISSING_CREATE_ISSUE_SESSION_METADATA_DETAIL,
+  MISSING_CREATED_ISSUE_RESULT_FILE_DETAIL,
   spawnShipper,
   startShipper,
   type ShipperRunner,
@@ -67,9 +72,6 @@ const STAGE_FOR_LABEL = {
   'shipper:pr-open': 'pr_review',
   'shipper:pr-reviewed': 'pr_remediate',
 } as const;
-const MISSING_CREATED_ISSUE_DETAIL =
-  'The new agent exited successfully but did not record created_issue in .shipper/output/result.json. Inspect the session log to see whether an issue was created.';
-
 type AdvanceStageName = (typeof STAGE_FOR_LABEL)[keyof typeof STAGE_FOR_LABEL];
 type AdvanceVerdict = 'accept' | 'reject' | 'fail';
 
@@ -347,6 +349,7 @@ async function resolveSessionContext(opts: {
   issue: string;
   stage: string;
   since: Date;
+  runId?: string;
 }): Promise<{ finalMessage?: string; sessionLogPath?: string; resultFile?: string }> {
   const meta = await findLatestSessionMeta(opts);
   if (!meta) {
@@ -803,13 +806,18 @@ export const mcpToolDefinitions = [
         try {
           const sessionRepo = await resolveSessionRepo({ repo });
           const startedAt = new Date();
+          const runId = randomUUID();
           const args = ['new', request, '--mode', 'headless'];
-          const result = await spawnShipper(args, { timeoutMs: agentTimeoutMs() });
+          const result = await spawnShipper(args, {
+            timeoutMs: agentTimeoutMs(),
+            env: { [SHIPPER_SESSION_RUN_ID_ENV]: runId },
+          });
           const sessionContext = await resolveSessionContext({
             repoSlug: sessionRepo.repoSlug,
             issue: 'unlinked',
             stage: 'new',
             since: startedAt,
+            runId,
           });
           let payload: { issueNumber: number; title: string; url: string } | undefined;
           let missingPayloadDetail: string | undefined;
@@ -823,10 +831,14 @@ export const mcpToolDefinitions = [
                   url: newResult.created_issue.url,
                 };
               } catch (error) {
-                missingPayloadDetail = `${MISSING_CREATED_ISSUE_DETAIL}\n${toErrorMessage(error)}`;
+                missingPayloadDetail = `${INVALID_CREATED_ISSUE_RESULT_DETAIL}\n${toErrorMessage(
+                  error
+                )}`;
               }
             } else {
-              missingPayloadDetail = MISSING_CREATED_ISSUE_DETAIL;
+              missingPayloadDetail = sessionContext.sessionLogPath
+                ? MISSING_CREATED_ISSUE_RESULT_FILE_DETAIL
+                : MISSING_CREATE_ISSUE_SESSION_METADATA_DETAIL;
             }
           }
           return formatCreateIssueResult(result, payload, {
