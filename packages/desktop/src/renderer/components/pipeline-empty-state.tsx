@@ -24,7 +24,7 @@ export function PipelineEmptyState({
     return (
       <section className="relative flex min-h-[24rem] flex-col items-center justify-center rounded-sm border border-dashed border-border bg-card px-6 py-10 text-center">
         <svg
-          className="absolute opacity-[0.06] text-foreground"
+          className="pointer-events-none absolute opacity-[0.06] text-foreground"
           width="140"
           height="140"
           viewBox="0 0 100 100"
