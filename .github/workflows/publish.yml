@@ -31,7 +31,7 @@ jobs:
       - name: Verify tag matches all package versions
         run: |
           TAG_VERSION="${GITHUB_REF_NAME#v}"
-          for pkg in cli core desktop; do
+          for pkg in cli core desktop mcp; do
             PKG_VERSION="$(node -p "require('./packages/${pkg}/package.json').version")"
             if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
               echo "::error::Tag ${GITHUB_REF_NAME} does not match packages/${pkg} version ${PKG_VERSION}"
