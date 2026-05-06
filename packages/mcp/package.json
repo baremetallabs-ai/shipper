@@ -1,6 +1,6 @@
 {
   "name": "@baremetallabs-ai/shipper-mcp",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "MCP server for Shipper workflow orchestration",
   "homepage": "https://shipper.baremetallabs.ai",
   "bugs": {
@@ -35,7 +35,7 @@
     "dist"
   ],
   "dependencies": {
-    "@baremetallabs-ai/shipper-core": "3.0.0",
+    "@baremetallabs-ai/shipper-core": "3.0.1",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "zod": "^4.0.0"
   },
