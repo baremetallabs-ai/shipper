@@ -12,7 +12,6 @@ vi.mock('../../src/lib/settings.js', () => ({
 
 let savedVersion: string | undefined;
 let savedSkip: string | undefined;
-let savedCwd: string;
 let warnSpy: ReturnType<typeof vi.spyOn>;
 const tempDirs: string[] = [];
 
@@ -44,16 +43,16 @@ function writeDogfoodIdentity(repo: string): void {
   );
 }
 
-function useDogfoodRepo(): void {
+function useDogfoodRepo(): string {
   const repo = createTempGitRepo();
   writeDogfoodIdentity(repo);
-  process.chdir(repo);
+  return repo;
 }
 
-function useNonDogfoodRepo(): void {
+function useNonDogfoodRepo(): string {
   const repo = createTempGitRepo();
   writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ name: 'user-repo' }, null, 2));
-  process.chdir(repo);
+  return repo;
 }
 
 function getWarningText(): string {
@@ -63,7 +62,6 @@ function getWarningText(): string {
 beforeEach(() => {
   savedVersion = process.env.SHIPPER_VERSION;
   savedSkip = process.env.SHIPPER_SKIP_VERSION_CHECK;
-  savedCwd = process.cwd();
   warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
   delete process.env.SHIPPER_SKIP_VERSION_CHECK;
   getSettingsMock.mockReset();
@@ -71,7 +69,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  process.chdir(savedCwd);
   if (savedVersion !== undefined) {
     process.env.SHIPPER_VERSION = savedVersion;
   } else {
@@ -100,12 +97,12 @@ describe('checkVersionFreshness', () => {
   });
 
   it('warns once in Shipper dogfood mode when the running version is newer than recorded', async () => {
-    useDogfoodRepo();
+    const repo = useDogfoodRepo();
     process.env.SHIPPER_VERSION = '2.0.0';
     const { checkVersionFreshness } = await import('../../src/lib/version.js');
     getSettingsMock.mockReturnValue({ cliVersion: '1.0.0' });
     expect(() => {
-      checkVersionFreshness();
+      checkVersionFreshness({ cwd: repo });
     }).not.toThrow();
     expect(warnSpy).toHaveBeenCalledTimes(1);
     const warning = getWarningText();
@@ -117,12 +114,12 @@ describe('checkVersionFreshness', () => {
   });
 
   it('warns once in Shipper dogfood mode when the running version is older than recorded', async () => {
-    useDogfoodRepo();
+    const repo = useDogfoodRepo();
     process.env.SHIPPER_VERSION = '1.0.0';
     const { checkVersionFreshness } = await import('../../src/lib/version.js');
     getSettingsMock.mockReturnValue({ cliVersion: '2.0.0' });
     expect(() => {
-      checkVersionFreshness();
+      checkVersionFreshness({ cwd: repo });
     }).not.toThrow();
     expect(warnSpy).toHaveBeenCalledTimes(1);
     const warning = getWarningText();
@@ -134,12 +131,12 @@ describe('checkVersionFreshness', () => {
   });
 
   it('warns once in Shipper dogfood mode when the fingerprint is missing', async () => {
-    useDogfoodRepo();
+    const repo = useDogfoodRepo();
     process.env.SHIPPER_VERSION = '1.0.0';
     const { checkVersionFreshness } = await import('../../src/lib/version.js');
     getSettingsMock.mockReturnValue({});
     expect(() => {
-      checkVersionFreshness();
+      checkVersionFreshness({ cwd: repo });
     }).not.toThrow();
     expect(warnSpy).toHaveBeenCalledTimes(1);
     const warning = getWarningText();
@@ -151,23 +148,23 @@ describe('checkVersionFreshness', () => {
   });
 
   it('throws without warning in non-dogfood repos when versions mismatch', async () => {
-    useNonDogfoodRepo();
+    const repo = useNonDogfoodRepo();
     process.env.SHIPPER_VERSION = '2.0.0';
     const { checkVersionFreshness } = await import('../../src/lib/version.js');
     getSettingsMock.mockReturnValue({ cliVersion: '1.0.0' });
     expect(() => {
-      checkVersionFreshness();
+      checkVersionFreshness({ cwd: repo });
     }).toThrow('Installed CLI version (2.0.0)');
     expect(warnSpy).not.toHaveBeenCalled();
   });
 
   it('throws without warning in non-dogfood repos when fingerprint is missing', async () => {
-    useNonDogfoodRepo();
+    const repo = useNonDogfoodRepo();
     process.env.SHIPPER_VERSION = '1.0.0';
     const { checkVersionFreshness } = await import('../../src/lib/version.js');
     getSettingsMock.mockReturnValue({});
     expect(() => {
-      checkVersionFreshness();
+      checkVersionFreshness({ cwd: repo });
     }).toThrow('No version fingerprint found');
     expect(warnSpy).not.toHaveBeenCalled();
   });

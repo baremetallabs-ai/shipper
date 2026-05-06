@@ -1,3 +1,5 @@
+set -e
+
 # `git push` exports GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE / GIT_OBJECT_DIRECTORY /
 # GIT_ALTERNATE_OBJECT_DIRECTORIES into the hook process. Those leak into npm
 # subprocesses and break tests that spawn their own `git` (notably the worktree

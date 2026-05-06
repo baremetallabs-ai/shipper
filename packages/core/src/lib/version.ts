@@ -46,9 +46,10 @@ function getRepositoryUrl(pkg: Record<string, unknown> | undefined): unknown {
   return repository;
 }
 
-function isShipperDogfoodRepo(): boolean {
+function isShipperDogfoodRepo(cwd = process.cwd()): boolean {
   try {
     const root = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
@@ -65,7 +66,7 @@ function isShipperDogfoodRepo(): boolean {
   }
 }
 
-export function checkVersionFreshness(): void {
+export function checkVersionFreshness(options: { cwd?: string } = {}): void {
   if (process.env.SHIPPER_SKIP_VERSION_CHECK === '1') return;
 
   const installed = CLI_VERSION;
@@ -74,7 +75,7 @@ export function checkVersionFreshness(): void {
   if (installed === '0.0.0-dev' || recorded === '0.0.0-dev') return;
 
   if (recorded !== installed) {
-    if (isShipperDogfoodRepo()) {
+    if (isShipperDogfoodRepo(options.cwd)) {
       logger.warn(`Shipper dogfood mode: running CLI version (${installed}) differs from the recorded fingerprint (${recorded ?? '<missing>'}).
 Run \`shipper init\` to refresh the fingerprint, or align \`packages/cli/package.json\` if the manifest bump was unintended.`);
       return;
