@@ -162,7 +162,26 @@ export async function runStageScaffold(opts: StageScaffoldOpts): Promise<StageRu
           async (wtPath) => {
             await scrubOutputDir(wtPath);
             const invocation = opts.invoker({ wtPath, repoRoot, branch, baseBranch });
-            const setupCtx = (await invocation.setup?.()) ?? undefined;
+            const crashOptions = {
+              cwd: wtPath,
+              detailFilename: `${opts.resultStage}-failure-detail.txt`,
+            };
+            let setupCtx: StageSetupResult | undefined;
+            try {
+              setupCtx = (await invocation.setup?.()) ?? undefined;
+            } catch (error) {
+              const detail = toErrorMessage(error);
+              logger.error(detail);
+              await handleAgentCrash(
+                opts.repo,
+                opts.issueNumber,
+                opts.resultStage,
+                detail,
+                undefined,
+                crashOptions
+              );
+              return { success: false, exitCode: 1, error: detail } satisfies StageRunResult;
+            }
 
             const initialCode = await invocation.initial();
             if (initialCode !== 0) {
@@ -175,7 +194,7 @@ export async function runStageScaffold(opts: StageScaffoldOpts): Promise<StageRu
                   opts.resultStage,
                   detail,
                   `The \`${opts.resultStage}\` agent run exited with code ${initialCode}.`,
-                  { cwd: wtPath, detailFilename: `${opts.resultStage}-failure-detail.txt` }
+                  crashOptions
                 );
                 return { success: false, exitCode: 1, error: detail } satisfies StageRunResult;
               }
@@ -243,10 +262,7 @@ export async function runStageScaffold(opts: StageScaffoldOpts): Promise<StageRu
                 opts.resultStage,
                 detail,
                 undefined,
-                {
-                  cwd: wtPath,
-                  detailFilename: `${opts.resultStage}-failure-detail.txt`,
-                }
+                crashOptions
               );
               return { success: false, exitCode: 1, error: detail } satisfies StageRunResult;
             }

@@ -514,8 +514,12 @@ export async function retryPrReviewOutputAndSubmission(opts: {
 
       const refreshedContext = await opts.refreshContext?.();
       if (refreshedContext) {
-        currentPrFiles = refreshedContext.prFiles;
-        currentDiffHunks = refreshedContext.diffHunks;
+        if (refreshedContext.prFiles !== undefined) {
+          currentPrFiles = refreshedContext.prFiles;
+        }
+        if (refreshedContext.diffHunks !== undefined) {
+          currentDiffHunks = refreshedContext.diffHunks;
+        }
       }
 
       const detail = await truncateLargeInput(

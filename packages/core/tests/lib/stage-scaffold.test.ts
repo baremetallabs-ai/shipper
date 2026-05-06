@@ -329,6 +329,49 @@ describe('runStageScaffold', () => {
     );
   });
 
+  it('logs and reports setup failures after the worktree is ready', async () => {
+    const initialMock = vi.fn<() => Promise<number>>().mockResolvedValue(0);
+
+    await expect(
+      runStageScaffold({
+        repo: 'owner/repo',
+        issueNumber: '123',
+        stage: 'pr-review',
+        resultStage: 'pr_review',
+        createBranch: false,
+        initialFailure: 'crash',
+        prNumber: { value: '84' },
+        resolveLocked: () =>
+          Promise.resolve({
+            repoRoot: '/tmp/fake-repo',
+            branch: 'shipper/123-branch',
+          }),
+        invoker: () =>
+          buildInvocation({
+            setup: () => Promise.reject(new Error('gh pr diff failed\n\n{"message":"No diff"}')),
+            initial: initialMock,
+          }),
+      })
+    ).resolves.toEqual({
+      success: false,
+      exitCode: 1,
+      error: 'gh pr diff failed\n\n{"message":"No diff"}',
+    });
+
+    expect(initialMock).not.toHaveBeenCalled();
+    expect(retryPrReviewOutputAndSubmissionMock).not.toHaveBeenCalled();
+    expect(processResultMock).not.toHaveBeenCalled();
+    expect(loggerErrorMock).toHaveBeenCalledWith('gh pr diff failed\n\n{"message":"No diff"}');
+    expect(handleAgentCrashMock).toHaveBeenCalledWith(
+      'owner/repo',
+      '123',
+      'pr_review',
+      'gh pr diff failed\n\n{"message":"No diff"}',
+      undefined,
+      { cwd: '/tmp/fake-wt', detailFilename: 'pr_review-failure-detail.txt' }
+    );
+  });
+
   it('propagates transport initial exit codes without invoking crash handling', async () => {
     await expect(
       runStageScaffold({

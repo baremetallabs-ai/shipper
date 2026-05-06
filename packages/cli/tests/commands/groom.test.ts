@@ -389,7 +389,11 @@ describe('groomCommand', () => {
       if (args[0] === 'issue' && args[1] === 'comment' && args[2] === '123') {
         const bodyIndex = args.indexOf('--body');
         const body = bodyIndex === -1 ? undefined : args[bodyIndex + 1];
-        if (typeof body === 'string' && body.includes('## Groom Post-flight Failure')) {
+        if (
+          typeof body === 'string' &&
+          body.includes('## Groom Post-flight Failure') &&
+          !body.includes('## Agent Failure')
+        ) {
           throw new Error('failure comment failed');
         }
       }
@@ -412,6 +416,7 @@ describe('groomCommand', () => {
       expect.stringContaining('## Agent Failure'),
     ]);
     expect(fake.state.postedComments.at(-1)?.body).toContain('failure comment failed');
+    expect(fake.state.postedComments.at(-1)?.body).toContain('body update failed');
     expect(process.exitCode).toBe(1);
   });
 
