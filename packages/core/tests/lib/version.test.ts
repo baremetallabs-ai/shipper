@@ -1,3 +1,7 @@
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const getSettingsMock = vi.fn<() => { cliVersion?: string }>();
@@ -8,16 +12,66 @@ vi.mock('../../src/lib/settings.js', () => ({
 
 let savedVersion: string | undefined;
 let savedSkip: string | undefined;
+let savedCwd: string;
+let warnSpy: ReturnType<typeof vi.spyOn>;
+const tempDirs: string[] = [];
+
+function createTempGitRepo(): string {
+  const repo = mkdtempSync(path.join(tmpdir(), 'shipper-version-'));
+  tempDirs.push(repo);
+  execFileSync('git', ['init'], { cwd: repo, stdio: 'ignore' });
+  return repo;
+}
+
+function writeDogfoodIdentity(repo: string): void {
+  mkdirSync(path.join(repo, 'packages/cli'), { recursive: true });
+  writeFileSync(
+    path.join(repo, 'package.json'),
+    JSON.stringify({ name: 'shipper-monorepo' }, null, 2)
+  );
+  writeFileSync(
+    path.join(repo, 'packages/cli/package.json'),
+    JSON.stringify(
+      {
+        name: '@baremetallabs-ai/shipper-cli',
+        repository: {
+          url: 'https://github.com/baremetallabs-ai/shipper.git',
+        },
+      },
+      null,
+      2
+    )
+  );
+}
+
+function useDogfoodRepo(): void {
+  const repo = createTempGitRepo();
+  writeDogfoodIdentity(repo);
+  process.chdir(repo);
+}
+
+function useNonDogfoodRepo(): void {
+  const repo = createTempGitRepo();
+  writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ name: 'user-repo' }, null, 2));
+  process.chdir(repo);
+}
+
+function getWarningText(): string {
+  return warnSpy.mock.calls.map(([message]) => String(message)).join('\n');
+}
 
 beforeEach(() => {
   savedVersion = process.env.SHIPPER_VERSION;
   savedSkip = process.env.SHIPPER_SKIP_VERSION_CHECK;
+  savedCwd = process.cwd();
+  warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
   delete process.env.SHIPPER_SKIP_VERSION_CHECK;
   getSettingsMock.mockReset();
   vi.resetModules();
 });
 
 afterEach(() => {
+  process.chdir(savedCwd);
   if (savedVersion !== undefined) {
     process.env.SHIPPER_VERSION = savedVersion;
   } else {
@@ -27,6 +81,10 @@ afterEach(() => {
     process.env.SHIPPER_SKIP_VERSION_CHECK = savedSkip;
   } else {
     delete process.env.SHIPPER_SKIP_VERSION_CHECK;
+  }
+  warnSpy.mockRestore();
+  for (const dir of tempDirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
@@ -38,24 +96,80 @@ describe('checkVersionFreshness', () => {
     expect(() => {
       checkVersionFreshness();
     }).not.toThrow();
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 
-  it('throws when versions mismatch', async () => {
+  it('warns once in Shipper dogfood mode when the running version is newer than recorded', async () => {
+    useDogfoodRepo();
+    process.env.SHIPPER_VERSION = '2.0.0';
+    const { checkVersionFreshness } = await import('../../src/lib/version.js');
+    getSettingsMock.mockReturnValue({ cliVersion: '1.0.0' });
+    expect(() => {
+      checkVersionFreshness();
+    }).not.toThrow();
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    const warning = getWarningText();
+    expect(warning).toContain('Shipper dogfood mode');
+    expect(warning).toContain('2.0.0');
+    expect(warning).toContain('1.0.0');
+    expect(warning).toContain('shipper init');
+    expect(warning).toContain('packages/cli/package.json');
+  });
+
+  it('warns once in Shipper dogfood mode when the running version is older than recorded', async () => {
+    useDogfoodRepo();
+    process.env.SHIPPER_VERSION = '1.0.0';
+    const { checkVersionFreshness } = await import('../../src/lib/version.js');
+    getSettingsMock.mockReturnValue({ cliVersion: '2.0.0' });
+    expect(() => {
+      checkVersionFreshness();
+    }).not.toThrow();
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    const warning = getWarningText();
+    expect(warning).toContain('Shipper dogfood mode');
+    expect(warning).toContain('1.0.0');
+    expect(warning).toContain('2.0.0');
+    expect(warning).toContain('shipper init');
+    expect(warning).toContain('packages/cli/package.json');
+  });
+
+  it('warns once in Shipper dogfood mode when the fingerprint is missing', async () => {
+    useDogfoodRepo();
+    process.env.SHIPPER_VERSION = '1.0.0';
+    const { checkVersionFreshness } = await import('../../src/lib/version.js');
+    getSettingsMock.mockReturnValue({});
+    expect(() => {
+      checkVersionFreshness();
+    }).not.toThrow();
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    const warning = getWarningText();
+    expect(warning).toContain('Shipper dogfood mode');
+    expect(warning).toContain('1.0.0');
+    expect(warning).toContain('<missing>');
+    expect(warning).toContain('shipper init');
+    expect(warning).toContain('packages/cli/package.json');
+  });
+
+  it('throws without warning in non-dogfood repos when versions mismatch', async () => {
+    useNonDogfoodRepo();
     process.env.SHIPPER_VERSION = '2.0.0';
     const { checkVersionFreshness } = await import('../../src/lib/version.js');
     getSettingsMock.mockReturnValue({ cliVersion: '1.0.0' });
     expect(() => {
       checkVersionFreshness();
     }).toThrow('Installed CLI version (2.0.0)');
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 
-  it('throws when fingerprint is missing', async () => {
+  it('throws without warning in non-dogfood repos when fingerprint is missing', async () => {
+    useNonDogfoodRepo();
     process.env.SHIPPER_VERSION = '1.0.0';
     const { checkVersionFreshness } = await import('../../src/lib/version.js');
     getSettingsMock.mockReturnValue({});
     expect(() => {
       checkVersionFreshness();
     }).toThrow('No version fingerprint found');
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 
   it('skips check when installed version is 0.0.0-dev', async () => {
@@ -65,6 +179,7 @@ describe('checkVersionFreshness', () => {
     expect(() => {
       checkVersionFreshness();
     }).not.toThrow();
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 
   it('skips check when recorded version is 0.0.0-dev', async () => {
@@ -74,6 +189,7 @@ describe('checkVersionFreshness', () => {
     expect(() => {
       checkVersionFreshness();
     }).not.toThrow();
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 
   it('skips check when SHIPPER_SKIP_VERSION_CHECK=1', async () => {
@@ -84,5 +200,7 @@ describe('checkVersionFreshness', () => {
     expect(() => {
       checkVersionFreshness();
     }).not.toThrow();
+    expect(getSettingsMock).not.toHaveBeenCalled();
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 });
