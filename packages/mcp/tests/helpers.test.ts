@@ -145,10 +145,53 @@ describe('tool-specific result formatters', () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toContain(
-      'Unable to recover created issue details from post-run metadata.'
+      'did not record created_issue in .shipper/output/result.json'
     );
     expect(result.content[0]?.text).toContain('Created issue draft and printed the summary.');
     expect(result.content[0]?.text).toContain('Session log: /tmp/create.jsonl');
+  });
+
+  it('does not add missing-identity detail for non-zero create-issue runs', () => {
+    const result = formatCreateIssueResult(
+      {
+        exitCode: 2,
+        stdout: '',
+        stderr: 'fatal: gh issue create failed',
+        timedOut: false,
+      },
+      undefined,
+      {
+        command: 'shipper new <request> --mode headless',
+        sessionLogPath: '/tmp/create.jsonl',
+      }
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain('[exit 2] shipper new <request> --mode headless');
+    expect(result.content[0]?.text).toContain('fatal: gh issue create failed');
+    expect(result.content[0]?.text).toContain('Session log: /tmp/create.jsonl');
+    expect(result.content[0]?.text).not.toContain('did not record created_issue');
+  });
+
+  it('does not add missing-identity detail for timed-out create-issue runs', () => {
+    const result = formatCreateIssueResult(
+      {
+        exitCode: -1,
+        stdout: '',
+        stderr: '',
+        timedOut: true,
+      },
+      undefined,
+      {
+        command: 'shipper new <request> --mode headless',
+        sessionLogPath: '/tmp/create.jsonl',
+      }
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain('[timed out] shipper new <request> --mode headless');
+    expect(result.content[0]?.text).toContain('Session log: /tmp/create.jsonl');
+    expect(result.content[0]?.text).not.toContain('did not record created_issue');
   });
 
   it('renders session-log-missing markers on structured success paths', () => {

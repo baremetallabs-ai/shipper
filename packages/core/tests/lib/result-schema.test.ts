@@ -5,8 +5,10 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  readNewResultFile,
   readResultFile,
   ResultValidationError,
+  validateNewResult,
   validateResult,
 } from '../../src/lib/result-schema.js';
 
@@ -136,6 +138,100 @@ describe('validateResult', () => {
   });
 });
 
+describe('validateNewResult', () => {
+  it('accepts a valid created issue result', () => {
+    expect(
+      validateNewResult({
+        created_issue: {
+          number: 42,
+          title: 'Add generated MCP reference pages',
+          url: 'https://github.com/owner/repo/issues/42',
+        },
+      })
+    ).toEqual({
+      created_issue: {
+        number: 42,
+        title: 'Add generated MCP reference pages',
+        url: 'https://github.com/owner/repo/issues/42',
+      },
+    });
+  });
+
+  it('rejects non-object input', () => {
+    expect(() => validateNewResult('bad')).toThrowError(
+      new ResultValidationError(['result.json must be a JSON object'])
+    );
+  });
+
+  it('reports a missing created_issue field', () => {
+    expect(() => validateNewResult({})).toThrowError(
+      "Invalid result.json:\n- missing required field 'created_issue'"
+    );
+  });
+
+  it('rejects a non-object created_issue field', () => {
+    expect(() => validateNewResult({ created_issue: 'bad' })).toThrowError(
+      "Invalid result.json:\n- 'created_issue' must be a JSON object"
+    );
+  });
+
+  it.each([0, -1, 1.5, '42'])('rejects invalid issue number %s', (number) => {
+    expect(() =>
+      validateNewResult({
+        created_issue: {
+          number,
+          title: 'Valid title',
+          url: 'https://github.com/owner/repo/issues/42',
+        },
+      })
+    ).toThrowError("Invalid result.json:\n- 'created_issue.number' must be a positive integer");
+  });
+
+  it.each(['title', 'url'] as const)('rejects a blank %s', (field) => {
+    expect(() =>
+      validateNewResult({
+        created_issue: {
+          number: 42,
+          title: field === 'title' ? '   ' : 'Valid title',
+          url: field === 'url' ? '' : 'https://github.com/owner/repo/issues/42',
+        },
+      })
+    ).toThrowError(`Invalid result.json:\n- 'created_issue.${field}' must be a non-empty string`);
+  });
+
+  it.each(['title', 'url'] as const)('rejects a non-string %s', (field) => {
+    expect(() =>
+      validateNewResult({
+        created_issue: {
+          number: 42,
+          title: field === 'title' ? 7 : 'Valid title',
+          url: field === 'url' ? 7 : 'https://github.com/owner/repo/issues/42',
+        },
+      })
+    ).toThrowError(`Invalid result.json:\n- 'created_issue.${field}' must be a non-empty string`);
+  });
+
+  it('ignores unrelated extra fields', () => {
+    expect(
+      validateNewResult({
+        created_issue: {
+          number: 42,
+          title: 'Valid title',
+          url: 'https://github.com/owner/repo/issues/42',
+          ignored: true,
+        },
+        ignored: true,
+      })
+    ).toEqual({
+      created_issue: {
+        number: 42,
+        title: 'Valid title',
+        url: 'https://github.com/owner/repo/issues/42',
+      },
+    });
+  });
+});
+
 describe('readResultFile', () => {
   let tempDir: string;
 
@@ -200,6 +296,79 @@ describe('readResultFile', () => {
 
     await expect(readResultFile(tempDir)).rejects.toThrowError(
       `Invalid result.json at ${path.join(tempDir, 'result.json')}:\n- missing required field 'comment'`
+    );
+  });
+});
+
+describe('readNewResultFile', () => {
+  let tempDir: string;
+
+  afterEach(async () => {
+    if (tempDir) {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('reads and validates a result file from a full path', async () => {
+    tempDir = await mkdtemp(path.join(tmpdir(), 'shipper-new-result-schema-'));
+    const resultPath = path.join(tempDir, 'new.result.json');
+    await writeFile(
+      resultPath,
+      JSON.stringify({
+        created_issue: {
+          number: 42,
+          title: 'Add generated MCP reference pages',
+          url: 'https://github.com/owner/repo/issues/42',
+        },
+      }),
+      'utf-8'
+    );
+
+    await expect(readNewResultFile(resultPath)).resolves.toEqual({
+      created_issue: {
+        number: 42,
+        title: 'Add generated MCP reference pages',
+        url: 'https://github.com/owner/repo/issues/42',
+      },
+    });
+  });
+
+  it('reports a missing result.json file', async () => {
+    tempDir = await mkdtemp(path.join(tmpdir(), 'shipper-new-result-schema-'));
+    const resultPath = path.join(tempDir, 'new.result.json');
+
+    await expect(readNewResultFile(resultPath)).rejects.toThrowError(
+      `Missing result.json at ${resultPath}`
+    );
+  });
+
+  it('reports malformed JSON', async () => {
+    tempDir = await mkdtemp(path.join(tmpdir(), 'shipper-new-result-schema-'));
+    const resultPath = path.join(tempDir, 'new.result.json');
+    await writeFile(resultPath, '{bad json', 'utf-8');
+
+    await expect(readNewResultFile(resultPath)).rejects.toThrowError(
+      new RegExp(`^Failed to parse ${escapeRegExp(resultPath)}:`)
+    );
+  });
+
+  it('preserves non-ENOENT read failures', async () => {
+    tempDir = await mkdtemp(path.join(tmpdir(), 'shipper-new-result-schema-'));
+    const resultPath = path.join(tempDir, 'new.result.json');
+    await mkdir(resultPath);
+
+    await expect(readNewResultFile(resultPath)).rejects.toThrowError(
+      new RegExp(`^Failed to read result\\.json at ${escapeRegExp(resultPath)}:`)
+    );
+  });
+
+  it('reports schema validation failures from the file', async () => {
+    tempDir = await mkdtemp(path.join(tmpdir(), 'shipper-new-result-schema-'));
+    const resultPath = path.join(tempDir, 'new.result.json');
+    await writeFile(resultPath, JSON.stringify({ created_issue: { number: 0 } }), 'utf-8');
+
+    await expect(readNewResultFile(resultPath)).rejects.toThrowError(
+      `Invalid result.json at ${resultPath}:\n- 'created_issue.number' must be a positive integer\n- 'created_issue.title' must be a non-empty string\n- 'created_issue.url' must be a non-empty string`
     );
   });
 });

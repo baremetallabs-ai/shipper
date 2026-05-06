@@ -9,7 +9,7 @@ Create a new GitHub issue from a plain-text request. Spawns `shipper new <reques
 
 ## When to use
 
-Use this when the user has a plain-language request that should become a researched GitHub issue rather than immediate code changes.
+Use this when the user has a plain-language request that should become a researched GitHub issue rather than immediate code changes. The success result is sourced from the headless agent's `.shipper/output/result.json` `created_issue` record; the transcript is used only for the final-message wrap-up.
 
 ## Behavior hints
 
@@ -43,10 +43,9 @@ Session log: /tmp/shipper/session.log
 
 ## Error modes
 
-- Missing created issue metadata: Unable to recover created issue details from post-run metadata.
+- Missing created issue metadata: The new agent exited successfully but did not record created_issue in .shipper/output/result.json. Inspect the session log to see whether an issue was created.
 - Timed out worker: [timed out] shipper new <request> --mode headless
 - Failed worker: [exit <code>] shipper new <request> --mode headless
-- Issue recovery failure: gh issue view or issue-list recovery failure: <underlying error message>
 
 ## Related tools
 

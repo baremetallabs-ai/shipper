@@ -357,6 +357,29 @@ describe('new prompts', () => {
       expect(prompt).toContain('before any assumptions or before the self-contained fallback');
     }
   );
+
+  it.each(['claude', 'codex', 'copilot'])(
+    'records created issue identity after successful gh issue create for %s',
+    (agent) => {
+      const prompt = readFileSync(
+        new URL(`../../src/prompts/${agent}/new.md`, import.meta.url),
+        'utf-8'
+      );
+
+      expect(prompt).toContain('.shipper/tmp/issue-<timestamp>.md');
+      expect(prompt).toContain('.shipper/output/result.json');
+      expect(prompt).toContain('after `gh issue create` succeeds');
+      expect(prompt).toContain('created_issue');
+      expect(prompt).toContain('"number"');
+      expect(prompt).toContain('"title"');
+      expect(prompt).toContain('"url"');
+      expect(prompt).toContain('Parse the issue number from the trailing `/issues/<number>`');
+      expect(prompt).toContain('Use JSON-safe writing');
+      expect(prompt).toContain(
+        'If any `gh issue create` step fails, report the error and do not write a success `result.json`.'
+      );
+    }
+  );
 });
 
 describe('plan/design escape-hatch softening', () => {

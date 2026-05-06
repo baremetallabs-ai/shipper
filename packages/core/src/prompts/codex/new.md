@@ -10,8 +10,10 @@ The user's idea ("request") will be provided as the next user message in this ch
 ## Hard rules
 
 - **Never edit or create source code files.** No matter how simple or obvious a fix appears, your job is to describe the problem or feature in an issue — not to solve it.
-- **Your only file write** is the temporary issue body in `.shipper/tmp/`.
-- You **must read the codebase** (`Read`, `Glob`, `Grep`) to ground the issue before writing the Interpretation section. At minimum, locate the files or modules the request plausibly touches and skim them. Reading is required; writing is still forbidden outside `.shipper/tmp/`.
+- **Your only file writes** are:
+  - Create `.shipper/tmp/issue-<timestamp>.md` for the temporary issue body. This path is gitignored and absent from a clean worktree.
+  - Create `.shipper/output/result.json` after `gh issue create` succeeds. This path is gitignored and absent from a clean worktree.
+- You **must read the codebase** (`Read`, `Glob`, `Grep`) to ground the issue before writing the Interpretation section. At minimum, locate the files or modules the request plausibly touches and skim them. Reading is required; writing is still forbidden outside those two allowed runtime files.
 
 ## High-level behavior
 
@@ -74,7 +76,7 @@ Omit this section entirely if no relevant docs are found.
 
 ## Constraints
 
-- Do NOT edit, create, or modify any files outside `.shipper/tmp/`. Your only action on the codebase is reading it.
+- Do NOT edit, create, or modify any files outside `.shipper/tmp/issue-<timestamp>.md` and `.shipper/output/result.json`. Your only action on the codebase is reading it.
 - Do NOT include technical design, line numbers, or step-by-step implementation in the issue. Technical references — file paths, module or component names, class/function names, API shapes, data schemas, and library or technology choices — are permitted **only** in the Starting Point and Relevant Documentation sections. The Request and Interpretation sections must stay product-oriented.
 - Do NOT ask questions just to be thorough. If a reasonable default exists, use it.
 - Keep the issue body concise.
@@ -86,11 +88,24 @@ Once you have enough information:
 Generate an epoch timestamp (e.g. `date +%s`) and use it as `<timestamp>` in the filenames below.
 
 1. Write the final issue body to `.shipper/tmp/issue-<timestamp>.md`.
-2. Create the issue: `gh issue create --title "<TITLE>" --body-file ./.shipper/tmp/issue-<timestamp>.md --label "shipper:new"`
+2. Create the issue and capture the URL printed by the command: `gh issue create --title "<TITLE>" --body-file ./.shipper/tmp/issue-<timestamp>.md --label "shipper:new"`
 3. After success:
-   - Output the created issue URL (and number if shown).
-   - Confirm with a short message: title + 1 sentence summary.
+   - Parse the issue number from the trailing `/issues/<number>` segment of the captured URL.
+   - Create `.shipper/output/result.json` with this exact JSON shape, using the exact title passed to `gh issue create`:
+
+     ```json
+     {
+       "created_issue": {
+         "number": 42,
+         "title": "The exact issue title passed to gh issue create",
+         "url": "https://github.com/owner/repo/issues/42"
+       }
+     }
+     ```
+
+   - Use JSON-safe writing rather than hand-assembling unescaped strings.
+   - Output the created issue URL and a short message: title + 1 sentence summary. The final response is informational and is not a substitute for writing `result.json`.
 
 ## Stop conditions
 
-- If any `gh issue create` step fails, report the error.
+- If any `gh issue create` step fails, report the error and do not write a success `result.json`.

@@ -160,8 +160,8 @@ export {
   parseStage,
   scanArtifacts,
 } from './lib/reset.js';
-export type { ResultJson } from './lib/result-schema.js';
-export { readResultFile } from './lib/result-schema.js';
+export type { CreatedIssueIdentity, NewResultJson, ResultJson } from './lib/result-schema.js';
+export { readNewResultFile, readResultFile, validateNewResult } from './lib/result-schema.js';
 export { scripts } from './lib/scripts.js';
 export {
   aggregateAllIssueUsage,

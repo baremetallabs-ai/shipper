@@ -13,6 +13,16 @@ export interface ResultJson {
   groom?: string;
 }
 
+export interface CreatedIssueIdentity {
+  number: number;
+  title: string;
+  url: string;
+}
+
+export interface NewResultJson {
+  created_issue: CreatedIssueIdentity;
+}
+
 export const VALID_VERDICTS = ['accept', 'reject', 'fail'] as const;
 const PROTOCOL_OUTPUT_DIR = path.join('.shipper', 'output');
 
@@ -117,9 +127,54 @@ export function validateResult(data: unknown): ResultJson {
   return result;
 }
 
-export async function readResultFile(outputDir: string): Promise<ResultJson> {
-  const resultPath = path.join(outputDir, 'result.json');
+export function validateNewResult(data: unknown): NewResultJson {
+  const errors: string[] = [];
 
+  if (!isRecord(data)) {
+    throw new ResultValidationError(['result.json must be a JSON object']);
+  }
+
+  if (!('created_issue' in data)) {
+    errors.push("missing required field 'created_issue'");
+  } else if (!isRecord(data.created_issue)) {
+    errors.push("'created_issue' must be a JSON object");
+  } else {
+    const createdIssue = data.created_issue;
+    if (
+      typeof createdIssue.number !== 'number' ||
+      !Number.isInteger(createdIssue.number) ||
+      createdIssue.number <= 0
+    ) {
+      errors.push("'created_issue.number' must be a positive integer");
+    }
+
+    if (typeof createdIssue.title !== 'string' || createdIssue.title.trim().length === 0) {
+      errors.push("'created_issue.title' must be a non-empty string");
+    }
+
+    if (typeof createdIssue.url !== 'string' || createdIssue.url.trim().length === 0) {
+      errors.push("'created_issue.url' must be a non-empty string");
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new ResultValidationError(errors);
+  }
+
+  const createdIssue = (data as { created_issue: CreatedIssueIdentity }).created_issue;
+  return {
+    created_issue: {
+      number: createdIssue.number,
+      title: createdIssue.title.trim(),
+      url: createdIssue.url.trim(),
+    },
+  };
+}
+
+async function readJsonResultFile<T>(
+  resultPath: string,
+  validator: (data: unknown) => T
+): Promise<T> {
   let raw: string;
   try {
     raw = await readFile(resultPath, 'utf-8');
@@ -139,7 +194,7 @@ export async function readResultFile(outputDir: string): Promise<ResultJson> {
   }
 
   try {
-    return validateResult(parsed);
+    return validator(parsed);
   } catch (error) {
     if (error instanceof ResultValidationError) {
       throw new ResultValidationError(error.errors, `Invalid result.json at ${resultPath}`);
@@ -147,4 +202,12 @@ export async function readResultFile(outputDir: string): Promise<ResultJson> {
 
     throw error;
   }
+}
+
+export async function readResultFile(outputDir: string): Promise<ResultJson> {
+  return await readJsonResultFile(path.join(outputDir, 'result.json'), validateResult);
+}
+
+export async function readNewResultFile(resultPath: string): Promise<NewResultJson> {
+  return await readJsonResultFile(resultPath, validateNewResult);
 }
