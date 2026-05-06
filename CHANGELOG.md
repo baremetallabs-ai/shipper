@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- CI and the local pre-push hook now guard against drift between `.shipper/settings.json`'s
+  `cliVersion` fingerprint and `packages/cli/package.json`'s `version`.
+
+### Changed
+
+- Shipper's own dogfood mode now downgrades CLI fingerprint drift from a hard failure to a warning
+  while keeping user repositories strict.
+
 ## [3.0.0]
 
 ### Changed
