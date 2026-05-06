@@ -19,6 +19,14 @@ type GhHandler = (
   args: string[],
   options?: { cwd?: string }
 ) => GhResponse | Promise<GhResponse> | undefined | Promise<undefined>;
+type FakeGhError = Error & {
+  name: 'GhError';
+  args: string[];
+  command: string;
+  stdout: string;
+  stderr: string;
+  code?: string | number;
+};
 
 interface FakeIssueRecord {
   number: string;
@@ -188,6 +196,10 @@ interface CreateFakeCore {
     ) => Promise<AggregateSessionUsageResult> | AggregateSessionUsageResult
   ): void;
   stubGh(handler: GhHandler): void;
+  makeGhError(
+    args: string[],
+    detail: { stdout?: string; stderr?: string; code?: string | number }
+  ): FakeGhError;
   writeStageOutput(options: WriteStageOutputOptions): Promise<ResultJson>;
 }
 
@@ -249,6 +261,37 @@ function getFlagValue(args: string[], flag: string): string | undefined {
 
 function toResponse(stdout = '', stderr = ''): GhResponse {
   return { stdout, stderr };
+}
+
+function makeGhError(
+  args: string[],
+  detail: { stdout?: string; stderr?: string; code?: string | number }
+): FakeGhError {
+  const stdout = detail.stdout ?? '';
+  const stderr = detail.stderr ?? '';
+  const command = `gh ${args.join(' ')}`;
+  const statusLine = stderr.trim().split(/\r?\n/, 1)[0] ?? '';
+  const header = `${command} failed${detail.code === undefined ? '' : ` (code ${detail.code})`}${
+    statusLine ? `: ${statusLine}` : ''
+  }`;
+  const sections = [header];
+  if (stderr.trim()) {
+    sections.push('', 'stderr:', stderr.trim());
+  }
+  if (stdout.trim()) {
+    sections.push('', 'stdout:', stdout.trim());
+  }
+
+  const error = Object.assign(new Error(sections.join('\n')), {
+    name: 'GhError' as const,
+    args: [...args],
+    command,
+    stdout,
+    stderr,
+    ...(detail.code === undefined ? {} : { code: detail.code }),
+  });
+  error.name = 'GhError';
+  return error;
 }
 
 function resolvePathWithCwd(filePath: string, options?: { cwd?: string }): string {
@@ -807,6 +850,7 @@ export function createFakeCore(): CreateFakeCore {
     stubGh(handler): void {
       ghStubs.push(handler);
     },
+    makeGhError,
     async writeStageOutput(options: WriteStageOutputOptions): Promise<ResultJson> {
       const outputDir = path.join(wtPath, '.shipper', 'output');
       mkdirSync(outputDir, { recursive: true });

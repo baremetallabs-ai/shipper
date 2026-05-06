@@ -2,8 +2,9 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { formatValidRanges, includesLine, type DiffFileHunks } from './diff-parse.js';
-import { PROTOCOL_OUTPUT_DIR, resolveOutputPath } from './protocol-io.js';
+import { PROTOCOL_OUTPUT_DIR, resolveOutputPath, truncateLargeInput } from './protocol-io.js';
 import { toErrorMessage } from '../errors.js';
+import { getGhErrorDetail, isRecoverableReviewSubmissionGhError } from '../gh.js';
 import { readResultFile, ResultValidationError, type ResultJson } from '../result-schema.js';
 import type { StageName } from '../stage-transitions.js';
 import { readGroomManifest } from './groom.js';
@@ -450,6 +451,85 @@ export async function retryOnInvalidOutput(opts: {
   }
 
   throw new Error('Unreachable: retryOnInvalidOutput exhausted attempts without returning.');
+}
+
+export interface PrReviewRetryContext {
+  prFiles?: Set<string>;
+  diffHunks?: Map<string, DiffFileHunks>;
+}
+
+export interface RetryPrReviewOutputAndSubmissionResult {
+  result: ResultJson;
+  reviewSubmitted: boolean;
+}
+
+function formatGitHubReviewRejectionCorrectionMessage(detail: string): string {
+  return [
+    'GitHub rejected the review payload after it passed Shipper validation. Fix the review payload and produce a valid .shipper/output/result.json.',
+    '',
+    detail,
+  ].join('\n');
+}
+
+export async function retryPrReviewOutputAndSubmission(opts: {
+  cwd: string;
+  prFiles?: Set<string>;
+  diffHunks?: Map<string, DiffFileHunks>;
+  retry: (correctionMessage: string) => Promise<number>;
+  submitReviewPayload: (payloadPath: string) => Promise<void>;
+  refreshContext?: () => Promise<PrReviewRetryContext | undefined>;
+}): Promise<RetryPrReviewOutputAndSubmissionResult> {
+  let currentPrFiles = opts.prFiles;
+  let currentDiffHunks = opts.diffHunks;
+
+  for (let attempt = 1; attempt <= MAX_VALIDATION_ATTEMPTS; attempt++) {
+    let result: ResultJson;
+    try {
+      result = await validateStageOutput(opts.cwd, 'pr_review', currentPrFiles, currentDiffHunks);
+    } catch (error) {
+      if (attempt === MAX_VALIDATION_ATTEMPTS) {
+        throw error;
+      }
+
+      const errors =
+        error instanceof ResultValidationError ? error.errors : [toErrorMessage(error)];
+      await opts.retry(formatCorrectionMessage(errors));
+      continue;
+    }
+
+    if (result.verdict !== 'accept') {
+      return { result, reviewSubmitted: false };
+    }
+    if (!result.review_payload) {
+      throw new Error('pr_review accept requires a review_payload in result.json');
+    }
+
+    try {
+      await opts.submitReviewPayload(result.review_payload);
+      return { result, reviewSubmitted: true };
+    } catch (error) {
+      if (!isRecoverableReviewSubmissionGhError(error) || attempt === MAX_VALIDATION_ATTEMPTS) {
+        throw error;
+      }
+
+      const refreshedContext = await opts.refreshContext?.();
+      if (refreshedContext) {
+        currentPrFiles = refreshedContext.prFiles;
+        currentDiffHunks = refreshedContext.diffHunks;
+      }
+
+      const detail = await truncateLargeInput(
+        opts.cwd,
+        getGhErrorDetail(error),
+        'github-review-rejection.txt'
+      );
+      await opts.retry(formatGitHubReviewRejectionCorrectionMessage(detail));
+    }
+  }
+
+  throw new Error(
+    'Unreachable: retryPrReviewOutputAndSubmission exhausted attempts without returning.'
+  );
 }
 
 export function formatCorrectionMessage(errors: string[]): string {

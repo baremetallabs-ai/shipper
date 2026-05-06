@@ -198,7 +198,8 @@ export async function attemptUnblock(
         issueStr,
         'unblock',
         detail,
-        `The \`unblock\` agent run exited with code ${exitCode}.`
+        `The \`unblock\` agent run exited with code ${exitCode}.`,
+        { cwd, detailFilename: 'unblock-failure-detail.txt' }
       );
       return false;
     }
@@ -228,7 +229,10 @@ export async function attemptUnblock(
     } catch (error) {
       const detail = toErrorMessage(error);
       logger.error(detail);
-      await handleAgentCrash(repo, issueStr, 'unblock', detail);
+      await handleAgentCrash(repo, issueStr, 'unblock', detail, undefined, {
+        cwd,
+        detailFilename: 'unblock-failure-detail.txt',
+      });
       return false;
     }
   });

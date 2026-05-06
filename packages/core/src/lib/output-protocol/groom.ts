@@ -10,7 +10,7 @@ import {
 import { type ResultJson } from '../result-schema.js';
 import { toErrorMessage } from '../errors.js';
 import { gh } from '../gh.js';
-import { resolveOutputPath } from './protocol-io.js';
+import { resolveOutputPath, truncateLargeInput } from './protocol-io.js';
 
 export type GroomPriority = 'high' | 'normal' | 'low';
 export type GroomDecompositionKind = 'none' | 'partial' | 'full';
@@ -766,7 +766,11 @@ export async function processGroomResult(opts: {
     return result;
   }
 
-  const failureBody = formatFailureComment(steps);
+  const failureBody = await truncateLargeInput(
+    cwd,
+    formatFailureComment(steps),
+    'groom-post-flight-failure.txt'
+  );
   try {
     await gh(['issue', 'comment', issueNumber, '-R', repo, '--body', failureBody]);
   } catch (error) {
