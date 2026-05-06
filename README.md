@@ -29,6 +29,11 @@ repeatable GitHub-backed workflow instead of another manual prompt thread.
 
 ## 30-second quickstart
 
+Use Shipper through the CLI or the supported macOS desktop app. Both entry points operate on the
+same GitHub issues, labels, comments, settings, locks, and workflow artifacts.
+
+### CLI
+
 ```bash
 npm install -g @baremetallabs-ai/shipper-cli
 shipper init
@@ -36,11 +41,19 @@ shipper new "your idea"
 shipper ship --auto
 ```
 
+### Desktop
+
+1. Download the latest macOS arm64 desktop artifact from
+   https://github.com/baremetallabs-ai/shipper/releases.
+2. Authenticate GitHub CLI with `gh auth login`.
+3. Add or select a GitHub repository in the desktop app.
+4. Run setup/init if prompted, then start from the pipeline board.
+
 ## Maturity & scope
 
-The project currently includes the CLI, a macOS desktop app in early development, an MCP server, and
-three-agent support for `claude`, `codex`, and `copilot`. The workflow is GitHub-only today. The
-desktop app is macOS-only today.
+The project currently includes the CLI, a supported macOS desktop app, an MCP server, and
+three-agent support for `claude`, `codex`, and `copilot`. The workflow is GitHub-only today.
+Desktop distribution is macOS arm64-only today.
 
 ## Architecture
 

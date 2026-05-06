@@ -5,8 +5,9 @@ description: How Shipper CLI, core, desktop, MCP, worktrees, prompts, and GitHub
 
 Shipper is a small npm workspace. `packages/cli` contains the `shipper` entrypoint and command
 implementations, `packages/core` contains shared prompts, settings, GitHub integration, worktrees,
-and locking, `packages/desktop` contains the early Electron app, and `packages/mcp` exposes Shipper
-workflow tools to AI agents.
+and locking, `packages/desktop` contains the supported Electron app, and `packages/mcp` exposes
+Shipper workflow tools to AI agents. The CLI, desktop app, and MCP server all reuse core workflow
+logic and GitHub state instead of maintaining separate lifecycle implementations.
 
 ## Runtime Tour
 

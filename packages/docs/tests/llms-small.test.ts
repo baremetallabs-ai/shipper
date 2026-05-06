@@ -94,7 +94,8 @@ describe('llms-small corpus', () => {
       {
         slug: 'guides/desktop',
         heading: 'Desktop',
-        description: 'Desktop app status, local development workflow, and smoke-test coverage.',
+        description:
+          "Install and use Shipper's supported macOS desktop app for GitHub-backed workflows.",
       },
       {
         slug: 'agents/cookbook',

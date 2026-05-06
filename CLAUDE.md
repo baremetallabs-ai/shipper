@@ -10,7 +10,7 @@ This repo is a small monorepo with four packages:
 
 - `packages/cli` - the CLI entrypoint and command implementations
 - `packages/core` - shared library code for prompts, settings, GitHub integration, worktrees, and locking
-- `packages/desktop` - Electron desktop app in early development
+- `packages/desktop` - supported Electron desktop app for Shipper workflows
 - `packages/mcp` - MCP server exposing Shipper workflow tools to AI agents
 
 ## Commands

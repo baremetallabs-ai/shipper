@@ -3,8 +3,9 @@ title: Getting Started
 description: Set up prerequisites, initialize a repository, and run the first Shipper workflow commands.
 ---
 
-You need a Git repository with a GitHub remote, an authenticated GitHub CLI, and Shipper initialized
-in the repo.
+You need a Git repository with a GitHub remote, an authenticated GitHub CLI, and a supported coding
+agent CLI configured for Shipper. You can use Shipper through the npm CLI or the supported macOS
+desktop app; both entry points operate on the same GitHub-backed workflow state.
 
 For interactive use, authenticate with GitHub CLI:
 
@@ -14,6 +15,14 @@ gh auth login
 
 For containers or CI, export `GH_TOKEN` or `GITHUB_TOKEN` in the environment where Shipper runs.
 See the [Containers reference](/reference/containers/) for the token and git credential helper path.
+
+## CLI Path
+
+Install the CLI:
+
+```bash
+npm install -g @baremetallabs-ai/shipper-cli
+```
 
 Initialize Shipper once per repository:
 
@@ -46,3 +55,17 @@ shipper ship <issue>
 `shipper next` reads the issue's current workflow label and dispatches the matching stage command.
 `shipper ship` keeps dispatching until the issue reaches the next terminal point, including orderly
 rollback and resume behavior when an agent returns a reject verdict.
+
+These commands are the CLI equivalents of the same issue lifecycle shown in the desktop app.
+
+## Desktop Path
+
+Download the latest macOS arm64 artifact from
+[GitHub Releases](https://github.com/baremetallabs-ai/shipper/releases), launch the app, and add or
+select a repository in `owner/repo` format. If the repo is not initialized, run setup/init when the
+app prompts for it.
+
+From there, use the pipeline board for issue intake, adoption, grooming, shipping, review,
+remediation, unblock/reset/unlock operations, priority changes, auto-ship, and auto-merge. The
+[Desktop guide](/guides/desktop/) has the full first-run walkthrough and current distribution
+constraints.
