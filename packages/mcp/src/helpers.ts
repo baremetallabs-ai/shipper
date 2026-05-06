@@ -54,6 +54,8 @@ interface UnblockPayload {
 
 const MISSING_FINAL_MESSAGE_LINE =
   'No final message was captured in this run. See session log for details.';
+const DEFAULT_MISSING_CREATED_ISSUE_DETAIL =
+  'The new agent exited successfully but did not record created_issue in .shipper/output/result.json. Inspect the session log to see whether an issue was created.';
 const STDERR_TAIL_LIMIT = 4_096;
 
 export async function spawnShipper(
@@ -278,15 +280,23 @@ export function formatSpawnResult(result: SpawnResult, command: string): ToolTex
 export function formatCreateIssueResult(
   result: SpawnResult,
   payload: CreateIssuePayload | undefined,
-  opts: { command: string; finalMessage?: string; sessionLogPath?: string }
+  opts: {
+    command: string;
+    finalMessage?: string;
+    sessionLogPath?: string;
+    missingPayloadDetail?: string;
+  }
 ): ToolTextResult {
   if (!payload) {
+    const needsMissingIdentityDetail = !result.timedOut && result.exitCode === 0;
     return formatFailureSummary(result, {
       command: opts.command,
       sessionLogPath: opts.sessionLogPath,
       finalMessage: opts.finalMessage,
-      detail: 'Unable to recover created issue details from post-run metadata.',
-      forceError: true,
+      detail: needsMissingIdentityDetail
+        ? (opts.missingPayloadDetail ?? DEFAULT_MISSING_CREATED_ISSUE_DETAIL)
+        : undefined,
+      forceError: needsMissingIdentityDetail,
     });
   }
 

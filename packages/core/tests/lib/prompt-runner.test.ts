@@ -31,6 +31,7 @@ const spawnMock =
 const execFileSyncMock =
   vi.fn<(command: string, args?: string[], options?: Record<string, unknown>) => void>();
 const readFileMock = vi.fn<(path: string, encoding: string) => Promise<string>>();
+const copyFileMock = vi.fn<(source: string, destination: string) => Promise<void>>();
 const mkdirMock = vi.fn<(path: string, options?: Record<string, unknown>) => Promise<void>>();
 const statSyncMock = vi.fn<(path: string) => unknown>();
 const createWriteStreamMock = vi.fn<(path: string) => MockLogStream>();
@@ -49,7 +50,7 @@ const getSessionPathsMock = vi
       issueRef?: string,
       stage?: string,
       timestamp?: Date
-    ) => { logFile: string; metaFile: string }
+    ) => { logFile: string; metaFile: string; resultFile: string }
   >()
   .mockImplementation((repoSlug, issueRef = 'unlinked', stage = 'test', timestamp = new Date()) => {
     const token = timestamp.toISOString().replace(/[:.]/g, '-');
@@ -57,6 +58,7 @@ const getSessionPathsMock = vi
     return {
       logFile: `/home/user/.shipper/sessions/${repoSlug}/${base}.jsonl`,
       metaFile: `/home/user/.shipper/sessions/${repoSlug}/${base}.meta.json`,
+      resultFile: `/home/user/.shipper/sessions/${repoSlug}/${base}.result.json`,
     };
   });
 const writeSessionMetaMock =
@@ -106,6 +108,7 @@ vi.mock('node:fs/promises', async () => {
   const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
   return {
     ...actual,
+    copyFile: (...args: unknown[]) => copyFileMock(...args),
     mkdir: (...args: unknown[]) => mkdirMock(...args),
     readFile: (...args: unknown[]) => readFileMock(...args),
   };
@@ -321,6 +324,7 @@ afterEach(() => {
   vi.clearAllMocks();
   spawnMock.mockReset();
   readFileMock.mockReset();
+  copyFileMock.mockReset();
   mkdirMock.mockReset();
   statSyncMock.mockReset();
   createWriteStreamMock.mockReset();
@@ -349,6 +353,7 @@ afterEach(() => {
   });
   readFileSyncMock.mockReset();
   mkdirMock.mockResolvedValue(undefined);
+  copyFileMock.mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
   createWriteStreamMock.mockImplementation(() => makeLogStream());
 });
 
@@ -1294,6 +1299,77 @@ describe('runPrompt', () => {
       'claude',
       expect.stringContaining('/home/user/.shipper/sessions/owner-repo/308-implement-')
     );
+  });
+
+  it('persists a new result file from the worktree into session storage', async () => {
+    resolveModeMock.mockReturnValue('headless');
+    readFileMock.mockResolvedValueOnce(makePrompt('claude'));
+    copyFileMock.mockResolvedValueOnce(undefined);
+    mockSpawnResult();
+
+    await expect(
+      runPrompt('new', { mode: 'headless', repo: 'owner/repo', cwd: '/tmp/new-worktree' })
+    ).resolves.toBe(0);
+
+    const resultFile = writeSessionMetaMock.mock.calls[0]?.[1].resultFile;
+    expect(copyFileMock).toHaveBeenCalledWith(
+      '/tmp/new-worktree/.shipper/output/result.json',
+      resultFile
+    );
+    expect(resultFile).toContain('/home/user/.shipper/sessions/owner-repo/unlinked-new-');
+    expect(resultFile).toContain('.result.json');
+    expect(writeSessionMetaMock).toHaveBeenCalledWith(
+      expect.stringContaining('/home/user/.shipper/sessions/owner-repo/unlinked-new-'),
+      expect.objectContaining({
+        issue: 'unlinked',
+        stage: 'new',
+        resultFile,
+      })
+    );
+  });
+
+  it('omits resultFile metadata when the worktree result file is absent', async () => {
+    resolveModeMock.mockReturnValue('headless');
+    readFileMock.mockResolvedValueOnce(makePrompt('claude'));
+    copyFileMock.mockRejectedValueOnce(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+    const warnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockSpawnResult({ code: 7 });
+
+    await expect(
+      runPrompt('new', { mode: 'headless', repo: 'owner/repo', cwd: '/tmp/new-worktree' })
+    ).resolves.toBe(7);
+
+    expect(copyFileMock).toHaveBeenCalledWith(
+      '/tmp/new-worktree/.shipper/output/result.json',
+      expect.stringContaining('/home/user/.shipper/sessions/owner-repo/unlinked-new-')
+    );
+    expect(warnMock).not.toHaveBeenCalled();
+    expect(writeSessionMetaMock.mock.calls[0]?.[1]).toMatchObject({
+      exitCode: 7,
+      resultFile: undefined,
+    });
+    warnMock.mockRestore();
+  });
+
+  it('warns and omits resultFile metadata when result persistence fails', async () => {
+    resolveModeMock.mockReturnValue('headless');
+    readFileMock.mockResolvedValueOnce(makePrompt('claude'));
+    copyFileMock.mockRejectedValueOnce(new Error('permission denied'));
+    const warnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockSpawnResult({ code: 7 });
+
+    await expect(
+      runPrompt('new', { mode: 'headless', repo: 'owner/repo', cwd: '/tmp/new-worktree' })
+    ).resolves.toBe(7);
+
+    expect(warnMock).toHaveBeenCalledWith(
+      '[shipper] Warning: Failed to persist prompt result from /tmp/new-worktree/.shipper/output/result.json: permission denied'
+    );
+    expect(writeSessionMetaMock.mock.calls[0]?.[1]).toMatchObject({
+      exitCode: 7,
+      resultFile: undefined,
+    });
+    warnMock.mockRestore();
   });
 
   it('captures default-mode non-interactive stdout and persists usage metadata', async () => {

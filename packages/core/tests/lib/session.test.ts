@@ -75,6 +75,15 @@ describe('getSessionPaths', () => {
         '308-implement-2026-03-15T23-25-12-345Z.meta.json'
       )
     );
+    expect(result.resultFile).toBe(
+      path.join(
+        '/home/user',
+        '.shipper',
+        'sessions',
+        'owner-repo',
+        '308-implement-2026-03-15T23-25-12-345Z.result.json'
+      )
+    );
   });
 
   it('uses the unlinked fallback when no issue number is provided', () => {
@@ -84,6 +93,9 @@ describe('getSessionPaths', () => {
     expect(result.logFile).toContain('/owner-repo/unlinked-setup-2026-03-15T23-25-12-345Z.jsonl');
     expect(result.metaFile).toContain(
       '/owner-repo/unlinked-setup-2026-03-15T23-25-12-345Z.meta.json'
+    );
+    expect(result.resultFile).toContain(
+      '/owner-repo/unlinked-setup-2026-03-15T23-25-12-345Z.result.json'
     );
   });
 });
@@ -163,6 +175,7 @@ describe('writeSessionMeta', () => {
         timestamp: '2026-03-15T23:25:12.345Z',
         exitCode: 0,
         logFile: '/tmp/308-implement.jsonl',
+        resultFile: '/tmp/308-implement.result.json',
         usage: {
           inputTokens: 45,
           outputTokens: 12,
@@ -182,6 +195,7 @@ describe('writeSessionMeta', () => {
         timestamp: '2026-03-15T23:25:12.345Z',
         exitCode: 0,
         logFile: '/tmp/308-implement.jsonl',
+        resultFile: '/tmp/308-implement.result.json',
         usage: {
           inputTokens: 45,
           outputTokens: 12,
@@ -637,6 +651,7 @@ describe('findLatestSessionMeta', () => {
           stage: 'implement',
           timestamp: '2026-03-15T05:00:00.000Z',
           logFile: '/tmp/latest.jsonl',
+          resultFile: '/tmp/latest.result.json',
         })
       );
 
@@ -652,6 +667,7 @@ describe('findLatestSessionMeta', () => {
         stage: 'implement',
         timestamp: '2026-03-15T05:00:00.000Z',
         logFile: '/tmp/latest.jsonl',
+        resultFile: '/tmp/latest.result.json',
       });
     } finally {
       rmSync(tempHome, { recursive: true, force: true });
@@ -720,6 +736,7 @@ function buildMeta(overrides: {
   stage?: string;
   exitCode?: number;
   logFile?: string;
+  resultFile?: string;
   usage?: Record<string, unknown>;
 }): Record<string, unknown> {
   return {
@@ -731,6 +748,7 @@ function buildMeta(overrides: {
     timestamp: overrides.timestamp,
     exitCode: overrides.exitCode ?? 0,
     ...(overrides.logFile ? { logFile: overrides.logFile } : {}),
+    ...(overrides.resultFile ? { resultFile: overrides.resultFile } : {}),
     ...(overrides.usage ? { usage: overrides.usage } : {}),
   };
 }

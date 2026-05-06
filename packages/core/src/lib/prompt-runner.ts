@@ -1,6 +1,6 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { createWriteStream, readFileSync, statSync } from 'node:fs';
-import { mkdir, readFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import {
@@ -638,6 +638,28 @@ async function spawnClaudeWithDeferLoop(
   }
 }
 
+async function persistPromptResult(
+  cwd: string | undefined,
+  destination: string | undefined
+): Promise<string | undefined> {
+  if (!cwd || !destination) {
+    return undefined;
+  }
+
+  const source = path.join(cwd, '.shipper', 'output', 'result.json');
+  try {
+    await copyFile(source, destination);
+    return destination;
+  } catch (err) {
+    if (hasErrorCode(err, 'ENOENT')) {
+      return undefined;
+    }
+
+    logger.warn(`Warning: Failed to persist prompt result from ${source}: ${toErrorMessage(err)}`);
+    return undefined;
+  }
+}
+
 async function runPromptDefault(name: string, opts: RunPromptOpts): Promise<number> {
   const effectiveMode = resolveMode(name, opts.mode);
 
@@ -656,6 +678,7 @@ async function runPromptDefault(name: string, opts: RunPromptOpts): Promise<numb
   let sessionRepo: Awaited<ReturnType<typeof resolveSessionRepo>> | undefined;
   let logFile: string | undefined;
   let metaFile: string | undefined;
+  let resultFile: string | undefined;
   let sessionTimestamp: Date | undefined;
 
   try {
@@ -670,6 +693,7 @@ async function runPromptDefault(name: string, opts: RunPromptOpts): Promise<numb
     await mkdir(path.dirname(sessionPaths.logFile), { recursive: true });
     logFile = sessionPaths.logFile;
     metaFile = sessionPaths.metaFile;
+    resultFile = sessionPaths.resultFile;
   } catch (err) {
     sessionRepo = undefined;
     sessionTimestamp = undefined;
@@ -714,6 +738,7 @@ async function runPromptDefault(name: string, opts: RunPromptOpts): Promise<numb
         )
       : await spawnAsync(agent, args, baseSpawnOpts);
     let usage: TokenUsage | undefined;
+    const persistedResultFile = await persistPromptResult(opts.cwd, resultFile);
 
     if (trackUsage && spawnLogFile) {
       try {
@@ -739,6 +764,7 @@ async function runPromptDefault(name: string, opts: RunPromptOpts): Promise<numb
           timestamp: sessionTimestamp.toISOString(),
           exitCode,
           logFile: spawnLogFile,
+          resultFile: persistedResultFile,
           usage,
         });
       } catch (err) {
@@ -751,6 +777,10 @@ async function runPromptDefault(name: string, opts: RunPromptOpts): Promise<numb
     logger.error(`Error: Failed to spawn ${agent}: ${toErrorMessage(err)}`);
     return 1;
   }
+}
+
+function hasErrorCode(error: unknown, code: string): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === code;
 }
 
 let runPromptImpl: typeof runPromptDefault = runPromptDefault;

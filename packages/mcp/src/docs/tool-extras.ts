@@ -176,7 +176,7 @@ of question text -> your answer (free text).`,
   },
   shipper_create_issue: {
     whenToUse:
-      'Use this when the user has a plain-language request that should become a researched GitHub issue rather than immediate code changes.',
+      "Use this when the user has a plain-language request that should become a researched GitHub issue rather than immediate code changes. The success result is sourced from the headless agent's `.shipper/output/result.json` `created_issue` record; the transcript is used only for the final-message wrap-up.",
     example: {
       call: { request: 'Add generated MCP reference pages for the docs site' },
       result: `Created issue: #42 Add generated MCP reference pages for the docs site
@@ -190,7 +190,8 @@ Session log: /tmp/shipper/session.log`,
     errorModes: [
       {
         name: 'Missing created issue metadata',
-        message: 'Unable to recover created issue details from post-run metadata.',
+        message:
+          'The new agent exited successfully but did not record created_issue in .shipper/output/result.json. Inspect the session log to see whether an issue was created.',
       },
       {
         name: 'Timed out worker',
@@ -199,10 +200,6 @@ Session log: /tmp/shipper/session.log`,
       {
         name: 'Failed worker',
         message: '[exit <code>] shipper new <request> --mode headless',
-      },
-      {
-        name: 'Issue recovery failure',
-        message: 'gh issue view or issue-list recovery failure: <underlying error message>',
       },
     ],
     relatedTools: ['shipper_groom', 'shipper_advance'],

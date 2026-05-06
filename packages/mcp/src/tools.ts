@@ -30,6 +30,7 @@ import {
   listIssues,
   parseIssueLabelsState,
   parseIssueTitleLabelsList,
+  readNewResultFile,
   readResultFile,
   releaseIssueLock,
   resolveSessionRepo,
@@ -66,11 +67,11 @@ const STAGE_FOR_LABEL = {
   'shipper:pr-open': 'pr_review',
   'shipper:pr-reviewed': 'pr_remediate',
 } as const;
-const ISSUE_URL_RE = /https:\/\/github\.com\/([^/\s]+\/[^/\s]+)\/issues\/(\d+)/g;
+const MISSING_CREATED_ISSUE_DETAIL =
+  'The new agent exited successfully but did not record created_issue in .shipper/output/result.json. Inspect the session log to see whether an issue was created.';
 
 type AdvanceStageName = (typeof STAGE_FOR_LABEL)[keyof typeof STAGE_FOR_LABEL];
 type AdvanceVerdict = 'accept' | 'reject' | 'fail';
-type GhIssueCandidate = { number: number; title?: string; url?: string; createdAt?: string };
 
 export const toolNames = [
   'shipper_list_issues',
@@ -346,10 +347,15 @@ async function resolveSessionContext(opts: {
   issue: string;
   stage: string;
   since: Date;
-}): Promise<{ finalMessage?: string; sessionLogPath?: string }> {
+}): Promise<{ finalMessage?: string; sessionLogPath?: string; resultFile?: string }> {
   const meta = await findLatestSessionMeta(opts);
-  if (!meta?.logFile) {
+  if (!meta) {
     return {};
+  }
+
+  const resultFile = typeof meta.resultFile === 'string' ? meta.resultFile : undefined;
+  if (!meta.logFile) {
+    return { resultFile };
   }
 
   const agent = toAgentName(meta.agent);
@@ -357,6 +363,7 @@ async function resolveSessionContext(opts: {
   return {
     finalMessage,
     sessionLogPath: meta.logFile,
+    resultFile,
   };
 }
 
@@ -438,150 +445,6 @@ function resolveNoopAdvanceOutcome(
   }
 
   return { from: preStageLabel, to: preStageLabel, verdict: 'noop' };
-}
-
-function findIssueUrl(
-  repo: string,
-  message: string | undefined
-): { issueNumber: number; url: string } | undefined {
-  if (!message) {
-    return undefined;
-  }
-
-  const matches = [...message.matchAll(ISSUE_URL_RE)];
-  for (let index = matches.length - 1; index >= 0; index -= 1) {
-    const match = matches[index];
-    if (!match?.[0] || !match[1] || !match[2] || match[1] !== repo) {
-      continue;
-    }
-
-    const issueNumber = Number.parseInt(match[2], 10);
-    if (!Number.isFinite(issueNumber)) {
-      continue;
-    }
-
-    return { issueNumber, url: match[0] };
-  }
-
-  return undefined;
-}
-
-async function listRecentNewIssues(repo: string, since: Date): Promise<GhIssueCandidate[]> {
-  const { stdout } = await gh([
-    'issue',
-    'list',
-    '-R',
-    repo,
-    '--search',
-    `label:shipper:new created:>=${since.toISOString()}`,
-    '--json',
-    'number,title,url,createdAt',
-    '--limit',
-    '5',
-  ]);
-
-  const parsed: unknown = JSON.parse(stdout);
-  if (!Array.isArray(parsed)) {
-    return [];
-  }
-
-  return parsed
-    .map((entry) =>
-      typeof entry === 'object' && entry !== null ? (entry as GhIssueCandidate) : undefined
-    )
-    .filter(
-      (entry): entry is GhIssueCandidate =>
-        !!entry && typeof entry.number === 'number' && typeof entry.url === 'string'
-    );
-}
-
-async function fetchIssueDetails(
-  repo: string,
-  issueNumber: number
-): Promise<{ issueNumber: number; title: string; url: string } | undefined> {
-  const { stdout } = await gh([
-    'issue',
-    'view',
-    String(issueNumber),
-    '-R',
-    repo,
-    '--json',
-    'number,title,url',
-  ]);
-
-  const parsed: unknown = JSON.parse(stdout);
-  if (
-    typeof parsed !== 'object' ||
-    parsed === null ||
-    typeof (parsed as { number?: unknown }).number !== 'number' ||
-    typeof (parsed as { title?: unknown }).title !== 'string' ||
-    typeof (parsed as { url?: unknown }).url !== 'string'
-  ) {
-    return undefined;
-  }
-
-  return {
-    issueNumber: (parsed as { number: number }).number,
-    title: (parsed as { title: string }).title,
-    url: (parsed as { url: string }).url,
-  };
-}
-
-async function resolveCreatedIssuePayload(
-  repo: string,
-  startedAt: Date,
-  finalMessage: string | undefined
-): Promise<{ issueNumber: number; title: string; url: string } | undefined> {
-  const fromMessage = findIssueUrl(repo, finalMessage);
-  if (fromMessage) {
-    try {
-      return await fetchIssueDetails(repo, fromMessage.issueNumber);
-    } catch {
-      return undefined;
-    }
-  }
-
-  let issues: GhIssueCandidate[];
-  try {
-    issues = await listRecentNewIssues(repo, startedAt);
-  } catch {
-    return undefined;
-  }
-  if (issues.length === 0) {
-    return undefined;
-  }
-
-  const newest = [...issues].sort((a, b) => {
-    const aTime = a.createdAt ? Date.parse(a.createdAt) : Number.NEGATIVE_INFINITY;
-    const bTime = b.createdAt ? Date.parse(b.createdAt) : Number.NEGATIVE_INFINITY;
-    const aValue = Number.isNaN(aTime) ? Number.NEGATIVE_INFINITY : aTime;
-    const bValue = Number.isNaN(bTime) ? Number.NEGATIVE_INFINITY : bTime;
-    return bValue - aValue;
-  });
-  const titleMatches =
-    finalMessage !== undefined
-      ? newest.filter(
-          (issue) => typeof issue.title === 'string' && finalMessage.includes(issue.title)
-        )
-      : [];
-  const candidate =
-    titleMatches.length === 1
-      ? titleMatches[0]
-      : titleMatches.length > 1
-        ? undefined
-        : newest.length === 1
-          ? newest[0]
-          : undefined;
-
-  if (!candidate) {
-    return undefined;
-  }
-
-  try {
-    return await fetchIssueDetails(repo, candidate.number);
-  } catch {
-    return undefined;
-  }
 }
 
 function mapUnblockVerdict(
@@ -948,15 +811,29 @@ export const mcpToolDefinitions = [
             stage: 'new',
             since: startedAt,
           });
-          const payload = await resolveCreatedIssuePayload(
-            repo,
-            startedAt,
-            sessionContext.finalMessage
-          );
+          let payload: { issueNumber: number; title: string; url: string } | undefined;
+          let missingPayloadDetail: string | undefined;
+          if (!result.timedOut && result.exitCode === 0) {
+            if (sessionContext.resultFile) {
+              try {
+                const newResult = await readNewResultFile(sessionContext.resultFile);
+                payload = {
+                  issueNumber: newResult.created_issue.number,
+                  title: newResult.created_issue.title,
+                  url: newResult.created_issue.url,
+                };
+              } catch (error) {
+                missingPayloadDetail = `${MISSING_CREATED_ISSUE_DETAIL}\n${toErrorMessage(error)}`;
+              }
+            } else {
+              missingPayloadDetail = MISSING_CREATED_ISSUE_DETAIL;
+            }
+          }
           return formatCreateIssueResult(result, payload, {
             command: 'shipper new <request> --mode headless',
             finalMessage: sessionContext.finalMessage,
             sessionLogPath: sessionContext.sessionLogPath,
+            missingPayloadDetail,
           });
         } catch (err) {
           return formatToolError(err);

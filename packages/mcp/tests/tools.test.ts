@@ -12,6 +12,7 @@ const {
   mockIsLockStale,
   mockListIssues,
   mockReadFile,
+  mockReadNewResultFile,
   mockReadResultFile,
   mockReleaseLock,
   mockResolveSessionRepo,
@@ -32,6 +33,7 @@ const {
   mockIsLockStale: vi.fn(),
   mockListIssues: vi.fn(),
   mockReadFile: vi.fn(),
+  mockReadNewResultFile: vi.fn(),
   mockReadResultFile: vi.fn(),
   mockReleaseLock: vi.fn(),
   mockResolveSessionRepo: vi.fn(),
@@ -67,6 +69,7 @@ vi.mock('@baremetallabs-ai/shipper-core', async () => {
     gh: (args: string[]) => mockGh(args),
     isLockStale: mockIsLockStale,
     listIssues: mockListIssues,
+    readNewResultFile: mockReadNewResultFile,
     readResultFile: mockReadResultFile,
     releaseIssueLock: mockReleaseLock,
     resolveSessionRepo: mockResolveSessionRepo,
@@ -1276,7 +1279,7 @@ describe('shipper_create_issue', () => {
     expect(mockSpawnShipper).not.toHaveBeenCalled();
   });
 
-  it('returns the created issue payload, final message, and session log without transcript content', async () => {
+  it('returns the created issue payload from result.json with final message and session log', async () => {
     mockSpawnShipper.mockResolvedValue({
       exitCode: 0,
       stdout: '{"type":"response_item"}',
@@ -1292,17 +1295,15 @@ describe('shipper_create_issue', () => {
       repo: 'owner/repo',
       exitCode: 0,
       logFile: '/tmp/create.jsonl',
+      resultFile: '/tmp/create.result.json',
     });
-    mockExtractFinalMessage.mockResolvedValue(
-      'Created issue: https://github.com/owner/repo/issues/55\nSummary follows.'
-    );
-    mockGh.mockResolvedValue({
-      stdout: JSON.stringify({
+    mockExtractFinalMessage.mockResolvedValue('Created the issue and wrote a final summary.');
+    mockReadNewResultFile.mockResolvedValue({
+      created_issue: {
         number: 55,
         title: 'Improve MCP tool output summaries',
         url: 'https://github.com/owner/repo/issues/55',
-      }),
-      stderr: '',
+      },
     });
 
     const getTool = await collectTools();
@@ -1311,14 +1312,16 @@ describe('shipper_create_issue', () => {
 
     expect(text).toContain('Created issue: #55 Improve MCP tool output summaries');
     expect(text).toContain('URL: https://github.com/owner/repo/issues/55');
-    expect(text).toContain('Created issue: https://github.com/owner/repo/issues/55');
+    expect(text).toContain('Created the issue and wrote a final summary.');
     expect(text).toContain('Session log: /tmp/create.jsonl');
     expect(text).not.toContain('--- stdout ---');
     expect(text).not.toContain('response_item');
     expect(text.length).toBeLessThan(8192);
+    expect(mockReadNewResultFile).toHaveBeenCalledWith('/tmp/create.result.json');
+    expect(mockGh).not.toHaveBeenCalled();
   });
 
-  it('prefers the last matching issue URL from the current repo in the final message', async () => {
+  it('uses result.json even when the final message contains different issue URLs', async () => {
     mockSpawnShipper.mockResolvedValue({
       exitCode: 0,
       stdout: '',
@@ -1334,6 +1337,7 @@ describe('shipper_create_issue', () => {
       repo: 'owner/repo',
       exitCode: 0,
       logFile: '/tmp/create-last-url.jsonl',
+      resultFile: '/tmp/create-last-url.result.json',
     });
     mockExtractFinalMessage.mockResolvedValue(
       [
@@ -1342,30 +1346,21 @@ describe('shipper_create_issue', () => {
         'Created issue: https://github.com/owner/repo/issues/55',
       ].join('\n')
     );
-    mockGh.mockResolvedValue({
-      stdout: JSON.stringify({
-        number: 55,
-        title: 'Prefer the created issue URL',
-        url: 'https://github.com/owner/repo/issues/55',
-      }),
-      stderr: '',
+    mockReadNewResultFile.mockResolvedValue({
+      created_issue: {
+        number: 99,
+        title: 'Structured result wins',
+        url: 'https://github.com/owner/repo/issues/99',
+      },
     });
 
     const getTool = await collectTools();
     const result = await getTool('shipper_create_issue')({ request: 'Prefer last URL' });
 
-    expect(mockGh).toHaveBeenCalledTimes(1);
-    expect(mockGh).toHaveBeenCalledWith([
-      'issue',
-      'view',
-      '55',
-      '-R',
-      'owner/repo',
-      '--json',
-      'number,title,url',
-    ]);
     expect(result.isError).toBeUndefined();
-    expect(result.content[0]?.text).toContain('Created issue: #55 Prefer the created issue URL');
+    expect(result.content[0]?.text).toContain('Created issue: #99 Structured result wins');
+    expect(result.content[0]?.text).toContain('URL: https://github.com/owner/repo/issues/99');
+    expect(mockGh).not.toHaveBeenCalled();
   });
 
   it('uses the exact missing-final-message fallback while still returning structured payload', async () => {
@@ -1384,39 +1379,28 @@ describe('shipper_create_issue', () => {
       repo: 'owner/repo',
       exitCode: 0,
       logFile: '/tmp/no-message.jsonl',
+      resultFile: '/tmp/no-message.result.json',
     });
     mockExtractFinalMessage.mockResolvedValue(undefined);
-    mockGh
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify([
-          {
-            number: 56,
-            title: 'Fallback issue',
-            url: 'https://github.com/owner/repo/issues/56',
-            createdAt: '2026-04-21T00:00:02.000Z',
-          },
-        ]),
-        stderr: '',
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          number: 56,
-          title: 'Fallback issue',
-          url: 'https://github.com/owner/repo/issues/56',
-        }),
-        stderr: '',
-      });
+    mockReadNewResultFile.mockResolvedValue({
+      created_issue: {
+        number: 56,
+        title: 'Structured issue',
+        url: 'https://github.com/owner/repo/issues/56',
+      },
+    });
 
     const getTool = await collectTools();
     const result = await getTool('shipper_create_issue')({ request: 'Fallback path' });
 
-    expect(result.content[0]?.text).toContain('Created issue: #56 Fallback issue');
+    expect(result.content[0]?.text).toContain('Created issue: #56 Structured issue');
     expect(result.content[0]?.text).toContain(
       'No final message was captured in this run. See session log for details.'
     );
+    expect(mockGh).not.toHaveBeenCalled();
   });
 
-  it('falls back to issue-list recovery when the final message has no issue URL', async () => {
+  it('fails after an exit-0 run when session metadata has no resultFile', async () => {
     mockSpawnShipper.mockResolvedValue({
       exitCode: 0,
       stdout: '',
@@ -1434,35 +1418,21 @@ describe('shipper_create_issue', () => {
       logFile: '/tmp/fallback.jsonl',
     });
     mockExtractFinalMessage.mockResolvedValue('Created the issue and wrote a summary.');
-    mockGh
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify([
-          {
-            number: 57,
-            title: 'Recovered via fallback',
-            url: 'https://github.com/owner/repo/issues/57',
-            createdAt: '2026-04-21T00:00:03.000Z',
-          },
-        ]),
-        stderr: '',
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          number: 57,
-          title: 'Recovered via fallback',
-          url: 'https://github.com/owner/repo/issues/57',
-        }),
-        stderr: '',
-      });
 
     const getTool = await collectTools();
     const result = await getTool('shipper_create_issue')({ request: 'Fallback' });
 
-    expect(result.content[0]?.text).toContain('Created issue: #57 Recovered via fallback');
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain(
+      'did not record created_issue in .shipper/output/result.json'
+    );
     expect(result.content[0]?.text).toContain('Created the issue and wrote a summary.');
+    expect(result.content[0]?.text).toContain('Session log: /tmp/fallback.jsonl');
+    expect(mockReadNewResultFile).not.toHaveBeenCalled();
+    expect(mockGh).not.toHaveBeenCalled();
   });
 
-  it('requires an unambiguous fallback issue candidate before recovering the payload', async () => {
+  it('fails after an exit-0 run when the persisted result is invalid', async () => {
     mockSpawnShipper.mockResolvedValue({
       exitCode: 0,
       stdout: '',
@@ -1478,38 +1448,31 @@ describe('shipper_create_issue', () => {
       repo: 'owner/repo',
       exitCode: 0,
       logFile: '/tmp/ambiguous.jsonl',
+      resultFile: '/tmp/ambiguous.result.json',
     });
     mockExtractFinalMessage.mockResolvedValue('Created the issue and wrote a summary.');
-    mockGh.mockResolvedValue({
-      stdout: JSON.stringify([
-        {
-          number: 57,
-          title: 'First candidate',
-          url: 'https://github.com/owner/repo/issues/57',
-          createdAt: '2026-04-21T00:00:03.000Z',
-        },
-        {
-          number: 58,
-          title: 'Second candidate',
-          url: 'https://github.com/owner/repo/issues/58',
-          createdAt: '2026-04-21T00:00:04.000Z',
-        },
-      ]),
-      stderr: '',
-    });
+    mockReadNewResultFile.mockRejectedValue(
+      new Error(
+        "Invalid result.json at /tmp/ambiguous.result.json:\n- 'created_issue.number' must be a positive integer"
+      )
+    );
 
     const getTool = await collectTools();
-    const result = await getTool('shipper_create_issue')({ request: 'Fallback ambiguity' });
+    const result = await getTool('shipper_create_issue')({ request: 'Invalid result' });
 
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toContain(
-      'Unable to recover created issue details from post-run metadata.'
+      'did not record created_issue in .shipper/output/result.json'
+    );
+    expect(result.content[0]?.text).toContain(
+      "Invalid result.json at /tmp/ambiguous.result.json:\n- 'created_issue.number' must be a positive integer"
     );
     expect(result.content[0]?.text).toContain('Created the issue and wrote a summary.');
     expect(result.content[0]?.text).toContain('Session log: /tmp/ambiguous.jsonl');
+    expect(mockGh).not.toHaveBeenCalled();
   });
 
-  it('keeps the final message and session log when issue recovery gh calls fail', async () => {
+  it('fails after an exit-0 run when the persisted result cannot be read', async () => {
     mockSpawnShipper.mockResolvedValue({
       exitCode: 0,
       stdout: '',
@@ -1525,23 +1488,93 @@ describe('shipper_create_issue', () => {
       repo: 'owner/repo',
       exitCode: 0,
       logFile: '/tmp/create-gh-failure.jsonl',
+      resultFile: '/tmp/create-gh-failure.result.json',
     });
     mockExtractFinalMessage.mockResolvedValue(
       'Created issue: https://github.com/owner/repo/issues/55\nSummary follows.'
     );
-    mockGh.mockRejectedValue(new Error('gh issue view failed'));
+    mockReadNewResultFile.mockRejectedValue(
+      new Error('Failed to parse /tmp/create-gh-failure.result.json: Unexpected token')
+    );
 
     const getTool = await collectTools();
-    const result = await getTool('shipper_create_issue')({ request: 'GH recovery failure' });
+    const result = await getTool('shipper_create_issue')({ request: 'Read failure' });
 
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toContain(
-      'Unable to recover created issue details from post-run metadata.'
+      'did not record created_issue in .shipper/output/result.json'
+    );
+    expect(result.content[0]?.text).toContain(
+      'Failed to parse /tmp/create-gh-failure.result.json: Unexpected token'
     );
     expect(result.content[0]?.text).toContain(
       'Created issue: https://github.com/owner/repo/issues/55'
     );
     expect(result.content[0]?.text).toContain('Session log: /tmp/create-gh-failure.jsonl');
+    expect(mockGh).not.toHaveBeenCalled();
+  });
+
+  it('returns the existing focused failure summary for non-zero shipper new results', async () => {
+    mockSpawnShipper.mockResolvedValue({
+      exitCode: 1,
+      stdout: '{"type":"response_item"}',
+      stderr: 'gh issue create failed',
+      timedOut: false,
+    });
+    mockFindLatestSessionMeta.mockResolvedValue({
+      issue: 'unlinked',
+      stage: 'new',
+      timestamp: '2026-04-21T00:00:00.000Z',
+      agent: 'codex',
+      model: 'gpt-5',
+      repo: 'owner/repo',
+      exitCode: 1,
+      logFile: '/tmp/create-failed.jsonl',
+      resultFile: '/tmp/create-failed.result.json',
+    });
+    mockExtractFinalMessage.mockResolvedValue('The issue could not be created.');
+
+    const getTool = await collectTools();
+    const result = await getTool('shipper_create_issue')({ request: 'Failure' });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain('[exit 1] shipper new <request> --mode headless');
+    expect(result.content[0]?.text).toContain('gh issue create failed');
+    expect(result.content[0]?.text).toContain('The issue could not be created.');
+    expect(result.content[0]?.text).toContain('Session log: /tmp/create-failed.jsonl');
+    expect(result.content[0]?.text).not.toContain('did not record created_issue');
+    expect(mockReadNewResultFile).not.toHaveBeenCalled();
+  });
+
+  it('returns the existing focused failure summary for timed-out shipper new results', async () => {
+    mockSpawnShipper.mockResolvedValue({
+      exitCode: -1,
+      stdout: '{"type":"response_item"}',
+      stderr: 'timed out after waiting',
+      timedOut: true,
+    });
+    mockFindLatestSessionMeta.mockResolvedValue({
+      issue: 'unlinked',
+      stage: 'new',
+      timestamp: '2026-04-21T00:00:00.000Z',
+      agent: 'codex',
+      model: 'gpt-5',
+      repo: 'owner/repo',
+      exitCode: -1,
+      logFile: '/tmp/create-timeout.jsonl',
+      resultFile: '/tmp/create-timeout.result.json',
+    });
+    mockExtractFinalMessage.mockResolvedValue(undefined);
+
+    const getTool = await collectTools();
+    const result = await getTool('shipper_create_issue')({ request: 'Timeout' });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain('[timed out] shipper new <request> --mode headless');
+    expect(result.content[0]?.text).toContain('timed out after waiting');
+    expect(result.content[0]?.text).toContain('Session log: /tmp/create-timeout.jsonl');
+    expect(result.content[0]?.text).not.toContain('did not record created_issue');
+    expect(mockReadNewResultFile).not.toHaveBeenCalled();
   });
 });
 

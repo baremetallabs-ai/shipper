@@ -16,6 +16,7 @@ export interface SessionMeta {
   timestamp: string;
   exitCode: number;
   logFile?: string;
+  resultFile?: string;
   usage?: TokenUsage;
 }
 
@@ -33,7 +34,7 @@ export function getSessionPaths(
   issue: string | undefined,
   stage: string,
   timestamp: Date = new Date()
-): { logFile: string; metaFile: string } {
+): { logFile: string; metaFile: string; resultFile: string } {
   const timestampToken = timestamp.toISOString().replace(/[:.]/g, '-');
   const issueToken = issue ?? 'unlinked';
   const basename = `${issueToken}-${stage}-${timestampToken}`;
@@ -41,6 +42,7 @@ export function getSessionPaths(
   return {
     logFile: path.join(getSessionDir(repoSlug), `${basename}.jsonl`),
     metaFile: path.join(getSessionDir(repoSlug), `${basename}.meta.json`),
+    resultFile: path.join(getSessionDir(repoSlug), `${basename}.result.json`),
   };
 }
 
