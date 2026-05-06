@@ -2,13 +2,15 @@ import { error as writeError } from 'node:console';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const settingsPath = '.shipper/settings.json';
 const cliPackagePath = 'packages/cli/package.json';
 const missing = '<missing>';
 
 function readJson(relativePath) {
-  const filePath = path.join(process.cwd(), relativePath);
+  const filePath = path.join(root, relativePath);
 
   try {
     return JSON.parse(readFileSync(filePath, 'utf8'));

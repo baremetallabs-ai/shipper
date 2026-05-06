@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(testDir, '../../../..');
-const scriptPath = path.join(repoRoot, 'scripts/check-cli-version-fingerprint.mjs');
+const sourceScriptPath = path.join(repoRoot, 'scripts/check-cli-version-fingerprint.mjs');
 const tempRepos: string[] = [];
 
 interface TempRepoOptions {
@@ -21,6 +21,7 @@ function createTempRepo({ cliVersion, packageVersion = '3.0.0' }: TempRepoOption
 
   mkdirSync(path.join(repo, '.shipper'), { recursive: true });
   mkdirSync(path.join(repo, 'packages/cli'), { recursive: true });
+  mkdirSync(path.join(repo, 'scripts'), { recursive: true });
 
   const settings = cliVersion === undefined ? {} : { cliVersion };
   writeFileSync(path.join(repo, '.shipper/settings.json'), JSON.stringify(settings, null, 2));
@@ -28,15 +29,21 @@ function createTempRepo({ cliVersion, packageVersion = '3.0.0' }: TempRepoOption
     path.join(repo, 'packages/cli/package.json'),
     JSON.stringify({ version: packageVersion }, null, 2)
   );
+  copyFileSync(sourceScriptPath, path.join(repo, 'scripts/check-cli-version-fingerprint.mjs'));
 
   return repo;
 }
 
-function runGuard(cwd: string) {
-  return spawnSync(process.execPath, [scriptPath], {
-    cwd,
-    encoding: 'utf8',
-  });
+function runGuard(repo: string, cwd = repo, env: Record<string, string | undefined> = process.env) {
+  return spawnSync(
+    process.execPath,
+    [path.join(repo, 'scripts/check-cli-version-fingerprint.mjs')],
+    {
+      cwd,
+      env,
+      encoding: 'utf8',
+    }
+  );
 }
 
 afterEach(() => {
@@ -49,7 +56,7 @@ describe('check-cli-version-fingerprint', () => {
   it('passes without output when the recorded fingerprint matches the CLI manifest', () => {
     const repo = createTempRepo({ cliVersion: '3.0.0', packageVersion: '3.0.0' });
 
-    const result = runGuard(repo);
+    const result = runGuard(repo, path.join(repo, 'packages/cli'));
 
     expect(result.status).toBe(0);
     expect(result.stderr).toBe('');
@@ -78,5 +85,28 @@ describe('check-cli-version-fingerprint', () => {
     expect(result.stderr).toContain('packages/cli/package.json version: 3.0.0');
     expect(result.stderr).toContain('shipper init');
     expect(result.stderr).toContain('revert/align `packages/cli/package.json`');
+  });
+
+  it('does not apply the runtime skip escape hatch to the CI and hook guard', () => {
+    const repo = createTempRepo({ cliVersion: '3.0.0', packageVersion: '3.1.0' });
+
+    const result = runGuard(repo, repo, {
+      ...process.env,
+      SHIPPER_SKIP_VERSION_CHECK: '1',
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('.shipper/settings.json cliVersion: 3.0.0');
+    expect(result.stderr).toContain('packages/cli/package.json version: 3.1.0');
+  });
+
+  it('does not apply the runtime dev-version exemption to the CI and hook guard', () => {
+    const repo = createTempRepo({ cliVersion: '0.0.0-dev', packageVersion: '3.0.0' });
+
+    const result = runGuard(repo);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('.shipper/settings.json cliVersion: 0.0.0-dev');
+    expect(result.stderr).toContain('packages/cli/package.json version: 3.0.0');
   });
 });
