@@ -1,6 +1,6 @@
 {
   "name": "@baremetallabs-ai/shipper-core",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "Core domain logic for Shipper workflow orchestration",
   "keywords": [
     "shipper",
