@@ -78,12 +78,18 @@ interface ChildCreation {
 export class GroomPostFlightError extends Error {
   readonly steps: StepRecord[];
   readonly failureCommentPosted: boolean;
+  readonly detail: string | undefined;
 
-  constructor(message: string, steps: StepRecord[], opts: { failureCommentPosted?: boolean } = {}) {
-    super(message);
+  constructor(
+    message: string,
+    steps: StepRecord[],
+    opts: { failureCommentPosted?: boolean; detail?: string } = {}
+  ) {
+    super(opts.detail ? `${message}\n\n${opts.detail}` : message);
     this.name = 'GroomPostFlightError';
     this.steps = steps;
     this.failureCommentPosted = opts.failureCommentPosted ?? false;
+    this.detail = opts.detail;
   }
 }
 
@@ -766,22 +772,20 @@ export async function processGroomResult(opts: {
     return result;
   }
 
-  const failureBody = await truncateLargeInput(
-    cwd,
-    formatFailureComment(steps),
-    'groom-post-flight-failure.txt'
-  );
+  const failureDetail = formatFailureComment(steps);
+  const failureBody = await truncateLargeInput(cwd, failureDetail, 'groom-post-flight-failure.txt');
   try {
     await gh(['issue', 'comment', issueNumber, '-R', repo, '--body', failureBody]);
   } catch (error) {
     throw new GroomPostFlightError(
       `Groom post-flight failed, and posting the failure comment also failed: ${toErrorMessage(error)}`,
       steps,
-      { failureCommentPosted: false }
+      { failureCommentPosted: false, detail: failureDetail }
     );
   }
 
   throw new GroomPostFlightError('Groom post-flight failed; posted failure comment', steps, {
     failureCommentPosted: true,
+    detail: failureDetail,
   });
 }

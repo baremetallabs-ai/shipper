@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { DiffFileHunks } from '../../src/lib/output-protocol/diff-parse.js';
 import type { ResultJson } from '../../src/lib/result-schema.js';
 
 const ghMock = vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>();
@@ -1799,7 +1800,7 @@ describe('output protocol helpers', () => {
 
       await expect(
         processGroomResult({ repo: 'owner/repo', issueNumber: '248', cwd: tempDir, result })
-      ).rejects.toThrow('Groom post-flight failed');
+      ).rejects.toThrow('body update failed');
 
       expect(
         ghMock.mock.calls.some(
@@ -1830,7 +1831,7 @@ describe('output protocol helpers', () => {
 
       await expect(
         processGroomResult({ repo: 'owner/repo', issueNumber: '248', cwd: tempDir, result })
-      ).rejects.toThrow('Groom post-flight failed');
+      ).rejects.toThrow('groom failure line 140');
 
       expect(ghMock.mock.calls.at(-1)?.[0]).toEqual([
         'issue',
@@ -2352,6 +2353,69 @@ describe('output protocol helpers', () => {
       );
       expect(refreshContextMock).toHaveBeenCalledTimes(1);
       expect(retryMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('preserves existing review diff hunks when refreshed context omits them', async () => {
+      const result = await writePrReviewResult({
+        comments: [{ path: 'src/file.ts', line: 5, side: 'RIGHT', body: 'Initial.' }],
+      });
+      const submitReviewPayloadMock = vi
+        .fn<(payloadPath: string) => Promise<void>>()
+        .mockRejectedValueOnce(
+          makeGhError({
+            stderr: 'gh: Validation Failed (HTTP 422)',
+            stdout: '{"message":"Validation Failed","errors":[{"message":"stale commit_id"}]}',
+          })
+        )
+        .mockResolvedValueOnce(undefined);
+      const retryMock = vi
+        .fn<(message: string) => Promise<number>>()
+        .mockImplementationOnce(async (message) => {
+          expect(message).toContain('stale commit_id');
+          await writeOutputJson(
+            'review-payload-248.json',
+            buildReviewPayload({
+              comments: [{ path: 'src/file.ts', line: 99, side: 'RIGHT', body: 'Out of hunk.' }],
+            })
+          );
+          return 0;
+        })
+        .mockImplementationOnce(async (message) => {
+          expect(message).toContain('line 99');
+          await writeOutputJson(
+            'review-payload-248.json',
+            buildReviewPayload({
+              comments: [{ path: 'src/file.ts', line: 5, side: 'RIGHT', body: 'Fixed.' }],
+            })
+          );
+          return 0;
+        });
+      const refreshContextMock = vi.fn(() =>
+        Promise.resolve({ prFiles: new Set(['src/file.ts']) })
+      );
+
+      await expect(
+        retryPrReviewOutputAndSubmission({
+          cwd: tempDir,
+          prFiles: new Set(['src/file.ts']),
+          diffHunks: new Map<string, DiffFileHunks>([
+            [
+              'src/file.ts',
+              {
+                left: [],
+                right: [[5, 5]],
+              },
+            ],
+          ]),
+          retry: retryMock,
+          submitReviewPayload: submitReviewPayloadMock,
+          refreshContext: refreshContextMock,
+        })
+      ).resolves.toEqual({ result, reviewSubmitted: true });
+
+      expect(refreshContextMock).toHaveBeenCalledTimes(1);
+      expect(retryMock).toHaveBeenCalledTimes(2);
+      expect(submitReviewPayloadMock).toHaveBeenCalledTimes(2);
     });
 
     it('shares one three-attempt budget across local validation failures and GitHub rejections', async () => {
