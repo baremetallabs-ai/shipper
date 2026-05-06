@@ -101,7 +101,10 @@ export async function runGroomStage(
                 const detail = toErrorMessage(error);
                 logger.error(detail);
                 if (!(error instanceof GroomPostFlightError) || !error.failureCommentPosted) {
-                  await handleAgentCrash(repo, issueStr, 'groom', detail);
+                  await handleAgentCrash(repo, issueStr, 'groom', detail, undefined, {
+                    cwd: wtPath,
+                    detailFilename: 'groom-failure-detail.txt',
+                  });
                 }
                 return 1;
               }
@@ -131,7 +134,8 @@ export async function runGroomStage(
                 issueStr,
                 'groom',
                 detail,
-                `The \`groom\` agent run exited with code ${exitCode}.`
+                `The \`groom\` agent run exited with code ${exitCode}.`,
+                { cwd: wtPath, detailFilename: 'groom-failure-detail.txt' }
               );
               return 1;
             }

@@ -217,6 +217,253 @@ describe('prReviewCommand', () => {
     );
   });
 
+  it('retries a GitHub-rejected review payload with full diagnostic detail and refreshed context', async () => {
+    fake.setIssue('10', { labels: ['shipper:pr-open'], title: 'Review issue' });
+    fake.setPr('42', {
+      labels: ['shipper:pr-open'],
+      body: 'Closes #10',
+      diff: diffFixture,
+      headRefName: 'shipper/10-feature',
+    });
+    const events: string[] = [];
+    let metadataCalls = 0;
+    let reviewPostCalls = 0;
+    fake.stubGh((args) => {
+      if (
+        args[0] === 'api' &&
+        args[1] === `repos/${repo}/pulls/42/files` &&
+        args.includes('--paginate') &&
+        args.includes('--slurp')
+      ) {
+        return {
+          stdout: '[[{"filename":"src/file.ts"}]]',
+          stderr: '',
+        };
+      }
+
+      if (
+        args[0] === 'pr' &&
+        args[1] === 'view' &&
+        args[2] === '42' &&
+        args.includes('--json') &&
+        args.includes('headRefOid,author,title,headRefName')
+      ) {
+        metadataCalls++;
+        events.push(`metadata:${metadataCalls}`);
+        return {
+          stdout: JSON.stringify({
+            headRefOid: metadataCalls === 1 ? 'abc123' : 'def456',
+            author: { login: 'review-author' },
+            title: 'PR 42',
+            headRefName: 'shipper/10-feature',
+          }),
+          stderr: '',
+        };
+      }
+
+      return undefined;
+    });
+    const githubBody =
+      '{"message":"Validation Failed","errors":[{"message":"line must be part of the diff"}]}';
+    fake.stubGh((args) => {
+      if (
+        args[0] === 'api' &&
+        args[1] === `repos/${repo}/pulls/42/reviews` &&
+        args.includes('--method') &&
+        args.includes('POST')
+      ) {
+        reviewPostCalls++;
+        events.push(`review:${reviewPostCalls}`);
+        if (reviewPostCalls === 1) {
+          throw fake.makeGhError(args, {
+            stderr: 'gh: Validation Failed (HTTP 422)',
+            stdout: githubBody,
+          });
+        }
+      }
+      return undefined;
+    });
+    fake.scriptRunPrompt(async (name, opts) => {
+      promptCalls.push({ name, opts });
+      events.push(`prompt:${promptCalls.length}`);
+      if (promptCalls.length === 2) {
+        expect(opts.userInput).toContain(githubBody);
+        await expect(readInputFile('pr-metadata.json')).resolves.toContain('def456');
+      }
+      await fake.writeStageOutput({
+        result: {
+          verdict: 'accept',
+          comment: '.shipper/output/comment-10.md',
+        },
+        commentBody: 'PR review complete.',
+        reviewPayload: {
+          payload: {
+            commit_id: promptCalls.length === 1 ? 'abc123' : 'def456',
+            body: 'Looks good.',
+            event: 'COMMENT',
+            comments: [],
+          },
+        },
+      });
+      return 0;
+    });
+
+    const { prReviewCommand } = await import('../../src/commands/pr-review.js');
+
+    await expect(prReviewCommand(repo, '42')).resolves.toBeUndefined();
+
+    expect(process.exitCode).toBe(0);
+    expect(events).toEqual([
+      'metadata:1',
+      'prompt:1',
+      'review:1',
+      'metadata:2',
+      'prompt:2',
+      'review:2',
+    ]);
+    expect(promptCalls).toHaveLength(2);
+    expect(metadataCalls).toBe(2);
+    expect(fake.state.submittedReviews).toHaveLength(1);
+    expect(fake.state.postedComments).toEqual([
+      { target: 'issue', number: '10', body: 'PR review complete.' },
+    ]);
+    expect(
+      fake.state.labelTransitions.filter((transition) =>
+        transition.add.includes('shipper:pr-reviewed')
+      )
+    ).toEqual([
+      {
+        target: 'issue',
+        number: '10',
+        add: ['shipper:pr-reviewed'],
+        remove: ['shipper:pr-open'],
+      },
+      {
+        target: 'pr',
+        number: '42',
+        add: ['shipper:pr-reviewed'],
+        remove: ['shipper:pr-open'],
+      },
+    ]);
+  });
+
+  it('exhausts the shared retry budget on repeated GitHub review rejections', async () => {
+    fake.setIssue('10', { labels: ['shipper:pr-open'], title: 'Review issue' });
+    fake.setPr('42', {
+      labels: ['shipper:pr-open'],
+      body: 'Closes #10',
+      diff: diffFixture,
+      headRefName: 'shipper/10-feature',
+    });
+    stubPrFilesAndMetadata('10', '42');
+    let reviewPostCalls = 0;
+    fake.stubGh((args) => {
+      if (
+        args[0] === 'api' &&
+        args[1] === `repos/${repo}/pulls/42/reviews` &&
+        args.includes('--method') &&
+        args.includes('POST')
+      ) {
+        reviewPostCalls++;
+        throw fake.makeGhError(args, {
+          stderr: 'gh: Validation Failed (HTTP 422)',
+          stdout: `{"message":"latest rejection ${reviewPostCalls}"}`,
+        });
+      }
+      return undefined;
+    });
+    fake.scriptRunPrompt(async (name, opts) => {
+      promptCalls.push({ name, opts });
+      await fake.writeStageOutput({
+        result: {
+          verdict: 'accept',
+          comment: '.shipper/output/comment-10.md',
+        },
+        commentBody: 'PR review complete.',
+        reviewPayload: {
+          payload: {
+            commit_id: 'abc123',
+            body: 'Looks good.',
+            event: 'COMMENT',
+            comments: [],
+          },
+        },
+      });
+      return 0;
+    });
+
+    const { prReviewCommand } = await import('../../src/commands/pr-review.js');
+
+    await expect(prReviewCommand(repo, '42')).resolves.toBeUndefined();
+
+    expect(process.exitCode).toBe(1);
+    expect(promptCalls).toHaveLength(3);
+    expect(reviewPostCalls).toBe(3);
+    expect(fake.state.submittedReviews).toEqual([]);
+    expect(fake.state.postedComments.at(-1)?.body).toContain('latest rejection 3');
+    expect(
+      fake.state.labelTransitions.some((transition) =>
+        transition.add.includes('shipper:pr-reviewed')
+      )
+    ).toBe(false);
+  });
+
+  it('does not retry non-fixable GitHub review submission failures', async () => {
+    fake.setIssue('10', { labels: ['shipper:pr-open'], title: 'Review issue' });
+    fake.setPr('42', {
+      labels: ['shipper:pr-open'],
+      body: 'Closes #10',
+      diff: diffFixture,
+      headRefName: 'shipper/10-feature',
+    });
+    stubPrFilesAndMetadata('10', '42');
+    let reviewPostCalls = 0;
+    fake.stubGh((args) => {
+      if (
+        args[0] === 'api' &&
+        args[1] === `repos/${repo}/pulls/42/reviews` &&
+        args.includes('--method') &&
+        args.includes('POST')
+      ) {
+        reviewPostCalls++;
+        throw fake.makeGhError(args, {
+          stderr: 'gh: Bad credentials (HTTP 401)',
+          stdout: '{"message":"Bad credentials"}',
+        });
+      }
+      return undefined;
+    });
+    fake.scriptRunPrompt(async (name, opts) => {
+      promptCalls.push({ name, opts });
+      await fake.writeStageOutput({
+        result: {
+          verdict: 'accept',
+          comment: '.shipper/output/comment-10.md',
+        },
+        commentBody: 'PR review complete.',
+        reviewPayload: {
+          payload: {
+            commit_id: 'abc123',
+            body: 'Looks good.',
+            event: 'COMMENT',
+            comments: [],
+          },
+        },
+      });
+      return 0;
+    });
+
+    const { prReviewCommand } = await import('../../src/commands/pr-review.js');
+
+    await expect(prReviewCommand(repo, '42')).resolves.toBeUndefined();
+
+    expect(process.exitCode).toBe(1);
+    expect(promptCalls).toHaveLength(1);
+    expect(reviewPostCalls).toBe(1);
+    expect(fake.state.submittedReviews).toEqual([]);
+    expect(fake.state.postedComments.at(-1)?.body).toContain('Bad credentials');
+  });
+
   it('auto-selects a PR that is ready for review when none is provided', async () => {
     fake.setIssue('321', { labels: ['shipper:pr-open'], title: 'Selected issue' });
     fake.setPr('84', {

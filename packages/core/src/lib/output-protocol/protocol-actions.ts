@@ -6,7 +6,7 @@ import { gh } from '../gh.js';
 import { logger } from '../logger.js';
 import type { ResultJson } from '../result-schema.js';
 import { resolveTransition, type LabelTransition, type StageName } from '../stage-transitions.js';
-import { resolveOutputPath } from './protocol-io.js';
+import { resolveOutputPath, truncateLargeInput } from './protocol-io.js';
 import { readPrSpec, readReviewPayload } from './protocol-validation.js';
 
 const PR_MIRROR_STAGES = new Set<StageName>(['pr_open', 'pr_review', 'pr_remediate']);
@@ -217,6 +217,7 @@ export async function processResult(opts: {
   cwd: string;
   result: ResultJson;
   prNumber?: string;
+  reviewPayloadAlreadySubmitted?: boolean;
 }): Promise<ResultJson> {
   if (opts.stage === 'groom') {
     throw new Error('groom results must be processed with processGroomResult');
@@ -234,7 +235,9 @@ export async function processResult(opts: {
     if (!opts.prNumber) {
       throw new Error('review payload requires a PR number');
     }
-    await submitReviewPayload(opts.repo, opts.prNumber, opts.cwd, result.review_payload);
+    if (!opts.reviewPayloadAlreadySubmitted) {
+      await submitReviewPayload(opts.repo, opts.prNumber, opts.cwd, result.review_payload);
+    }
   }
 
   await postComment(opts.repo, opts.issueNumber, commentPath);
@@ -256,9 +259,17 @@ export async function handleAgentCrash(
   issueNumber: string,
   stage: StageName,
   errorDetail: string,
-  summary = `The \`${stage}\` agent run exited without producing a valid \`.shipper/output/result.json\`.`
+  summary = `The \`${stage}\` agent run exited without producing a valid \`.shipper/output/result.json\`.`,
+  options?: { cwd?: string; detailFilename?: string }
 ): Promise<void> {
-  const body = ['## Agent Failure', '', summary, '', errorDetail].join('\n');
+  const commentDetail = options?.cwd
+    ? await truncateLargeInput(
+        options.cwd,
+        errorDetail,
+        options.detailFilename ?? `${stage}-failure-detail.txt`
+      )
+    : errorDetail;
+  const body = ['## Agent Failure', '', summary, '', commentDetail].join('\n');
 
   await gh(['issue', 'comment', issueNumber, '-R', repo, '--body', body]);
 }

@@ -384,6 +384,10 @@ export async function runPrRemediateStage(
         { repoRoot, branch, createBranch: false, issueNumber, stage: 'pr-remediate' },
         async (wtPath) => {
           const gitOpts = { wtPath, repoRoot, baseBranch, pushMode: 'force-with-lease' as const };
+          const crashOptions = {
+            cwd: wtPath,
+            detailFilename: 'pr_remediate-failure-detail.txt',
+          };
 
           for (let pass = 1; pass <= MAX_REMEDIATION_PASSES; pass++) {
             await preflight(wtPath, repo, prRef, pass, MAX_REMEDIATION_PASSES);
@@ -425,7 +429,14 @@ export async function runPrRemediateStage(
             } catch (error) {
               const detail = toErrorMessage(error);
               failureError = detail;
-              await handleAgentCrash(repo, issueNumber, 'pr_remediate', detail);
+              await handleAgentCrash(
+                repo,
+                issueNumber,
+                'pr_remediate',
+                detail,
+                undefined,
+                crashOptions
+              );
               return 1;
             }
 
@@ -435,7 +446,14 @@ export async function runPrRemediateStage(
             } catch (error) {
               const detail = toErrorMessage(error);
               failureError = detail;
-              await handleAgentCrash(repo, issueNumber, 'pr_remediate', detail);
+              await handleAgentCrash(
+                repo,
+                issueNumber,
+                'pr_remediate',
+                detail,
+                undefined,
+                crashOptions
+              );
               return 1;
             }
 
@@ -446,7 +464,14 @@ This typically means the branch's commits were already on the base branch throug
 
 Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
               failureError = detail;
-              await handleAgentCrash(repo, issueNumber, 'pr_remediate', detail);
+              await handleAgentCrash(
+                repo,
+                issueNumber,
+                'pr_remediate',
+                detail,
+                undefined,
+                crashOptions
+              );
               await executeTransition(
                 repo,
                 issueNumber,
@@ -477,7 +502,8 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
                 issueNumber,
                 'pr_remediate',
                 detail,
-                `The \`pr_remediate\` agent run exited with code ${exitCode}.`
+                `The \`pr_remediate\` agent run exited with code ${exitCode}.`,
+                crashOptions
               );
               return 1;
             }
@@ -504,7 +530,14 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
               const detail = toErrorMessage(error);
               logger.error(detail);
               failureError = detail;
-              await handleAgentCrash(repo, issueNumber, 'pr_remediate', detail);
+              await handleAgentCrash(
+                repo,
+                issueNumber,
+                'pr_remediate',
+                detail,
+                undefined,
+                crashOptions
+              );
               return 1;
             }
 
@@ -525,7 +558,14 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
                 const detail = toErrorMessage(error);
                 logger.error(detail);
                 failureError = detail;
-                await handleAgentCrash(repo, issueNumber, 'pr_remediate', detail);
+                await handleAgentCrash(
+                  repo,
+                  issueNumber,
+                  'pr_remediate',
+                  detail,
+                  undefined,
+                  crashOptions
+                );
                 return 1;
               }
             }
@@ -591,7 +631,8 @@ Suggested recovery: close the PR and reset the issue via \`shipper reset\`.`;
                 issueNumber,
                 'pr_remediate',
                 detail,
-                'The `pr_remediate` agent run failed while pushing the remediation worktree after producing a valid `.shipper/output/result.json`.'
+                'The `pr_remediate` agent run failed while pushing the remediation worktree after producing a valid `.shipper/output/result.json`.',
+                crashOptions
               );
               return 1;
             }

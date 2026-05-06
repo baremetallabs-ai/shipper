@@ -5,8 +5,10 @@ import { logger } from './logger.js';
 import {
   handleAgentCrash,
   processResult,
+  retryPrReviewOutputAndSubmission,
   retryOnInvalidOutput,
   scrubOutputDir,
+  submitReviewPayload,
   truncateLargeInput,
 } from './output-protocol/index.js';
 import type { DiffFileHunks } from './output-protocol/diff-parse.js';
@@ -172,7 +174,8 @@ export async function runStageScaffold(opts: StageScaffoldOpts): Promise<StageRu
                   opts.issueNumber,
                   opts.resultStage,
                   detail,
-                  `The \`${opts.resultStage}\` agent run exited with code ${initialCode}.`
+                  `The \`${opts.resultStage}\` agent run exited with code ${initialCode}.`,
+                  { cwd: wtPath, detailFilename: `${opts.resultStage}-failure-detail.txt` }
                 );
                 return { success: false, exitCode: 1, error: detail } satisfies StageRunResult;
               }
@@ -184,12 +187,34 @@ export async function runStageScaffold(opts: StageScaffoldOpts): Promise<StageRu
             }
 
             try {
-              const result = await retryOnInvalidOutput({
-                cwd: wtPath,
-                stage: opts.resultStage,
-                ...(setupCtx ?? {}),
-                retry: (userInput) => invocation.retry(userInput),
-              });
+              let result: ResultJson;
+              let reviewSubmitted = false;
+              if (opts.resultStage === 'pr_review') {
+                const prNumber = opts.prNumber?.value;
+                if (!prNumber) {
+                  throw new Error('pr_review submission requires a PR number');
+                }
+
+                const retryResult = await retryPrReviewOutputAndSubmission({
+                  cwd: wtPath,
+                  ...(setupCtx ?? {}),
+                  retry: (userInput) => invocation.retry(userInput),
+                  submitReviewPayload: async (payloadPath) => {
+                    await submitReviewPayload(opts.repo, prNumber, wtPath, payloadPath);
+                  },
+                  refreshContext: async () => (await invocation.setup?.()) ?? undefined,
+                });
+                result = retryResult.result;
+                reviewSubmitted = retryResult.reviewSubmitted;
+              } else {
+                result = await retryOnInvalidOutput({
+                  cwd: wtPath,
+                  stage: opts.resultStage,
+                  ...(setupCtx ?? {}),
+                  retry: (userInput) => invocation.retry(userInput),
+                });
+              }
+
               await processResult({
                 repo: opts.repo,
                 issueNumber: opts.issueNumber,
@@ -197,6 +222,9 @@ export async function runStageScaffold(opts: StageScaffoldOpts): Promise<StageRu
                 cwd: wtPath,
                 result,
                 ...(opts.prNumber !== undefined ? { prNumber: opts.prNumber.value } : {}),
+                ...(opts.resultStage === 'pr_review'
+                  ? { reviewPayloadAlreadySubmitted: reviewSubmitted }
+                  : {}),
               });
               return result.verdict === 'accept'
                 ? ({ success: true, exitCode: 0, verdict: result.verdict } satisfies StageRunResult)
@@ -209,7 +237,17 @@ export async function runStageScaffold(opts: StageScaffoldOpts): Promise<StageRu
             } catch (error) {
               const detail = toErrorMessage(error);
               logger.error(detail);
-              await handleAgentCrash(opts.repo, opts.issueNumber, opts.resultStage, detail);
+              await handleAgentCrash(
+                opts.repo,
+                opts.issueNumber,
+                opts.resultStage,
+                detail,
+                undefined,
+                {
+                  cwd: wtPath,
+                  detailFilename: `${opts.resultStage}-failure-detail.txt`,
+                }
+              );
               return { success: false, exitCode: 1, error: detail } satisfies StageRunResult;
             }
           }

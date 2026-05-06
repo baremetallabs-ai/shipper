@@ -1,6 +1,6 @@
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { toError } from '../../src/lib/errors.js';
+import { toError, toErrorMessage } from '../../src/lib/errors.js';
 
 const execFileMock = vi.fn();
 const sleepMsMock = vi.fn<(ms: number) => Promise<void>>(() => Promise.resolve());
@@ -16,7 +16,10 @@ const execFile = Object.assign(
           ...args,
           (err: unknown, stdout: string | Buffer = '', stderr: string | Buffer = '') => {
             if (err) {
-              reject(toError(err));
+              const error = toError(err) as Error & { stdout?: string; stderr?: string };
+              error.stdout ??= String(stdout);
+              error.stderr ??= String(stderr);
+              reject(error);
               return;
             }
             resolve({ stdout: String(stdout), stderr: String(stderr) });
@@ -35,7 +38,8 @@ vi.mock('../../src/lib/sleep.js', () => ({
   sleepMs: (ms: number) => sleepMsMock(ms),
 }));
 
-const { gh } = await import('../../src/lib/gh.js');
+const { GhError, getGhErrorDetail, gh, isGhError, isRecoverableReviewSubmissionGhError } =
+  await import('../../src/lib/gh.js');
 
 function transientError(message: string, stderr = message): Error & { stderr: string } {
   return Object.assign(new Error(message), { stderr });
@@ -47,6 +51,17 @@ function permanentError(message: string): Error & { stderr: string } {
 
 function missingBinaryError(): Error & { code: string } {
   return Object.assign(new Error('spawn gh ENOENT'), { code: 'ENOENT' });
+}
+
+function makeGhError(detail: { stdout?: string; stderr?: string; code?: string | number }) {
+  return new GhError(
+    ['api', 'repos/owner/repo/pulls/42/reviews'],
+    Object.assign(new Error(detail.stderr ?? detail.stdout ?? 'gh failed'), {
+      stdout: detail.stdout ?? '',
+      stderr: detail.stderr ?? '',
+      ...(detail.code === undefined ? {} : { code: detail.code }),
+    })
+  );
 }
 
 describe('gh', () => {
@@ -106,7 +121,7 @@ describe('gh', () => {
     expect(sleepMsMock).toHaveBeenNthCalledWith(2, 2000);
   });
 
-  it('throws the first error after exhausting all retry attempts', async () => {
+  it('throws a GhError for the last error after exhausting all retry attempts', async () => {
     const first = transientError('HTTP 500 first');
     const second = transientError('HTTP 500 second');
     const third = transientError('HTTP 500 third');
@@ -131,7 +146,13 @@ describe('gh', () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    await expect(promise).rejects.toBe(first);
+    await expect(promise).rejects.toBeInstanceOf(GhError);
+    await expect(promise).rejects.toMatchObject({
+      args: ['pr', 'view', '42'],
+      command: 'gh pr view 42',
+      stderr: 'HTTP 500 third',
+      stdout: '',
+    });
     expect(execFileMock).toHaveBeenCalledTimes(3);
     expect(errorSpy).toHaveBeenCalledTimes(2);
     expect(errorSpy).toHaveBeenNthCalledWith(
@@ -142,6 +163,12 @@ describe('gh', () => {
       2,
       '[shipper] gh pr view 42 failed: HTTP 500 second, retrying (attempt 3/3)...'
     );
+    try {
+      await promise;
+    } catch (error) {
+      expect(toErrorMessage(error)).toContain('gh pr view 42 failed: HTTP 500 third');
+      expect(toErrorMessage(error)).not.toContain('HTTP 500 first');
+    }
     expect(sleepMsMock).toHaveBeenNthCalledWith(1, 1000);
     expect(sleepMsMock).toHaveBeenNthCalledWith(2, 2000);
   });
@@ -214,7 +241,15 @@ describe('gh', () => {
       cb(err);
     });
 
-    await expect(gh(['issue', 'view', '42'])).rejects.toBe(err);
+    const promise = gh(['issue', 'view', '42']);
+
+    await expect(promise).rejects.toBeInstanceOf(GhError);
+    await expect(promise).rejects.toMatchObject({
+      args: ['issue', 'view', '42'],
+      command: 'gh issue view 42',
+      stderr,
+      stdout: '',
+    });
     expect(execFileMock).toHaveBeenCalledTimes(1);
     expect(errorSpy).not.toHaveBeenCalled();
     expect(sleepMsMock).not.toHaveBeenCalled();
@@ -227,9 +262,79 @@ describe('gh', () => {
       cb(err);
     });
 
-    await expect(gh(['--version'])).rejects.toBe(err);
+    const promise = gh(['--version']);
+
+    await expect(promise).rejects.toBeInstanceOf(GhError);
+    await expect(promise).rejects.toMatchObject({
+      args: ['--version'],
+      command: 'gh --version',
+      code: 'ENOENT',
+      stderr: '',
+      stdout: '',
+    });
     expect(execFileMock).toHaveBeenCalledTimes(1);
     expect(errorSpy).not.toHaveBeenCalled();
     expect(sleepMsMock).not.toHaveBeenCalled();
+  });
+
+  it('preserves command, stderr status, and stdout diagnostic body for terminal gh api failures', async () => {
+    const stderr = 'gh: Validation Failed (HTTP 422)';
+    const stdout =
+      '{"message":"Validation Failed","errors":[{"message":"line must be part of the diff"}]}';
+
+    execFileMock.mockImplementationOnce((_cmd: string, _args: string[], ...rest: unknown[]) => {
+      const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
+      cb(new Error('exit status 1'), stdout, stderr);
+    });
+
+    let thrown: unknown;
+    try {
+      await gh(['api', 'repos/owner/repo/pulls/42/reviews']);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(GhError);
+    expect(isGhError(thrown)).toBe(true);
+    expect(toErrorMessage(thrown)).toContain('gh api repos/owner/repo/pulls/42/reviews failed');
+    expect(toErrorMessage(thrown)).toContain(stderr);
+    expect(toErrorMessage(thrown)).toContain(stdout);
+    expect(getGhErrorDetail(thrown)).toContain('stdout:');
+    expect(getGhErrorDetail(thrown)).toContain(stdout);
+    expect(execFileMock).toHaveBeenCalledTimes(1);
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(sleepMsMock).not.toHaveBeenCalled();
+  });
+
+  it('recognizes structural GhError objects from fake transports', () => {
+    const fake = Object.assign(new Error('gh api failed'), {
+      name: 'GhError',
+      args: ['api', 'repos/owner/repo/pulls/42/reviews'],
+      command: 'gh api repos/owner/repo/pulls/42/reviews',
+      stdout: '{"message":"Validation Failed"}',
+      stderr: 'gh: Validation Failed (HTTP 422)',
+    });
+
+    expect(isGhError(fake)).toBe(true);
+    expect(isRecoverableReviewSubmissionGhError(fake)).toBe(true);
+  });
+
+  it.each([
+    [
+      'HTTP 422',
+      makeGhError({
+        stderr: 'gh: Validation Failed (HTTP 422)',
+        stdout: '{"message":"Validation Failed"}',
+      }),
+      true,
+    ],
+    ['validation failed', makeGhError({ stderr: 'validation failed' }), true],
+    ['HTTP 401', makeGhError({ stderr: 'gh: Bad credentials (HTTP 401)' }), false],
+    ['HTTP 403', makeGhError({ stderr: 'gh: Forbidden (HTTP 403)' }), false],
+    ['HTTP 404', makeGhError({ stderr: 'gh: Not Found (HTTP 404)' }), false],
+    ['missing binary', makeGhError({ stderr: 'spawn gh ENOENT', code: 'ENOENT' }), false],
+    ['network failure', makeGhError({ stderr: 'network connection timed out' }), false],
+  ])('classifies recoverable review submission errors: %s', (_name, error, expected) => {
+    expect(isRecoverableReviewSubmissionGhError(error)).toBe(expected);
   });
 });

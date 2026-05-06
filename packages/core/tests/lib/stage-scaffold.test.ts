@@ -25,18 +25,45 @@ type ProcessResultOpts = {
   cwd: string;
   result: typeof acceptedResult;
   prNumber?: string;
+  reviewPayloadAlreadySubmitted?: boolean;
+};
+
+type PrReviewRetryOpts = {
+  cwd: string;
+  retry: (userInput: string) => Promise<number>;
+  submitReviewPayload: (payloadPath: string) => Promise<void>;
+  refreshContext?: () => Promise<
+    { prFiles?: Set<string>; diffHunks?: Map<string, DiffFileHunks> } | undefined
+  >;
+  prFiles?: Set<string>;
+  diffHunks?: Map<string, DiffFileHunks>;
 };
 
 const events: string[] = [];
 const formatConflictContextMock = vi.fn<(context: unknown) => string>();
 const handleAgentCrashMock = vi.fn<
-  (repo: string, issue: string, stage: string, detail: string, summary?: string) => Promise<void>
+  (
+    repo: string,
+    issue: string,
+    stage: string,
+    detail: string,
+    summary?: string,
+    options?: { cwd?: string; detailFilename?: string }
+  ) => Promise<void>
 >(() => Promise.resolve());
 const loggerErrorMock = vi.fn<(message: string) => void>();
 const processResultMock = vi.fn<(opts: ProcessResultOpts) => Promise<typeof acceptedResult>>();
+const retryPrReviewOutputAndSubmissionMock =
+  vi.fn<
+    (
+      opts: PrReviewRetryOpts
+    ) => Promise<{ result: typeof acceptedResult; reviewSubmitted: boolean }>
+  >();
 const retryOnInvalidOutputMock = vi.fn<(opts: RetryOpts) => Promise<typeof acceptedResult>>();
 const runPromptMock = vi.fn<(name: string, opts: RunPromptOpts) => Promise<number>>();
 const scrubOutputDirMock = vi.fn<(wtPath: string) => Promise<void>>();
+const submitReviewPayloadMock =
+  vi.fn<(repo: string, prNumber: string, cwd: string, payloadPath: string) => Promise<void>>();
 const toErrorMessageMock = vi.fn<(error: unknown) => string>((error) =>
   error instanceof Error ? error.message : String(error)
 );
@@ -97,12 +124,16 @@ vi.mock('../../src/lib/output-protocol/index.js', () => ({
     issue: string,
     stage: string,
     detail: string,
-    summary?: string
-  ) =>
-    handleAgentCrashMock(repo, issue, stage, detail, ...(summary === undefined ? [] : [summary])),
+    summary?: string,
+    options?: { cwd?: string; detailFilename?: string }
+  ) => handleAgentCrashMock(repo, issue, stage, detail, summary, options),
   processResult: (opts: ProcessResultOpts) => processResultMock(opts),
+  retryPrReviewOutputAndSubmission: (opts: PrReviewRetryOpts) =>
+    retryPrReviewOutputAndSubmissionMock(opts),
   retryOnInvalidOutput: (opts: RetryOpts) => retryOnInvalidOutputMock(opts),
   scrubOutputDir: (wtPath: string) => scrubOutputDirMock(wtPath),
+  submitReviewPayload: (repo: string, prNumber: string, cwd: string, payloadPath: string) =>
+    submitReviewPayloadMock(repo, prNumber, cwd, payloadPath),
   truncateLargeInput: (wtPath: string, text: string, filename: string) =>
     truncateLargeInputMock(wtPath, text, filename),
 }));
@@ -141,10 +172,15 @@ describe('runStageScaffold', () => {
       events.push('retryOnInvalidOutput');
       return Promise.resolve(acceptedResult);
     });
+    retryPrReviewOutputAndSubmissionMock.mockImplementation(() => {
+      events.push('retryPrReviewOutputAndSubmission');
+      return Promise.resolve({ result: acceptedResult, reviewSubmitted: true });
+    });
     processResultMock.mockImplementation(() => {
       events.push('processResult');
       return Promise.resolve(acceptedResult);
     });
+    submitReviewPayloadMock.mockResolvedValue(undefined);
   });
 
   it('runs the shared scaffold in order and forwards setup and PR metadata when present', async () => {
@@ -204,7 +240,7 @@ describe('runStageScaffold', () => {
       'scrubOutputDir',
       'setup',
       'initial',
-      'retryOnInvalidOutput',
+      'retryPrReviewOutputAndSubmission',
       'processResult',
     ]);
     expect(withStageHooksMock).toHaveBeenCalledWith(
@@ -222,16 +258,18 @@ describe('runStageScaffold', () => {
       },
       expect.any(Function)
     );
-    const retryOpts = retryOnInvalidOutputMock.mock.calls[0]?.[0];
+    expect(retryOnInvalidOutputMock).not.toHaveBeenCalled();
+    const retryOpts = retryPrReviewOutputAndSubmissionMock.mock.calls[0]?.[0];
     expect(retryOpts).toBeDefined();
     if (!retryOpts) {
       throw new Error('Expected retry arguments');
     }
     expect(retryOpts.cwd).toBe('/tmp/fake-wt');
-    expect(retryOpts.stage).toBe('pr_review');
     expect(retryOpts.prFiles).toEqual(prFiles);
     expect(retryOpts.diffHunks).toEqual(diffHunks);
     expect(typeof retryOpts.retry).toBe('function');
+    expect(typeof retryOpts.submitReviewPayload).toBe('function');
+    expect(typeof retryOpts.refreshContext).toBe('function');
     expect(processResultMock).toHaveBeenCalledWith({
       repo: 'owner/repo',
       issueNumber: '123',
@@ -239,7 +277,17 @@ describe('runStageScaffold', () => {
       cwd: '/tmp/fake-wt',
       result: acceptedResult,
       prNumber: '84',
+      reviewPayloadAlreadySubmitted: true,
     });
+
+    await retryOpts.submitReviewPayload('.shipper/output/review-payload.json');
+    expect(submitReviewPayloadMock).toHaveBeenCalledWith(
+      'owner/repo',
+      '84',
+      '/tmp/fake-wt',
+      '.shipper/output/review-payload.json'
+    );
+    await expect(retryOpts.refreshContext?.()).resolves.toEqual({ prFiles, diffHunks });
   });
 
   it('logs and reports agent crashes for simple-stage non-zero initial exits', async () => {
@@ -276,7 +324,8 @@ describe('runStageScaffold', () => {
       '123',
       'design',
       'Agent exited with code 23',
-      'The `design` agent run exited with code 23.'
+      'The `design` agent run exited with code 23.',
+      { cwd: '/tmp/fake-wt', detailFilename: 'design-failure-detail.txt' }
     );
   });
 
@@ -346,7 +395,9 @@ describe('runStageScaffold', () => {
       'owner/repo',
       '123',
       'plan',
-      'Missing result.json'
+      'Missing result.json',
+      undefined,
+      { cwd: '/tmp/fake-wt', detailFilename: 'plan-failure-detail.txt' }
     );
   });
 
@@ -389,6 +440,15 @@ describe('runStageScaffold', () => {
       cwd: '/tmp/fake-wt',
       result: acceptedResult,
     });
+    const retryOpts = retryOnInvalidOutputMock.mock.calls[0]?.[0];
+    expect(retryOpts).toBeDefined();
+    if (!retryOpts) {
+      throw new Error('Expected retry arguments');
+    }
+    expect(retryOpts.cwd).toBe('/tmp/fake-wt');
+    expect(retryOpts.stage).toBe('plan');
+    expect(typeof retryOpts.retry).toBe('function');
+    expect(retryPrReviewOutputAndSubmissionMock).not.toHaveBeenCalled();
   });
 });
 

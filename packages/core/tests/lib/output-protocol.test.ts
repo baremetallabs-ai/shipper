@@ -8,11 +8,17 @@ import type { ResultJson } from '../../src/lib/result-schema.js';
 
 const ghMock = vi.fn<(args: string[]) => Promise<{ stdout: string; stderr: string }>>();
 
-vi.mock('../../src/lib/gh.js', () => ({
-  gh: (...args: unknown[]) => {
-    return ghMock(...(args as [string[]]));
-  },
-}));
+vi.mock('../../src/lib/gh.js', async () => {
+  const actual = await vi.importActual<typeof import('../../src/lib/gh.js')>('../../src/lib/gh.js');
+  return {
+    ...actual,
+    gh: (...args: unknown[]) => {
+      return ghMock(...(args as [string[]]));
+    },
+  };
+});
+
+const { GhError } = await import('../../src/lib/gh.js');
 
 const {
   createPrFromSpec,
@@ -27,6 +33,7 @@ const {
   processGroomResult,
   processResult,
   parseDiffHunks,
+  retryPrReviewOutputAndSubmission,
   retryOnInvalidOutput,
   scrubOutputDir,
   submitReviewPayload,
@@ -115,6 +122,17 @@ describe('output protocol helpers', () => {
       comments: [],
       ...overrides,
     };
+  }
+
+  function makeGhError(detail: { stdout?: string; stderr?: string; code?: string | number }) {
+    return new GhError(
+      ['api', 'repos/owner/repo/pulls/248/reviews'],
+      Object.assign(new Error(detail.stderr ?? detail.stdout ?? 'gh failed'), {
+        stdout: detail.stdout ?? '',
+        stderr: detail.stderr ?? '',
+        ...(detail.code === undefined ? {} : { code: detail.code }),
+      })
+    );
   }
 
   function groomedBody(summary = 'Summary'): string {
@@ -1383,6 +1401,60 @@ describe('output protocol helpers', () => {
       ]);
     });
 
+    it('skips duplicate review submission when the payload was already submitted', async () => {
+      const result = buildResult({ review_payload: outputRelative('review-payload-248.json') });
+      await writeOutputFile('comment-248.md', 'summary');
+      await writeOutputJson('review-payload-248.json', buildReviewPayload());
+
+      await expect(
+        processResult({
+          repo: 'owner/repo',
+          issueNumber: '248',
+          stage: 'pr_review',
+          cwd: tempDir,
+          result,
+          prNumber: '77',
+          reviewPayloadAlreadySubmitted: true,
+        })
+      ).resolves.toEqual(result);
+
+      expect(ghMock).toHaveBeenCalledTimes(3);
+      expect(ghMock).toHaveBeenNthCalledWith(1, [
+        'issue',
+        'comment',
+        '248',
+        '-R',
+        'owner/repo',
+        '--body-file',
+        outputAbs('comment-248.md'),
+      ]);
+      expect(ghMock).toHaveBeenNthCalledWith(2, [
+        'issue',
+        'edit',
+        '248',
+        '-R',
+        'owner/repo',
+        '--add-label',
+        'shipper:pr-reviewed',
+        '--remove-label',
+        'shipper:pr-open',
+      ]);
+      expect(ghMock).toHaveBeenNthCalledWith(3, [
+        'pr',
+        'edit',
+        '77',
+        '-R',
+        'owner/repo',
+        '--add-label',
+        'shipper:pr-reviewed',
+        '--remove-label',
+        'shipper:pr-open',
+      ]);
+      expect(
+        ghMock.mock.calls.some(([args]) => args[0] === 'api' && args.includes('--input'))
+      ).toBe(false);
+    });
+
     it.each([
       ['pr_open', 'reject', '66', ['shipper:planned'], ['shipper:implemented']],
       ['pr_open', 'fail', '66', ['shipper:failed'], ['shipper:implemented']],
@@ -1743,6 +1815,37 @@ describe('output protocol helpers', () => {
         '--body',
         expect.stringContaining('## Groom Post-flight Failure'),
       ]);
+    });
+
+    it('truncates oversized groom post-flight failure comments', async () => {
+      const result = await writeValidGroomOutput();
+      const largeDetail = Array.from(
+        { length: 140 },
+        (_, index) => `${'x'.repeat(400)} groom failure line ${index + 1}`
+      ).join('\n');
+      ghMock
+        .mockRejectedValueOnce(new Error(largeDetail))
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })
+        .mockResolvedValueOnce({ stdout: '', stderr: '' });
+
+      await expect(
+        processGroomResult({ repo: 'owner/repo', issueNumber: '248', cwd: tempDir, result })
+      ).rejects.toThrow('Groom post-flight failed');
+
+      expect(ghMock.mock.calls.at(-1)?.[0]).toEqual([
+        'issue',
+        'comment',
+        '248',
+        '-R',
+        'owner/repo',
+        '--body',
+        expect.stringContaining(
+          'full output written to .shipper/input/groom-post-flight-failure.txt'
+        ),
+      ]);
+      await expect(
+        readFile(path.join(tempDir, PROTOCOL_INPUT_DIR, 'groom-post-flight-failure.txt'), 'utf-8')
+      ).resolves.toContain(largeDetail);
     });
 
     it('applies blocked parent state and creates partial-replacement children', async () => {
@@ -2182,6 +2285,214 @@ describe('output protocol helpers', () => {
     });
   });
 
+  describe('retryPrReviewOutputAndSubmission', () => {
+    async function writePrReviewResult(
+      payloadOverrides: Parameters<typeof buildReviewPayload>[0] = {}
+    ): Promise<ResultJson> {
+      const result = buildResult({ review_payload: outputRelative('review-payload-248.json') });
+      await writeResultFile(result);
+      await writeOutputJson('review-payload-248.json', buildReviewPayload(payloadOverrides));
+      return result;
+    }
+
+    it('retries a recoverable GitHub review rejection after refreshing context', async () => {
+      const result = await writePrReviewResult({
+        comments: [{ path: 'src/old.ts', line: 4, side: 'RIGHT', body: 'Old context.' }],
+      });
+      const githubBody =
+        '{"message":"Validation Failed","errors":[{"message":"line must be part of the diff"}]}';
+      const events: string[] = [];
+      const submitReviewPayloadMock = vi
+        .fn<(payloadPath: string) => Promise<void>>()
+        .mockImplementationOnce(() => {
+          events.push('submit failed');
+          return Promise.reject(
+            makeGhError({
+              stderr: 'gh: Validation Failed (HTTP 422)',
+              stdout: githubBody,
+            })
+          );
+        })
+        .mockImplementationOnce(() => {
+          events.push('submit succeeded');
+          return Promise.resolve();
+        });
+      const retryMock = vi
+        .fn<(message: string) => Promise<number>>()
+        .mockImplementation(async (message) => {
+          events.push('retry');
+          expect(message).toContain(githubBody);
+          await writeOutputJson(
+            'review-payload-248.json',
+            buildReviewPayload({
+              comments: [{ path: 'src/new.ts', line: 12, side: 'RIGHT', body: 'New context.' }],
+            })
+          );
+          return 0;
+        });
+      const refreshContextMock = vi.fn(() => {
+        events.push('refresh');
+        return Promise.resolve({ prFiles: new Set(['src/new.ts']) });
+      });
+
+      await expect(
+        retryPrReviewOutputAndSubmission({
+          cwd: tempDir,
+          prFiles: new Set(['src/old.ts']),
+          retry: retryMock,
+          submitReviewPayload: submitReviewPayloadMock,
+          refreshContext: refreshContextMock,
+        })
+      ).resolves.toEqual({ result, reviewSubmitted: true });
+
+      expect(events).toEqual(['submit failed', 'refresh', 'retry', 'submit succeeded']);
+      expect(submitReviewPayloadMock).toHaveBeenCalledTimes(2);
+      expect(submitReviewPayloadMock).toHaveBeenCalledWith(
+        outputRelative('review-payload-248.json')
+      );
+      expect(refreshContextMock).toHaveBeenCalledTimes(1);
+      expect(retryMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('shares one three-attempt budget across local validation failures and GitHub rejections', async () => {
+      await writeResultFile(buildResult());
+      const result = buildResult({ review_payload: outputRelative('review-payload-248.json') });
+      const submitReviewPayloadMock = vi
+        .fn<(payloadPath: string) => Promise<void>>()
+        .mockRejectedValueOnce(
+          makeGhError({
+            stderr: 'gh: Validation Failed (HTTP 422)',
+            stdout: '{"message":"Validation Failed","errors":[{"message":"stale commit_id"}]}',
+          })
+        )
+        .mockResolvedValueOnce(undefined);
+      const retryMock = vi
+        .fn<(message: string) => Promise<number>>()
+        .mockImplementation(async () => {
+          await writeResultFile(result);
+          await writeOutputJson('review-payload-248.json', buildReviewPayload());
+          return 0;
+        });
+
+      await expect(
+        retryPrReviewOutputAndSubmission({
+          cwd: tempDir,
+          retry: retryMock,
+          submitReviewPayload: submitReviewPayloadMock,
+        })
+      ).resolves.toEqual({ result, reviewSubmitted: true });
+
+      expect(retryMock).toHaveBeenCalledTimes(2);
+      expect(retryMock.mock.calls[0]?.[0]).toContain(
+        'pr_review accept requires a review_payload in result.json'
+      );
+      expect(retryMock.mock.calls[1]?.[0]).toContain('stale commit_id');
+      expect(submitReviewPayloadMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('rethrows the most recent GitHub rejection when the shared budget is exhausted', async () => {
+      await writePrReviewResult();
+      const submitReviewPayloadMock = vi
+        .fn<(payloadPath: string) => Promise<void>>()
+        .mockRejectedValueOnce(
+          makeGhError({
+            stderr: 'gh: Validation Failed (HTTP 422)',
+            stdout: '{"message":"old rejection"}',
+          })
+        )
+        .mockRejectedValueOnce(
+          makeGhError({
+            stderr: 'gh: Validation Failed (HTTP 422)',
+            stdout: '{"message":"middle rejection"}',
+          })
+        )
+        .mockRejectedValueOnce(
+          makeGhError({
+            stderr: 'gh: Validation Failed (HTTP 422)',
+            stdout: '{"message":"latest rejection"}',
+          })
+        );
+      const retryMock = vi.fn<(message: string) => Promise<number>>().mockResolvedValue(0);
+
+      await expect(
+        retryPrReviewOutputAndSubmission({
+          cwd: tempDir,
+          retry: retryMock,
+          submitReviewPayload: submitReviewPayloadMock,
+        })
+      ).rejects.toThrow('latest rejection');
+
+      expect(submitReviewPayloadMock).toHaveBeenCalledTimes(3);
+      expect(retryMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not retry non-fixable GitHub review submission failures', async () => {
+      await writePrReviewResult();
+      const submitReviewPayloadMock = vi
+        .fn<(payloadPath: string) => Promise<void>>()
+        .mockRejectedValue(
+          makeGhError({
+            stderr: 'gh: Bad credentials (HTTP 401)',
+            stdout: '{"message":"Bad credentials"}',
+          })
+        );
+      const retryMock = vi.fn<(message: string) => Promise<number>>().mockResolvedValue(0);
+      const refreshContextMock = vi.fn(() =>
+        Promise.resolve({ prFiles: new Set(['src/file.ts']) })
+      );
+
+      await expect(
+        retryPrReviewOutputAndSubmission({
+          cwd: tempDir,
+          retry: retryMock,
+          submitReviewPayload: submitReviewPayloadMock,
+          refreshContext: refreshContextMock,
+        })
+      ).rejects.toThrow('Bad credentials');
+
+      expect(submitReviewPayloadMock).toHaveBeenCalledTimes(1);
+      expect(retryMock).not.toHaveBeenCalled();
+      expect(refreshContextMock).not.toHaveBeenCalled();
+    });
+
+    it('truncates oversized GitHub rejection detail in correction messages', async () => {
+      await writePrReviewResult();
+      const oversizedBody = JSON.stringify({
+        message: 'Validation Failed',
+        detail: 'x'.repeat(60_000),
+      });
+      const submitReviewPayloadMock = vi
+        .fn<(payloadPath: string) => Promise<void>>()
+        .mockRejectedValueOnce(
+          makeGhError({
+            stderr: 'gh: Validation Failed (HTTP 422)',
+            stdout: oversizedBody,
+          })
+        )
+        .mockResolvedValueOnce(undefined);
+      const retryMock = vi.fn<(message: string) => Promise<number>>().mockResolvedValue(0);
+
+      await expect(
+        retryPrReviewOutputAndSubmission({
+          cwd: tempDir,
+          retry: retryMock,
+          submitReviewPayload: submitReviewPayloadMock,
+        })
+      ).resolves.toEqual({
+        result: buildResult({ review_payload: outputRelative('review-payload-248.json') }),
+        reviewSubmitted: true,
+      });
+
+      expect(retryMock).toHaveBeenCalledTimes(1);
+      expect(retryMock.mock.calls[0]?.[0]).toContain(
+        'full output written to .shipper/input/github-review-rejection.txt'
+      );
+      await expect(
+        readFile(path.join(tempDir, PROTOCOL_INPUT_DIR, 'github-review-rejection.txt'), 'utf-8')
+      ).resolves.toContain(oversizedBody);
+    });
+  });
+
   it('formats correction messages with every validation error', () => {
     expect(
       formatCorrectionMessage([
@@ -2239,5 +2550,27 @@ describe('output protocol helpers', () => {
         'fatal: unable to access remote',
       ].join('\n'),
     ]);
+  });
+
+  it('truncates oversized crash details in the posted failure comment when cwd is provided', async () => {
+    const detail = Array.from(
+      { length: 140 },
+      (_, index) => `${'x'.repeat(400)} line ${index + 1}`
+    ).join('\n');
+
+    await handleAgentCrash('owner/repo', '248', 'implement', detail, undefined, {
+      cwd: tempDir,
+      detailFilename: 'implement-failure-detail.txt',
+    });
+
+    expect(ghMock).toHaveBeenCalledTimes(1);
+    const postedBody = ghMock.mock.calls[0]?.[0]?.at(-1);
+    expect(postedBody).toContain('## Agent Failure');
+    expect(postedBody).toContain(
+      '[40 lines omitted; full output written to .shipper/input/implement-failure-detail.txt]'
+    );
+    await expect(
+      readFile(path.join(tempDir, PROTOCOL_INPUT_DIR, 'implement-failure-detail.txt'), 'utf-8')
+    ).resolves.toBe(detail);
   });
 });
