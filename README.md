@@ -44,7 +44,7 @@ shipper ship --auto
 ### Desktop
 
 1. Download the latest macOS arm64 desktop artifact from
-   https://github.com/baremetallabs-ai/shipper/releases.
+   [GitHub Releases](https://github.com/baremetallabs-ai/shipper/releases).
 2. Authenticate GitHub CLI with `gh auth login`.
 3. Add or select a GitHub repository in the desktop app.
 4. Run setup/init if prompted, then start from the pipeline board.
