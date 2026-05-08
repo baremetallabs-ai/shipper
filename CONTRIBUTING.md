@@ -28,7 +28,7 @@ npm run type-check     # tsc --noEmit across workspaces
 npm run lint           # eslint .
 npm run lint:fix       # eslint . --fix
 npm run format         # prettier --write .
-npm run check:cli-version-fingerprint # Verify .shipper/settings.json matches CLI manifest version
+npm run check:shipper-init-drift # Verify committed .shipper/ output matches shipper init
 npm run test           # vitest run, per workspace
 npm run test:coverage  # vitest run --coverage, per workspace
 ```
@@ -52,10 +52,10 @@ Common types: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `ci`, `build`.
 2. Make sure `npm run build`, `npm run lint`, `npm run type-check`, and `npm run test` all pass locally before opening a PR.
 3. Update or add tests where the change is testable.
 4. Note any user-visible change in `CHANGELOG.md` under `[Unreleased]`.
-5. When intentionally changing `packages/cli/package.json`'s `version`, rerun `shipper init` so `.shipper/settings.json`'s `cliVersion` is refreshed. If the version bump was unintended, revert or align the manifest instead.
+5. When changing the CLI version or init-managed `.shipper/` artifacts, run `shipper init` and commit the resulting `.shipper/` changes if the drift guard reports them.
 6. Fill in the PR template; reference the issue you are addressing.
 
-The pre-push hook and CI both run `npm run check:cli-version-fingerprint` before the broader validation suite. CI runs `check` (docs, lint, format, type-check, build, coverage) on Ubuntu and `desktop-macos` on macOS. Both must pass before merge.
+The pre-push hook and CI both run `npm run check:shipper-init-drift` as part of the broader validation suite. If it reports drift, run `shipper init` and commit the resulting `.shipper/` changes. CI runs `check` (docs, lint, format, type-check, build, coverage) on Ubuntu and `desktop-macos` on macOS. Both must pass before merge.
 
 ## Filing issues
 

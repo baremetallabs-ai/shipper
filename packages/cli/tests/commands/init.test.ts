@@ -73,6 +73,10 @@ const outputDirPath = path.resolve('.shipper', 'output');
 const inputGitkeepPath = path.resolve(inputDirPath, '.gitkeep');
 const outputGitkeepPath = path.resolve(outputDirPath, '.gitkeep');
 const expectedLabels = core.LABELS;
+const silentLogger = {
+  log: vi.fn<(message: string) => void>(),
+  error: vi.fn<(message: string) => void>(),
+};
 
 type FakeCore = ReturnType<typeof createFakeCore>;
 
@@ -133,6 +137,8 @@ beforeEach(() => {
     return Promise.resolve(undefined);
   });
   fake.stubGh((args) => mockGh(args));
+  silentLogger.log.mockReset();
+  silentLogger.error.mockReset();
   mockExecFileAsync.mockReset();
   mockRunAuthPreflight.mockReset();
   mockRunAuthPreflight.mockResolvedValue(undefined);
@@ -433,6 +439,68 @@ describe('initCommand stored agent', () => {
     const written = parseWrittenSettings();
     expect(getCommandConfig(written, 'default').agent).toBe('claude');
     expect(console.log).not.toHaveBeenCalledWith(expect.stringContaining('from settings'));
+  });
+});
+
+describe('initCommand offline mode', () => {
+  it('uses committed settings, skips GitHub work, and still writes generated files', async () => {
+    existsSyncMock.mockImplementation((p: string) => p === settingsPath);
+    readFileSyncMock.mockImplementation((p: string) => {
+      if (p === settingsPath) {
+        return '{"commands": {"default": {"agent": "codex"}}}';
+      }
+      throw new Error('ENOENT');
+    });
+
+    await initCommand({ offline: true, logger: silentLogger });
+
+    expect(mockRunAuthPreflight).not.toHaveBeenCalled();
+    expect(mockRunPrereqChecks).toHaveBeenCalledWith([core.checkGitRepo]);
+    expect(mockGh).not.toHaveBeenCalled();
+    expect(questionMock).not.toHaveBeenCalled();
+    expect(findWriteCall(settingsPath)).toBeDefined();
+    expect(findWriteCall(gitignorePath)).toBeDefined();
+    expect(findWriteCall(inputGitkeepPath)).toBeDefined();
+    expect(findWriteCall(outputGitkeepPath)).toBeDefined();
+    for (const filename of Object.keys(core.scripts)) {
+      expect(findWriteCall(path.resolve('.shipper', 'scripts', filename))).toBeDefined();
+    }
+  });
+
+  it('rejects autocommit and push before file writes', async () => {
+    const rejectedOptions = [
+      { offline: true, autocommit: true, logger: silentLogger },
+      { offline: true, push: true, logger: silentLogger },
+    ];
+
+    for (const options of rejectedOptions) {
+      writeFileSyncMock.mockClear();
+      await expect(initCommand(options)).rejects.toThrow(
+        'Error: offline init cannot be combined with --autocommit or --push.'
+      );
+      expect(writeFileSyncMock).not.toHaveBeenCalled();
+    }
+
+    expect(mockRunAuthPreflight).not.toHaveBeenCalled();
+    expect(mockRunPrereqChecks).not.toHaveBeenCalled();
+    expect(mockGh).not.toHaveBeenCalled();
+  });
+
+  it('throws instead of prompting when no valid stored agent is available', async () => {
+    readFileSyncMock.mockImplementation((p: string) => {
+      if (p === settingsPath) return '{"commands": {"default": {"agent": "vim"}}}';
+      throw new Error('ENOENT');
+    });
+
+    await expect(initCommand({ offline: true, logger: silentLogger })).rejects.toThrow(
+      'Error: offline init requires an existing .shipper/settings.json with commands.default.agent set to claude, codex, or copilot.'
+    );
+
+    expect(mockRunAuthPreflight).not.toHaveBeenCalled();
+    expect(mockRunPrereqChecks).toHaveBeenCalledWith([core.checkGitRepo]);
+    expect(questionMock).not.toHaveBeenCalled();
+    expect(writeFileSyncMock).not.toHaveBeenCalled();
+    expect(mockGh).not.toHaveBeenCalled();
   });
 });
 

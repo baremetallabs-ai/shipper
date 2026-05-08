@@ -13,7 +13,6 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm run check:cli-version-fingerprint
       - run: npm ci
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
@@ -23,6 +22,7 @@ jobs:
       - run: npm run format:check
       - run: npm run type-check
       - run: npm run build
+      - run: npm run check:shipper-init-drift
       - run: npm run test:coverage
 
   desktop-macos:
