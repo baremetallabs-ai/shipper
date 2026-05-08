@@ -99,7 +99,10 @@ export function useTerminalSessions({
   const drawerPanelRef = useRef<ComponentRef<'div'> | null>(null);
   const sessionsRef = useRef<TerminalSession[]>([]);
   const activeSessionIdRef = useRef<string | null>(null);
+  const activeRepoRef = useRef(activeRepo);
   const lastOutputAtBySessionRef = useRef<Map<string, number>>(new Map());
+
+  activeRepoRef.current = activeRepo;
 
   const hasSession = sessions.length > 0;
   const pendingCloseSession =
@@ -455,7 +458,7 @@ export function useTerminalSessions({
       pending.reason === 'discard-progress' &&
       typeof session.repo === 'string' &&
       typeof session.issueNumber === 'number'
-        ? { repo: session.repo, issueNumber: session.issueNumber }
+        ? { repo: session.repo, issueNumber: session.issueNumber, sessionId: session.id }
         : null;
 
     try {
@@ -473,7 +476,7 @@ export function useTerminalSessions({
           );
           if (!result.ok) {
             pushToast({
-              id: `discard-unlock-error-${discardIssue.issueNumber}`,
+              id: `discard-unlock-error-${discardIssue.sessionId}`,
               sessionId: '',
               variant: 'error',
               title: `Failed to unlock issue #${discardIssue.issueNumber}`,
@@ -482,14 +485,16 @@ export function useTerminalSessions({
           }
         } catch (error) {
           pushToast({
-            id: `discard-unlock-error-${discardIssue.issueNumber}`,
+            id: `discard-unlock-error-${discardIssue.sessionId}`,
             sessionId: '',
             variant: 'error',
             title: `Failed to unlock issue #${discardIssue.issueNumber}`,
             description: toErrorMessage(error),
           });
         } finally {
-          await refreshIssuesForActiveRepo(discardIssue.repo);
+          if (discardIssue.repo === activeRepoRef.current) {
+            await refreshIssuesForActiveRepo(discardIssue.repo);
+          }
         }
       }
     } catch (error) {
