@@ -34,6 +34,29 @@ export type CommandExtras = {
 };
 
 const promptMcpConstraint = '--disable-mcp and --enable-mcp are mutually exclusive';
+const troubleshootingStaleLocks =
+  'Troubleshooting: [stale locks](/troubleshooting/common-errors/#stale-locks)';
+const troubleshootingWorkflowLabels =
+  'Troubleshooting: [missing or duplicate workflow labels]' +
+  '(/troubleshooting/common-errors/#missing-or-duplicate-workflow-labels)';
+const troubleshootingGitHubAuth =
+  'Troubleshooting: [GitHub authentication problems]' +
+  '(/troubleshooting/common-errors/#github-authentication-problems)';
+const troubleshootingWorktreeInstall =
+  'Troubleshooting: [worktree creation and install command failures]' +
+  '(/troubleshooting/common-errors/#worktree-creation-and-install-command-failures)';
+const troubleshootingVersionMismatch =
+  'Troubleshooting: [CLI version drift and version mismatch]' +
+  '(/troubleshooting/common-errors/#cli-version-drift-and-version-mismatch)';
+const troubleshootingFailedRuns =
+  'Troubleshooting: [failed issues and rollback loops]' +
+  '(/troubleshooting/common-errors/#failed-issues-and-rollback-loops)';
+const troubleshootingMcpLoading =
+  'Troubleshooting: [MCP tool loading issues]' +
+  '(/troubleshooting/common-errors/#mcp-tool-loading-issues)';
+const troubleshootingExitCodes =
+  'Troubleshooting: [shipping and remediation exit codes]' +
+  '(/troubleshooting/common-errors/#shipping-and-remediation-exit-codes)';
 
 const stageExitCodes: CommandExitCode[] = [
   { code: 0, when: 'The stage completes successfully or returns a reject verdict.' },
@@ -55,6 +78,8 @@ export const commandExtras: Record<CommandPath, CommandExtras> = {
       '--push requires --autocommit',
       'shipper init owns committed .shipper/ artifacts in this repository; rerun it and ' +
         'commit the resulting .shipper/ changes when the init drift guard reports drift',
+      troubleshootingWorkflowLabels,
+      troubleshootingVersionMismatch,
     ],
   },
   setup: {
@@ -68,7 +93,13 @@ export const commandExtras: Record<CommandPath, CommandExtras> = {
       { code: 0, when: 'Setup completes successfully or writes a setup PR.' },
       { code: 1, when: 'Setup validation, agent execution, or setup finalization fails.' },
     ],
-    constraints: [promptMcpConstraint, HEADLESS_SETUP_ERROR],
+    constraints: [
+      promptMcpConstraint,
+      HEADLESS_SETUP_ERROR,
+      troubleshootingGitHubAuth,
+      troubleshootingWorktreeInstall,
+      troubleshootingMcpLoading,
+    ],
   },
   new: {
     examples: [
@@ -121,7 +152,7 @@ export const commandExtras: Record<CommandPath, CommandExtras> = {
         when: 'Preflight, label validation, stage dispatch, or fail verdict handling fails.',
       },
     ],
-    constraints: promptConstraints,
+    constraints: [promptMcpConstraint, troubleshootingWorkflowLabels, troubleshootingFailedRuns],
   },
   ship: {
     examples: [
@@ -150,6 +181,8 @@ export const commandExtras: Record<CommandPath, CommandExtras> = {
       '--auto and --mode are mutually exclusive',
       '--parallel <n> requires --auto',
       '--parallel <n> must be a positive integer',
+      troubleshootingFailedRuns,
+      troubleshootingExitCodes,
     ],
   },
   groom: {
@@ -201,6 +234,7 @@ export const commandExtras: Record<CommandPath, CommandExtras> = {
       { code: 0, when: 'The issue is reset to the selected earlier stage.' },
       { code: 1, when: 'Validation, issue lookup, confirmation, or cleanup fails.' },
     ],
+    constraints: [troubleshootingFailedRuns],
   },
   unblock: {
     examples: [
@@ -224,6 +258,7 @@ export const commandExtras: Record<CommandPath, CommandExtras> = {
     constraints: [
       '--stale cannot be used with an issue argument',
       'An issue argument is required unless --stale is used',
+      troubleshootingStaleLocks,
     ],
   },
   merge: {
@@ -277,7 +312,7 @@ export const commandExtras: Record<CommandPath, CommandExtras> = {
       },
       { code: 130, when: 'Check polling is interrupted.' },
     ],
-    constraints: promptConstraints,
+    constraints: [promptMcpConstraint, troubleshootingMcpLoading, troubleshootingExitCodes],
   },
 };
 

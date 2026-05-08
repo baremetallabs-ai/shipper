@@ -1,0 +1,231 @@
+---
+title: Common Errors
+description: Diagnose common Shipper failures and choose the right recovery command or setting.
+---
+
+## Stale Locks
+
+### Symptom
+
+An issue keeps a stale lock: it still has `shipper:locked`, but no active Shipper run appears to be
+working on it.
+
+### Cause
+
+Shipper uses `shipper:locked` to prevent two agents from advancing the same issue at the same time.
+The lock can outlive the run that created it if a process exits unexpectedly, or if the configured
+`lockTimeoutMinutes` window has not elapsed yet.
+
+### Recovery
+
+Use `shipper unlock <issue>` when you know no run is still active. Use `shipper unlock --stale` to
+clear only locks that are older than the configured `lockTimeoutMinutes` value.
+
+### See also
+
+- [State machine locking](/concepts/state-machine/#locking)
+- [Settings reference](/reference/settings/)
+- [`shipper unlock`](/reference/cli/unlock/)
+
+## Missing or Duplicate Workflow Labels
+
+### Symptom
+
+`shipper next`, `shipper ship`, or the desktop app cannot tell which stage an issue is in because the
+issue has no workflow label or more than one workflow label.
+
+### Cause
+
+Every Shipper issue must have exactly one workflow label such as `shipper:new`,
+`shipper:implemented`, or `shipper:ready`. Missing labels usually mean the repository was not
+initialized or the issue was not adopted. Duplicate labels usually mean labels were edited outside
+Shipper.
+
+### Recovery
+
+Run `shipper init` if the repository has not been initialized or if the workflow labels need to be
+synced. Use `shipper adopt <issue>` or `shipper adopt --all` for existing GitHub issues that should
+enter the Shipper workflow. Desktop users can perform equivalent label-state recovery through the app
+without duplicating the CLI steps here.
+
+### See also
+
+- [Getting Started](/start-here/getting-started/)
+- [Workflow labels](/concepts/state-machine/#workflow-labels)
+- [`shipper init`](/reference/cli/init/)
+- [`shipper next`](/reference/cli/next/)
+- [Desktop guide](/guides/desktop/)
+
+## GitHub Authentication Problems
+
+### Symptom
+
+Shipper cannot read issues, update labels, create pull requests, or clone GitHub-backed worktrees
+because GitHub API or git authentication fails.
+
+### Cause
+
+Interactive runs need an authenticated GitHub CLI session. Containers and CI usually rely on token
+auth through `GH_TOKEN` or `GITHUB_TOKEN`, and git operations also need a usable credential helper.
+
+### Recovery
+
+For local interactive use, run `gh auth login` and confirm `gh auth status` passes. In noninteractive
+environments, export `GH_TOKEN` or `GITHUB_TOKEN` in the same environment that runs Shipper.
+
+### See also
+
+- [Getting Started authentication](/start-here/getting-started/)
+- [Container token authentication](/reference/containers/)
+- [`shipper setup`](/reference/cli/setup/)
+
+## Worktree Creation and Install Command Failures
+
+### Symptom
+
+A stage fails while creating its isolated worktree, preparing dependencies, or running the configured
+dependency install step.
+
+### Cause
+
+Shipper creates ephemeral worktrees under `~/.shipper/worktrees/`. The optional `installCommand` runs
+inside those worktrees, and the `hookTimeoutMinutes` setting also bounds the worktree setup and
+install phases.
+
+### Recovery
+
+Check that the repository can create git worktrees, that the failing worktree path under
+`~/.shipper/worktrees/` is writable, and that the configured `installCommand` is valid for the
+repository. If the install is legitimate but slow, raise `hookTimeoutMinutes` for the repository.
+
+### See also
+
+- [Settings reference](/reference/settings/)
+- [`shipper setup`](/reference/cli/setup/)
+- [Configure hooks](/agents/cookbook/configure-hooks/)
+
+## CLI Version Drift and Version Mismatch
+
+### Symptom
+
+Shipper reports a version mismatch or refuses to run because the repository's recorded `cliVersion`
+does not match the CLI that is running now.
+
+### Cause
+
+`shipper init` records the Shipper CLI version in `.shipper/settings.json`. A stale or missing
+`cliVersion` means the repository configuration may not match the installed CLI.
+
+### Recovery
+
+Rerun `shipper init` from the repository root to refresh Shipper-managed files and the recorded
+`cliVersion`. Use `SHIPPER_SKIP_VERSION_CHECK=1` only as a temporary escape hatch when you must run
+before refreshing the repository configuration.
+
+### See also
+
+- [Settings failure handling](/reference/settings/#failure-handling)
+- [`shipper init`](/reference/cli/init/)
+
+## Agent and Hook Timeouts
+
+### Symptom
+
+A stage stops with an agent timeout, or a hook, worktree setup, teardown, or install phase times out
+before it finishes.
+
+### Cause
+
+Headless agent processes are bounded by `agentTimeoutMinutes`. File-based hooks and the worktree
+dependency install command are bounded by `hookTimeoutMinutes`.
+
+### Recovery
+
+Raise `agentTimeoutMinutes` for stages that need more agent runtime, or set it to `0` to disable the
+agent timeout. Raise `hookTimeoutMinutes` when hooks or install steps are expected to run longer, or
+set it to `0` to disable hook timeout enforcement.
+
+### See also
+
+- [Settings reference](/reference/settings/)
+- [`shipper setup`](/reference/cli/setup/)
+- [Configure hooks](/agents/cookbook/configure-hooks/)
+
+## Failed Issues and Rollback Loops
+
+### Symptom
+
+An issue is marked `shipper:failed`, repeatedly rolls back after reject verdicts, or stops after too
+many transitions.
+
+### Cause
+
+Shipper treats reject as a rollback event, not an immediate command failure. It can keep advancing
+after rollback until the work reaches a terminal point, but the shared transition cap
+`MAX_TRANSITIONS = 15` prevents infinite loops and marks the issue `shipper:failed` when exhausted.
+
+### Recovery
+
+Use `shipper reset <issue>` to move a failed issue back one stage, or
+`shipper reset --to <stage> <issue>` to choose a valid earlier stage. Blocked issue recovery uses
+`shipper unblock`; a deeper blocked-issue recovery guide is deferred. Desktop users can perform
+equivalent label-state recovery through the app.
+
+### See also
+
+- [Reject is an interior event](/concepts/state-machine/#reject-is-an-interior-event)
+- [The reset command](/concepts/state-machine/#the-reset-command)
+- [Blocking](/concepts/state-machine/#blocking)
+- [Protocol verdicts](/concepts/protocol/#verdicts)
+- [`shipper next`](/reference/cli/next/)
+- [`shipper ship`](/reference/cli/ship/)
+- [`shipper reset`](/reference/cli/reset/)
+- [`shipper unblock`](/reference/cli/unblock/)
+- [Desktop guide](/guides/desktop/)
+
+## MCP Tool Loading Issues
+
+### Symptom
+
+An agent does not see expected Shipper MCP tools, or a run loads tools when the stage should avoid
+MCP access.
+
+### Cause
+
+MCP loading is controlled by `commands.<stage>.disableMcp`, stage defaults, local settings, and
+per-run flags. The effective policy can differ between stages.
+
+### Recovery
+
+Set `commands.<stage>.disableMcp` for persistent stage policy. For one run, use `--disable-mcp` to
+prevent MCP loading or `--enable-mcp` to force loading when a stage default disables it.
+
+### See also
+
+- [MCP loading policy](/concepts/protocol/#mcp-loading-policy)
+- [Settings failure handling](/reference/settings/#failure-handling)
+- [`shipper setup`](/reference/cli/setup/)
+- [`shipper pr remediate`](/reference/cli/pr/remediate/)
+
+## Shipping and Remediation Exit Codes
+
+### Symptom
+
+Automation needs to distinguish a normal `shipper ship` failure from pause, retriable failure, or an
+interrupted PR remediation poll.
+
+### Cause
+
+`shipper ship` has dedicated exit codes for pause and retriable failure. Interrupted check polling is
+documented on `shipper pr remediate`, not as a current `shipper ship` exit code.
+
+### Recovery
+
+Handle `75` from `shipper ship` as the pause sentinel and `76` as a retriable failure. Handle `130`
+as interrupted `shipper pr remediate` check polling. Current `shipper ship` maps ordinary stage
+failures to `1`.
+
+### See also
+
+- [`shipper ship`](/reference/cli/ship/)
+- [`shipper pr remediate`](/reference/cli/pr/remediate/)

@@ -38,6 +38,8 @@ rollback transition from the agent's result.
 Rollback targets come from `STAGE_TRANSITIONS` in
 `packages/core/src/lib/stage-transitions.ts`. For example, an implementation reject rolls the issue
 back to `shipper:designed`, and a PR review reject rolls it back to `shipper:implemented`.
+For recovery from crashes, missing results, timeouts, and reject loops, see
+[failed issues and rollback loops](/troubleshooting/common-errors/#failed-issues-and-rollback-loops).
 
 ## Label transitions
 
@@ -78,3 +80,5 @@ MCP loading disabled for stage <name>.
 
 It then injects the empty MCP configuration or disable flags appropriate to the selected agent.
 When MCP loading remains enabled, Shipper does not print an extra MCP line.
+For setup or tool-loading symptoms, see
+[MCP tool loading issues](/troubleshooting/common-errors/#mcp-tool-loading-issues).

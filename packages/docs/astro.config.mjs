@@ -59,6 +59,10 @@ export default defineConfig({
           ],
         },
         {
+          label: 'Troubleshooting',
+          items: [{ label: 'Common Errors', slug: 'troubleshooting/common-errors' }],
+        },
+        {
           label: 'Agents',
           items: [
             { label: 'Setup', slug: 'agents/setup' },

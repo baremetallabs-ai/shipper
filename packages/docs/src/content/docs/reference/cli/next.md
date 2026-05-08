@@ -43,3 +43,5 @@ shipper next 42
 ## Constraints
 
 - --disable-mcp and --enable-mcp are mutually exclusive
+- Troubleshooting: [missing or duplicate workflow labels](/troubleshooting/common-errors/#missing-or-duplicate-workflow-labels)
+- Troubleshooting: [failed issues and rollback loops](/troubleshooting/common-errors/#failed-issues-and-rollback-loops)

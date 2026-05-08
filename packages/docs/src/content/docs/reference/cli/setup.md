@@ -46,3 +46,6 @@ shipper setup "change the default agent to codex"
 
 - --disable-mcp and --enable-mcp are mutually exclusive
 - Headless mode is not supported for shipper setup; run setup interactively or remove "commands.setup.mode": "headless" / "commands.default.mode": "headless" from .shipper/settings.json.
+- Troubleshooting: [GitHub authentication problems](/troubleshooting/common-errors/#github-authentication-problems)
+- Troubleshooting: [worktree creation and install command failures](/troubleshooting/common-errors/#worktree-creation-and-install-command-failures)
+- Troubleshooting: [MCP tool loading issues](/troubleshooting/common-errors/#mcp-tool-loading-issues)

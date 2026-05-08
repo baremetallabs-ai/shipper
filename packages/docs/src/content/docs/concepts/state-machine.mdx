@@ -21,6 +21,9 @@ exactly one `shipper:*` workflow label at a time, plus zero or more control and 
 | `shipper:pr-reviewed` | PR reviewed, awaiting remediation       |
 | `shipper:ready`       | Ready for final review and merge        |
 
+If an issue is missing this exactly-one workflow-label invariant, see
+[missing or duplicate workflow labels](/troubleshooting/common-errors/#missing-or-duplicate-workflow-labels).
+
 ### Control labels
 
 | Label             | Description                                                                                |
@@ -146,6 +149,9 @@ The existing safety rails still apply:
   infinite loop.
 - Crashes (no verdict) and explicit `fail` verdicts are still terminal failures.
 
+For recovery from failed issues, reject loops, or transition-cap exhaustion, see
+[failed issues and rollback loops](/troubleshooting/common-errors/#failed-issues-and-rollback-loops).
+
 Rolling back to `shipper:new` is the one special case:
 
 - Single-issue `shipper ship <issue>` stops before running interactive `groom`, leaves the issue at
@@ -207,6 +213,9 @@ The shared per-run transition cap (`MAX_TRANSITIONS = 15`) prevents infinite loo
 - Reset always removes `shipper:failed`.
 - Reset preserves `shipper:priority-high` and `shipper:priority-low`.
 
+For symptom-first reset guidance, see
+[failed issues and rollback loops](/troubleshooting/common-errors/#failed-issues-and-rollback-loops).
+
 ## Locking
 
 The `shipper:locked` label prevents concurrent execution on the same issue.
@@ -222,6 +231,7 @@ The `shipper:locked` label prevents concurrent execution on the same issue.
   `shipper:locked` and compares its age to the configured timeout.
 
 All workflow commands wrap their execution in `withIssueLock()`.
+For stale lock recovery, see [stale locks](/troubleshooting/common-errors/#stale-locks).
 
 ## Blocking
 
@@ -231,6 +241,9 @@ grooming when dependencies are discovered.
 - The `next` command refuses to advance blocked issues, except `shipper:new`.
 - `selectIssuesForStage()` excludes blocked issues from auto-selection, except for `shipper:new`.
 - The `unblock` command prompts an agent to re-check dependencies and remove the label if resolved.
+
+For the short recovery pointer for blocked issues, see
+[failed issues and rollback loops](/troubleshooting/common-errors/#failed-issues-and-rollback-loops).
 
 ## Key files
 
