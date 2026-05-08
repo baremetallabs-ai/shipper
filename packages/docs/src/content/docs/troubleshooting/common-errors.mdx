@@ -166,10 +166,9 @@ after rollback until the work reaches a terminal point, but the shared transitio
 
 ### Recovery
 
-Use `shipper reset <issue>` to move a failed issue back one stage, or
-`shipper reset --to <stage> <issue>` to choose a valid earlier stage. Blocked issue recovery uses
-`shipper unblock`; a deeper blocked-issue recovery guide is deferred. Desktop users can perform
-equivalent label-state recovery through the app.
+Use `shipper reset <issue>` to reset a failed issue to an earlier valid stage, or
+`shipper reset --to <stage> <issue>` to choose the target explicitly. Blocked issue recovery starts
+with `shipper unblock`. Desktop users can perform equivalent label-state recovery through the app.
 
 ### See also
 
