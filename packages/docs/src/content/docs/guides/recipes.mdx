@@ -109,9 +109,8 @@ Shipper source.
    shipper eject pr-open
    ```
 
-2. Open `.shipper/prompts/claude/pr_open.md`. Edit this local override, not
-   `packages/core/src/prompts/claude/pr_open.md`, so the customization stays with your repository
-   instead of changing Shipper itself.
+2. Open `.shipper/prompts/claude/pr_open.md`. Edit this local override so the customization stays
+   with your repository instead of changing Shipper's bundled default prompt.
 
 3. Add a small repository-specific section to the PR body template. For example, insert a rollout
    checklist after the generated test plan section:
@@ -149,12 +148,12 @@ test -f .shipper/prompts/claude/pr_open.md
 Confirm your edit is in the prompt:
 
 ```bash
-rg "## Rollout Plan" .shipper/prompts/claude/pr_open.md
+grep "## Rollout Plan" .shipper/prompts/claude/pr_open.md
 ```
 
 After `shipper pr open <issue>` completes, confirm the PR body on GitHub contains the customized
 section:
 
 ```bash
-gh pr view <pr-number-or-branch> --json body -q '.body' | rg "## Rollout Plan"
+gh pr view <pr-number-or-branch> --json body -q '.body' | grep "## Rollout Plan"
 ```
