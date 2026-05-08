@@ -54,6 +54,9 @@ jobs:
 
   publish-desktop:
     runs-on: macos-latest
+    concurrency:
+      group: ${{ github.workflow }}-publish-desktop-${{ github.ref }}
+      cancel-in-progress: true
     permissions:
       contents: write
     steps:
@@ -84,6 +87,7 @@ jobs:
           set -euo pipefail
 
           TAG="${GITHUB_REF_NAME}"
+          build_commit="$(git rev-parse HEAD)"
           shopt -s nullglob
           dmg_assets=(packages/desktop/release/*.dmg)
           zip_assets=(packages/desktop/release/*.zip)
@@ -102,25 +106,64 @@ jobs:
           echo "desktop assets:"
           printf '  %s\n' "${assets[@]}"
 
-          if release_state="$(gh release view "${TAG}" --json isDraft,isPrerelease,targetCommitish --jq '[.isDraft, .isPrerelease, (.targetCommitish // "")] | @tsv')"; then
+          verify_remote_tag() {
+            remote_tag_commit=""
+
+            if peeled_tag="$(git ls-remote --exit-code origin "refs/tags/${TAG}^{}")"; then
+              remote_tag_commit="$(awk 'NR == 1 {print $1}' <<< "${peeled_tag}")"
+            elif tag_ref="$(git ls-remote --exit-code origin "refs/tags/${TAG}")"; then
+              remote_tag_commit="$(awk 'NR == 1 {print $1}' <<< "${tag_ref}")"
+            else
+              echo "::error::Remote tag ${TAG} no longer exists; refusing to mutate release state"
+              exit 1
+            fi
+
+            if [ "${remote_tag_commit}" != "${build_commit}" ]; then
+              echo "::error::Remote tag ${TAG} resolves to ${remote_tag_commit}, but this run built ${build_commit}; refusing to mutate release state"
+              exit 1
+            fi
+
+            echo "remote tag verified: ${TAG} -> ${remote_tag_commit}"
+          }
+
+          if release_state="$(
+            gh release view "${TAG}" \
+              --json isDraft,isPrerelease,targetCommitish \
+              --jq '[.isDraft, .isPrerelease, (.targetCommitish // "")] | @tsv'
+          )"; then
             IFS=$'\t' read -r was_draft was_prerelease target_commitish <<< "${release_state}"
-            was_latest="$(gh release list --limit 1000 --json tagName,isLatest --jq ".[] | select(.tagName == \"${TAG}\") | .isLatest")"
-            was_latest="${was_latest:-false}"
+            if was_latest="$(
+              gh release list \
+                --limit 1000 \
+                --json tagName,isLatest \
+                --jq ".[] | select(.tagName == \"${TAG}\") | .isLatest"
+            )"; then
+              was_latest="${was_latest:-false}"
+            else
+              echo "::warning::Unable to determine whether ${TAG} was Latest before normalization; continuing"
+              was_latest="unknown"
+            fi
 
             if [ "${was_draft}" = "true" ]; then
               release_path="recovered prior draft"
-            elif [ "${was_prerelease}" = "true" ] || [ "${was_latest}" != "true" ] || { [ "${target_commitish}" != "${GITHUB_SHA}" ] && [ "${target_commitish}" != "${DEFAULT_BRANCH}" ]; }; then
+            elif [ "${was_prerelease}" = "true" ] || [ "${was_latest}" != "true" ] || { [ "${target_commitish}" != "${build_commit}" ] && [ "${target_commitish}" != "${DEFAULT_BRANCH}" ]; }; then
               release_path="normalized existing release"
             else
               release_path="refreshed existing release"
             fi
 
-            echo "release path: ${release_path} (was_draft=${was_draft}, was_prerelease=${was_prerelease}, was_latest=${was_latest}, target_commitish=${target_commitish}, workflow_sha=${GITHUB_SHA})"
+            echo "release path: ${release_path} (was_draft=${was_draft}, was_prerelease=${was_prerelease}, was_latest=${was_latest}, target_commitish=${target_commitish}, build_commit=${build_commit}, workflow_sha=${GITHUB_SHA})"
+            verify_remote_tag
             gh release upload "${TAG}" "${assets[@]}" --clobber
-            gh release edit "${TAG}" --draft=false --prerelease=false --target "${GITHUB_SHA}" --verify-tag
-            gh release edit "${TAG}" --latest
+            gh release edit "${TAG}" \
+              --draft=false \
+              --prerelease=false \
+              --target "${build_commit}" \
+              --verify-tag \
+              --latest
           else
             echo "release path: created fresh"
+            verify_remote_tag
             gh release create "${TAG}" \
               --title "${TAG}" \
               --generate-notes \
