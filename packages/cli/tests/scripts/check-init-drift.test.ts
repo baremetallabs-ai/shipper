@@ -168,6 +168,45 @@ describe('checkInitDrift', () => {
     expect(output).toContain('Run `shipper init` and commit the resulting changes.');
   });
 
+  it('includes a diff for an init-managed file that init would add', async () => {
+    const repo = await seedInitializedRepo();
+    git(repo, ['rm', '--', '.shipper/scripts/install-deps.sh']);
+    git(repo, ['commit', '-m', 'remove install deps']);
+    const { formatInitDriftFailure } = await loadChecker('3.0.1');
+
+    const result = await withCleanGitEnv(async () => {
+      const { checkInitDrift } = await import('../../src/scripts/check-init-drift.js');
+      return await checkInitDrift({ repoRoot: repo });
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.diff).toContain('new file mode');
+    expect(result.diff).toContain('.shipper/scripts/install-deps.sh');
+    const output = formatInitDriftFailure(result);
+    expect(output).toContain('.shipper/scripts/install-deps.sh');
+    expect(output).toContain('Run `shipper init` and commit the resulting changes.');
+  });
+
+  it('still reports affected files and remediation when the diff exceeds the capture buffer', async () => {
+    const repo = await seedInitializedRepo();
+    const largePath = path.join(repo, '.shipper/input/large.txt');
+    writeFileSync(largePath, `${'x'.repeat(1024 * 1024 + 1)}\n`);
+    git(repo, ['add', '--force', '--', '.shipper/input/large.txt']);
+    git(repo, ['commit', '-m', 'track large input artifact']);
+    const { formatInitDriftFailure } = await loadChecker('3.0.1');
+
+    const result = await withCleanGitEnv(async () => {
+      const { checkInitDrift } = await import('../../src/scripts/check-init-drift.js');
+      return await checkInitDrift({ repoRoot: repo });
+    });
+
+    expect(result.ok).toBe(false);
+    const output = formatInitDriftFailure(result);
+    expect(output).toContain('.shipper/input/large.txt');
+    expect(output).toContain('Diff omitted because it exceeded 1048576 bytes.');
+    expect(output).toContain('Run `shipper init` and commit the resulting changes.');
+  });
+
   it.each(['.shipper/.gitignore', '.shipper/input/.gitkeep', '.shipper/output/.gitkeep'])(
     'fails with remediation when %s drifts',
     async (relativePath) => {

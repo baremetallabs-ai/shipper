@@ -10,6 +10,9 @@ import { toErrorMessage } from '@baremetallabs-ai/shipper-core';
 import { initCommand } from '../commands/init.js';
 
 const execFileAsync = promisify(execFile);
+const DIFF_MAX_BUFFER_BYTES = 1024 * 1024;
+const DIFF_OMITTED_MESSAGE =
+  'Diff omitted because it exceeded 1048576 bytes. Git status above identifies the affected files.';
 
 const silentLogger = {
   log(_message: string) {
@@ -38,9 +41,58 @@ export interface CheckInitDriftOptions {
   repoRoot?: string;
 }
 
-async function execGit(args: string[], cwd: string): Promise<string> {
-  const { stdout } = await execFileAsync('git', args, { cwd, encoding: 'utf-8' });
+function parseGitPathList(output: string): string[] {
+  return output
+    .split(/\r?\n/)
+    .map((file) => file.trim())
+    .filter(Boolean);
+}
+
+function isMaxBufferError(error: unknown): boolean {
+  return (
+    (typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') ||
+    toErrorMessage(error).includes('maxBuffer')
+  );
+}
+
+async function execGit(args: string[], cwd: string, maxBuffer?: number): Promise<string> {
+  const { stdout } = await execFileAsync('git', args, {
+    cwd,
+    encoding: 'utf-8',
+    ...(maxBuffer === undefined ? {} : { maxBuffer }),
+  });
   return stdout;
+}
+
+async function markUntrackedShipperFilesIntentToAdd(worktreePath: string): Promise<void> {
+  const output = await execGit(
+    ['ls-files', '--others', '--exclude-standard', '--', '.shipper/'],
+    worktreePath
+  );
+  const files = parseGitPathList(output);
+  if (files.length === 0) {
+    return;
+  }
+
+  await execGit(['add', '--intent-to-add', '--', ...files], worktreePath);
+}
+
+async function readBoundedShipperDiff(worktreePath: string): Promise<string> {
+  try {
+    return await execGit(
+      ['diff', '--no-ext-diff', 'HEAD', '--', '.shipper/'],
+      worktreePath,
+      DIFF_MAX_BUFFER_BYTES
+    );
+  } catch (error) {
+    if (isMaxBufferError(error)) {
+      return DIFF_OMITTED_MESSAGE;
+    }
+    throw error;
+  }
 }
 
 async function resolveRepoRoot(repoRoot?: string): Promise<string> {
@@ -71,8 +123,9 @@ export async function checkInitDrift(
       process.chdir(previousCwd);
     }
 
+    await markUntrackedShipperFilesIntentToAdd(worktreePath);
     const status = await execGit(['status', '--porcelain', '--', '.shipper/'], worktreePath);
-    const diff = await execGit(['diff', '--no-ext-diff', 'HEAD', '--', '.shipper/'], worktreePath);
+    const diff = await readBoundedShipperDiff(worktreePath);
 
     if (status === '' && diff === '') {
       return { ok: true, status: '', diff: '' };
