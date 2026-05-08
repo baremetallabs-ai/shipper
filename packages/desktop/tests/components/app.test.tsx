@@ -9,6 +9,7 @@ const state = vi.hoisted(() => ({
   backgroundState: {},
   pipelineState: {},
   terminalState: {},
+  terminalOptions: null as Record<string, unknown> | null,
   spawnShipperSetupMock: vi.fn(),
   spawnShipperGroomMock: vi.fn(),
   spawnBackgroundShipMock: vi.fn(),
@@ -29,7 +30,10 @@ vi.mock('../../src/renderer/hooks/use-issue-pipeline.js', () => ({
 }));
 
 vi.mock('../../src/renderer/hooks/use-terminal-sessions.js', () => ({
-  useTerminalSessions: () => state.terminalState,
+  useTerminalSessions: (options: Record<string, unknown>) => {
+    state.terminalOptions = options;
+    return state.terminalState;
+  },
 }));
 
 vi.mock('../../src/renderer/lib/shipper-api.js', () => ({
@@ -201,6 +205,7 @@ function resetMockState(): void {
   state.spawnBackgroundShipMock.mockReset();
   state.requestAutoShipHaltMock.mockReset();
   state.actionQueueDrawerProps = null;
+  state.terminalOptions = null;
   state.reposState = {
     activeRepo: 'owner/repo',
     autoMergeRepos: new Set<string>(),
@@ -275,6 +280,7 @@ function resetMockState(): void {
     issues: [],
     lastUpdated: null,
     loadIssues: vi.fn(),
+    refreshIssuesForActiveRepo: vi.fn(() => Promise.resolve()),
     getIssueByNumber: vi.fn(),
     pausedIssues: new Set<number>(),
     resetSelection: null,
@@ -337,6 +343,17 @@ describe('App setup launch', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetMockState();
+  });
+
+  it('passes app-level callbacks into terminal session state', () => {
+    render(<App />);
+
+    expect(state.terminalOptions?.activeRepo).toBe('owner/repo');
+    expect(state.terminalOptions?.setFetchError).toBe(state.pipelineState.setFetchError);
+    expect(state.terminalOptions?.pushToast).toBe(state.backgroundState.pushToast);
+    expect(state.terminalOptions?.refreshIssuesForActiveRepo).toBe(
+      state.pipelineState.refreshIssuesForActiveRepo
+    );
   });
 
   it('shows pending Groom feedback only for the launching issue and clears it on success', async () => {

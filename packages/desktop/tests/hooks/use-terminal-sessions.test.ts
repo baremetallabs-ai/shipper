@@ -12,6 +12,34 @@ import {
   teardownHookTestTimers,
 } from './test-utils.js';
 
+function renderTerminalSessions({
+  activeRepo = 'owner/repo',
+  pushToast = vi.fn(),
+  refreshIssuesForActiveRepo = vi.fn(() => Promise.resolve()),
+  setFetchError = vi.fn(),
+}: {
+  activeRepo?: string;
+  pushToast?: ReturnType<typeof vi.fn>;
+  refreshIssuesForActiveRepo?: ReturnType<typeof vi.fn>;
+  setFetchError?: ReturnType<typeof vi.fn>;
+} = {}) {
+  const hook = renderHook(() =>
+    useTerminalSessions({
+      activeRepo,
+      pushToast,
+      refreshIssuesForActiveRepo,
+      setFetchError,
+    })
+  );
+
+  return {
+    ...hook,
+    pushToast,
+    refreshIssuesForActiveRepo,
+    setFetchError,
+  };
+}
+
 describe('useTerminalSessions', () => {
   beforeEach(() => {
     setupHookTestTimers();
@@ -26,9 +54,7 @@ describe('useTerminalSessions', () => {
     const shipper = createMockShipperApi();
     shipper.install();
     const setFetchError = vi.fn();
-    const { result } = renderHook(() =>
-      useTerminalSessions({ activeRepo: 'owner/repo', setFetchError })
-    );
+    const { result } = renderTerminalSessions({ setFetchError });
 
     act(() => {
       result.current.openRunningSession('pty-1', 'groom - #11', {
@@ -60,9 +86,7 @@ describe('useTerminalSessions', () => {
   it('re-focuses an existing running setup session for the active repo', async () => {
     const shipper = createMockShipperApi();
     shipper.install();
-    const { result } = renderHook(() =>
-      useTerminalSessions({ activeRepo: 'owner/repo', setFetchError: vi.fn() })
-    );
+    const { result } = renderTerminalSessions();
 
     act(() => {
       result.current.openRunningSession('pty-setup-1', 'setup — owner/repo', {
@@ -88,9 +112,7 @@ describe('useTerminalSessions', () => {
   it('does not re-focus an exited setup session for the active repo', async () => {
     const shipper = createMockShipperApi();
     shipper.install();
-    const { result } = renderHook(() =>
-      useTerminalSessions({ activeRepo: 'owner/repo', setFetchError: vi.fn() })
-    );
+    const { result } = renderTerminalSessions();
 
     act(() => {
       result.current.openRunningSession('pty-setup-1', 'setup — owner/repo', {
@@ -112,9 +134,7 @@ describe('useTerminalSessions', () => {
   it('does not re-focus a setup session for a different repo', async () => {
     const shipper = createMockShipperApi();
     shipper.install();
-    const { result } = renderHook(() =>
-      useTerminalSessions({ activeRepo: 'owner/repo', setFetchError: vi.fn() })
-    );
+    const { result } = renderTerminalSessions();
 
     act(() => {
       result.current.openRunningSession('pty-setup-2', 'setup — owner/other', {
@@ -134,9 +154,7 @@ describe('useTerminalSessions', () => {
   it('does not treat groom sessions as setup sessions for the same repo', async () => {
     const shipper = createMockShipperApi();
     shipper.install();
-    const { result } = renderHook(() =>
-      useTerminalSessions({ activeRepo: 'owner/repo', setFetchError: vi.fn() })
-    );
+    const { result } = renderTerminalSessions();
 
     act(() => {
       result.current.openRunningSession('pty-groom-1', 'groom — #11', {
@@ -157,9 +175,7 @@ describe('useTerminalSessions', () => {
   it('marks idle running sessions as waiting and resumes them on PTY output', async () => {
     const shipper = createMockShipperApi();
     shipper.install();
-    const { result } = renderHook(() =>
-      useTerminalSessions({ activeRepo: 'owner/repo', setFetchError: vi.fn() })
-    );
+    const { result } = renderTerminalSessions();
 
     act(() => {
       result.current.openRunningSession('pty-1', 'groom - #11', {
@@ -178,9 +194,7 @@ describe('useTerminalSessions', () => {
   it('opens discard confirmation for no-result sessions and removes after confirm', async () => {
     const shipper = createMockShipperApi();
     shipper.install();
-    const { result } = renderHook(() =>
-      useTerminalSessions({ activeRepo: 'owner/repo', setFetchError: vi.fn() })
-    );
+    const { result, pushToast, refreshIssuesForActiveRepo } = renderTerminalSessions();
     vi.mocked(shipper.api.ptyCloseState).mockResolvedValueOnce({
       state: 'requires-discard-confirmation',
     });
@@ -205,6 +219,9 @@ describe('useTerminalSessions', () => {
       result.current.handlePendingCloseOpenChange(false);
     });
     expect(result.current.sessions.map((session) => session.id)).toEqual(['pty-1']);
+    expect(shipper.api.unlockIssue).not.toHaveBeenCalled();
+    expect(pushToast).not.toHaveBeenCalled();
+    expect(refreshIssuesForActiveRepo).not.toHaveBeenCalled();
 
     vi.mocked(shipper.api.ptyCloseState).mockResolvedValueOnce({
       state: 'requires-discard-confirmation',
@@ -219,15 +236,96 @@ describe('useTerminalSessions', () => {
     });
 
     expect(shipper.api.ptyForceKill).toHaveBeenCalledWith('pty-1');
+    expect(shipper.api.unlockIssue).toHaveBeenCalledWith('owner/repo', 11);
     expect(result.current.sessions).toHaveLength(0);
+    expect(pushToast).not.toHaveBeenCalled();
+    expect(refreshIssuesForActiveRepo).toHaveBeenCalledWith('owner/repo');
+  });
+
+  it('removes the tab, shows an error toast, and refreshes when discard unlock returns an error', async () => {
+    const shipper = createMockShipperApi();
+    shipper.install();
+    const { result, pushToast, refreshIssuesForActiveRepo } = renderTerminalSessions();
+    vi.mocked(shipper.api.ptyCloseState).mockResolvedValueOnce({
+      state: 'requires-discard-confirmation',
+    });
+    vi.mocked(shipper.api.unlockIssue).mockResolvedValueOnce({ ok: false, error: 'gh failed' });
+
+    act(() => {
+      result.current.openRunningSession('pty-1', 'groom - #11', {
+        repo: 'owner/repo',
+        issueNumber: 11,
+      });
+    });
+    await flushHookEffects();
+
+    act(() => {
+      result.current.handleCloseSession('pty-1');
+    });
+    await flushHookEffects();
+
+    await act(async () => {
+      await result.current.handleConfirmCloseSession();
+    });
+
+    expect(shipper.api.ptyForceKill).toHaveBeenCalledWith('pty-1');
+    expect(shipper.api.unlockIssue).toHaveBeenCalledWith('owner/repo', 11);
+    expect(result.current.sessions).toHaveLength(0);
+    expect(pushToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: '',
+        variant: 'error',
+        title: 'Failed to unlock issue #11',
+        description: 'gh failed',
+      })
+    );
+    expect(refreshIssuesForActiveRepo).toHaveBeenCalledWith('owner/repo');
+  });
+
+  it('removes the tab, shows an error toast, and refreshes when discard unlock rejects', async () => {
+    const shipper = createMockShipperApi();
+    shipper.install();
+    const { result, pushToast, refreshIssuesForActiveRepo } = renderTerminalSessions();
+    vi.mocked(shipper.api.ptyCloseState).mockResolvedValueOnce({
+      state: 'requires-discard-confirmation',
+    });
+    vi.mocked(shipper.api.unlockIssue).mockRejectedValueOnce(new Error('network down'));
+
+    act(() => {
+      result.current.openRunningSession('pty-1', 'groom - #11', {
+        repo: 'owner/repo',
+        issueNumber: 11,
+      });
+    });
+    await flushHookEffects();
+
+    act(() => {
+      result.current.handleCloseSession('pty-1');
+    });
+    await flushHookEffects();
+
+    await act(async () => {
+      await result.current.handleConfirmCloseSession();
+    });
+
+    expect(shipper.api.ptyForceKill).toHaveBeenCalledWith('pty-1');
+    expect(shipper.api.unlockIssue).toHaveBeenCalledWith('owner/repo', 11);
+    expect(result.current.sessions).toHaveLength(0);
+    expect(pushToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: '',
+        variant: 'error',
+        title: 'Failed to unlock issue #11',
+        description: 'network down',
+      })
+    );
+    expect(refreshIssuesForActiveRepo).toHaveBeenCalledWith('owner/repo');
   });
 
   it('finalizes result-present and setup sessions without removing the tab', async () => {
     const shipper = createMockShipperApi();
     shipper.install();
-    const { result } = renderHook(() =>
-      useTerminalSessions({ activeRepo: 'owner/repo', setFetchError: vi.fn() })
-    );
+    const { result } = renderTerminalSessions();
 
     act(() => {
       result.current.openRunningSession('pty-1', 'groom - #11', {
@@ -259,14 +357,13 @@ describe('useTerminalSessions', () => {
     expect(result.current.sessions.find((session) => session.id === 'pty-setup')?.status).toBe(
       'finalizing'
     );
+    expect(shipper.api.unlockIssue).not.toHaveBeenCalled();
   });
 
   it('offers force-kill for finalizing sessions and waits for PTY exit', async () => {
     const shipper = createMockShipperApi();
     shipper.install();
-    const { result } = renderHook(() =>
-      useTerminalSessions({ activeRepo: 'owner/repo', setFetchError: vi.fn() })
-    );
+    const { result } = renderTerminalSessions();
 
     act(() => {
       result.current.openRunningSession('pty-1', 'groom - #11', {
@@ -291,6 +388,7 @@ describe('useTerminalSessions', () => {
     });
 
     expect(shipper.api.ptyForceKill).toHaveBeenCalledWith('pty-1');
+    expect(shipper.api.unlockIssue).not.toHaveBeenCalled();
     expect(result.current.sessions.map((session) => session.id)).toEqual(['pty-1']);
 
     shipper.emitPtyExit({ sessionId: 'pty-1', exitCode: null });
@@ -300,9 +398,7 @@ describe('useTerminalSessions', () => {
   it('keeps non-zero exits inspectable and dismisses exited tabs without confirmation', async () => {
     const shipper = createMockShipperApi();
     shipper.install();
-    const { result } = renderHook(() =>
-      useTerminalSessions({ activeRepo: 'owner/repo', setFetchError: vi.fn() })
-    );
+    const { result } = renderTerminalSessions();
 
     act(() => {
       result.current.openRunningSession('pty-1', 'groom - #11', {
@@ -326,9 +422,7 @@ describe('useTerminalSessions', () => {
   it('does not transition finalizing sessions back to waiting', async () => {
     const shipper = createMockShipperApi();
     shipper.install();
-    const { result } = renderHook(() =>
-      useTerminalSessions({ activeRepo: 'owner/repo', setFetchError: vi.fn() })
-    );
+    const { result } = renderTerminalSessions();
 
     act(() => {
       result.current.openRunningSession('pty-1', 'groom - #11', {
@@ -351,9 +445,7 @@ describe('useTerminalSessions', () => {
     const shipper = createMockShipperApi();
     shipper.install();
     const setFetchError = vi.fn();
-    const { result } = renderHook(() =>
-      useTerminalSessions({ activeRepo: 'owner/repo', setFetchError })
-    );
+    const { result } = renderTerminalSessions({ setFetchError });
 
     act(() => {
       result.current.openRunningSession('pty-1', 'groom - #11', {
@@ -395,9 +487,7 @@ describe('useTerminalSessions', () => {
   it('toggles the drawer and clears pending-close state when the dialog closes', async () => {
     const shipper = createMockShipperApi();
     shipper.install();
-    const { result } = renderHook(() =>
-      useTerminalSessions({ activeRepo: 'owner/repo', setFetchError: vi.fn() })
-    );
+    const { result } = renderTerminalSessions();
 
     act(() => {
       result.current.openRunningSession('pty-1', 'groom - #11', {
