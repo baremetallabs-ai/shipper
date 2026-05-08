@@ -15,7 +15,7 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check:shipper-init-drift": "node packages/cli/dist/scripts/check-init-drift.js",
+    "check:shipper-init-drift": "node scripts/check-shipper-init-drift.mjs",
     "docs:generate-cli": "npm run docs:generate-cli --workspace=packages/cli",
     "docs:check-cli": "npm run docs:check-cli --workspace=packages/cli",
     "docs:generate-mcp": "npm run docs:generate-mcp --workspace=packages/mcp",

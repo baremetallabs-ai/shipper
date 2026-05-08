@@ -28,13 +28,13 @@ Every release must keep four versions in lockstep:
 
 The publish workflow fails the build if any of the four versions does not match `${GITHUB_REF_NAME#v}`. Bump all four together.
 
-There is also a CLI version **fingerprint** in `.shipper/settings.json` (`cliVersion`) that must match `packages/cli/package.json`'s `version`. The pre-push hook and the `check` CI job both run `npm run check:cli-version-fingerprint` and fail on drift. After bumping the CLI version, run `shipper init` to refresh the fingerprint.
+Shipper initialization owns committed files under `.shipper/`, including `.shipper/settings.json` (`cliVersion`) and generated helper scripts. The pre-push hook and the `check` CI job both run `npm run check:shipper-init-drift` and fail if rerunning `shipper init` would change any tracked `.shipper/` file. After bumping the CLI version or changing init-managed output, run `shipper init` and commit the resulting `.shipper/` changes.
 
 ## Cutting a release
 
 1. Make sure `main` is green and you are at the commit you want to release.
 2. Bump the four package versions to the new `X.Y.Z` (use the same number across all four).
-3. Run `shipper init` to refresh `.shipper/settings.json`'s `cliVersion`.
+3. Run `shipper init` to refresh committed `.shipper/` initialization output, including `.shipper/settings.json`'s `cliVersion`.
 4. Update `CHANGELOG.md`:
    - Move `[Unreleased]` entries under a new `## [X.Y.Z]` section.
    - Add a fresh empty `## [Unreleased]` at the top.
@@ -58,5 +58,5 @@ There is also a CLI version **fingerprint** in `.shipper/settings.json` (`cliVer
 - **The `v*` tag trigger is not branch-scoped.** `on.push.tags: ['v*']` in `publish.yml` will fire for any reachable commit, including a tag pushed off a feature branch by mistake. There is no guard checking that the tagged commit lives on `main`. Always tag from a freshly pulled `main`, and double-check `git log --oneline -1` before `git push origin vX.Y.Z`.
 - **`electron-builder` without `--publish never`** will try to upload artifacts before our explicit `gh release` step and racy-fail. Always pass `--publish never`.
 - **Node < 24 on publish-npm** breaks OIDC Trusted Publisher exchange. Setup-node must pin Node 24.
-- **Forgetting to refresh the cliVersion fingerprint** after a manifest bump trips the pre-push hook. The fix is `shipper init`, not editing the file by hand.
+- **Forgetting to refresh init-managed `.shipper/` output** after a manifest bump or init change trips the pre-push hook. The fix is `shipper init`, not editing files by hand.
 - **Tag without bumping all four packages** fails the workflow's version-match step. The MCP package is private but still gated.
