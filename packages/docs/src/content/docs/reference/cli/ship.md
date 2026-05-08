@@ -59,3 +59,5 @@ shipper ship --auto --parallel 3
 - --auto and --mode are mutually exclusive
 - --parallel <n> requires --auto
 - --parallel <n> must be a positive integer
+- Troubleshooting: [failed issues and rollback loops](/troubleshooting/common-errors/#failed-issues-and-rollback-loops)
+- Troubleshooting: [shipping and remediation exit codes](/troubleshooting/common-errors/#shipping-and-remediation-exit-codes)

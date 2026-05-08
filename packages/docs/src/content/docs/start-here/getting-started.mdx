@@ -15,6 +15,8 @@ gh auth login
 
 For containers or CI, export `GH_TOKEN` or `GITHUB_TOKEN` in the environment where Shipper runs.
 See the [Containers reference](/reference/containers/) for the token and git credential helper path.
+If authentication fails, start with the
+[GitHub authentication troubleshooting guide](/troubleshooting/common-errors/#github-authentication-problems).
 
 ## CLI Path
 
@@ -33,6 +35,10 @@ shipper init
 `shipper init` creates or updates `.shipper/`, ensures the workflow labels exist in GitHub, and
 checks the required local tooling. It is idempotent, so rerun it after upgrades or if a preflight
 check tells you the repo is not initialized.
+For initialization or workflow-label recovery, see
+[missing or duplicate workflow labels](/troubleshooting/common-errors/#missing-or-duplicate-workflow-labels);
+for upgrade drift, see
+[CLI version drift and version mismatch](/troubleshooting/common-errors/#cli-version-drift-and-version-mismatch).
 
 Create a first issue from a rough request:
 

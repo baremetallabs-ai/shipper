@@ -22,6 +22,13 @@ placed in `.shipper/settings.local.json`, which is gitignored.
 | `worktreeEnv`                 | unset                                                                   | Environment variables applied inside worktree execution. Values are merged with built-in cache directory defaults.                                                                                                                                                                                                                                                                                                                                      |
 | `merge.requirePassingChecks`  | `true`                                                                  | Require all CI checks to pass before auto-merging.                                                                                                                                                                                                                                                                                                                                                                                                      |
 
+For symptom-first recovery, see Troubleshooting for
+[stale locks](/troubleshooting/common-errors/#stale-locks),
+[worktree creation and install command failures](/troubleshooting/common-errors/#worktree-creation-and-install-command-failures),
+[CLI version drift and version mismatch](/troubleshooting/common-errors/#cli-version-drift-and-version-mismatch),
+[agent and hook timeouts](/troubleshooting/common-errors/#agent-and-hook-timeouts), and
+[MCP tool loading issues](/troubleshooting/common-errors/#mcp-tool-loading-issues).
+
 ## Failure handling
 
 If the agent discovers:
@@ -49,3 +56,6 @@ Settings precedence is: built-in defaults -> `.shipper/settings.json` ->
 `.shipper/settings.local.json`. Prompt-running commands can also override `agent`, `model`, `mode`,
 and MCP loading for one run with CLI flags such as `--agent`, `--model`, `--mode`,
 `--disable-mcp`, and `--enable-mcp`.
+If the symptom is a version mismatch or MCP loading issue, use the
+[Troubleshooting recovery checklist](/troubleshooting/common-errors/#cli-version-drift-and-version-mismatch)
+or [MCP recovery checklist](/troubleshooting/common-errors/#mcp-tool-loading-issues).

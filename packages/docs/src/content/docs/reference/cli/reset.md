@@ -36,3 +36,7 @@ shipper reset 42 --to groomed --force
 | ---- | --------------------------------------------------------- |
 | 0    | The issue is reset to the selected earlier stage.         |
 | 1    | Validation, issue lookup, confirmation, or cleanup fails. |
+
+## Constraints
+
+- Troubleshooting: [failed issues and rollback loops](/troubleshooting/common-errors/#failed-issues-and-rollback-loops)

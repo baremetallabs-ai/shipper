@@ -46,3 +46,4 @@ shipper unlock --stale
 
 - --stale cannot be used with an issue argument
 - An issue argument is required unless --stale is used
+- Troubleshooting: [stale locks](/troubleshooting/common-errors/#stale-locks)

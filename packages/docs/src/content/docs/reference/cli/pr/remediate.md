@@ -44,3 +44,5 @@ shipper pr remediate 42
 ## Constraints
 
 - --disable-mcp and --enable-mcp are mutually exclusive
+- Troubleshooting: [MCP tool loading issues](/troubleshooting/common-errors/#mcp-tool-loading-issues)
+- Troubleshooting: [shipping and remediation exit codes](/troubleshooting/common-errors/#shipping-and-remediation-exit-codes)

@@ -55,6 +55,12 @@ describe('llms-small corpus', () => {
         heading: 'Versioning',
         description: 'How Shipper versions itself and these docs.',
       },
+      {
+        slug: 'troubleshooting/common-errors',
+        heading: 'Common Errors',
+        description:
+          'Diagnose common Shipper failures and choose the right recovery command or setting.',
+      },
     ];
 
     const excludedPages = [
