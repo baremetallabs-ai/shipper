@@ -4,7 +4,7 @@ Shipper publishes from a tag push. Tagging is the release trigger; everything el
 
 ## What gets published
 
-A `v*` tag on `main` runs `.github/workflows/publish.yml`, which has two jobs:
+Pushing a `v*` tag runs `.github/workflows/publish.yml`, which has two jobs:
 
 - **publish-npm** (Ubuntu, Node 24) — runs lint, format:check, type-check, build, test, then publishes `@baremetallabs-ai/shipper-core` (idempotent — skipped if the version already exists) and `@baremetallabs-ai/shipper-cli` to the public npm registry with provenance.
 - **publish-desktop** (macOS, Node 22) — builds `packages/core` then `packages/desktop`, packages with `electron-builder --mac --arm64 --publish never`, and uploads `.dmg` / `.zip` artifacts to the GitHub Release for the tag (creating the release with `--generate-notes` if it does not already exist).
@@ -26,7 +26,7 @@ Every release must keep four versions in lockstep:
 - `packages/desktop/package.json`
 - `packages/mcp/package.json`
 
-The publish workflow fails the build if `${GITHUB_REF_NAME#v}` does not match any of the four. Bump all four together.
+The publish workflow fails the build if any of the four versions does not match `${GITHUB_REF_NAME#v}`. Bump all four together.
 
 There is also a CLI version **fingerprint** in `.shipper/settings.json` (`cliVersion`) that must match `packages/cli/package.json`'s `version`. The pre-push hook and the `check` CI job both run `npm run check:cli-version-fingerprint` and fail on drift. After bumping the CLI version, run `shipper init` to refresh the fingerprint.
 
@@ -55,6 +55,7 @@ There is also a CLI version **fingerprint** in `.shipper/settings.json` (`cliVer
 
 ## Things that have bitten us
 
+- **The `v*` tag trigger is not branch-scoped.** `on.push.tags: ['v*']` in `publish.yml` will fire for any reachable commit, including a tag pushed off a feature branch by mistake. There is no guard checking that the tagged commit lives on `main`. Always tag from a freshly pulled `main`, and double-check `git log --oneline -1` before `git push origin vX.Y.Z`.
 - **`electron-builder` without `--publish never`** will try to upload artifacts before our explicit `gh release` step and racy-fail. Always pass `--publish never`.
 - **Node < 24 on publish-npm** breaks OIDC Trusted Publisher exchange. Setup-node must pin Node 24.
 - **Forgetting to refresh the cliVersion fingerprint** after a manifest bump trips the pre-push hook. The fix is `shipper init`, not editing the file by hand.
