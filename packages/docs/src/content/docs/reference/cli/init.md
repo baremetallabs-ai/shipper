@@ -41,4 +41,4 @@ shipper init
 ## Constraints
 
 - --push requires --autocommit
-- shipper init writes or refreshes .shipper/settings.json cliVersion; rerun it after intentional packages/cli/package.json version bumps in this repository to satisfy the fingerprint guard
+- shipper init owns committed .shipper/ artifacts in this repository; rerun it and commit the resulting .shipper/ changes when the init drift guard reports drift

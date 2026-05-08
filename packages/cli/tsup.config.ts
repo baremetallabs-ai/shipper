@@ -4,7 +4,7 @@ import { defineConfig } from 'tsup';
 const pkg = JSON.parse(readFileSync('./package.json', 'utf-8')) as { version: string };
 
 export default defineConfig({
-  entry: ['src/index.ts', 'src/ship-worker.ts'],
+  entry: ['src/index.ts', 'src/ship-worker.ts', 'src/scripts/check-init-drift.ts'],
   noExternal: ['@baremetallabs-ai/shipper-core'],
   format: ['esm'],
   dts: true,

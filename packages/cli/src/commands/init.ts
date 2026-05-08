@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync } from 'n
 import path from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { promisify } from 'node:util';
+import type { Logger } from '@baremetallabs-ai/shipper-core';
 import {
   logger,
   gh,
@@ -33,6 +34,14 @@ function getErrorStderr(err: unknown): string {
 
 const VALID_AGENTS = ['claude', 'codex', 'copilot'] as const;
 const UNSAFE_COMMAND_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+export interface InitCommandOptions {
+  agent?: string;
+  autocommit?: boolean;
+  push?: boolean;
+  offline?: boolean;
+  logger?: Pick<Logger, 'log' | 'error'>;
+}
 
 function getNestedValue(source: Record<string, unknown>, dottedKey: string): unknown {
   let current: unknown = source;
@@ -87,14 +96,20 @@ function parseGitPathList(output: string): string[] {
     .filter(Boolean);
 }
 
-export async function initCommand(options: {
-  agent?: string;
-  autocommit?: boolean;
-  push?: boolean;
-}) {
+export async function initCommand(options: InitCommandOptions) {
+  const output = options.logger ?? logger;
+
+  if (options.offline && (options.autocommit || options.push)) {
+    throw new Error('Error: offline init cannot be combined with --autocommit or --push.');
+  }
+
   // Check prerequisites
-  await runAuthPreflight();
-  const ok = await runPrereqChecks([checkGitRepo, checkGitHubRemote]);
+  if (!options.offline) {
+    await runAuthPreflight();
+  }
+  const ok = await runPrereqChecks(
+    options.offline ? [checkGitRepo] : [checkGitRepo, checkGitHubRemote]
+  );
   if (!ok) {
     process.exitCode = 1;
     return;
@@ -117,7 +132,11 @@ export async function initCommand(options: {
     const stored = getStoredAgent();
     if (stored && VALID_AGENTS.includes(stored as (typeof VALID_AGENTS)[number])) {
       agent = stored;
-      logger.log(`Using agent: ${stored} (from settings)`);
+      output.log(`Using agent: ${stored} (from settings)`);
+    } else if (options.offline) {
+      throw new Error(
+        'Error: offline init requires an existing .shipper/settings.json with commands.default.agent set to claude, codex, or copilot.'
+      );
     } else {
       const rl = createInterface({ input: process.stdin, output: process.stdout });
       const answer = await rl.question(
@@ -186,14 +205,14 @@ export async function initCommand(options: {
         await execFileAsync('git', ['rm', '--cached', '--', ...trackedFiles]);
         removedTrackedArtifactPaths = trackedFiles;
         for (const file of trackedFiles) {
-          logger.log(`Untracked: ${file}`);
+          output.log(`Untracked: ${file}`);
         }
-        logger.log(
+        output.log(
           'These files were tracked by git but should be gitignored. Commit the changes to complete the fix.'
         );
       } catch (err) {
         const stderr = getErrorStderr(err);
-        logger.error(
+        output.error(
           'Warning: Failed to untrack tracked files under .shipper/output/ and .shipper/input.' +
             (stderr ? `\n${stderr}` : '')
         );
@@ -270,7 +289,7 @@ export async function initCommand(options: {
 
   // Re-init warning
   if (existingAgent && existingAgent !== agent) {
-    logger.log(`Switching agent from ${existingAgent} to ${agent}`);
+    output.log(`Switching agent from ${existingAgent} to ${agent}`);
   }
 
   const mergedCommands = isPlainObject(merged.commands) ? merged.commands : {};
@@ -285,19 +304,19 @@ export async function initCommand(options: {
   delete merged.hooks;
   merged.cliVersion = CLI_VERSION;
   writeFileSync(settingsPath, JSON.stringify(merged, null, 2) + '\n');
-  logger.log('Wrote .shipper/settings.json with default settings:');
+  output.log('Wrote .shipper/settings.json with default settings:');
   for (const [key, value] of Object.entries(DEFAULTS)) {
     if (typeof value === 'object' && value !== null) continue;
     const desc = SETTING_DESCRIPTIONS[key];
-    logger.log(`  ${key}: ${value}${desc ? `  — ${desc}` : ''}`);
+    output.log(`  ${key}: ${value}${desc ? `  — ${desc}` : ''}`);
   }
   for (const [key, desc] of Object.entries(SETTING_DESCRIPTIONS)) {
     if (key in DEFAULTS) continue;
     const value = key.includes('.') ? getNestedValue(merged, key) : merged[key];
     if (value !== undefined) {
-      logger.log(`  ${key}: ${formatSettingValue(value)}  — ${desc}`);
+      output.log(`  ${key}: ${formatSettingValue(value)}  — ${desc}`);
     } else {
-      logger.log(`  ${key}: (not set)  — ${desc}`);
+      output.log(`  ${key}: (not set)  — ${desc}`);
     }
   }
 
@@ -309,30 +328,32 @@ export async function initCommand(options: {
     chmodSync(dest, 0o755);
     scriptCount++;
   }
-  logger.log(`Wrote ${scriptCount} script files to .shipper/scripts/`);
+  output.log(`Wrote ${scriptCount} script files to .shipper/scripts/`);
 
   // Write README
   const readmePath = path.resolve('.shipper', 'README.md');
   writeFileSync(readmePath, readmeTemplate);
-  logger.log('Wrote .shipper/README.md');
+  output.log('Wrote .shipper/README.md');
 
   // Ensure labels match the canonical shipper definitions
-  for (const label of LABELS) {
-    await gh([
-      'label',
-      'create',
-      label.name,
-      '--force',
-      '--color',
-      label.color,
-      '--description',
-      label.description,
-    ]);
+  if (!options.offline) {
+    for (const label of LABELS) {
+      await gh([
+        'label',
+        'create',
+        label.name,
+        '--force',
+        '--color',
+        label.color,
+        '--description',
+        label.description,
+      ]);
+    }
+    output.log(`Synced ${LABELS.length} labels`);
   }
-  logger.log(`Synced ${LABELS.length} labels`);
 
   if (!options.autocommit) {
-    logger.log(
+    output.log(
       "Tip: run 'git add .shipper/ && git commit' to commit your changes, then push to your default branch."
     );
   } else {
@@ -348,7 +369,7 @@ export async function initCommand(options: {
     }
 
     if (!hasChanges) {
-      logger.log('.shipper/ files are unchanged — nothing to commit.');
+      output.log('.shipper/ files are unchanged — nothing to commit.');
     } else {
       let currentBranch = '';
       if (options.push) {
@@ -392,7 +413,7 @@ export async function initCommand(options: {
       }
 
       if (!options.push) {
-        logger.log('Committed .shipper/ files.');
+        output.log('Committed .shipper/ files.');
       } else {
         const pushBranch = currentBranch;
 
@@ -424,7 +445,7 @@ export async function initCommand(options: {
           );
         }
 
-        logger.log(`Committed and pushed .shipper/ files to ${pushBranch}`);
+        output.log(`Committed and pushed .shipper/ files to ${pushBranch}`);
       }
     }
   }
@@ -434,15 +455,15 @@ export async function initCommand(options: {
   if (existsSync(rootGitignore)) {
     const content = readGitignore(rootGitignore);
     if (!content.includes('.shipper/tmp')) {
-      logger.log('\nTip: .shipper/tmp/ is gitignored within .shipper/.');
+      output.log('\nTip: .shipper/tmp/ is gitignored within .shipper/.');
     }
   }
 
-  logger.log('\nshipper initialized! You can now run:');
-  logger.log('  shipper setup          — configure install command and get onboarding help');
-  logger.log('  shipper new <request>  — create a new issue from an idea');
-  logger.log('  shipper adopt <issue>  — bring an existing issue into the workflow');
-  logger.log('  shipper groom <issue>  — groom an issue for implementation');
+  output.log('\nshipper initialized! You can now run:');
+  output.log('  shipper setup          — configure install command and get onboarding help');
+  output.log('  shipper new <request>  — create a new issue from an idea');
+  output.log('  shipper adopt <issue>  — bring an existing issue into the workflow');
+  output.log('  shipper groom <issue>  — groom an issue for implementation');
 }
 
 function readGitignore(filepath: string): string {

@@ -48,4 +48,15 @@ describe('createProgram', () => {
     expect(next?.options.some((option) => option.long === '--disable-mcp')).toBe(true);
     expect(next?.options.some((option) => option.long === '--enable-mcp')).toBe(true);
   });
+
+  it('keeps internal init check options out of public help metadata', () => {
+    const program = createProgram();
+    const init = program.commands.find((command) => command.name() === 'init');
+    const longOptions = init?.options.map((option) => option.long);
+
+    expect(longOptions).toEqual(['--agent', '--autocommit', '--push']);
+    expect(longOptions).not.toContain('--offline');
+    expect(longOptions).not.toContain('--check');
+    expect(longOptions).not.toContain('--check-only');
+  });
 });

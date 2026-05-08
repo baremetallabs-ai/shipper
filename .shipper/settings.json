@@ -5,6 +5,7 @@
   },
   "lockTimeoutMinutes": 30,
   "agentTimeoutMinutes": 60,
+  "hookTimeoutMinutes": 10,
   "commands": {
     "default": {
       "agent": "codex"
