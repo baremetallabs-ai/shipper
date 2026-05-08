@@ -79,14 +79,52 @@ jobs:
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
+          set -euo pipefail
+
           TAG="${GITHUB_REF_NAME}"
-          if gh release view "${TAG}" >/dev/null 2>&1; then
-            gh release upload "${TAG}" packages/desktop/release/*.dmg packages/desktop/release/*.zip --clobber
+          shopt -s nullglob
+          dmg_assets=(packages/desktop/release/*.dmg)
+          zip_assets=(packages/desktop/release/*.zip)
+          assets=("${dmg_assets[@]}" "${zip_assets[@]}")
+
+          if [ "${#dmg_assets[@]}" -eq 0 ]; then
+            echo "::error::No desktop DMG artifacts found in packages/desktop/release"
+            exit 1
+          fi
+
+          if [ "${#zip_assets[@]}" -eq 0 ]; then
+            echo "::error::No desktop zip artifacts found in packages/desktop/release"
+            exit 1
+          fi
+
+          echo "desktop assets:"
+          printf '  %s\n' "${assets[@]}"
+
+          if release_state="$(gh release view "${TAG}" --json isDraft,isPrerelease,targetCommitish --jq '[.isDraft, .isPrerelease, (.targetCommitish // "")] | @tsv')"; then
+            IFS=$'\t' read -r was_draft was_prerelease target_commitish <<< "${release_state}"
+            was_latest="$(gh release list --limit 1000 --json tagName,isLatest --jq ".[] | select(.tagName == \"${TAG}\") | .isLatest")"
+            was_latest="${was_latest:-false}"
+
+            if [ "${was_draft}" = "true" ]; then
+              release_path="recovered prior draft"
+            elif [ "${was_prerelease}" = "true" ] || [ "${was_latest}" != "true" ] || { [ "${target_commitish}" != "${GITHUB_SHA}" ] && [ "${target_commitish}" != "${DEFAULT_BRANCH}" ]; }; then
+              release_path="normalized existing release"
+            else
+              release_path="refreshed existing release"
+            fi
+
+            echo "release path: ${release_path} (was_draft=${was_draft}, was_prerelease=${was_prerelease}, was_latest=${was_latest}, target_commitish=${target_commitish}, workflow_sha=${GITHUB_SHA})"
+            gh release upload "${TAG}" "${assets[@]}" --clobber
+            gh release edit "${TAG}" --draft=false --prerelease=false --target "${GITHUB_SHA}" --verify-tag
+            gh release edit "${TAG}" --latest
           else
+            echo "release path: created fresh"
             gh release create "${TAG}" \
               --title "${TAG}" \
               --generate-notes \
-              packages/desktop/release/*.dmg \
-              packages/desktop/release/*.zip
+              --latest \
+              --verify-tag \
+              "${assets[@]}"
           fi
