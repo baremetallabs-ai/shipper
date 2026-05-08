@@ -1,7 +1,6 @@
 ---
 cmd: claude
 args:
-  - -p
   - --model
   - opus
   - --permission-mode

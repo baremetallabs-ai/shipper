@@ -1,3 +1,5 @@
+import { HEADLESS_SETUP_ERROR } from '../lib/setup-errors.js';
+
 export const commandPaths = [
   'init',
   'setup',
@@ -66,11 +68,7 @@ export const commandExtras: Record<CommandPath, CommandExtras> = {
       { code: 0, when: 'Setup completes successfully or writes a setup PR.' },
       { code: 1, when: 'Setup validation, agent execution, or setup finalization fails.' },
     ],
-    constraints: [
-      promptMcpConstraint,
-      'Headless mode is not supported for shipper setup; run setup interactively or remove ' +
-        '"commands.setup.mode": "headless" / "commands.default.mode": "headless" from .shipper/settings.json.',
-    ],
+    constraints: [promptMcpConstraint, HEADLESS_SETUP_ERROR],
   },
   new: {
     examples: [

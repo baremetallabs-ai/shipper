@@ -11,6 +11,7 @@ import {
   type CommandMode,
 } from '@baremetallabs-ai/shipper-core';
 import { confirm } from '../lib/confirm.js';
+import { HEADLESS_SETUP_ERROR } from '../lib/setup-errors.js';
 
 export async function setupCommand(
   words: string[],
@@ -18,10 +19,7 @@ export async function setupCommand(
 ): Promise<void> {
   const effectiveMode = resolveMode('setup', options.mode);
   if (effectiveMode === 'headless') {
-    throw new Error(
-      'Error: shipper setup does not support headless mode. Run setup interactively, or remove ' +
-        '"commands.setup.mode": "headless" / "commands.default.mode": "headless" from .shipper/settings.json.'
-    );
+    throw new Error(HEADLESS_SETUP_ERROR);
   }
 
   const settings = getSettings();

@@ -1,9 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as core from '@baremetallabs-ai/shipper-core';
-
-const HEADLESS_SETUP_ERROR =
-  'Error: shipper setup does not support headless mode. Run setup interactively, or remove ' +
-  '"commands.setup.mode": "headless" / "commands.default.mode": "headless" from .shipper/settings.json.';
+import { HEADLESS_SETUP_ERROR } from '../../src/lib/setup-errors.js';
 
 const { existsSyncMock } = vi.hoisted(() => ({
   existsSyncMock: vi.fn<(path: string) => boolean>(),
