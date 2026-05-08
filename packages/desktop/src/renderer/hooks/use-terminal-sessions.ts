@@ -4,7 +4,12 @@ import type { ComponentRef, Dispatch, RefObject, SetStateAction } from 'react';
 import { toErrorMessage } from '@baremetallabs-ai/shipper-core';
 
 import { getShipperApi } from '../lib/shipper-api.js';
-import type { PendingTerminalClose, TerminalCloseReason, TerminalSession } from '../types.js';
+import type {
+  BackgroundToastItem,
+  PendingTerminalClose,
+  TerminalCloseReason,
+  TerminalSession,
+} from '../types.js';
 
 function getNextActiveSessionId(
   sessions: TerminalSession[],
@@ -47,6 +52,8 @@ function findActiveSetupSession(
 
 interface UseTerminalSessionsOptions {
   activeRepo: string;
+  pushToast: (toast: BackgroundToastItem) => void;
+  refreshIssuesForActiveRepo: (repo: string) => Promise<void>;
   setFetchError: Dispatch<SetStateAction<string | null>>;
 }
 
@@ -76,6 +83,8 @@ export interface UseTerminalSessionsResult {
 
 export function useTerminalSessions({
   activeRepo,
+  pushToast,
+  refreshIssuesForActiveRepo,
   setFetchError,
 }: UseTerminalSessionsOptions): UseTerminalSessionsResult {
   const [sessions, setSessions] = useState<TerminalSession[]>([]);
@@ -442,11 +451,46 @@ export function useTerminalSessions({
       return;
     }
 
+    const discardIssue =
+      pending.reason === 'discard-progress' &&
+      typeof session.repo === 'string' &&
+      typeof session.issueNumber === 'number'
+        ? { repo: session.repo, issueNumber: session.issueNumber }
+        : null;
+
     try {
       await getShipperApi().ptyForceKill(session.id);
       setPendingCloseState(null);
       if (pending.reason === 'discard-progress') {
         removeSession(session.id);
+      }
+
+      if (discardIssue !== null) {
+        try {
+          const result = await getShipperApi().unlockIssue(
+            discardIssue.repo,
+            discardIssue.issueNumber
+          );
+          if (!result.ok) {
+            pushToast({
+              id: `discard-unlock-error-${discardIssue.issueNumber}`,
+              sessionId: '',
+              variant: 'error',
+              title: `Failed to unlock issue #${discardIssue.issueNumber}`,
+              description: result.error,
+            });
+          }
+        } catch (error) {
+          pushToast({
+            id: `discard-unlock-error-${discardIssue.issueNumber}`,
+            sessionId: '',
+            variant: 'error',
+            title: `Failed to unlock issue #${discardIssue.issueNumber}`,
+            description: toErrorMessage(error),
+          });
+        } finally {
+          await refreshIssuesForActiveRepo(discardIssue.repo);
+        }
       }
     } catch (error) {
       const message = toErrorMessage(error);

@@ -66,6 +66,8 @@ export default function App(): JSX.Element {
   });
   const terminalState = useTerminalSessions({
     activeRepo: reposState.activeRepo,
+    pushToast: backgroundState.pushToast,
+    refreshIssuesForActiveRepo: pipelineState.refreshIssuesForActiveRepo,
     setFetchError: pipelineState.setFetchError,
   });
 
