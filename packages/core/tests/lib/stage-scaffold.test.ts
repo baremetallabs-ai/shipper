@@ -40,6 +40,17 @@ type PrReviewRetryOpts = {
 };
 
 const events: string[] = [];
+const execAsyncMock =
+  vi.fn<
+    (
+      cmd: string,
+      args: string[],
+      opts: { cwd?: string }
+    ) => Promise<{ stdout: string; stderr: string; code: number }>
+  >();
+const formatCommandFailureMock = vi.fn<
+  (cmd: string, args: string[], result: { stdout: string; stderr: string; code: number }) => string
+>(() => 'failed');
 const formatConflictContextMock = vi.fn<(context: unknown) => string>();
 const handleAgentCrashMock = vi.fn<
   (
@@ -52,7 +63,18 @@ const handleAgentCrashMock = vi.fn<
   ) => Promise<void>
 >(() => Promise.resolve());
 const loggerErrorMock = vi.fn<(message: string) => void>();
+const postCommentMock =
+  vi.fn<(repo: string, issueNumber: string, commentPath: string) => Promise<void>>();
 const processResultMock = vi.fn<(opts: ProcessResultOpts) => Promise<typeof acceptedResult>>();
+const resolveAgentMock = vi.fn<(step: string, override?: string) => string>(
+  (_step, override) => override ?? 'claude'
+);
+const resolveDisableMcpMock = vi.fn<(step: string, override?: boolean) => boolean>(
+  (_step, override) => override ?? false
+);
+const resolveModelMock = vi.fn<(step: string, override?: string) => string | undefined>(
+  (_step, override) => override
+);
 const retryPrReviewOutputAndSubmissionMock =
   vi.fn<
     (
@@ -69,6 +91,15 @@ const toErrorMessageMock = vi.fn<(error: unknown) => string>((error) =>
 );
 const truncateLargeInputMock =
   vi.fn<(wtPath: string, text: string, filename: string) => Promise<string>>();
+const validateStageOutputMock =
+  vi.fn<
+    (
+      cwd: string,
+      stage: string,
+      prFiles?: Set<string>,
+      diffHunks?: Map<string, DiffFileHunks>
+    ) => Promise<typeof acceptedResult>
+  >();
 const withGitTransportMock = vi.fn<(opts: unknown, fn: unknown) => unknown>();
 const withIssueLockMock = vi.fn<
   (repo: string, issue: string, fn: () => Promise<unknown>) => Promise<unknown>
@@ -139,6 +170,8 @@ vi.mock('../../src/lib/output-protocol/index.js', () => ({
     summary?: string,
     options?: { cwd?: string; detailFilename?: string }
   ) => handleAgentCrashMock(repo, issue, stage, detail, summary, options),
+  postComment: (repo: string, issueNumber: string, commentPath: string) =>
+    postCommentMock(repo, issueNumber, commentPath),
   processResult: (opts: ProcessResultOpts) => processResultMock(opts),
   retryPrReviewOutputAndSubmission: (opts: PrReviewRetryOpts) =>
     retryPrReviewOutputAndSubmissionMock(opts),
@@ -148,10 +181,22 @@ vi.mock('../../src/lib/output-protocol/index.js', () => ({
     submitReviewPayloadMock(repo, prNumber, cwd, payloadPath),
   truncateLargeInput: (wtPath: string, text: string, filename: string) =>
     truncateLargeInputMock(wtPath, text, filename),
+  validateStageOutput: (
+    cwd: string,
+    stage: string,
+    prFiles?: Set<string>,
+    diffHunks?: Map<string, DiffFileHunks>
+  ) => validateStageOutputMock(cwd, stage, prFiles, diffHunks),
 }));
 
 vi.mock('../../src/lib/prompt-runner.js', () => ({
   runPrompt: (name: string, opts: RunPromptOpts) => runPromptMock(name, opts),
+}));
+
+vi.mock('../../src/lib/settings.js', () => ({
+  resolveAgent: (step: string, override?: string) => resolveAgentMock(step, override),
+  resolveDisableMcp: (step: string, override?: boolean) => resolveDisableMcpMock(step, override),
+  resolveModel: (step: string, override?: string) => resolveModelMock(step, override),
 }));
 
 vi.mock('../../src/lib/worktree.js', () => ({
@@ -161,7 +206,17 @@ vi.mock('../../src/lib/worktree.js', () => ({
     withWorktreeMock(opts, fn),
 }));
 
-const { runStageScaffold, simpleInvoker, transportInvoker } =
+vi.mock('../../src/lib/worktree/helpers.js', () => ({
+  execAsync: (cmd: string, args: string[], opts: { cwd?: string }) =>
+    execAsyncMock(cmd, args, opts),
+  formatCommandFailure: (
+    cmd: string,
+    args: string[],
+    result: { stdout: string; stderr: string; code: number }
+  ) => formatCommandFailureMock(cmd, args, result),
+}));
+
+const { adversarialInvoker, runStageScaffold, simpleInvoker, transportInvoker } =
   await import('../../src/lib/stage-scaffold.js');
 
 function buildInvocation(overrides: Partial<StageInvocation> = {}): StageInvocation {
@@ -760,5 +815,202 @@ describe('transportInvoker', () => {
         baseBranch: undefined,
       })
     ).toThrow('baseBranch is required for transport invocations');
+  });
+});
+
+describe('adversarialInvoker', () => {
+  beforeEach(() => {
+    events.length = 0;
+    vi.clearAllMocks();
+    resolveAgentMock.mockImplementation((_step, override) => override ?? 'claude');
+    resolveDisableMcpMock.mockImplementation((_step, override) => override ?? false);
+    resolveModelMock.mockImplementation((_step, override) => override);
+    runPromptMock.mockImplementation((name) => {
+      events.push(`runPrompt:${name}`);
+      return Promise.resolve(0);
+    });
+    scrubOutputDirMock.mockImplementation(() => {
+      events.push('scrubOutputDir');
+      return Promise.resolve();
+    });
+    execAsyncMock.mockImplementation((_cmd, args) => {
+      events.push(`exec:${args.join(' ')}`);
+      return Promise.resolve({ stdout: '', stderr: '', code: 0 });
+    });
+    postCommentMock.mockImplementation(() => {
+      events.push('postComment');
+      return Promise.resolve();
+    });
+    validateStageOutputMock.mockImplementation(() => Promise.resolve(acceptedResult));
+  });
+
+  function buildArgs(overrides: { rounds?: number } = {}) {
+    return {
+      primary: 'design' as const,
+      adversary: 'design_adversary' as const,
+      rounds: overrides.rounds ?? 1,
+      repo: 'owner/repo',
+      issueNumber: '123',
+      baseRunPromptOpts: {
+        repo: 'owner/repo',
+        issueRef: '123',
+        mode: 'headless' as const,
+        agent: 'codex' as const,
+        model: 'gpt-5',
+      },
+    };
+  }
+
+  function build(overrides: { rounds?: number } = {}) {
+    return adversarialInvoker(buildArgs(overrides))({
+      wtPath: '/tmp/fake-wt',
+      repoRoot: '/tmp/fake-repo',
+      branch: 'shipper/123-branch',
+      baseBranch: 'main',
+    });
+  }
+
+  it('rounds=0 runs primary once with no posts and no resets', async () => {
+    const invocation = build({ rounds: 0 });
+    await expect(invocation.initial()).resolves.toBe(0);
+
+    expect(runPromptMock).toHaveBeenCalledTimes(1);
+    expect(runPromptMock).toHaveBeenCalledWith('design', expect.any(Object));
+    expect(postCommentMock).not.toHaveBeenCalled();
+    expect(scrubOutputDirMock).not.toHaveBeenCalled();
+    expect(execAsyncMock).not.toHaveBeenCalled();
+    expect(validateStageOutputMock).not.toHaveBeenCalled();
+  });
+
+  it('rounds=1 runs designer → adversary → designer with two intermediate posts', async () => {
+    const invocation = build({ rounds: 1 });
+    await expect(invocation.initial()).resolves.toBe(0);
+
+    expect(events).toEqual([
+      'runPrompt:design',
+      'postComment',
+      'scrubOutputDir',
+      'exec:reset --hard origin/main',
+      'runPrompt:design_adversary',
+      'postComment',
+      'scrubOutputDir',
+      'exec:reset --hard origin/main',
+      'runPrompt:design',
+    ]);
+    expect(runPromptMock).toHaveBeenCalledTimes(3);
+    expect(postCommentMock).toHaveBeenCalledTimes(2);
+    expect(validateStageOutputMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('rounds=2 runs five prompts with four intermediate posts', async () => {
+    const invocation = build({ rounds: 2 });
+    await expect(invocation.initial()).resolves.toBe(0);
+
+    const promptCalls = events.filter((e) => e.startsWith('runPrompt:'));
+    expect(promptCalls).toEqual([
+      'runPrompt:design',
+      'runPrompt:design_adversary',
+      'runPrompt:design',
+      'runPrompt:design_adversary',
+      'runPrompt:design',
+    ]);
+    expect(postCommentMock).toHaveBeenCalledTimes(4);
+    expect(execAsyncMock).toHaveBeenCalledTimes(4);
+  });
+
+  it('returns 0 without posting when round-1 designer rejects (scaffold processes the rejection)', async () => {
+    validateStageOutputMock.mockResolvedValueOnce({
+      verdict: 'reject' as const,
+      comment: '.shipper/output/comment-123.md',
+    });
+
+    const invocation = build({ rounds: 1 });
+    await expect(invocation.initial()).resolves.toBe(0);
+
+    expect(runPromptMock).toHaveBeenCalledTimes(1);
+    expect(postCommentMock).not.toHaveBeenCalled();
+    expect(execAsyncMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 1 when intermediate output is invalid', async () => {
+    validateStageOutputMock.mockRejectedValueOnce(new Error('missing result.json'));
+
+    const invocation = build({ rounds: 1 });
+    await expect(invocation.initial()).resolves.toBe(1);
+
+    expect(loggerErrorMock).toHaveBeenCalledWith(expect.stringContaining('missing result.json'));
+    expect(postCommentMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 1 when adversary returns a non-accept verdict', async () => {
+    validateStageOutputMock.mockResolvedValueOnce(acceptedResult).mockResolvedValueOnce({
+      verdict: 'reject' as const,
+      comment: '.shipper/output/comment-123.md',
+    });
+
+    const invocation = build({ rounds: 1 });
+    await expect(invocation.initial()).resolves.toBe(1);
+
+    expect(runPromptMock).toHaveBeenCalledTimes(2);
+    expect(postCommentMock).toHaveBeenCalledTimes(1);
+    expect(loggerErrorMock).toHaveBeenCalledWith(
+      expect.stringContaining('adversary must always return accept')
+    );
+  });
+
+  it('propagates non-zero exit codes from any agent invocation', async () => {
+    runPromptMock.mockImplementationOnce(() => {
+      events.push('runPrompt:design');
+      return Promise.resolve(0);
+    });
+    runPromptMock.mockImplementationOnce(() => {
+      events.push('runPrompt:design_adversary');
+      return Promise.resolve(42);
+    });
+
+    const invocation = build({ rounds: 1 });
+    await expect(invocation.initial()).resolves.toBe(42);
+    expect(postCommentMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('throws when reset fails between rounds', async () => {
+    execAsyncMock.mockResolvedValueOnce({ stdout: '', stderr: 'no upstream', code: 128 });
+
+    const invocation = build({ rounds: 1 });
+    await expect(invocation.initial()).rejects.toThrow(/Failed to reset worktree to origin\/main/);
+  });
+
+  it('throws when baseBranch is omitted', () => {
+    expect(() =>
+      adversarialInvoker(buildArgs())({
+        wtPath: '/tmp/fake-wt',
+        repoRoot: '/tmp/fake-repo',
+        branch: 'shipper/123-branch',
+        baseBranch: undefined,
+      })
+    ).toThrow('baseBranch is required for adversarialInvoker');
+  });
+
+  it('resolves agent/model/disableMcp using the primary step name so the adversary inherits design settings', () => {
+    resolveAgentMock.mockReturnValue('codex');
+    resolveModelMock.mockReturnValue('gpt-5-pro');
+    resolveDisableMcpMock.mockReturnValue(true);
+
+    build({ rounds: 1 });
+
+    expect(resolveAgentMock).toHaveBeenCalledWith('design', 'codex');
+    expect(resolveModelMock).toHaveBeenCalledWith('design', 'gpt-5');
+    expect(resolveDisableMcpMock).toHaveBeenCalledWith('design', undefined);
+  });
+
+  it('retry re-runs the final designer with the correction message', async () => {
+    const invocation = build({ rounds: 1 });
+    await expect(invocation.retry('please fix result.json')).resolves.toBe(0);
+
+    expect(runPromptMock).toHaveBeenCalledTimes(1);
+    expect(runPromptMock).toHaveBeenCalledWith(
+      'design',
+      expect.objectContaining({ userInput: 'please fix result.json' })
+    );
   });
 });

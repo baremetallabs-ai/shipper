@@ -1,4 +1,12 @@
 export const MCP_GROOMING_FLAG = 'SHIPPER_EXPERIMENTAL_MCP_GROOMING';
+export const DESIGN_ADVERSARY_FLAG = 'SHIPPER_EXPERIMENTAL_DESIGN_ADVERSARY';
+
+function isFlagSet(name: string): boolean {
+  const raw = process.env[name];
+  if (raw === undefined) return false;
+  const trimmed = raw.trim().toLowerCase();
+  return trimmed !== '' && trimmed !== '0' && trimmed !== 'false' && trimmed !== 'no';
+}
 
 /**
  * MCP-driven grooming is gated behind an experimental env var. Interactive grooming
@@ -12,8 +20,17 @@ export const MCP_GROOMING_FLAG = 'SHIPPER_EXPERIMENTAL_MCP_GROOMING';
  * With the flag unset, behaviour is unchanged.
  */
 export function isMcpGroomingEnabled(): boolean {
-  const raw = process.env[MCP_GROOMING_FLAG];
-  if (raw === undefined) return false;
-  const trimmed = raw.trim().toLowerCase();
-  return trimmed !== '' && trimmed !== '0' && trimmed !== 'false' && trimmed !== 'no';
+  return isFlagSet(MCP_GROOMING_FLAG);
+}
+
+/**
+ * Adversarial design review is gated behind an experimental env var. When set, the
+ * design stage runs designer → adversary → designer (three agent invocations in one
+ * stage) instead of a single designer pass, with each intermediate comment posted to
+ * the issue thread before the next agent reads it.
+ *
+ * With the flag unset, behaviour is unchanged.
+ */
+export function isDesignAdversaryEnabled(): boolean {
+  return isFlagSet(DESIGN_ADVERSARY_FLAG);
 }
