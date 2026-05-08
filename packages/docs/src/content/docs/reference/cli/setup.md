@@ -45,3 +45,4 @@ shipper setup "change the default agent to codex"
 ## Constraints
 
 - --disable-mcp and --enable-mcp are mutually exclusive
+- Headless mode is not supported for shipper setup; run setup interactively or remove "commands.setup.mode": "headless" / "commands.default.mode": "headless" from .shipper/settings.json.

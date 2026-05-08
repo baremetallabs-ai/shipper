@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as core from '@baremetallabs-ai/shipper-core';
 
+const HEADLESS_SETUP_ERROR =
+  'Error: shipper setup does not support headless mode. Run setup interactively, or remove ' +
+  '"commands.setup.mode": "headless" / "commands.default.mode": "headless" from .shipper/settings.json.';
+
 const { existsSyncMock } = vi.hoisted(() => ({
   existsSyncMock: vi.fn<(path: string) => boolean>(),
 }));
@@ -84,18 +88,34 @@ describe('setupCommand', () => {
     expect(process.exitCode).toBe(2);
   });
 
-  it('skips the finalize offer entirely when setup resolves to headless mode', async () => {
+  it('rejects explicit headless setup before any setup work starts', async () => {
     vi.spyOn(core, 'resolveMode').mockReturnValueOnce('headless');
     const { setupCommand } = await import('../../src/commands/setup.js');
 
-    await setupCommand(['configure'], { mode: 'default' });
-
-    expect(core.runPrompt).toHaveBeenCalledWith(
-      'setup',
-      expect.objectContaining({ mode: 'headless' })
+    await expect(setupCommand(['configure'], { mode: 'headless' })).rejects.toThrow(
+      HEADLESS_SETUP_ERROR
     );
+
+    expect(core.resolveMode).toHaveBeenCalledWith('setup', 'headless');
+    expect(core.getSettings).not.toHaveBeenCalled();
+    expect(core.readGitStatusSnapshot).not.toHaveBeenCalled();
+    expect(core.runPrompt).not.toHaveBeenCalled();
     expect(core.offerSetupFinalize).not.toHaveBeenCalled();
-    expect(process.exitCode).toBe(0);
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it('rejects settings-resolved headless setup before any setup work starts', async () => {
+    vi.spyOn(core, 'resolveMode').mockReturnValueOnce('headless');
+    const { setupCommand } = await import('../../src/commands/setup.js');
+
+    await expect(setupCommand(['configure'])).rejects.toThrow(HEADLESS_SETUP_ERROR);
+
+    expect(core.resolveMode).toHaveBeenCalledWith('setup', undefined);
+    expect(core.getSettings).not.toHaveBeenCalled();
+    expect(core.readGitStatusSnapshot).not.toHaveBeenCalled();
+    expect(core.runPrompt).not.toHaveBeenCalled();
+    expect(core.offerSetupFinalize).not.toHaveBeenCalled();
+    expect(process.exitCode).toBeUndefined();
   });
 
   it('forwards the resolved mode and model settings into the finalizer', async () => {
