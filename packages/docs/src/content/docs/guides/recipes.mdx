@@ -1,12 +1,160 @@
 ---
 title: Recipes
-description: Operational recipes for Shipper setup, customization, and recovery.
+description: Task walkthroughs for adopting repositories and customizing Shipper prompts.
 ---
 
-This section will hold task-oriented operational recipes for common Shipper setup, customization,
-and recovery work.
+Recipes are task walkthroughs for readers who already know the Shipper job they want to complete and
+need the shortest safe path through it. For CI or container token authentication, use the
+[Containers reference](/reference/containers/).
 
-- Adopt an existing repo — coming soon
-- Run Shipper in CI with a token — coming soon
-- Customize a stage prompt — coming soon
-- Recover from a failed run — coming soon
+## Adopt an existing repo
+
+### Goal
+
+Initialize Shipper in an existing GitHub-backed repository and bring open GitHub issues into the
+Shipper workflow without recreating them.
+
+### Preconditions
+
+- You are in the root of a Git checkout with a GitHub remote.
+- `git`, `gh`, and `shipper` are installed.
+- GitHub authentication works through `gh auth login`, or the environment exports `GH_TOKEN` or
+  `GITHUB_TOKEN`.
+- At least one open GitHub issue does not already have a `shipper:` label.
+
+### Steps
+
+1. Verify GitHub auth before you initialize Shipper:
+
+   ```bash
+   gh auth status
+   ```
+
+   In token-based environments, confirm one of the supported token variables is present instead:
+
+   ```bash
+   test -n "${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+   ```
+
+2. Initialize Shipper from the repository root:
+
+   ```bash
+   shipper init
+   ```
+
+3. Let `shipper init` create or update `.shipper/`, write `.shipper/settings.json`, and sync the
+   Shipper workflow labels in GitHub. This step must run before adoption so `shipper adopt` can move
+   issues into an initialized workflow.
+
+4. If the repo team shares Shipper configuration, commit the generated setup:
+
+   ```bash
+   git status --short .shipper/
+   git add .shipper/
+   git commit -m "chore: initialize shipper"
+   ```
+
+5. Adopt one existing issue by number:
+
+   ```bash
+   shipper adopt <issue>
+   ```
+
+6. Or adopt every open issue that does not already have a `shipper:` label:
+
+   ```bash
+   shipper adopt --all
+   ```
+
+### Verification
+
+Confirm Shipper was initialized locally:
+
+```bash
+test -f .shipper/settings.json
+```
+
+Confirm the targeted GitHub issue now carries `shipper:new`:
+
+```bash
+gh issue view <issue> --json labels -q '.labels[].name' | grep '^shipper:new$'
+```
+
+You can also view adopted issues through Shipper:
+
+```bash
+shipper issue list --status new
+```
+
+## Customize a stage prompt
+
+### Goal
+
+Make the `pr-open` stage produce a repository-specific PR description without editing bundled
+Shipper source.
+
+### Preconditions
+
+- `shipper init` has already run in the repository.
+- This example assumes `.shipper/settings.json` has `commands.default.agent` set to `claude`.
+- You have an issue ready for PR opening at `shipper:implemented`.
+- GitHub authentication is working, because `shipper pr open <issue>` creates or updates a pull
+  request through Shipper's normal PR-open stage.
+
+### Steps
+
+1. Eject the bundled `pr-open` prompt into the local `.shipper/` configuration:
+
+   ```bash
+   shipper eject pr-open
+   ```
+
+2. Open `.shipper/prompts/claude/pr_open.md`. Edit this local override, not
+   `packages/core/src/prompts/claude/pr_open.md`, so the customization stays with your repository
+   instead of changing Shipper itself.
+
+3. Add a small repository-specific section to the PR body template. For example, insert a rollout
+   checklist after the generated test plan section:
+
+   ```diff
+   @@
+    ## Test Plan
+
+    - [ ] [Automated or manual verification step]
+
+   +## Rollout Plan
+   +
+   +- [ ] [Release, migration, or monitoring notes for this repository.]
+   +
+    ## Pre-merge actions
+   ```
+
+4. Run the stage that consumes the prompt:
+
+   ```bash
+   shipper pr open <issue>
+   ```
+
+5. The same flow applies to other ejected prompts: eject the prompt, edit the local override, then
+   run the stage that consumes it.
+
+### Verification
+
+Confirm the local override exists:
+
+```bash
+test -f .shipper/prompts/claude/pr_open.md
+```
+
+Confirm your edit is in the prompt:
+
+```bash
+rg "## Rollout Plan" .shipper/prompts/claude/pr_open.md
+```
+
+After `shipper pr open <issue>` completes, confirm the PR body on GitHub contains the customized
+section:
+
+```bash
+gh pr view <pr-number-or-branch> --json body -q '.body' | rg "## Rollout Plan"
+```
