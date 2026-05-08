@@ -252,14 +252,14 @@ Body text here.`;
     expect(input).not.toContain('using an absolute path will be denied');
   });
 
-  it('keeps the Claude setup remediation transport and permission posture', () => {
+  it('keeps the Claude setup remediation interactive permission posture', () => {
     const input = readFileSync(
       resolve(testDir, '../../src/prompts/claude/setup_remediate.md'),
       'utf8'
     );
     const result = parseFrontmatter(input);
 
-    expect(result.frontmatter.args).toContain('-p');
+    expect(result.frontmatter.args).not.toContain('-p');
     expect(result.frontmatter.args).toContain('--permission-mode');
     expect(result.frontmatter.args).toContain('acceptEdits');
     expect(result.frontmatter['append-pr']).toBe(true);
