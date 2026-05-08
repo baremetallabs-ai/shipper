@@ -75,6 +75,9 @@ const resolveDisableMcpMock = vi.fn<(step: string, override?: boolean) => boolea
 const resolveModelMock = vi.fn<(step: string, override?: string) => string | undefined>(
   (_step, override) => override
 );
+const resolveModeMock = vi.fn<(step: string, override?: string) => string>(
+  (_step, override) => override ?? 'default'
+);
 const retryPrReviewOutputAndSubmissionMock =
   vi.fn<
     (
@@ -196,6 +199,7 @@ vi.mock('../../src/lib/prompt-runner.js', () => ({
 vi.mock('../../src/lib/settings.js', () => ({
   resolveAgent: (step: string, override?: string) => resolveAgentMock(step, override),
   resolveDisableMcp: (step: string, override?: boolean) => resolveDisableMcpMock(step, override),
+  resolveMode: (step: string, override?: string) => resolveModeMock(step, override),
   resolveModel: (step: string, override?: string) => resolveModelMock(step, override),
 }));
 
@@ -824,6 +828,7 @@ describe('adversarialInvoker', () => {
     vi.clearAllMocks();
     resolveAgentMock.mockImplementation((_step, override) => override ?? 'claude');
     resolveDisableMcpMock.mockImplementation((_step, override) => override ?? false);
+    resolveModeMock.mockImplementation((_step, override) => override ?? 'default');
     resolveModelMock.mockImplementation((_step, override) => override);
     runPromptMock.mockImplementation((name) => {
       events.push(`runPrompt:${name}`);
@@ -973,11 +978,24 @@ describe('adversarialInvoker', () => {
     expect(postCommentMock).toHaveBeenCalledTimes(1);
   });
 
-  it('throws when reset fails between rounds', async () => {
+  it('returns 1 and logs when reset fails between rounds (lets scaffold post a crash comment)', async () => {
     execAsyncMock.mockResolvedValueOnce({ stdout: '', stderr: 'no upstream', code: 128 });
 
     const invocation = build({ rounds: 1 });
-    await expect(invocation.initial()).rejects.toThrow(/Failed to reset worktree to origin\/main/);
+    await expect(invocation.initial()).resolves.toBe(1);
+    expect(loggerErrorMock).toHaveBeenCalledWith(
+      expect.stringMatching(/Adversarial loop failed:.*Failed to reset worktree to origin\/main/)
+    );
+  });
+
+  it('returns 1 and logs when postComment throws (transient GitHub failure)', async () => {
+    postCommentMock.mockRejectedValueOnce(new Error('gh: API rate limit'));
+
+    const invocation = build({ rounds: 1 });
+    await expect(invocation.initial()).resolves.toBe(1);
+    expect(loggerErrorMock).toHaveBeenCalledWith(
+      expect.stringMatching(/Adversarial loop failed:.*gh: API rate limit/)
+    );
   });
 
   it('throws when baseBranch is omitted', () => {
@@ -991,15 +1009,17 @@ describe('adversarialInvoker', () => {
     ).toThrow('baseBranch is required for adversarialInvoker');
   });
 
-  it('resolves agent/model/disableMcp using the primary step name so the adversary inherits design settings', () => {
+  it('resolves agent/model/mode/disableMcp using the primary step name so the adversary inherits design settings', () => {
     resolveAgentMock.mockReturnValue('codex');
     resolveModelMock.mockReturnValue('gpt-5-pro');
+    resolveModeMock.mockReturnValue('headless');
     resolveDisableMcpMock.mockReturnValue(true);
 
     build({ rounds: 1 });
 
     expect(resolveAgentMock).toHaveBeenCalledWith('design', 'codex');
     expect(resolveModelMock).toHaveBeenCalledWith('design', 'gpt-5');
+    expect(resolveModeMock).toHaveBeenCalledWith('design', 'headless');
     expect(resolveDisableMcpMock).toHaveBeenCalledWith('design', undefined);
   });
 
