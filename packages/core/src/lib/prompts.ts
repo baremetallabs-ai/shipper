@@ -1,6 +1,7 @@
 import newPrompt from '../prompts/claude/new.md';
 import groomPrompt from '../prompts/claude/groom.md';
 import designPrompt from '../prompts/claude/design.md';
+import designAdversaryPrompt from '../prompts/claude/design_adversary.md';
 import planPrompt from '../prompts/claude/plan.md';
 import implementPrompt from '../prompts/claude/implement.md';
 import prOpenPrompt from '../prompts/claude/pr_open.md';
@@ -13,6 +14,7 @@ import setupRemediatePrompt from '../prompts/claude/setup_remediate.md';
 import codexNewPrompt from '../prompts/codex/new.md';
 import codexGroomPrompt from '../prompts/codex/groom.md';
 import codexDesignPrompt from '../prompts/codex/design.md';
+import codexDesignAdversaryPrompt from '../prompts/codex/design_adversary.md';
 import codexPlanPrompt from '../prompts/codex/plan.md';
 import codexImplementPrompt from '../prompts/codex/implement.md';
 import codexPrOpenPrompt from '../prompts/codex/pr_open.md';
@@ -25,6 +27,7 @@ import codexSetupRemediatePrompt from '../prompts/codex/setup_remediate.md';
 import copilotNewPrompt from '../prompts/copilot/new.md';
 import copilotGroomPrompt from '../prompts/copilot/groom.md';
 import copilotDesignPrompt from '../prompts/copilot/design.md';
+import copilotDesignAdversaryPrompt from '../prompts/copilot/design_adversary.md';
 import copilotPlanPrompt from '../prompts/copilot/plan.md';
 import copilotImplementPrompt from '../prompts/copilot/implement.md';
 import copilotPrOpenPrompt from '../prompts/copilot/pr_open.md';
@@ -39,6 +42,7 @@ export const agentPrompts: Record<string, Record<string, string>> = {
     'new.md': newPrompt,
     'groom.md': groomPrompt,
     'design.md': designPrompt,
+    'design_adversary.md': designAdversaryPrompt,
     'plan.md': planPrompt,
     'implement.md': implementPrompt,
     'pr_open.md': prOpenPrompt,
@@ -52,6 +56,7 @@ export const agentPrompts: Record<string, Record<string, string>> = {
     'new.md': codexNewPrompt,
     'groom.md': codexGroomPrompt,
     'design.md': codexDesignPrompt,
+    'design_adversary.md': codexDesignAdversaryPrompt,
     'plan.md': codexPlanPrompt,
     'implement.md': codexImplementPrompt,
     'pr_open.md': codexPrOpenPrompt,
@@ -65,6 +70,7 @@ export const agentPrompts: Record<string, Record<string, string>> = {
     'new.md': copilotNewPrompt,
     'groom.md': copilotGroomPrompt,
     'design.md': copilotDesignPrompt,
+    'design_adversary.md': copilotDesignAdversaryPrompt,
     'plan.md': copilotPlanPrompt,
     'implement.md': copilotImplementPrompt,
     'pr_open.md': copilotPrOpenPrompt,

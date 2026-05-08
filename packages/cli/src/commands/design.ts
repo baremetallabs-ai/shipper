@@ -1,8 +1,10 @@
 import {
+  adversarialInvoker,
   autoSelectIssue,
   generateBranchName,
   getRepoRoot,
   getSettings,
+  isDesignAdversaryEnabled,
   logger,
   resolveBaseBranch,
   resolveMode,
@@ -21,6 +23,18 @@ export async function runDesignStage(
   disableMcp?: boolean
 ): Promise<StageRunResult> {
   const effectiveMode = resolveMode('design', mode);
+  const baseRunPromptOpts = { repo, issueRef: issue, mode, agent, model, disableMcp };
+  const invoker = isDesignAdversaryEnabled()
+    ? adversarialInvoker({
+        primary: 'design',
+        adversary: 'design_adversary',
+        rounds: 1,
+        repo,
+        issueNumber: issue,
+        baseRunPromptOpts,
+      })
+    : simpleInvoker({ promptName: 'design', baseRunPromptOpts });
+
   return await runStageScaffold({
     repo,
     issueNumber: issue,
@@ -36,10 +50,7 @@ export async function runDesignStage(
       const baseBranch = await resolveBaseBranch(repo, settings.defaultBaseBranch);
       return { repoRoot, branch, baseBranch };
     },
-    invoker: simpleInvoker({
-      promptName: 'design',
-      baseRunPromptOpts: { repo, issueRef: issue, mode, agent, model, disableMcp },
-    }),
+    invoker,
   });
 }
 

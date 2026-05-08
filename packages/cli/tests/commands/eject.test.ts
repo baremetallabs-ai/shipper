@@ -101,13 +101,14 @@ describe('ejectCommand', () => {
   it('writes all workflow prompts and excludes setup.md when no name is provided', () => {
     ejectCommand();
 
-    expect(writeFileSyncMock).toHaveBeenCalledTimes(9);
+    expect(writeFileSyncMock).toHaveBeenCalledTimes(10);
 
     const writtenPaths = writeFileSyncMock.mock.calls.map((call) => call[0]);
     expect(writtenPaths).toEqual([
       path.resolve('.shipper', 'prompts', 'claude', 'new.md'),
       path.resolve('.shipper', 'prompts', 'claude', 'groom.md'),
       path.resolve('.shipper', 'prompts', 'claude', 'design.md'),
+      path.resolve('.shipper', 'prompts', 'claude', 'design_adversary.md'),
       path.resolve('.shipper', 'prompts', 'claude', 'plan.md'),
       path.resolve('.shipper', 'prompts', 'claude', 'implement.md'),
       path.resolve('.shipper', 'prompts', 'claude', 'pr_open.md'),
@@ -119,14 +120,14 @@ describe('ejectCommand', () => {
     expect(writtenPaths.some((writtenPath) => writtenPath.endsWith('setup_remediate.md'))).toBe(
       false
     );
-    expect(logSpy).toHaveBeenCalledWith('[shipper] Summary: wrote 9, skipped 0');
+    expect(logSpy).toHaveBeenCalledWith('[shipper] Summary: wrote 10, skipped 0');
   });
 
   it('throws a helpful error for invalid prompt names', () => {
     expect(() => {
       ejectCommand('not-a-prompt');
     }).toThrow(
-      'Error: Invalid prompt name "not-a-prompt". Valid prompt names: new, groom, design, plan, implement, pr-open, pr-review, pr-remediate, unblock, setup'
+      'Error: Invalid prompt name "not-a-prompt". Valid prompt names: new, groom, design, design-adversary, plan, implement, pr-open, pr-review, pr-remediate, unblock, setup'
     );
     expect(errorSpy).not.toHaveBeenCalled();
     expect(writeFileSyncMock).not.toHaveBeenCalled();
@@ -138,6 +139,6 @@ describe('ejectCommand', () => {
     ejectCommand();
 
     expect(writeFileSyncMock).not.toHaveBeenCalled();
-    expect(logSpy).toHaveBeenCalledWith('[shipper] Summary: wrote 0, skipped 9');
+    expect(logSpy).toHaveBeenCalledWith('[shipper] Summary: wrote 0, skipped 10');
   });
 });

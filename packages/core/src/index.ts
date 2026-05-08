@@ -29,7 +29,12 @@ export {
   writeDesktopControlState,
 } from './lib/desktop-control.js';
 export { PAUSED_EXIT_CODE, RETRIABLE_FAILURE_EXIT_CODE } from './lib/exit-codes.js';
-export { MCP_GROOMING_FLAG, isMcpGroomingEnabled } from './lib/feature-flags.js';
+export {
+  DESIGN_ADVERSARY_FLAG,
+  MCP_GROOMING_FLAG,
+  isDesignAdversaryEnabled,
+  isMcpGroomingEnabled,
+} from './lib/feature-flags.js';
 export { gh } from './lib/gh.js';
 export { GhPayloadError } from './lib/gh-json.js';
 export type { MergeQueueSearchNode, PrViewForMerge } from './lib/gh-schemas.js';
@@ -196,7 +201,12 @@ export {
 } from './lib/settings.js';
 export { sleepMs } from './lib/sleep.js';
 export type { StageRunResult, StageScaffoldOpts } from './lib/stage-scaffold.js';
-export { runStageScaffold, simpleInvoker, transportInvoker } from './lib/stage-scaffold.js';
+export {
+  adversarialInvoker,
+  runStageScaffold,
+  simpleInvoker,
+  transportInvoker,
+} from './lib/stage-scaffold.js';
 export type { LabelTransition, Verdict } from './lib/stage-transitions.js';
 export { resolveTransition } from './lib/stage-transitions.js';
 export { isPlainObject } from './lib/type-guards.js';
