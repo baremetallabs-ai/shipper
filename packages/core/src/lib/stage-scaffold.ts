@@ -17,7 +17,7 @@ import {
 import type { DiffFileHunks } from './output-protocol/diff-parse.js';
 import { runPrompt, type RunPromptOpts } from './prompt-runner.js';
 import type { ResultJson } from './result-schema.js';
-import { resolveAgent, resolveDisableMcp, resolveModel } from './settings.js';
+import { resolveAgent, resolveDisableMcp, resolveMode, resolveModel } from './settings.js';
 import { formatConflictContext, withGitTransport, withWorktree } from './worktree.js';
 import { execAsync, formatCommandFailure } from './worktree/helpers.js';
 
@@ -127,11 +127,12 @@ export function adversarialInvoker(args: {
     const resetTarget = `origin/${baseBranch}`;
 
     // Resolve once using the primary step name so the adversary inherits the same
-    // settings (agent, model, disableMcp) when the user has set commands.design.* —
+    // settings (agent, model, mode, disableMcp) when the user has set commands.design.* —
     // otherwise resolveAgent('design_adversary', ...) would fall back to defaults.
     const resolved = {
       agent: resolveAgent(args.primary, args.baseRunPromptOpts.agent),
       model: resolveModel(args.primary, args.baseRunPromptOpts.model),
+      mode: resolveMode(args.primary, args.baseRunPromptOpts.mode),
       disableMcp: resolveDisableMcp(args.primary, args.baseRunPromptOpts.disableMcp),
     };
     const sharedOpts: StageRunPromptOpts = {
@@ -194,34 +195,42 @@ export function adversarialInvoker(args: {
 
     return {
       initial: async (): Promise<number> => {
-        const code1 = await runPrimary();
-        if (code1 !== 0) return code1;
-        if (args.rounds <= 0) return 0;
+        try {
+          const code1 = await runPrimary();
+          if (code1 !== 0) return code1;
+          if (args.rounds <= 0) return 0;
 
-        for (let round = 1; round <= args.rounds; round++) {
-          // Validate the current designer output (round 1 designer on first iter,
-          // revise output on subsequent iters).
-          const designOutcome = await inspectIntermediate();
-          if (designOutcome.kind === 'invalid') return 1;
-          if (designOutcome.kind === 'reject') return 0;
+          for (let round = 1; round <= args.rounds; round++) {
+            // Validate the current designer output (round 1 designer on first iter,
+            // revise output on subsequent iters).
+            const designOutcome = await inspectIntermediate();
+            if (designOutcome.kind === 'invalid') return 1;
+            if (designOutcome.kind === 'reject') return 0;
 
-          await postComment(args.repo, args.issueNumber, designOutcome.commentPath);
-          await resetWorktree();
+            await postComment(args.repo, args.issueNumber, designOutcome.commentPath);
+            await resetWorktree();
 
-          const codeAdv = await runAdversary();
-          if (codeAdv !== 0) return codeAdv;
+            const codeAdv = await runAdversary();
+            if (codeAdv !== 0) return codeAdv;
 
-          const advOutcome = await inspectAdversary();
-          if (advOutcome.kind !== 'accept') return 1;
+            const advOutcome = await inspectAdversary();
+            if (advOutcome.kind !== 'accept') return 1;
 
-          await postComment(args.repo, args.issueNumber, advOutcome.commentPath);
-          await resetWorktree();
+            await postComment(args.repo, args.issueNumber, advOutcome.commentPath);
+            await resetWorktree();
 
-          const codeRevise = await runPrimary();
-          if (codeRevise !== 0) return codeRevise;
+            const codeRevise = await runPrimary();
+            if (codeRevise !== 0) return codeRevise;
+          }
+
+          return 0;
+        } catch (error) {
+          // postComment / resetWorktree can throw on transient git or GitHub failures.
+          // Convert to a non-zero exit code so the scaffold's existing crash-handling
+          // path posts a crash comment rather than letting the exception escape.
+          logger.error(`Adversarial loop failed: ${toErrorMessage(error)}`);
+          return 1;
         }
-
-        return 0;
       },
       retry: async (userInput) => await runPrimary(userInput),
     };
