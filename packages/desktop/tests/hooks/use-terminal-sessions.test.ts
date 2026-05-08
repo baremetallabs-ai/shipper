@@ -23,13 +23,15 @@ function renderTerminalSessions({
   refreshIssuesForActiveRepo?: ReturnType<typeof vi.fn>;
   setFetchError?: ReturnType<typeof vi.fn>;
 } = {}) {
-  const hook = renderHook(() =>
-    useTerminalSessions({
-      activeRepo,
-      pushToast,
-      refreshIssuesForActiveRepo,
-      setFetchError,
-    })
+  const hook = renderHook(
+    ({ activeRepo: currentActiveRepo }: { activeRepo: string }) =>
+      useTerminalSessions({
+        activeRepo: currentActiveRepo,
+        pushToast,
+        refreshIssuesForActiveRepo,
+        setFetchError,
+      }),
+    { initialProps: { activeRepo } }
   );
 
   return {
@@ -273,6 +275,7 @@ describe('useTerminalSessions', () => {
     expect(result.current.sessions).toHaveLength(0);
     expect(pushToast).toHaveBeenCalledWith(
       expect.objectContaining({
+        id: 'discard-unlock-error-pty-1',
         sessionId: '',
         variant: 'error',
         title: 'Failed to unlock issue #11',
@@ -313,6 +316,7 @@ describe('useTerminalSessions', () => {
     expect(result.current.sessions).toHaveLength(0);
     expect(pushToast).toHaveBeenCalledWith(
       expect.objectContaining({
+        id: 'discard-unlock-error-pty-1',
         sessionId: '',
         variant: 'error',
         title: 'Failed to unlock issue #11',
@@ -320,6 +324,39 @@ describe('useTerminalSessions', () => {
       })
     );
     expect(refreshIssuesForActiveRepo).toHaveBeenCalledWith('owner/repo');
+  });
+
+  it('skips issue refresh when the discarded session repo is no longer active', async () => {
+    const shipper = createMockShipperApi();
+    shipper.install();
+    const { result, rerender, refreshIssuesForActiveRepo } = renderTerminalSessions();
+    vi.mocked(shipper.api.ptyCloseState).mockResolvedValueOnce({
+      state: 'requires-discard-confirmation',
+    });
+
+    act(() => {
+      result.current.openRunningSession('pty-1', 'groom - #11', {
+        repo: 'owner/repo',
+        issueNumber: 11,
+      });
+    });
+    await flushHookEffects();
+
+    act(() => {
+      result.current.handleCloseSession('pty-1');
+    });
+    await flushHookEffects();
+
+    rerender({ activeRepo: 'owner/other' });
+
+    await act(async () => {
+      await result.current.handleConfirmCloseSession();
+    });
+
+    expect(shipper.api.ptyForceKill).toHaveBeenCalledWith('pty-1');
+    expect(shipper.api.unlockIssue).toHaveBeenCalledWith('owner/repo', 11);
+    expect(result.current.sessions).toHaveLength(0);
+    expect(refreshIssuesForActiveRepo).not.toHaveBeenCalled();
   });
 
   it('finalizes result-present and setup sessions without removing the tab', async () => {
