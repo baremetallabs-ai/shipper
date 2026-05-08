@@ -6,9 +6,6 @@ args:
   - opus
   - --permission-mode
   - acceptEdits
-  - --settings
-  # prettier-ignore
-  - {"permissions":{"allow":["Bash(git add *)","Bash(git commit *)","Bash(./.shipper/scripts/install-deps.sh)","WebSearch"]},"sandbox":{"enabled":true,"autoAllowBashIfSandboxed":true,"excludedCommands":["git add *","git commit *","./.shipper/scripts/install-deps.sh"],"network":{"allowedDomains":["registry.npmjs.org","fonts.googleapis.com","fonts.gstatic.com","cdn.jsdelivr.net","unpkg.com","cdnjs.cloudflare.com","*.vercel.com"]}}}
 append-pr: true
 ---
 

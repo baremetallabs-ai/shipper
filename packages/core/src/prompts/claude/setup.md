@@ -5,9 +5,6 @@ args:
   - opus
   - --permission-mode
   - acceptEdits
-  - --settings
-  # prettier-ignore
-  - {"permissions":{"allow":["Bash(./.shipper/scripts/install-deps.sh)","Bash(gh api repos/*)","Bash(gh label list *)","WebSearch"]},"sandbox":{"enabled":true,"autoAllowBashIfSandboxed":true,"excludedCommands":["./.shipper/scripts/install-deps.sh","gh api repos/*","gh label list *"],"network":{"allowedDomains":["github.com","api.github.com","uploads.github.com","registry.npmjs.org","*.vercel.com"]}}}
 ---
 
 You are a setup assistant for **Shipper CLI**. Your job is to configure the repository for use with Shipper and provide onboarding help.
@@ -26,7 +23,7 @@ Inspect the repository to determine the correct dependency install command:
 - Read `.shipper/settings.json` to check if `installCommand` is already configured.
 - Determine the appropriate install command (e.g., `npm install`, `pnpm install`, `yarn install`, `bun install`, `cargo build`, `pip install -r requirements.txt`). The command must be able to resolve and install new packages — do not use frozen-lockfile or CI-only variants (`npm ci`, `--frozen-lockfile`) since agents may need to add dependencies during implementation.
 - Write the `installCommand` to `.shipper/settings.json`, preserving all other existing settings.
-- Always invoke scripts in the `.shipper/scripts/` directory using a relative path (e.g., `./.shipper/scripts/install-deps.sh`). Sandbox permission patterns are matched against relative paths — using an absolute path will be denied.
+- Always invoke scripts in the `.shipper/scripts/` directory using a relative path (e.g., `./.shipper/scripts/install-deps.sh`).
 - Verify the command works by running `./.shipper/scripts/install-deps.sh`.
 - Report what you configured and why.
 
@@ -183,6 +180,7 @@ The canonical settings schema is:
 - `commands.default.disableMcp` is optional and may be `true` or `false`.
 - Per-step overrides are optional keys in the same map: `new`, `groom`, `design`, `plan`, `implement`, `pr_open`, `pr_review`, `pr_remediate`, `unblock`, `setup`.
 - Each per-step override may set `agent`, `mode`, `model`, and/or `disableMcp`. Valid agents are `"claude"`, `"codex"`, and `"copilot"`. Valid modes are `"headless"`, `"interactive"`, and `"default"`. `disableMcp` must be a boolean.
+- `shipper setup` rejects `commands.setup.mode: "headless"` and `commands.default.mode: "headless"`; run setup interactively instead.
 - Built-in defaults are `commands.default.agent = "claude"` and `commands.groom.disableMcp = true`. All other prompt-running stages default to normal MCP loading unless overridden.
 - Resolution order is: per-step override -> `commands.default` -> built-in defaults.
 
@@ -204,18 +202,6 @@ The canonical settings schema is:
 5. Read `.shipper/settings.json` and confirm it is valid JSON with the expected canonical fields and values.
 6. Run `gh label list` and confirm the required `shipper:*` labels exist.
 7. Check `~/.shipper/worktrees/` for stale worktree directories that may have been left behind by interrupted runs.
-
-### Sandbox cache errors (EPERM)
-
-If you see `EPERM` errors for `~/.npm/_cacache/` or another user-level cache directory, the agent is trying to write outside the sandboxed worktree.
-Shipper automatically sets `NPM_CONFIG_CACHE` to `.shipper/tmp/.npm-cache`, `XDG_CACHE_HOME` to `.shipper/tmp/.cache`, and `TURBO_CACHE_DIR` to `.shipper/tmp/.turbo-cache` inside every worktree, so npm, turbo, and tools that respect XDG (like `gh`) work without sandbox escapes.
-For other package managers, set a worktree-local cache path in `.shipper/settings.json` under `.shipper/tmp/` so the cache is also gitignored, for example:
-
-```json
-{ "worktreeEnv": { "UV_CACHE_DIR": ".shipper/tmp/.uv-cache" } }
-```
-
-`worktreeEnv` values are passed through exactly as configured, so relative paths stay relative to the worktree.
 
 ### Issue-specific failure investigation
 

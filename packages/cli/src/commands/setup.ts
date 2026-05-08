@@ -17,6 +17,13 @@ export async function setupCommand(
   options: { mode?: CommandMode; agent?: AgentName; model?: string; disableMcp?: boolean } = {}
 ): Promise<void> {
   const effectiveMode = resolveMode('setup', options.mode);
+  if (effectiveMode === 'headless') {
+    throw new Error(
+      'Error: shipper setup does not support headless mode. Run setup interactively, or remove ' +
+        '"commands.setup.mode": "headless" / "commands.default.mode": "headless" from .shipper/settings.json.'
+    );
+  }
+
   const settings = getSettings();
   const effectiveAgent =
     options.agent ?? settings.commands.setup?.agent ?? settings.commands.default.agent;
@@ -46,11 +53,6 @@ export async function setupCommand(
   process.exitCode = setupExitCode;
 
   if (setupExitCode !== 0) {
-    return;
-  }
-
-  if (effectiveMode === 'headless') {
-    process.exitCode = 0;
     return;
   }
 

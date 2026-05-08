@@ -199,8 +199,6 @@ Body text here.`;
       '../../src/prompts/claude/implement.md',
       '../../src/prompts/claude/pr_open.md',
       '../../src/prompts/claude/pr_remediate.md',
-      '../../src/prompts/claude/setup_remediate.md',
-      '../../src/prompts/claude/setup.md',
     ];
 
     for (const promptPath of promptPaths) {
@@ -220,25 +218,66 @@ Body text here.`;
     }
   });
 
-  it('requires gh api repos sandbox access in the Claude setup prompt', () => {
+  it('does not pass sandbox settings in the Claude setup prompts', () => {
+    const promptPaths = [
+      '../../src/prompts/claude/setup.md',
+      '../../src/prompts/claude/setup_remediate.md',
+    ];
+
+    for (const promptPath of promptPaths) {
+      const input = readFileSync(resolve(testDir, promptPath), 'utf8');
+      const result = parseFrontmatter(input);
+
+      expect(result.frontmatter.args, `${promptPath} must not pass --settings`).not.toContain(
+        '--settings'
+      );
+      expect(input, `${promptPath} must not contain sandbox configuration`).not.toMatch(/sandbox/i);
+      expect(input, `${promptPath} must not auto-allow sandboxed Bash`).not.toContain(
+        'autoAllowBashIfSandboxed'
+      );
+      expect(input, `${promptPath} must not mention stale cache troubleshooting`).not.toContain(
+        'Sandbox cache errors'
+      );
+    }
+  });
+
+  it('keeps the Claude setup permission posture without stale sandbox copy', () => {
     const input = readFileSync(resolve(testDir, '../../src/prompts/claude/setup.md'), 'utf8');
     const result = parseFrontmatter(input);
-    const settingsIndex = result.frontmatter.args.indexOf('--settings');
-    expect(settingsIndex).toBeGreaterThanOrEqual(0);
 
-    const settingsArg = result.frontmatter.args[settingsIndex + 1];
-    expect(settingsArg).toBeDefined();
-    if (settingsArg === undefined) {
-      throw new Error('Claude setup prompt is missing the settings payload');
+    expect(result.frontmatter.args).toContain('--permission-mode');
+    expect(result.frontmatter.args).toContain('acceptEdits');
+    expect(input).not.toContain('Sandbox permission patterns');
+    expect(input).not.toContain('sandboxed worktree');
+    expect(input).not.toContain('using an absolute path will be denied');
+  });
+
+  it('keeps the Claude setup remediation transport and permission posture', () => {
+    const input = readFileSync(
+      resolve(testDir, '../../src/prompts/claude/setup_remediate.md'),
+      'utf8'
+    );
+    const result = parseFrontmatter(input);
+
+    expect(result.frontmatter.args).toContain('-p');
+    expect(result.frontmatter.args).toContain('--permission-mode');
+    expect(result.frontmatter.args).toContain('acceptEdits');
+    expect(result.frontmatter['append-pr']).toBe(true);
+  });
+
+  it('keeps Codex and Copilot setup frontmatter unchanged', () => {
+    const promptPaths = [
+      { path: '../../src/prompts/codex/setup.md', cmd: 'codex' },
+      { path: '../../src/prompts/copilot/setup.md', cmd: 'copilot' },
+    ];
+
+    for (const { path: promptPath, cmd } of promptPaths) {
+      const input = readFileSync(resolve(testDir, promptPath), 'utf8');
+      const result = parseFrontmatter(input);
+
+      expect(result.frontmatter.cmd).toBe(cmd);
+      expect(result.frontmatter.args).toEqual([]);
     }
-
-    const settings = JSON.parse(settingsArg) as {
-      permissions?: { allow?: string[] };
-      sandbox?: { excludedCommands?: string[] };
-    };
-
-    expect(settings.permissions?.allow).toContain('Bash(gh api repos/*)');
-    expect(settings.sandbox?.excludedCommands).toContain('gh api repos/*');
   });
 
   it('requires append-pr on the setup remediation prompts', () => {
