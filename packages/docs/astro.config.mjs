@@ -59,6 +59,7 @@ export default defineConfig({
           items: [
             { label: 'Recipes', slug: 'guides/recipes' },
             { label: 'Desktop', slug: 'guides/desktop' },
+            { label: 'MCP setup', slug: 'guides/mcp-setup' },
           ],
         },
         {

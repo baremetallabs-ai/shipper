@@ -5,7 +5,7 @@ description: 'Reference for every shipper MCP server tool.'
 
 # MCP
 
-Shipper exposes its workflow operations to AI agents via an MCP server. Each tool below has a dedicated reference page covering schema, examples, and error modes.
+Shipper exposes its workflow operations to AI agents via an MCP server. Each tool below has a dedicated reference page covering schema, examples, and error modes. If you need to connect the server first, start with the [MCP setup guide](/guides/mcp-setup/).
 
 ## Documentation
 
