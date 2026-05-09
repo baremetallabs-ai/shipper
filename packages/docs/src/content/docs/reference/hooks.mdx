@@ -1,0 +1,88 @@
+---
+title: Hooks
+description: Supported Shipper hook files, runtime context, and failure behavior.
+---
+
+Hooks are executable files under `.shipper/hooks/`. Shipper runs a hook only when a supported
+filename exists and the file is executable.
+
+## Stage hooks
+
+Stage hooks run immediately before or after a supported Shipper workflow stage.
+
+| Stage          | Pre-stage hook     | Post-stage hook     |
+| -------------- | ------------------ | ------------------- |
+| `new`          | `pre-new`          | `post-new`          |
+| `groom`        | `pre-groom`        | `post-groom`        |
+| `design`       | `pre-design`       | `post-design`       |
+| `plan`         | `pre-plan`         | `post-plan`         |
+| `implement`    | `pre-implement`    | `post-implement`    |
+| `pr-open`      | `pre-pr-open`      | `post-pr-open`      |
+| `pr-review`    | `pre-pr-review`    | `post-pr-review`    |
+| `pr-remediate` | `pre-pr-remediate` | `post-pr-remediate` |
+| `merge`        | `pre-merge`        | `post-merge`        |
+
+The stage names `setup`, `unblock`, `adopt`, `reset`, and `init` do not fire stage hooks.
+Creating files such as `.shipper/hooks/pre-unblock` or `.shipper/hooks/post-init` will not run.
+
+## Worktree lifecycle hooks
+
+Worktree lifecycle hooks are separate from `pre-<stage>` and `post-<stage>` hooks.
+
+| Hook                | Workflow point                                                                                  |
+| ------------------- | ----------------------------------------------------------------------------------------------- |
+| `worktree-setup`    | Runs after Shipper creates a temporary worktree and after the dependency-install step finishes. |
+| `worktree-teardown` | Runs during cleanup before Shipper removes the temporary worktree.                              |
+
+These hooks run for temporary worktrees created by `new`, `groom`, `design`, `plan`, `implement`,
+`pr-open`, `pr-review`, and `pr-remediate`. They do not run for `merge`, `setup`, `unblock`,
+`adopt`, `reset`, or `init`.
+
+## Exit codes
+
+| Hook type           | Non-zero exit behavior |
+| ------------------- | ---------------------- |
+| `pre-<stage>`       | Aborts the stage.      |
+| `post-<stage>`      | Warns and continues.   |
+| `worktree-setup`    | Warns and continues.   |
+| `worktree-teardown` | Warns and continues.   |
+
+## Timeouts
+
+Shipper enforces hook timeouts with the `hookTimeoutMinutes` setting. The default is `10` minutes.
+Set it to `0` to disable timeout enforcement.
+
+| Hook type           | Timeout behavior       |
+| ------------------- | ---------------------- |
+| `pre-<stage>`       | Aborts the stage.      |
+| `post-<stage>`      | Warns and continues.   |
+| `worktree-setup`    | Aborts worktree setup. |
+| `worktree-teardown` | Warns and continues.   |
+
+## Cancellation
+
+SIGINT or SIGTERM cancellation always aborts the current Shipper operation, including hooks that
+otherwise warn and continue on non-zero exit or timeout.
+
+## Non-executable files
+
+If a supported hook file exists but is not executable, Shipper warns and skips it without running
+it. Run `chmod +x .shipper/hooks/<hook-name>` to make the hook executable.
+
+## Runtime context
+
+Shipper passes runtime context to hook scripts through environment variables.
+
+| Hook type                | Variables                                                                               |
+| ------------------------ | --------------------------------------------------------------------------------------- |
+| Stage hooks              | `SHIPPER_STAGE`, `SHIPPER_ISSUE_NUMBER`, `SHIPPER_BRANCH_NAME`                          |
+| Worktree lifecycle hooks | `SHIPPER_STAGE`, `SHIPPER_ISSUE_NUMBER`, `SHIPPER_BRANCH_NAME`, `SHIPPER_WORKTREE_PATH` |
+
+`SHIPPER_ISSUE_NUMBER` is empty for the `new` stage because no issue exists yet.
+`SHIPPER_BRANCH_NAME` is the branch the stage is operating on.
+
+## Related: dependency install
+
+The configured `installCommand` runs inside new worktrees as an advisory step before
+`worktree-setup` and shares the `hookTimeoutMinutes` timeout setting. See
+[Settings](/reference/settings/) for full configuration semantics.

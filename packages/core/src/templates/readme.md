@@ -29,6 +29,18 @@ whether it is committed or ignored, see:
 
 https://shipper.baremetallabs.ai/reference/shipper-directory/
 
+## Hooks
+
+Hook scripts live in `.shipper/hooks/`.
+
+Pre-stage hooks: `pre-new`, `pre-groom`, `pre-design`, `pre-plan`, `pre-implement`,
+`pre-pr-open`, `pre-pr-review`, `pre-pr-remediate`, `pre-merge`.
+Post-stage hooks: `post-new`, `post-groom`, `post-design`, `post-plan`, `post-implement`,
+`post-pr-open`, `post-pr-review`, `post-pr-remediate`, `post-merge`.
+Worktree lifecycle hooks: `worktree-setup`, `worktree-teardown`.
+
+Hooks reference: https://shipper.baremetallabs.ai/reference/hooks/
+
 ## Workflow orientation
 
 Each issue progresses through Shipper's label-based workflow:
@@ -51,7 +63,7 @@ https://shipper.baremetallabs.ai/concepts/state-machine/
 
 - `.shipper directory`: https://shipper.baremetallabs.ai/reference/shipper-directory/
 - Settings: https://shipper.baremetallabs.ai/reference/settings/
-- Configure hooks: https://shipper.baremetallabs.ai/agents/cookbook/configure-hooks/
+- Hooks: https://shipper.baremetallabs.ai/reference/hooks/
 - Eject a prompt: https://shipper.baremetallabs.ai/agents/cookbook/eject-prompt/
 - CLI reference: https://shipper.baremetallabs.ai/reference/cli/
 - State machine: https://shipper.baremetallabs.ai/concepts/state-machine/

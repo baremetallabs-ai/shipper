@@ -49,6 +49,7 @@ export default defineConfig({
             { label: 'MCP', autogenerate: { directory: 'reference/mcp' } },
             { label: 'Settings', slug: 'reference/settings' },
             { label: '.shipper directory', slug: 'reference/shipper-directory' },
+            { label: 'Hooks', slug: 'reference/hooks' },
             { label: 'Environment variables', slug: 'reference/environment-variables' },
             { label: 'Containers', slug: 'reference/containers' },
           ],
