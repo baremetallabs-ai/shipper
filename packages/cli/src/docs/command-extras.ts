@@ -78,6 +78,8 @@ export const commandExtras: Record<CommandPath, CommandExtras> = {
       '--push requires --autocommit',
       'shipper init owns committed .shipper/ artifacts in this repository; rerun it and ' +
         'commit the resulting .shipper/ changes when the init drift guard reports drift',
+      'For the files and directories written by shipper init, see ' +
+        '[.shipper directory](/reference/shipper-directory/).',
       troubleshootingWorkflowLabels,
       troubleshootingVersionMismatch,
     ],

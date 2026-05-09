@@ -1,0 +1,132 @@
+---
+title: .shipper directory
+description: Repository-local Shipper directory layout, creation paths, and version-control expectations.
+---
+
+The `.shipper/` directory stores repository-local Shipper configuration and stage I/O. Some entries
+are shared team configuration that should stay trackable in git. Others are local overrides or
+generated runtime artifacts that should stay out of version control.
+
+Committed `.shipper/` entries should remain visible to git. Runtime ignores belong in
+`.shipper/.gitignore`, not in a repository rule that hides the whole `.shipper/` directory.
+
+## Standard entries
+
+### `settings.json`
+
+- **Purpose:** Shared repository configuration for Shipper.
+- **Created or updated by:** `shipper init` writes and rewrites the file. Users and setup flows edit
+  it when configuration should be shared by the team.
+- **Version control:** Committed. The schema, defaults, and precedence rules are documented in
+  [Settings](/reference/settings/).
+
+### `settings.local.json`
+
+- **Purpose:** Machine-local overrides for Shipper settings.
+- **Created or updated by:** Users create and edit the file when a setting should apply only on one
+  machine. Shipper reads it after `settings.json`.
+- **Version control:** Gitignored by `.shipper/.gitignore`; not committed. Override precedence is
+  documented in [Settings](/reference/settings/).
+
+### `prompts/<agent>/`
+
+- **Purpose:** Repository prompt overrides for the configured coding agent.
+- **Created or updated by:** `shipper eject` creates the agent directory and prompt files under the
+  configured agent name. Users edit those files to override bundled prompts.
+- **Version control:** Not ignored by Shipper. Commit these files when the team intentionally shares
+  prompt overrides. The prompt override contract belongs in
+  [Eject a prompt](/agents/cookbook/eject-prompt/).
+
+### `hooks/`
+
+- **Purpose:** Executable hook scripts that run around Shipper stages and worktree lifecycle events.
+- **Created or updated by:** `shipper init` creates the directory on disk. Users add executable hook
+  scripts.
+- **Version control:** Not ignored by Shipper. Commit hook scripts when they are shared automation.
+  An empty directory is not represented in git. Hook names and semantics belong in
+  [Configure hooks](/agents/cookbook/configure-hooks/).
+
+### `scripts/`
+
+- **Purpose:** Init-managed helper scripts used by Shipper runs.
+- **Created or updated by:** `shipper init` creates the directory and writes helper scripts,
+  currently including `install-deps.sh`.
+- **Version control:** Committed shared helpers. These files are covered by the init drift guard.
+
+### `tmp/`
+
+- **Purpose:** Temporary caches and scratch data, including worktree dependency caches created by
+  configured commands.
+- **Created or updated by:** `shipper init` creates the directory. Shipper and configured commands
+  may write temporary data there during local runs.
+- **Version control:** Gitignored by `.shipper/.gitignore`; not committed.
+
+### `input/`
+
+- **Purpose:** Per-stage context files that Shipper provides to agents.
+- **Created or updated by:** `shipper init` creates the directory and writes `input/.gitkeep`.
+  Runtime code writes context files there during stage runs.
+- **Version control:** `input/.gitkeep` is committed so the directory exists in fresh checkouts. All
+  other `input/*` files are ignored by `.shipper/.gitignore`.
+
+Representative runtime files include `pr-diff.patch`, `pr-files.json`, `pr-metadata.json`,
+`review-threads.json`, `ci-status.json`, `ci-log-*.txt`, `pass-info.json`, `dependencies.md`,
+`conflict-context.txt`, `push-error.txt`, `install-error.txt`, and
+`groom-post-flight-failure.txt`. This list is not exhaustive.
+
+### `output/`
+
+- **Purpose:** Stage protocol outputs written by agents for Shipper to consume.
+- **Created or updated by:** `shipper init` creates the directory and writes `output/.gitkeep`.
+  Agents write result, comment, and payload artifacts there during stage runs.
+- **Version control:** `output/.gitkeep` is committed so the directory exists in fresh checkouts. All
+  other `output/*` files are ignored by `.shipper/.gitignore`.
+
+Representative runtime files include `result.json`, `comment-<number>.md`,
+`grooming-comment-<number>.md`, `groom-<number>.json`, `blocked-comment-<number>.md`,
+`issue-body-<number>.md`, `child-<number>-1-body.md`, `pr-body-<number>.md`,
+`pr-spec-<number>.json`, `review-payload-<number>.json`, and `replies/<comment-id>.md`. This list
+is not exhaustive.
+
+### `README.md`
+
+- **Purpose:** Short local orientation for someone opening `.shipper/` in an initialized
+  repository.
+- **Created or updated by:** `shipper init` writes the file from Shipper's README template.
+- **Version control:** Gitignored by `.shipper/.gitignore`; not committed.
+
+### `.gitignore`
+
+- **Purpose:** Runtime ignore rules for generated `.shipper/` files.
+- **Created or updated by:** `shipper init` writes the file.
+- **Version control:** Committed.
+
+The current runtime ignore contract is exactly:
+
+```text
+tmp/
+settings.local.json
+README.md
+input/*
+!input/.gitkeep
+output/*
+!output/.gitkeep
+```
+
+## Worktree-only artifacts
+
+Files such as `.shipper/defer-bridge.mjs` may appear inside ephemeral stage worktrees. They are
+written per worktree by Shipper worktree plumbing, are not shared repository configuration, and
+should not be committed.
+
+Do not treat these files as part of the repository-local `.shipper/` contract. They stay out of
+version control because they are worktree artifacts, not because `.shipper/.gitignore` names each
+file. Cooperating files may also appear outside `.shipper/`, such as `.claude/settings.json`, but
+those files are outside this page's scope.
+
+## Project-root `.gitignore`
+
+The repository's top-level `.gitignore` should not ignore `.shipper/` wholesale. Committed entries
+such as `.shipper/settings.json`, `.shipper/.gitignore`, `.shipper/scripts/install-deps.sh`,
+`.shipper/input/.gitkeep`, and `.shipper/output/.gitkeep` must stay trackable. Keep runtime
+artifact rules in `.shipper/.gitignore` instead.
