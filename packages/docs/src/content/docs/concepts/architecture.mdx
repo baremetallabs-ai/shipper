@@ -100,11 +100,13 @@ bundled docs, then an absolute `SHIPPER_DOCS_PATH` fallback. The
 The tools in `packages/mcp/src/tools.ts` fall into three implementation classes. Direct
 GitHub-backed helpers call core `gh` utilities without spawning `shipper`, including
 `shipper_list_issues`, `shipper_get_issue`, `shipper_get_pr_checks`, `shipper_adopt`, and
-`shipper_unlock`. Direct in-process core helpers include `shipper_docs_search`, `shipper_docs_get`,
-and `shipper_reset` via `executeReset`. Workflow-changing agent work such as `shipper_advance`,
-experimental `shipper_groom`, `shipper_create_issue`, `shipper_unblock`, and `shipper_merge` spawns
-headless `shipper` CLI runs. The [MCP reference](/reference/mcp/) owns the per-tool surface, while
-[MCP setup](/guides/mcp-setup/) owns client setup.
+`shipper_unlock`. Direct in-process helpers include `shipper_docs_search`, `shipper_docs_get`,
+`shipper_reset` via `executeReset`, and `shipper_answer_question` for resuming pending headless
+sessions. Workflow-changing tools spawn CLI subprocesses: `shipper_advance`, experimental
+`shipper_groom`, `shipper_create_issue`, and `shipper_unblock` use headless mode for agent-backed
+work, while `shipper_merge` runs `shipper merge --once` for ready PRs. The
+[MCP reference](/reference/mcp/) owns the per-tool surface, while [MCP setup](/guides/mcp-setup/)
+owns client setup.
 
 ## Workflow state
 
