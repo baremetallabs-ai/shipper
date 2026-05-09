@@ -113,11 +113,15 @@ only the absolute Shipper checkout path and target repository path:
 command = "node"
 args = ["/absolute/path/to/shipper/packages/mcp/dist/index.js"]
 startup_timeout_sec = 30
-tool_timeout_sec = 300
+tool_timeout_sec = 86400
 
 [mcp_servers.shipper.env]
 SHIPPER_REPO_DIR = "/absolute/path/to/target/repo"
 ```
+
+The example uses a 24-hour tool timeout so Codex does not interrupt long-running Shipper workflow
+tools such as implementation, review, or merge stages. Lower it only when you intentionally want a
+client-side cutoff.
 
 If you deliberately want startup cwd to select the repository, omit `SHIPPER_REPO_DIR` and set
 `cwd = "/absolute/path/to/target/repo"` under `[mcp_servers.shipper]`. Keep explicit
@@ -165,16 +169,20 @@ For expected tool visibility problems, see
 
 ## Startup failures
 
-The server starts with error-reporting tools when startup cannot complete. The recovery path depends
-on the startup failure:
+The server starts with error-reporting tools when startup cannot complete. The tool output includes
+the exact initialization error; use that message as the source of truth. Common recovery paths are:
 
 - Missing or unreadable repo dir: fix the `SHIPPER_REPO_DIR` path or permissions, or remove
   `SHIPPER_REPO_DIR` and start the client from the repository.
 - Target path is not a Git repository: point `SHIPPER_REPO_DIR` at the repository root, or clone or
   initialize the repository before starting the MCP server.
+- GitHub CLI is not installed: install `gh` from [cli.github.com](https://cli.github.com/), then
+  restart the MCP client.
 - GitHub CLI not authenticated: run `gh auth login`, or provide `GH_TOKEN` or `GITHUB_TOKEN` in the
   MCP server environment and verify `gh auth status`. See
   [GitHub Authentication Problems](/troubleshooting/common-errors/#github-authentication-problems).
+- GitHub repository cannot be resolved: make sure the target repository has a GitHub remote that
+  `gh repo view` can read from inside the repo, then restart the MCP client.
 - Shipper preflight failure: run `shipper init` in the target repository and fix missing
   [.shipper artifacts](/reference/shipper-directory/) or workflow labels before restarting the MCP
   client.
