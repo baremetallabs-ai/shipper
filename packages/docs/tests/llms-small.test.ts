@@ -42,7 +42,7 @@ describe('llms-small corpus', () => {
         slug: 'concepts/architecture',
         heading: 'Architecture',
         description:
-          'How Shipper CLI, core, desktop, MCP, worktrees, prompts, and GitHub labels fit together.',
+          'How the Shipper CLI, desktop app, MCP server, shared core model, and GitHub workflow state fit together.',
       },
       {
         slug: 'concepts/protocol',
