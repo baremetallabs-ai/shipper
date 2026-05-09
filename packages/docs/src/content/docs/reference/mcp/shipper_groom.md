@@ -7,7 +7,7 @@ flag: 'SHIPPER_EXPERIMENTAL_MCP_GROOMING'
 
 # shipper_groom
 
-Run grooming on a `shipper:new` issue in headless mode and bridge AskUserQuestion through MCP so the orchestrator answers the worker's clarifying questions via `shipper_answer_question`. Experimental — only registered when `isMcpGroomingEnabled()` returns true. Set `SHIPPER_EXPERIMENTAL_MCP_GROOMING` to enable.
+Run grooming on a `shipper:new` issue in headless mode and bridge AskUserQuestion through MCP so the orchestrator answers the worker's clarifying questions via `shipper_answer_question`. Experimental — only registered when `isMcpGroomingEnabled()` returns true. See [Experimental feature flags](/reference/environment-variables/#experimental-feature-flags) for `SHIPPER_EXPERIMENTAL_MCP_GROOMING` enablement.
 
 ## When to use
 

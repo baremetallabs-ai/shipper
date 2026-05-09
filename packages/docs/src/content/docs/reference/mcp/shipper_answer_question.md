@@ -7,7 +7,7 @@ flag: 'SHIPPER_EXPERIMENTAL_MCP_GROOMING'
 
 # shipper_answer_question
 
-Provide answers to a paused headless worker that called AskUserQuestion. The worker resumes with the supplied answers and continues until it either defers again (returning another awaiting_answer payload) or completes. Experimental — only registered when `isMcpGroomingEnabled()` returns true. Set `SHIPPER_EXPERIMENTAL_MCP_GROOMING` to enable.
+Provide answers to a paused headless worker that called AskUserQuestion. The worker resumes with the supplied answers and continues until it either defers again (returning another awaiting_answer payload) or completes. Experimental — only registered when `isMcpGroomingEnabled()` returns true. See [Experimental feature flags](/reference/environment-variables/#experimental-feature-flags) for `SHIPPER_EXPERIMENTAL_MCP_GROOMING` enablement.
 
 ## When to use
 

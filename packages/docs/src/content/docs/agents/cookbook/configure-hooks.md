@@ -49,13 +49,8 @@ under `.shipper/hooks/`.
 
 6. Read hook context from environment variables.
 
-   Stage hooks receive:
-   - `SHIPPER_STAGE`
-   - `SHIPPER_ISSUE_NUMBER`
-   - `SHIPPER_BRANCH_NAME`
-
-   Worktree hooks also receive:
-   - `SHIPPER_WORKTREE_PATH`
+   Use the [Hook context](/reference/environment-variables/#hook-context) reference to read the
+   values Shipper provides to stage and worktree hook scripts.
 
 7. Check related reference material.
 

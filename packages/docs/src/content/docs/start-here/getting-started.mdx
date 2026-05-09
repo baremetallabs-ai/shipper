@@ -13,8 +13,12 @@ For interactive use, authenticate with GitHub CLI:
 gh auth login
 ```
 
-For containers or CI, export `GH_TOKEN` or `GITHUB_TOKEN` in the environment where Shipper runs.
-See the [Containers reference](/reference/containers/) for the token and git credential helper path.
+For containers or CI, export
+[`GH_TOKEN` or `GITHUB_TOKEN`](/reference/environment-variables/#auth-tokens) in the environment
+where Shipper runs. See the [Containers reference](/reference/containers/) for the token and git
+credential helper path.
+For the full list of supported environment variables, see
+[Environment variables](/reference/environment-variables/).
 If authentication fails, start with the
 [GitHub authentication troubleshooting guide](/troubleshooting/common-errors/#github-authentication-problems).
 
