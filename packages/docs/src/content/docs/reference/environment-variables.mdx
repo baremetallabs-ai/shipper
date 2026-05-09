@@ -1,0 +1,123 @@
+---
+title: Environment variables
+description: Canonical reference for user-facing Shipper environment variables, including tokens, MCP configuration, runtime overrides, feature flags, and hook context.
+---
+
+This is the canonical reference for user-facing Shipper environment variables. Internal IPC,
+build-time, Electron, cache, and worktree implementation variables are intentionally excluded.
+
+## Auth tokens
+
+### `GH_TOKEN`
+
+| Field              | Value                                                                                                                                           |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Set by             | User, container runtime, or CI environment.                                                                                                     |
+| Read by            | Shipper CLI/MCP GitHub auth preflight in core.                                                                                                  |
+| Default when unset | Shipper relies on `gh auth login` or the existing GitHub CLI authentication available to the process.                                           |
+| Accepted values    | Any non-empty GitHub token string with the repository access needed for the Shipper operation; Shipper only checks that the value is non-empty. |
+| Example            | `GH_TOKEN=<token> shipper next 123`                                                                                                             |
+
+### `GITHUB_TOKEN`
+
+| Field              | Value                                                                                                 |
+| ------------------ | ----------------------------------------------------------------------------------------------------- |
+| Set by             | User, container runtime, or GitHub Actions.                                                           |
+| Read by            | The same Shipper CLI/MCP GitHub auth preflight after `GH_TOKEN`.                                      |
+| Default when unset | Same as `GH_TOKEN`; if both variables are set, Shipper's own token detection checks `GH_TOKEN` first. |
+| Accepted values    | Any non-empty GitHub token string with the repository access needed for the Shipper operation.        |
+| Example            | `GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} shipper next 123`                                           |
+
+## MCP server
+
+### `SHIPPER_REPO_DIR`
+
+| Field              | Value                                                                                               |
+| ------------------ | --------------------------------------------------------------------------------------------------- |
+| Set by             | MCP client configuration or the operator starting `shipper-mcp`.                                    |
+| Read by            | `shipper-mcp` at startup when resolving the target repository.                                      |
+| Default when unset | The MCP process startup working directory is used.                                                  |
+| Accepted values    | Path to a Git repository; relative paths resolve against the MCP process startup working directory. |
+| Example            | `SHIPPER_REPO_DIR=/path/to/repo shipper-mcp`                                                        |
+
+### `SHIPPER_DOCS_PATH`
+
+| Field              | Value                                                                                                                              |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Set by             | Developers or operators running development builds or non-standard installs where the bundled docs corpus snapshot is unavailable. |
+| Read by            | MCP docs corpus resolution after workspace docs and bundled docs lookup fail.                                                      |
+| Default when unset | Normal workspace/bundled docs discovery is used; end users on a normal install do not need to set this variable.                   |
+| Accepted values    | Absolute path to an existing docs corpus directory; relative paths and missing directories are ignored.                            |
+| Example            | `SHIPPER_DOCS_PATH=/path/to/shipper/packages/docs/src/content/docs shipper-mcp`                                                    |
+
+The MCP server's corpus-unavailable error message names `SHIPPER_DOCS_PATH` when this fallback
+may be needed.
+
+## Runtime overrides
+
+### `SHIPPER_SKIP_VERSION_CHECK`
+
+| Field              | Value                                                                                            |
+| ------------------ | ------------------------------------------------------------------------------------------------ |
+| Set by             | User as a temporary escape hatch.                                                                |
+| Read by            | Core version freshness checks.                                                                   |
+| Default when unset | Shipper enforces the runtime version check, except existing development/dogfood bypass behavior. |
+| Accepted values    | Exactly `1`; any other value behaves as unset.                                                   |
+| Example            | `SHIPPER_SKIP_VERSION_CHECK=1 shipper next 123`                                                  |
+
+## Experimental feature flags
+
+This section is included as the canonical home for experimental feature flags, even when only one
+flag exists.
+
+### `SHIPPER_EXPERIMENTAL_MCP_GROOMING`
+
+| Field              | Value                                                                                                           |
+| ------------------ | --------------------------------------------------------------------------------------------------------------- |
+| Set by             | MCP operator or developer.                                                                                      |
+| Read by            | CLI/MCP feature-gating code for MCP-driven grooming.                                                            |
+| Default when unset | MCP-driven grooming stays disabled.                                                                             |
+| Accepted values    | Any trimmed value except empty string, `0`, `false`, or `no` enables the feature; matching is case-insensitive. |
+| Example            | `SHIPPER_EXPERIMENTAL_MCP_GROOMING=1 shipper-mcp`                                                               |
+
+## Hook context
+
+### `SHIPPER_STAGE`
+
+| Field              | Value                                                                                                                                                                                                     |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Set by             | Shipper for stage hooks and worktree lifecycle hooks.                                                                                                                                                     |
+| Read by            | User-authored hook scripts.                                                                                                                                                                               |
+| Default when unset | Outside Shipper hook execution, Shipper does not provide it.                                                                                                                                              |
+| Accepted values    | Current stage string such as `groom`, `design`, `plan`, `implement`, `pr-open`, `pr-review`, `pr-remediate`, `new`, or `merge`; worktree hook contexts may provide an empty string when no stage applies. |
+| Example            | `printf '%s\n' "$SHIPPER_STAGE"`                                                                                                                                                                          |
+
+### `SHIPPER_ISSUE_NUMBER`
+
+| Field              | Value                                                                                                         |
+| ------------------ | ------------------------------------------------------------------------------------------------------------- |
+| Set by             | Shipper for hooks when issue context exists.                                                                  |
+| Read by            | User-authored hook scripts.                                                                                   |
+| Default when unset | Outside Shipper hook execution, Shipper does not provide it; in hooks without issue context, it may be empty. |
+| Accepted values    | GitHub issue number string or empty string.                                                                   |
+| Example            | `test -n "$SHIPPER_ISSUE_NUMBER"`                                                                             |
+
+### `SHIPPER_BRANCH_NAME`
+
+| Field              | Value                                                                                                          |
+| ------------------ | -------------------------------------------------------------------------------------------------------------- |
+| Set by             | Shipper for hooks when branch context exists.                                                                  |
+| Read by            | User-authored hook scripts.                                                                                    |
+| Default when unset | Outside Shipper hook execution, Shipper does not provide it; in hooks without branch context, it may be empty. |
+| Accepted values    | Git branch name or empty string.                                                                               |
+| Example            | `printf '%s\n' "$SHIPPER_BRANCH_NAME"`                                                                         |
+
+### `SHIPPER_WORKTREE_PATH`
+
+| Field              | Value                                                                               |
+| ------------------ | ----------------------------------------------------------------------------------- |
+| Set by             | Shipper for `worktree-setup` and `worktree-teardown` hooks.                         |
+| Read by            | User-authored worktree hook scripts.                                                |
+| Default when unset | Not supplied to plain stage hooks and not provided outside worktree hook execution. |
+| Accepted values    | Absolute path of the temporary worktree.                                            |
+| Example            | `cd "$SHIPPER_WORKTREE_PATH"`                                                       |

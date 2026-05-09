@@ -321,7 +321,7 @@ export function renderToolPage(tool: ReferenceTool, extras: ToolExtras): string 
   }
 
   const experimentalNote = tool.experimental
-    ? ` Experimental — only registered when \`isMcpGroomingEnabled()\` returns true. Set \`${tool.experimental.flag}\` to enable.`
+    ? ` Experimental — only registered when \`isMcpGroomingEnabled()\` returns true. See [Experimental feature flags](/reference/environment-variables/#experimental-feature-flags) for \`${tool.experimental.flag}\` enablement.`
     : '';
   const whenToUse = extras.whenToUse ? `## When to use\n\n${extras.whenToUse}\n\n` : '';
   const resultLanguage = extras.example.resultLanguage ?? 'text';

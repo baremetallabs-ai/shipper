@@ -120,7 +120,7 @@ describe('mcp reference generator', () => {
 
     expect(rendered).toContain('experimental: true\nflag: "SHIPPER_EXPERIMENTAL_MCP_GROOMING"');
     expect(rendered).toContain(
-      'Experimental — only registered when `isMcpGroomingEnabled()` returns true. Set `SHIPPER_EXPERIMENTAL_MCP_GROOMING` to enable.'
+      'Experimental — only registered when `isMcpGroomingEnabled()` returns true. See [Experimental feature flags](/reference/environment-variables/#experimental-feature-flags) for `SHIPPER_EXPERIMENTAL_MCP_GROOMING` enablement.'
     );
   });
 

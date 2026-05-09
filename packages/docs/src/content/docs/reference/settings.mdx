@@ -40,12 +40,14 @@ If the agent discovers:
 - Oversized scope -> recommend splitting into additional issues created in `shipper:new`.
 
 User repositories hard-fail when `.shipper/settings.json` has a stale or missing `cliVersion`;
-rerun `shipper init` to refresh the runtime fingerprint. `SHIPPER_SKIP_VERSION_CHECK=1` bypasses
-the runtime check, and `0.0.0-dev` on either side bypasses it for development builds. Inside this
-Shipper repository, the runtime check still downgrades stale or missing fingerprints to a warning so
-contributors can finish in-progress CLI version bumps. CI and pre-push protection are handled by a
-broader `.shipper/` init drift check; stale `cliVersion` is one possible drift, and remediation is
-to run `shipper init` and commit the resulting `.shipper/` changes.
+rerun `shipper init` to refresh the runtime fingerprint. The
+[`SHIPPER_SKIP_VERSION_CHECK` runtime override](/reference/environment-variables/#runtime-overrides)
+is available as a temporary escape hatch, and `0.0.0-dev` on either side bypasses the runtime check
+for development builds. Inside this Shipper repository, the runtime check still downgrades stale or
+missing fingerprints to a warning so contributors can finish in-progress CLI version bumps. CI and
+pre-push protection are handled by a broader `.shipper/` init drift check; stale `cliVersion` is one
+possible drift, and remediation is to run `shipper init` and commit the resulting `.shipper/`
+changes.
 
 Built-in defaults are `commands.default.agent = "claude"` and
 `commands.groom.disableMcp = true`. Every other prompt-running stage defaults to normal MCP loading

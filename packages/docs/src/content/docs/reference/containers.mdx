@@ -3,20 +3,21 @@ title: Containers
 description: Run Shipper in containers or CI with token auth and git credential setup.
 ---
 
-Shipper supports non-interactive GitHub authentication for containers and CI runners through
-`GH_TOKEN` or `GITHUB_TOKEN`. The container still needs `git`, `gh`, and `shipper` installed.
+Containers and CI runners can use token-based GitHub authentication. For supported token variables
+and precedence, see [Auth tokens](/reference/environment-variables/#auth-tokens). The container
+still needs `git`, `gh`, and `shipper` installed.
 
 ## Set a Token
 
-Set `GH_TOKEN` before running Shipper:
+Export a token before running Shipper:
 
 ```bash
 export GH_TOKEN=<token>
 shipper next <issue-or-pr>
 ```
 
-`GITHUB_TOKEN` works identically. In GitHub Actions, `GITHUB_TOKEN` is the default token name, so pass
-it into the step or container environment where Shipper runs.
+In GitHub Actions, pass the workflow token into the step or container environment where Shipper
+runs, as shown below.
 
 The token needs the same access you would grant with `gh auth login`: `repo`, `read:org`, and
 `workflow`.
@@ -25,7 +26,7 @@ The token needs the same access you would grant with `gh auth login`: `repo`, `r
 
 On each CLI or MCP preflight, Shipper:
 
-- Detects `GH_TOKEN` or `GITHUB_TOKEN`.
+- Detects [`GH_TOKEN` or `GITHUB_TOKEN`](/reference/environment-variables/#auth-tokens).
 - Checks the effective git credential helper for `https://github.com`.
 - Runs `gh auth setup-git` only when token auth is present and no credential helper is configured.
 - Writes one line when it makes that change:

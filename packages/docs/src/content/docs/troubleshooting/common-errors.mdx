@@ -65,13 +65,16 @@ because GitHub API or git authentication fails.
 
 ### Cause
 
-Interactive runs need an authenticated GitHub CLI session. Containers and CI usually rely on token
-auth through `GH_TOKEN` or `GITHUB_TOKEN`, and git operations also need a usable credential helper.
+Interactive runs need an authenticated GitHub CLI session. Containers and CI usually rely on
+[Auth tokens](/reference/environment-variables/#auth-tokens), and git operations also need a usable
+credential helper.
 
 ### Recovery
 
 For local interactive use, run `gh auth login` and confirm `gh auth status` passes. In noninteractive
-environments, export `GH_TOKEN` or `GITHUB_TOKEN` in the same environment that runs Shipper.
+environments, export one of the supported
+[Auth tokens](/reference/environment-variables/#auth-tokens) in the same environment that runs
+Shipper.
 
 ### See also
 
@@ -119,8 +122,9 @@ does not match the CLI that is running now.
 ### Recovery
 
 Rerun `shipper init` from the repository root to refresh Shipper-managed files and the recorded
-`cliVersion`. Use `SHIPPER_SKIP_VERSION_CHECK=1` only as a temporary escape hatch when you must run
-before refreshing the repository configuration.
+`cliVersion`. Use the
+[`SHIPPER_SKIP_VERSION_CHECK` runtime override](/reference/environment-variables/#runtime-overrides)
+only as a temporary escape hatch when you must run before refreshing the repository configuration.
 
 ### See also
 
