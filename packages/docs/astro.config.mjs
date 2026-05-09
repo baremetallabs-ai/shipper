@@ -70,6 +70,7 @@ export default defineConfig({
           label: 'Agents',
           items: [
             { label: 'Setup', slug: 'agents/setup' },
+            { label: 'Supported coding agents', slug: 'agents/supported-coding-agents' },
             {
               label: 'Cookbook',
               items: [

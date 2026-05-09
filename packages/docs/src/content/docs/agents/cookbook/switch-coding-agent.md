@@ -16,6 +16,9 @@ Change the agent Shipper uses globally or for a specific prompt-running stage. U
    Edit `.shipper/settings.json` and set `commands.default.agent`. The only valid values are
    `"claude"`, `"codex"`, and `"copilot"`.
 
+   Before switching, review [Supported coding agents](/agents/supported-coding-agents/) for each
+   agent's CLI prerequisite, repository config file, MCP defaults, and current limitations.
+
    ```json
    {
      "commands": {

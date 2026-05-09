@@ -21,6 +21,12 @@ describe('llms-small corpus', () => {
         description: 'Configure a repository so any coding agent can run Shipper reliably.',
       },
       {
+        slug: 'agents/supported-coding-agents',
+        heading: 'Supported coding agents',
+        description:
+          'Agent-specific setup facts for Claude Code, Codex CLI, and GitHub Copilot CLI.',
+      },
+      {
         slug: 'start-here/getting-started',
         heading: 'Getting Started',
         description:
