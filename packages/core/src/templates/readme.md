@@ -18,8 +18,9 @@ coding agents.
    shipper next <issue-number>
    ```
 
-   This runs the appropriate stage command automatically: grooming, design review, planning,
-   implementation, PR creation, review, remediation, and merge readiness.
+   This dispatches the next command for the issue's current label: `shipper groom`,
+   `shipper design`, `shipper plan`, `shipper implement`, `shipper pr open`,
+   `shipper pr review`, or `shipper pr remediate`.
 
 ## Directory reference
 
@@ -36,6 +37,10 @@ Each issue progresses through Shipper's label-based workflow:
 shipper:new -> shipper:groomed -> shipper:designed -> shipper:planned ->
 shipper:implemented -> shipper:pr-open -> shipper:pr-reviewed -> shipper:ready
 ```
+
+`shipper pr remediate` runs while the issue is labeled `shipper:pr-reviewed`. When remediation
+accepts, Shipper advances the issue and pull request to `shipper:ready`; there is no separate
+`shipper:remediation` label.
 
 See the state-machine reference for label definitions, transition behavior, locking, blocking,
 reset, and auto-ship ordering:
