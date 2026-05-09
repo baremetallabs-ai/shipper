@@ -1,0 +1,180 @@
+---
+title: MCP setup
+description: Connect Shipper's MCP server to Claude Code or Codex and verify the intended repository.
+---
+
+This guide covers Shipper MCP setup for Claude Code and Codex only. Claude Desktop, Cursor, and
+generic MCP host setup are out of scope and are not documented here because each client has its own
+configuration format and startup behavior.
+
+## Prerequisites
+
+Complete these checks before editing any MCP client configuration:
+
+- Install Git and make sure the target repository is checked out locally and readable by the MCP
+  client process.
+- Install GitHub CLI and authenticate it for the same user or token that should operate on the
+  target repository:
+
+  ```bash
+  gh auth status
+  ```
+
+  For token-based environments, provide
+  [`GH_TOKEN` or `GITHUB_TOKEN`](/reference/environment-variables/#auth-tokens) in the same
+  environment that starts the MCP server. See [Containers](/reference/containers/) for container
+  token and git credential helper setup.
+
+- Install Node.js `>=18.0.0`.
+- Keep a local Shipper source checkout available for the MCP server package.
+- Use a target repository with a GitHub remote and `shipper init` already completed. Initialization
+  creates the required `.shipper/` files and GitHub workflow labels. See
+  [`shipper init`](/reference/cli/init/), the
+  [.shipper directory](/reference/shipper-directory/), and
+  [GitHub Authentication Problems](/troubleshooting/common-errors/#github-authentication-problems)
+  if preflight checks fail.
+- Make sure any local tooling required by your Shipper settings, such as the configured coding agent
+  CLI for workflow stages, is available in the environment that will run Shipper commands.
+
+## Obtain the server
+
+`@baremetallabs-ai/shipper-mcp` is currently a private monorepo workspace. It is not published to npm,
+so do not configure clients with `npm install`, `npm install -g`, or `npx` for this package.
+
+Build the MCP server from a Shipper source checkout:
+
+```bash
+git clone https://github.com/baremetallabs-ai/shipper.git
+cd shipper
+npm install
+npm run build --workspace=packages/mcp
+```
+
+After the build, configure the MCP client to run the generated server entrypoint with Node:
+
+```bash
+node /absolute/path/to/shipper/packages/mcp/dist/index.js
+```
+
+`packages/mcp/dist/index.js` is build output. It is gitignored and is absent from a clean checkout
+until the build command creates it.
+
+## Choose the working repository
+
+The MCP server chooses one target repository at startup:
+
+- If `SHIPPER_REPO_DIR` is set to a non-empty value, the server resolves that value against the MCP
+  process startup working directory and uses the resolved path.
+- If `SHIPPER_REPO_DIR` is not set, the server uses the MCP process startup working directory.
+
+After successful resolution, the server changes into the repository and writes this line to stderr:
+
+```text
+shipper mcp: repo dir = /absolute/path/to/target/repo
+```
+
+Use explicit `SHIPPER_REPO_DIR` for both Claude Code and Codex when the client configuration lives
+outside the target repository, when one shared or global config can be used from multiple
+repositories, or when you are unsure which directory the client uses to start MCP servers. The
+canonical variable behavior is documented in
+[Environment variables](/reference/environment-variables/#shipper_repo_dir).
+
+Implicit startup-cwd selection is valid only when the MCP process starts inside the target
+repository.
+
+## Claude Code
+
+For a project-scoped Claude Code setup, add a `.mcp.json` file and change only the absolute Shipper
+checkout path and target repository path:
+
+```json
+{
+  "mcpServers": {
+    "shipper": {
+      "command": "node",
+      "args": ["/absolute/path/to/shipper/packages/mcp/dist/index.js"],
+      "env": {
+        "SHIPPER_REPO_DIR": "/absolute/path/to/target/repo"
+      }
+    }
+  }
+}
+```
+
+Use `claude mcp list` or open `/mcp` in Claude Code to inspect the `shipper` server connection.
+
+## Codex
+
+For Codex, add the server to `~/.codex/config.toml` or a project `.codex/config.toml` and change
+only the absolute Shipper checkout path and target repository path:
+
+```toml
+[mcp_servers.shipper]
+command = "node"
+args = ["/absolute/path/to/shipper/packages/mcp/dist/index.js"]
+startup_timeout_sec = 30
+tool_timeout_sec = 300
+
+[mcp_servers.shipper.env]
+SHIPPER_REPO_DIR = "/absolute/path/to/target/repo"
+```
+
+If you deliberately want startup cwd to select the repository, omit `SHIPPER_REPO_DIR` and set
+`cwd = "/absolute/path/to/target/repo"` under `[mcp_servers.shipper]`. Keep explicit
+`SHIPPER_REPO_DIR` when the config can be reused outside that repository.
+
+Use `codex mcp list` or open `/mcp` in the Codex TUI to inspect the `shipper` server connection.
+
+## Verify the connection
+
+Confirm the client reports the server as connected or active:
+
+- Claude Code: run `claude mcp list` or open `/mcp` and confirm `shipper` is connected.
+- Codex: run `codex mcp list` or open `/mcp` in the Codex TUI and confirm `shipper` is active.
+
+Confirm the normal tool surface includes:
+
+- `shipper_list_issues`
+- `shipper_get_issue`
+- `shipper_get_pr_checks`
+- `shipper_docs_search`
+- `shipper_docs_get`
+- `shipper_advance`
+- `shipper_create_issue`
+- `shipper_unblock`
+- `shipper_merge`
+- `shipper_unlock`
+- `shipper_reset`
+- `shipper_adopt`
+
+`shipper_groom` and `shipper_answer_question` are optional experimental tools. They appear only when
+[`SHIPPER_EXPERIMENTAL_MCP_GROOMING`](/reference/environment-variables/#experimental-feature-flags)
+is enabled.
+
+Confirm repository resolution by checking the client MCP logs for:
+
+```text
+shipper mcp: repo dir = /absolute/path/to/target/repo
+```
+
+If the client does not expose MCP logs, keep `SHIPPER_REPO_DIR` explicit and call a read-only tool
+such as `shipper_list_issues` against a repository with known Shipper issues.
+
+For expected tool visibility problems, see
+[MCP Tool Loading Issues](/troubleshooting/common-errors/#mcp-tool-loading-issues).
+
+## Startup failures
+
+The server starts with error-reporting tools when startup cannot complete. The recovery path depends
+on the startup failure:
+
+- Missing or unreadable repo dir: fix the `SHIPPER_REPO_DIR` path or permissions, or remove
+  `SHIPPER_REPO_DIR` and start the client from the repository.
+- Target path is not a Git repository: point `SHIPPER_REPO_DIR` at the repository root, or clone or
+  initialize the repository before starting the MCP server.
+- GitHub CLI not authenticated: run `gh auth login`, or provide `GH_TOKEN` or `GITHUB_TOKEN` in the
+  MCP server environment and verify `gh auth status`. See
+  [GitHub Authentication Problems](/troubleshooting/common-errors/#github-authentication-problems).
+- Shipper preflight failure: run `shipper init` in the target repository and fix missing
+  [.shipper artifacts](/reference/shipper-directory/) or workflow labels before restarting the MCP
+  client.

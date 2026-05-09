@@ -14,7 +14,7 @@ import { toolExtras, type ToolExtras } from './tool-extras.js';
 export const REMEDIATION_LINE = 'Run `npm run docs:generate-mcp` and commit the result.';
 
 const landingIntro =
-  'Shipper exposes its workflow operations to AI agents via an MCP server. Each tool below has a dedicated reference page covering schema, examples, and error modes.';
+  'Shipper exposes its workflow operations to AI agents via an MCP server. Each tool below has a dedicated reference page covering schema, examples, and error modes. If you need to connect the server first, start with the [MCP setup guide](/guides/mcp-setup/).';
 const landingDescription = 'Reference for every shipper MCP server tool.';
 
 type BehaviorHintName = 'readOnlyHint' | 'destructiveHint' | 'idempotentHint' | 'openWorldHint';

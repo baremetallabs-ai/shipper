@@ -79,3 +79,10 @@ From there, use the pipeline board for issue intake, adoption, grooming, shippin
 remediation, unblock/reset/unlock operations, priority changes, auto-ship, and auto-merge. The
 [Desktop guide](/guides/desktop/) has the full first-run walkthrough and current distribution
 constraints.
+
+## MCP Client Path
+
+If you want Claude Code or Codex to call Shipper through MCP, initialize the target repository first
+and then follow [MCP setup](/guides/mcp-setup/). That guide covers building the private workspace MCP
+server from a Shipper checkout, configuring the client, setting `SHIPPER_REPO_DIR`, and verifying
+that Shipper tools resolve the intended repository.
