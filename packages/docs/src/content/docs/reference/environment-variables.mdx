@@ -10,20 +10,20 @@ build-time, Electron, cache, and worktree implementation variables are intention
 
 ### `GH_TOKEN`
 
-| Field              | Value                                                                                                                                           |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Set by             | User, container runtime, or CI environment.                                                                                                     |
-| Read by            | Shipper CLI/MCP GitHub auth preflight in core.                                                                                                  |
-| Default when unset | Shipper relies on `gh auth login` or the existing GitHub CLI authentication available to the process.                                           |
-| Accepted values    | Any non-empty GitHub token string with the repository access needed for the Shipper operation; Shipper only checks that the value is non-empty. |
-| Example            | `GH_TOKEN=<token> shipper next 123`                                                                                                             |
+| Field              | Value                                                                                                 |
+| ------------------ | ----------------------------------------------------------------------------------------------------- |
+| Set by             | User, container runtime, or CI environment.                                                           |
+| Read by            | GitHub CLI (`gh`) for API and git auth; Shipper preflight detects it before `gh auth setup-git`.      |
+| Default when unset | Shipper relies on `gh auth login` or the existing GitHub CLI authentication available to the process. |
+| Accepted values    | Any non-empty GitHub token string with the repository access needed for the Shipper operation.        |
+| Example            | `GH_TOKEN=<token> shipper next 123`                                                                   |
 
 ### `GITHUB_TOKEN`
 
 | Field              | Value                                                                                                 |
 | ------------------ | ----------------------------------------------------------------------------------------------------- |
 | Set by             | User, container runtime, or GitHub Actions.                                                           |
-| Read by            | The same Shipper CLI/MCP GitHub auth preflight after `GH_TOKEN`.                                      |
+| Read by            | GitHub CLI (`gh`) for API and git auth; Shipper preflight detects it after `GH_TOKEN`.                |
 | Default when unset | Same as `GH_TOKEN`; if both variables are set, Shipper's own token detection checks `GH_TOKEN` first. |
 | Accepted values    | Any non-empty GitHub token string with the repository access needed for the Shipper operation.        |
 | Example            | `GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} shipper next 123`                                           |
