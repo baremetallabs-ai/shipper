@@ -61,28 +61,185 @@ After the board loads, desktop and CLI commands can operate on the same reposito
 
 ## Core Workflows
 
-Create issue starts the intake flow from a rough request and creates a GitHub issue tagged for
-Shipper. Adopt issue brings an existing GitHub issue onto the Shipper workflow by adding the
-appropriate label.
+After the first board load, desktop becomes an operating surface for the same issue lifecycle the
+[CLI reference](/reference/cli/) describes. The sections below cover the background queue, logs,
+terminal sessions, pause state, card actions, shared locks, automation toggles, and reset flow that
+power users need during day-to-day work.
 
-Groom opens an interactive terminal session for clarifying the request and producing the product
-grooming artifact. Setup uses the same terminal model when repository configuration needs guided
-agent assistance.
+## Action Queue
 
-Ship runs the next eligible stage for an issue in the background. As the issue moves through design,
-planning, implementation, PR opening, review, and remediation, desktop displays background status,
-logs, and queue activity from the same workflow commands the CLI uses.
+The action queue drawer shows desktop background commands launched by the board:
 
-Review and remediation happen through the PR stages. Desktop can launch the relevant stage work,
-show progress, and continue the issue toward ready state once checks and review feedback are handled.
+- `New` for `shipper new` issue creation.
+- `Ship` for `shipper ship` stage advancement.
+- `Init` for `shipper init` repository setup.
+- `Unblock` for `shipper unblock` recovery checks.
 
-Unblock checks whether a blocked issue can resume. Reset moves an issue back to an earlier workflow
-stage when you need to discard later artifacts. Unlock releases a stale issue lock. Priority controls
-auto-ship ordering with high, normal, and low labels.
+Each queue row shows the command title, the `New`, `Ship`, `Init`, or `Unblock` badge, the repository,
+the latest output or detail line, and a relative timestamp. The timestamp affordance exposes the
+absolute time. `Ship` rows also show the workflow stage when the board has one cached for that issue.
 
-Pause/resume lets you hold an issue out of active background work and later continue it. Auto-ship
-keeps eligible work moving from the board, and auto-merge lets ready PRs enter the merge queue for
-the selected repository.
+Queue rows use these rendered statuses:
+
+- `Queued`: the command is waiting to start.
+- `Running`: the command is currently executing.
+- `Succeeded`: the command finished successfully. This is the user-visible success label even though
+  the internal background status is still named `complete`.
+- `Failed`: the command exited unsuccessfully.
+- `Paused`: a ship command exited through the pause path.
+- `Cancelled`: the user explicitly stopped an item, so the row is shown as cancelled instead of a
+  normal failure.
+
+Queue history is only for the current desktop session. Running and queued rows live in memory in the
+desktop process, and visible rows live in renderer state. Finished rows stay visible until they are
+dismissed, removed with `Clear finished`, or cleared by restarting the app. Restarting desktop does
+not restore visible queue history.
+
+Rows expose actions based on their current state. `Logs` opens command output when the row has logs
+available. The stop control cancels a queued or running row. The dismiss control removes finished
+`Succeeded`, `Failed`, or `Paused` rows. `Clear finished` removes every non-active row and leaves
+`Queued` and `Running` rows in the drawer.
+
+Only one `Ship` command runs per repository at a time. If another ship starts for the same
+repository, it stays `Queued` and starts automatically when the active ship for that repository
+finishes. Ships for different repositories are not serialized by this rule.
+
+## Background Logs
+
+Use `Logs` from an eligible queue row to open the background log viewer. Running commands stream
+output into the viewer as it arrives. Finished commands show the buffered output retained for that
+row. `New` rows use the same viewer after the desktop can load their JSONL log file.
+
+The viewer follows the tail while you are scrolled to the bottom. If you scroll up to inspect earlier
+output, it stops auto-following and shows `Jump to latest`; selecting that control returns to the
+tail and resumes following new output.
+
+Use `Copy logs to clipboard` to copy the visible log content. The copy control is disabled when the
+viewer has no log content and changes to a success icon after the clipboard write succeeds.
+
+## Terminal Sessions
+
+Groom opens an interactive `shipper groom --mode interactive` terminal session for the selected
+issue. Setup opens an interactive setup session for repository configuration. If you select Groom or
+Setup again while a live session for the same issue or repository already exists, desktop focuses the
+existing session instead of launching a duplicate.
+
+The terminal drawer shows one tab per session. Groom tabs are labeled with the issue number, setup
+tabs are labeled with the repository, and each tab includes a status dot. The observed session states
+are:
+
+- `running`: the session has recent output or input activity.
+- `waiting`: no output has arrived for a short period, so the session may need attention.
+- `finalizing`: desktop has asked the session to finish gracefully.
+- `exited`: the process has ended and the tab can be dismissed.
+
+Closing a terminal tab depends on that state. An `exited` session dismisses immediately. A
+finalizable running session is asked to finish gracefully and moves to `finalizing`. A running groom
+session with no `result.json` prompts `Discard terminal progress?` because closing it will terminate
+the agent and discard progress. A `finalizing` session prompts `Force-kill finalizing session?`.
+
+Force-killing a groom session discards in-progress grooming work. After the process is killed,
+desktop attempts to unlock the issue and refreshes the active repository if that issue belongs to
+the repo you are viewing.
+
+## Pause and Resume
+
+Pause is scoped to one issue within one repository and is saved in desktop pause state, so it
+persists across desktop restarts.
+
+Pause behavior depends on what the issue is doing when you select it:
+
+- Running ship: desktop asks the active ship to halt at the next safe stage boundary, shows pending
+  pause feedback, and records the issue as paused only after the command exits with the pause
+  outcome.
+- Queued ship: desktop removes the queued ship session and immediately records the issue as paused.
+  If the queued item has already raced into `Running`, desktop follows the running-ship pause path
+  instead.
+- Idle issue: desktop records the issue as paused immediately without starting a background command.
+
+There is one final-stage exception. If a running ship is already at `shipper:pr-reviewed`, Pause does
+not request a safe-boundary halt; desktop tells you to use Stop if you need an abrupt halt.
+
+A paused card shows a paused indicator and a `Resume` action. Pause alone does not disable normal
+actions: `Ship` on a paused shippable card opens the `Resume and ship` confirmation, and Groom
+remains available on cards where Groom is normally rendered. `Resume` clears the desktop pause state
+and returns the issue to the standard ship and groom flows.
+
+## Issue Card Actions
+
+Issue cards expose primary buttons and an ellipsis menu. Availability depends on the card's current
+labels, shipping state, and repository prerequisites.
+
+| Action                 | Where it appears                                 | Available when                                                                                                                                                                                                                                                                                                | Effect                                                                                                                                                  |
+| ---------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Groom`                | Primary button on New attention cards            | The card is not blocked, locked, failed, or actively shipping; fetch prerequisites are satisfied; and a groom launch is not already pending. Pause alone does not disable Groom where it is normally rendered.                                                                                                | Opens or focuses the interactive grooming terminal for that issue.                                                                                      |
+| `Ship`                 | Primary button on non-ready pipeline cards       | A repository is active, fetch prerequisites are satisfied, the card is not blocked, locked, failed, or actively shipping, and a ship launch is not already pending. Pause alone does not disable Ship.                                                                                                        | Starts the next eligible background `Ship` command. On a paused card, opens the `Resume and ship` confirmation before starting.                         |
+| `Stop Ship`            | Stop control beside a currently shipping card    | A `Ship` row for that issue is `Queued` or `Running`.                                                                                                                                                                                                                                                         | Cancels the queued or running background command for that issue.                                                                                        |
+| `Pause`                | Ellipsis menu                                    | The card is not already paused.                                                                                                                                                                                                                                                                               | Records desktop pause state immediately for idle issues, removes queued ships before pausing, or asks a running ship to pause at a safe stage boundary. |
+| `Resume`               | Ellipsis menu                                    | The card is paused.                                                                                                                                                                                                                                                                                           | Clears desktop pause state for that issue.                                                                                                              |
+| `Reset`                | Ellipsis menu, and the failed-card reset control | Backward reset targets exist and the issue is not currently shipping. Targets are `New`, `Groomed`, `Designed`, `Planned`, and `Implemented` when those are earlier than the current stage or valid for a failed/post-implementation issue. A non-stale `shipper:locked` label makes the preview unavailable. | Opens `Reset Issue` for the selected target. The reset is preview first, execute second.                                                                |
+| `Priority`             | Ellipsis menu                                    | The card menu can be opened.                                                                                                                                                                                                                                                                                  | Sets priority to `High`, `Normal`, or `Low` by adding or removing `shipper:priority-high` and `shipper:priority-low`.                                   |
+| `Unlock`               | Ellipsis menu                                    | The card has `shipper:locked`, an unlock handler is available, and the issue is not currently shipping.                                                                                                                                                                                                       | Clears a stale lock directly. Active locks prompt for confirmation before removing `shipper:locked`.                                                    |
+| `Unblock`              | Ellipsis menu                                    | The card has `shipper:blocked`, is not locked, and is not currently shipping.                                                                                                                                                                                                                                 | Starts a background `shipper unblock` command.                                                                                                          |
+| `Close as not planned` | Ellipsis menu                                    | The issue is not locked and is not currently shipping.                                                                                                                                                                                                                                                        | Prompts for confirmation, closes the GitHub issue as not planned, and removes Shipper labels.                                                           |
+
+## Shared Locks
+
+Desktop and CLI clients coordinate through the same GitHub issue label: `shipper:locked`. There is no
+cross-machine messaging, presence channel, machine ID, or shared per-lock metadata. If two machines
+view the same repository, they both see the same label-backed lock state.
+
+When a client starts protected work, it adds `shipper:locked`. The active lock holder refreshes the
+lock on a heartbeat by renewing the label event. Other clients judge staleness from the most recent
+`shipper:locked` label event in the issue timeline and the configured
+[lock timeout](/reference/settings/#locktimeoutminutes). If that event is older than the timeout, the
+next client that touches the issue can clear the stale lock automatically before proceeding.
+
+If a second client finds a non-stale lock, it treats the issue as locked and avoids conflicting work.
+Manual `Unlock` is appropriate when the process that held the lock is no longer running, such as
+after a crash on another machine, and you want to take over before automatic stale-clear occurs.
+
+## Auto-Ship and Auto-Merge
+
+`Auto-ship` and `Auto-merge` are per-repository toolbar toggles on the pipeline board.
+
+`Auto-merge` is saved in desktop app config per repository. When enabled for the selected repository,
+desktop passes merge behavior into `Ship` commands so ready PRs can enter the merge flow.
+
+`Auto-ship` is enabled per repository for the current desktop session. Select the toggle to enable it
+for the active repository; select it again to disable it. After a ship finishes, desktop looks for the
+next eligible issue in that repository and starts it automatically. Auto-ship skips issues that are
+already active, paused, blocked, or failed.
+
+Auto-ship also has a safety stop. After three consecutive non-retriable failures in one repository,
+desktop disables auto-ship for that repository and reports that auto-ship paused so you can
+investigate before more work starts.
+
+## Reset
+
+Reset is a two-phase flow. It is not a one-click destructive menu action.
+
+Phase 1 is preview. Selecting a backward target opens `Reset Issue` and scans what will be cleaned
+up: the target stage, labels to remove, pull requests to close, remote branches to delete, local
+branches to delete, worktrees to remove, and issue comment count. Preview can fail before showing a
+summary if the issue is closed, the issue has a non-stale `shipper:locked` label, the target is the
+current stage, or the target is ahead of the current stage.
+
+Phase 2 is execute. Pressing `Reset` repeats validation, acquires the issue lock, runs cleanup, posts
+the reset notice, and releases the lock.
+
+Reset only works backward and only on open issues. The Reset action is hidden while the issue is
+currently shipping, and both preview and execute refuse non-stale locked issues.
+
+## Out of Scope
+
+The desktop app does not currently provide these capabilities:
+
+- Application-level keyboard shortcuts for issue-card actions.
+- Right-click issue-card context menus.
+- Queue persistence across app restarts.
+- Changing paused issues so they hide Ship or Groom; paused cards keep normal actions as described
+  above.
 
 ## State and Artifacts
 
@@ -96,8 +253,10 @@ Shipper stores durable state in GitHub:
   artifacts.
 - Pull requests and CI checks used by the review, remediation, and merge stages.
 
-Local stage output, sessions, prompt overrides, and settings follow the same Shipper conventions the
-CLI uses. Desktop is a UI and process launcher over that shared model.
+Desktop also has local state. Pause state is saved by the desktop app per repository and issue.
+Action queue rows are current-session memory and are not restored after restart. Local stage output,
+terminal sessions, prompt overrides, and settings follow the same Shipper conventions the CLI uses.
+Desktop is a UI and process launcher over that shared model.
 
 ## Current Constraints
 
@@ -110,6 +269,7 @@ CLI uses. Desktop is a UI and process launcher over that shared model.
 
 ## Related References
 
+- [Getting Started](/start-here/getting-started/)
 - [CLI reference](/reference/cli/)
 - [Settings reference](/reference/settings/)
 - [Architecture](/concepts/architecture/)
