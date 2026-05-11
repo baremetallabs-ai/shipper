@@ -22,13 +22,15 @@ const terminalState = vi.hoisted(() => ({
 }));
 
 vi.mock('@xterm/addon-fit', () => ({
-  FitAddon: vi.fn(() => ({
-    fit: vi.fn(),
-  })),
+  FitAddon: vi.fn(function FitAddon() {
+    return {
+      fit: vi.fn(),
+    };
+  }),
 }));
 
 vi.mock('@xterm/xterm', () => ({
-  Terminal: vi.fn(() => {
+  Terminal: vi.fn(function Terminal() {
     const instance = {
       dataHandler: null as ((data: string) => void) | null,
       dispose: vi.fn(),
