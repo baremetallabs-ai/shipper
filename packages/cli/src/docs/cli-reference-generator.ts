@@ -10,6 +10,7 @@ import {
   commandExtras,
   groups as commandGroups,
   type CommandExtras,
+  type CommandGroupExtras,
   type CommandPath,
 } from './command-extras.js';
 
@@ -38,7 +39,7 @@ export type ReferenceModel = {
 };
 
 type CommandExtrasRegistry = Record<string, CommandExtras>;
-type GroupRegistry = Record<string, { description: string }>;
+type GroupRegistry = Record<string, CommandGroupExtras>;
 type CategoryDefinition = { title: string; commands: readonly string[] };
 const groups: GroupRegistry = commandGroups;
 
@@ -157,6 +158,12 @@ export function validateReferenceModel(
     }
     if (!groupDefinition.description.trim()) {
       errors.push(`Docs group description for "${groupPath}" is empty.`);
+    }
+    if (groupDefinition.pageDescription !== undefined && !groupDefinition.pageDescription.trim()) {
+      errors.push(`Docs group page description for "${groupPath}" is empty.`);
+    }
+    if (groupDefinition.intro !== undefined && !groupDefinition.intro.trim()) {
+      errors.push(`Docs group intro for "${groupPath}" is empty.`);
     }
   }
 
@@ -393,7 +400,10 @@ function renderLandingPage(model: ReferenceModel): string {
 
 function renderGroupPage(group: GroupInfo): string {
   const pathKey = commandPath(group.pathSegments);
-  const groupDescription = groups[pathKey]?.description ?? group.description;
+  const groupExtras = groups[pathKey];
+  const groupDescription = groupExtras?.description ?? group.description;
+  const pageDescription = groupExtras?.pageDescription ?? groupDescription;
+  const intro = groupExtras?.intro ?? `${groupDescription}.`;
   const rows = group.children.map((child) => {
     const childPath = commandPath(child.pathSegments);
     if (child.kind === 'group') {
@@ -407,8 +417,8 @@ function renderGroupPage(group: GroupInfo): string {
   });
 
   return (
-    frontmatter(`shipper ${pathKey}`, groupDescription) +
-    `# shipper ${pathKey}\n\n${groupDescription}.\n\n` +
+    frontmatter(`shipper ${pathKey}`, pageDescription) +
+    `# shipper ${pathKey}\n\n${intro}\n\n` +
     rows.join('\n') +
     '\n'
   );
