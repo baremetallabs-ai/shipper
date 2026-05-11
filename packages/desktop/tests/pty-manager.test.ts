@@ -1,7 +1,7 @@
 import { mkdtemp, rm, writeFile, mkdir, access } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import * as nodePty from 'node-pty';
 import {
   DESKTOP_AGENT_GRACE_TIMEOUT_MS,
@@ -70,7 +70,7 @@ function spawnSession(
 
 describe('PtyManager.onSessionExit', () => {
   let tempDirs: string[];
-  let killSpy: ReturnType<typeof vi.spyOn>;
+  let killSpy: MockInstance;
 
   beforeEach(() => {
     tempDirs = [];

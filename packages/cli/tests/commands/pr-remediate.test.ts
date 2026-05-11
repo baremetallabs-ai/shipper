@@ -1,6 +1,6 @@
 import { access, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import * as core from '@baremetallabs-ai/shipper-core';
 import type {
   PRChecksLine,
@@ -84,7 +84,7 @@ function buildStageOutput(
 
 describe('prRemediateCommand', () => {
   let fake: FakeCore;
-  let getSettingsSpy: ReturnType<typeof vi.spyOn>;
+  let getSettingsSpy: MockInstance;
   let promptCalls: Array<{ name: string; opts: RunPromptOpts }>;
 
   const seedRemediationState = (): void => {

@@ -1,4 +1,13 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type MockInstance,
+} from 'vitest';
 
 const { mockLoggerError, mockLoggerLog, mockLoggerWarn } = vi.hoisted(() => ({
   mockLoggerError: vi.fn((message: string) => {
@@ -119,8 +128,8 @@ describe('shipper-cli', () => {
 
   describe('help output', () => {
     const originalArgv = [...process.argv];
-    let exitSpy: ReturnType<typeof vi.spyOn>;
-    let writeSpy: ReturnType<typeof vi.spyOn>;
+    let exitSpy: MockInstance;
+    let writeSpy: MockInstance;
 
     beforeEach(() => {
       exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
@@ -319,8 +328,8 @@ describe('shipper-cli', () => {
 
   describe('prompt command mode wiring', () => {
     const originalArgv = [...process.argv];
-    let exitSpy: ReturnType<typeof vi.spyOn>;
-    let errorSpy: ReturnType<typeof vi.spyOn>;
+    let exitSpy: MockInstance;
+    let errorSpy: MockInstance;
 
     beforeEach(() => {
       exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
@@ -788,7 +797,7 @@ describe('shipper-cli', () => {
 
   describe('ship command parallel validation', () => {
     const originalArgv = [...process.argv];
-    let exitSpy: ReturnType<typeof vi.spyOn>;
+    let exitSpy: MockInstance;
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     beforeEach(() => {

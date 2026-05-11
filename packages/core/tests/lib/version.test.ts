@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 
 const getSettingsMock = vi.fn<() => { cliVersion?: string }>();
 
@@ -12,7 +12,7 @@ vi.mock('../../src/lib/settings.js', () => ({
 
 let savedVersion: string | undefined;
 let savedSkip: string | undefined;
-let warnSpy: ReturnType<typeof vi.spyOn>;
+let warnSpy: MockInstance<typeof console.warn>;
 const tempDirs: string[] = [];
 
 function createTempGitRepo(): string {

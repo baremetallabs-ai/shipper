@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 
 import { createFakeCore } from '../_harness/fake-core.js';
 import { issueListCommand } from '../../src/commands/issue-list.js';
@@ -15,7 +15,7 @@ const blockedLabel = 'shipper:blocked';
 const failedLabel = 'shipper:failed';
 const lockedLabel = 'shipper:locked';
 
-function loggedLines(logSpy: ReturnType<typeof vi.spyOn>): string[] {
+function loggedLines(logSpy: MockInstance): string[] {
   return logSpy.mock.calls.map(([message]) => String(message));
 }
 
@@ -25,8 +25,8 @@ function prefixed(lines: string[]): string[] {
 
 describe('issueListCommand', () => {
   let fake: FakeCore;
-  let logSpy: ReturnType<typeof vi.spyOn>;
-  let errorSpy: ReturnType<typeof vi.spyOn>;
+  let logSpy: MockInstance;
+  let errorSpy: MockInstance;
 
   const stubIssueList = (issues: IssueFixture[]): void => {
     fake.stubGh((args) => {

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 
 const shipOneIssueMock =
   vi.fn<
@@ -28,8 +28,8 @@ vi.mock('../src/commands/ship-execute.js', () => ({
 describe('ship-worker', () => {
   const originalSendDescriptor = Object.getOwnPropertyDescriptor(process, 'send');
   let messageHandler: ((message: unknown) => void) | undefined;
-  let processOnMock: ReturnType<typeof vi.spyOn>;
-  let processExitMock: ReturnType<typeof vi.spyOn>;
+  let processOnMock: MockInstance;
+  let processExitMock: MockInstance;
 
   beforeEach(() => {
     vi.resetModules();

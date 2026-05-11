@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 
 type PromptStdout = EventEmitter & {
   pipe: (destination: EventEmitter) => EventEmitter;
@@ -2196,7 +2196,7 @@ describe('worktree --add-dir', () => {
 });
 
 describe('agent timeout', () => {
-  let errorMock: ReturnType<typeof vi.spyOn>;
+  let errorMock: MockInstance<typeof console.error>;
 
   beforeEach(() => {
     vi.useFakeTimers();

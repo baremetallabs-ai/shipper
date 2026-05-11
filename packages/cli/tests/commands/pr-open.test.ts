@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import * as core from '@baremetallabs-ai/shipper-core';
 import { runPrompt } from '@baremetallabs-ai/shipper-core';
 import type { RunPromptOpts } from '@baremetallabs-ai/shipper-core';
@@ -44,8 +44,8 @@ function buildIssueList(
 describe('prOpenCommand', () => {
   let fake: FakeCore;
   let promptCalls: Array<{ name: string; opts: RunPromptOpts }>;
-  let findBranchForIssueSpy: ReturnType<typeof vi.spyOn>;
-  let transportInvokerSpy: ReturnType<typeof vi.spyOn>;
+  let findBranchForIssueSpy: MockInstance;
+  let transportInvokerSpy: MockInstance;
 
   const toRunPromptOpts = (
     baseRunPromptOpts: BaseTransportPromptOpts,

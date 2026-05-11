@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 
 import { createFakeCore } from '../_harness/fake-core.js';
 import {
@@ -57,8 +57,8 @@ function prefixed(message: string): string {
 
 describe('ship-candidates', () => {
   let fake: FakeCore;
-  let warnSpy: ReturnType<typeof vi.spyOn>;
-  let logSpy: ReturnType<typeof vi.spyOn>;
+  let warnSpy: MockInstance;
+  let logSpy: MockInstance;
   let labelEventsByIssue: Map<string, Array<{ label: string; createdAt: string }>>;
   let lockTimestampsByIssue: Map<string, string[]>;
   let timelineRequestIssueNumbers: string[];

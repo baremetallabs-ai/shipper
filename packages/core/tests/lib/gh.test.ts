@@ -1,5 +1,5 @@
 import { promisify } from 'node:util';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { toError, toErrorMessage } from '../../src/lib/errors.js';
 
 const execFileMock = vi.fn();
@@ -65,7 +65,7 @@ function makeGhError(detail: { stdout?: string; stderr?: string; code?: string |
 }
 
 describe('gh', () => {
-  let errorSpy: ReturnType<typeof vi.spyOn>;
+  let errorSpy: MockInstance<typeof console.error>;
 
   beforeEach(() => {
     execFileMock.mockReset();
