@@ -97,8 +97,8 @@ not restore visible queue history.
 
 Rows expose actions based on their current state. `Logs` opens command output when the row has logs
 available. The stop control cancels a queued or running row. The dismiss control removes finished
-`Succeeded`, `Failed`, or `Paused` rows. `Clear finished` removes every non-active row and leaves
-`Queued` and `Running` rows in the drawer.
+`Succeeded`, `Failed`, `Paused`, or `Cancelled` rows. `Clear finished` removes every non-active row
+and leaves `Queued` and `Running` rows in the drawer.
 
 Only one `Ship` command runs per repository at a time. If another ship starts for the same
 repository, it stays `Queued` and starts automatically when the active ship for that repository
@@ -106,9 +106,11 @@ finishes. Ships for different repositories are not serialized by this rule.
 
 ## Background Logs
 
-Use `Logs` from an eligible queue row to open the background log viewer. Running commands stream
-output into the viewer as it arrives. Finished commands show the buffered output retained for that
-row. `New` rows use the same viewer after the desktop can load their JSONL log file.
+Use `Logs` from an eligible queue row to open the background log viewer. Queued rows expose `Logs`
+only after they have output to show; otherwise they have no log content until they start. Running
+commands stream output into the viewer as it arrives. Finished commands show the buffered output
+retained for that row. `New` rows use the same viewer after the desktop can load their JSONL log
+file.
 
 The viewer follows the tail while you are scrolled to the bottom. If you scroll up to inspect earlier
 output, it stops auto-following and shows `Jump to latest`; selecting that control returns to the
@@ -203,8 +205,9 @@ after a crash on another machine, and you want to take over before automatic sta
 
 `Auto-ship` and `Auto-merge` are per-repository toolbar toggles on the pipeline board.
 
-`Auto-merge` is saved in desktop app config per repository. When enabled for the selected repository,
-desktop passes merge behavior into `Ship` commands so ready PRs can enter the merge flow.
+`Auto-merge` is saved in desktop app config per repository. Select the toggle to enable it for the
+active repository; select it again to disable it. When enabled for the selected repository, desktop
+passes merge behavior into `Ship` commands so ready PRs can enter the merge flow.
 
 `Auto-ship` is enabled per repository for the current desktop session. Select the toggle to enable it
 for the active repository; select it again to disable it. After a ship finishes, desktop looks for the
