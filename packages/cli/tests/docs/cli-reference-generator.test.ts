@@ -219,6 +219,26 @@ describe('cli reference generator', () => {
     );
   });
 
+  it('does not double-punctuate fallback group intros', async () => {
+    const tempRoot = await makeTempRoot();
+    const originalPrGroup = groups.pr;
+    groups.pr = { description: 'Pull request commands.' };
+
+    try {
+      await generateCliReference(tempRoot);
+
+      const prIndex = await readFile(
+        path.join(tempRoot, 'packages/docs/src/content/docs/reference/cli/pr/index.md'),
+        'utf8'
+      );
+
+      expect(prIndex).toContain('# shipper pr\n\nPull request commands.\n\n');
+      expect(prIndex).not.toContain('Pull request commands..');
+    } finally {
+      groups.pr = originalPrGroup;
+    }
+  });
+
   it('reports drift with a diff and remediation line', async () => {
     const tempRoot = await makeTempRoot();
     await generateCliReference(tempRoot);
