@@ -4,14 +4,14 @@ import { copyFile, mkdir, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import {
-  buildClaudeResumeArgs,
-  clearAnswersEnv,
+  SHIPPER_QUESTION_BRIDGE_DIR_ENV,
+  SHIPPER_QUESTION_BRIDGE_TIMEOUT_MS_ENV,
+} from './defer-bridge.js';
+import {
   closeStdinReader,
   emitDeferMarker,
   logDeferCycle,
   readNextAnswerLine,
-  setAnswersEnv,
-  writeAnswersFile,
 } from './defer-loop.js';
 import {
   DESKTOP_AGENT_GRACE_TIMEOUT_MS,
@@ -29,6 +29,7 @@ import {
   TRUNCATION_THRESHOLD_BYTES,
   writeContextFile,
 } from './output-protocol/protocol-io.js';
+import { driveQuestionBridge } from './question-bridge.js';
 import {
   getSessionPaths,
   resolveSessionRepo,
@@ -153,9 +154,11 @@ interface SpawnAsyncOpts {
   initialInput?: string;
   onStdoutChunk?: (chunk: Buffer) => void;
   appendLog?: boolean;
+  env?: Record<string, string | undefined>;
+  abortSignal?: InstanceType<typeof globalThis.AbortController>['signal'];
   /**
    * When true, force stdin to 'ignore' even if other options would normally inherit it.
-   * Used by the claude defer loop so the CLI's stdin (used to receive deferred answers
+   * Used by the claude question bridge so the CLI's stdin (used to receive deferred answers
    * from the MCP parent) isn't shared with the worker claude process.
    */
   stdinIgnore?: boolean;
@@ -190,7 +193,7 @@ function spawnAsync(command: string, args: string[], opts: SpawnAsyncOpts): Prom
           : 'inherit';
     const child: ChildProcess = spawn(command, args, {
       stdio,
-      env: process.env,
+      env: opts.env ? { ...process.env, ...opts.env } : process.env,
       cwd: opts.cwd,
     });
     let logCompletion: Promise<void> | undefined;
@@ -274,10 +277,26 @@ function spawnAsync(command: string, args: string[], opts: SpawnAsyncOpts): Prom
 
     let killTimer: ReturnType<typeof setTimeout> | undefined;
     let graceTimer: ReturnType<typeof setTimeout> | undefined;
+    let abortGraceTimer: ReturnType<typeof setTimeout> | undefined;
     let finalizePollTimer: ReturnType<typeof setInterval> | undefined;
     let finalizeGraceTimer: ReturnType<typeof setTimeout> | undefined;
     let finalizeSignalSent = false;
     let timedOut = false;
+
+    const abortChild = (): void => {
+      child.kill('SIGTERM');
+      abortGraceTimer = setTimeout(() => {
+        child.kill('SIGKILL');
+      }, 10_000);
+    };
+
+    if (opts.abortSignal) {
+      if (opts.abortSignal.aborted) {
+        abortChild();
+      } else {
+        opts.abortSignal.addEventListener('abort', abortChild, { once: true });
+      }
+    }
 
     const clearFinalizeTimers = (): void => {
       clearInterval(finalizePollTimer);
@@ -326,7 +345,9 @@ function spawnAsync(command: string, args: string[], opts: SpawnAsyncOpts): Prom
     child.on('error', (err) => {
       clearTimeout(killTimer);
       clearTimeout(graceTimer);
+      clearTimeout(abortGraceTimer);
       clearFinalizeTimers();
+      opts.abortSignal?.removeEventListener('abort', abortChild);
       stdinCleanup?.();
       reject(toError(err));
     });
@@ -334,7 +355,9 @@ function spawnAsync(command: string, args: string[], opts: SpawnAsyncOpts): Prom
     const handleClose = async (code: number | null): Promise<void> => {
       clearTimeout(killTimer);
       clearTimeout(graceTimer);
+      clearTimeout(abortGraceTimer);
       clearFinalizeTimers();
+      opts.abortSignal?.removeEventListener('abort', abortChild);
       stdinCleanup?.();
       if (logCompletion) {
         outputLogStream?.end();
@@ -587,56 +610,59 @@ export async function runPrompt(name: string, opts: RunPromptOpts): Promise<numb
   return await runPromptImpl(name, opts);
 }
 
-async function spawnClaudeWithDeferLoop(
+async function spawnClaudeWithQuestionBridge(
   initialArgs: string[],
-  resumeBaseArgs: string[],
   spawnOpts: SpawnAsyncOpts,
   cwd: string
 ): Promise<number> {
-  let currentArgs = initialArgs;
-  let isResume = false;
+  const bridgeDir = path.join(
+    cwd,
+    '.shipper',
+    'tmp',
+    `question-bridge-${Date.now()}-${process.pid}`
+  );
+  const timeoutMs = spawnOpts.timeoutMs ?? 24 * 60 * 60 * 1000;
+  const abortController = new globalThis.AbortController();
+  await mkdir(bridgeDir, { recursive: true });
+  const consumer = new StreamJsonDeferConsumer();
+  const childExit = spawnAsync('claude', initialArgs, {
+    ...spawnOpts,
+    env: {
+      ...spawnOpts.env,
+      [SHIPPER_QUESTION_BRIDGE_DIR_ENV]: bridgeDir,
+      [SHIPPER_QUESTION_BRIDGE_TIMEOUT_MS_ENV]: String(timeoutMs),
+    },
+    abortSignal: abortController.signal,
+    onStdoutChunk: (chunk) => {
+      consumer.consume(chunk);
+      spawnOpts.onStdoutChunk?.(chunk);
+    },
+    stdinIgnore: true,
+  }).then((exitCode) => {
+    consumer.flush();
+    return exitCode;
+  });
+
   try {
-    for (;;) {
-      const consumer = new StreamJsonDeferConsumer();
-      const exitCode = await spawnAsync('claude', currentArgs, {
-        ...spawnOpts,
-        onStdoutChunk: (chunk) => {
-          consumer.consume(chunk);
-        },
-        appendLog: isResume ? true : spawnOpts.appendLog,
-        stdinIgnore: true,
-      });
-      consumer.flush();
-      const result = consumer.getResult();
-      if (result?.kind !== 'deferred') {
-        return exitCode;
-      }
-      logDeferCycle(result.sessionId, result.questions.length);
-      const markerPayload: Parameters<typeof emitDeferMarker>[0] = {
-        sessionId: result.sessionId,
-        questions: result.questions,
-      };
-      if (result.toolUseId) {
-        markerPayload.toolUseId = result.toolUseId;
-      }
-      emitDeferMarker(markerPayload);
-
-      let answer;
-      try {
-        answer = await readNextAnswerLine();
-      } catch (err) {
-        logger.error(`Failed to read deferred answer from stdin: ${toErrorMessage(err)}`);
-        return exitCode;
-      }
-
-      const { path: answersPath } = await writeAnswersFile(cwd, result.sessionId, answer.answers);
-      setAnswersEnv(answersPath);
-      currentArgs = buildClaudeResumeArgs(resumeBaseArgs, result.sessionId);
-      isResume = true;
-    }
+    return await driveQuestionBridge({
+      bridgeDir,
+      streamConsumer: consumer,
+      childExit,
+      readAnswer: readNextAnswerLine,
+      emitMarker: (payload) => {
+        logDeferCycle(payload.sessionId, payload.questions.length);
+        emitDeferMarker(payload);
+      },
+      abortChild: () => {
+        abortController.abort();
+      },
+    });
+  } catch (err) {
+    logger.error(`Error: AskUserQuestion bridge failed: ${toErrorMessage(err)}`);
+    abortController.abort();
+    return 1;
   } finally {
-    clearAnswersEnv();
-    // The defer loop attaches a readline.Interface to process.stdin to read answers
+    // The question bridge attaches a readline.Interface to process.stdin to read answers
     // from the MCP parent. Once the loop ends, that interface keeps the Node event
     // loop alive — the CLI hangs after claude exits and the MCP parent never sees
     // the child close. Detach explicitly so the CLI can drain and exit.
@@ -737,12 +763,7 @@ async function runPromptDefault(name: string, opts: RunPromptOpts): Promise<numb
     }
     const useDeferLoop = agent === 'claude' && effectiveMode === 'headless';
     const exitCode = useDeferLoop
-      ? await spawnClaudeWithDeferLoop(
-          args,
-          resolved.resumeBaseArgs,
-          baseSpawnOpts,
-          opts.cwd ?? process.cwd()
-        )
+      ? await spawnClaudeWithQuestionBridge(args, baseSpawnOpts, opts.cwd ?? process.cwd())
       : await spawnAsync(agent, args, baseSpawnOpts);
     let usage: TokenUsage | undefined;
     const persistedResultFile = await persistPromptResult(opts.cwd, resultFile);

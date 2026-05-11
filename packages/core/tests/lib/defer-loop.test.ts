@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFER_MARKER_PREFIX,
   DEFER_MARKER_SUFFIX,
-  buildClaudeResumeArgs,
+  findMissingAnswers,
   parseDeferMarker,
 } from '../../src/lib/defer-loop.js';
+import type { DeferQuestion } from '../../src/lib/defer-stream.js';
 
 describe('parseDeferMarker', () => {
   it('parses a well-formed defer marker line', () => {
@@ -47,18 +48,25 @@ describe('parseDeferMarker', () => {
   });
 });
 
-describe('buildClaudeResumeArgs', () => {
-  it('appends --resume <sessionId> to the base args', () => {
-    const args = buildClaudeResumeArgs(
-      ['-p', '--verbose', '--output-format', 'stream-json'],
-      'abc'
-    );
-    expect(args).toEqual(['-p', '--verbose', '--output-format', 'stream-json', '--resume', 'abc']);
+const QUESTIONS: DeferQuestion[] = [
+  { question: 'First?', options: [], multiSelect: false },
+  { question: 'Second?', options: [], multiSelect: false },
+];
+
+describe('findMissingAnswers', () => {
+  it('returns an empty array when all current question texts are present', () => {
+    expect(findMissingAnswers(QUESTIONS, { 'First?': 'one', 'Second?': 'two' })).toEqual([]);
   });
 
-  it('does not mutate the input array', () => {
-    const base = ['-p'];
-    buildClaudeResumeArgs(base, 'x');
-    expect(base).toEqual(['-p']);
+  it('returns the missing current question text', () => {
+    expect(findMissingAnswers(QUESTIONS, { 'First?': 'one' })).toEqual(['Second?']);
+  });
+
+  it('counts an empty-string answer as present', () => {
+    expect(findMissingAnswers(QUESTIONS, { 'First?': '', 'Second?': 'two' })).toEqual([]);
+  });
+
+  it('does not let extra answer keys satisfy a missing required key', () => {
+    expect(findMissingAnswers(QUESTIONS, { 'First?': 'one', Other: 'value' })).toEqual(['Second?']);
   });
 });

@@ -34,6 +34,10 @@ export function getWorktreePath(repoRoot: string, branch: string): string {
   return path.join(WORKTREES_DIR, `${repoName}--wt--${safeBranch}`);
 }
 
+function questionBridgeHookTimeoutSeconds(agentTimeoutMinutes: number): number {
+  return agentTimeoutMinutes > 0 ? agentTimeoutMinutes * 60 : 24 * 60 * 60;
+}
+
 export interface CreateWorktreeOpts {
   repoRoot: string;
   branch: string;
@@ -281,7 +285,9 @@ async function withWorktreeDefault<T>(
     worktreeLogger.worktreeStep('running setup hooks');
     await runWorktreeHook('worktree-setup', hookEnv, wtPath);
     try {
-      await installDeferBridge(wtPath);
+      await installDeferBridge(wtPath, {
+        timeoutSeconds: questionBridgeHookTimeoutSeconds(settings.agentTimeoutMinutes),
+      });
     } catch (err) {
       logger.warn(
         `Warning: Failed to install AskUserQuestion defer bridge in ${wtPath}: ${toErrorMessage(err)}`

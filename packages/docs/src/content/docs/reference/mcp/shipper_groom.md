@@ -11,7 +11,7 @@ Run grooming on a `shipper:new` issue in headless mode and bridge AskUserQuestio
 
 ## When to use
 
-Use this only for `shipper:new` issues when MCP-driven grooming is enabled and the orchestrator is prepared to answer worker questions with `shipper_answer_question`.
+Use this only for `shipper:new` issues when MCP-driven grooming is enabled and the orchestrator is prepared to answer worker questions with `shipper_answer_question`. Each awaiting_answer result contains exactly one question batch; if the worker has more pending batches, the next one is returned by `shipper_answer_question` after the current batch is answered.
 
 ## Behavior hints
 
@@ -40,6 +40,13 @@ Session: sess-abc123
 The headless worker called AskUserQuestion and is paused awaiting answers from the orchestrator.
 Reply with `shipper_answer_question` providing { session_id, answers } where answers is a map
 of question text -> your answer (free text).
+
+Questions (JSON):
+[
+  {
+    "question": "Which behavior should the implementation preserve?"
+  }
+]
 ```
 
 ## Error modes

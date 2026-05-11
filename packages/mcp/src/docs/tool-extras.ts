@@ -142,7 +142,7 @@ Session log: /tmp/shipper/session.log`,
   },
   shipper_groom: {
     whenToUse:
-      'Use this only for `shipper:new` issues when MCP-driven grooming is enabled and the orchestrator is prepared to answer worker questions with `shipper_answer_question`.',
+      'Use this only for `shipper:new` issues when MCP-driven grooming is enabled and the orchestrator is prepared to answer worker questions with `shipper_answer_question`. Each awaiting_answer result contains exactly one question batch; if the worker has more pending batches, the next one is returned by `shipper_answer_question` after the current batch is answered.',
     example: {
       call: { issue: 42 },
       result: `Status: awaiting_answer
@@ -150,7 +150,14 @@ Session: sess-abc123
 
 The headless worker called AskUserQuestion and is paused awaiting answers from the orchestrator.
 Reply with \`shipper_answer_question\` providing { session_id, answers } where answers is a map
-of question text -> your answer (free text).`,
+of question text -> your answer (free text).
+
+Questions (JSON):
+[
+  {
+    "question": "Which behavior should the implementation preserve?"
+  }
+]`,
     },
     errorModes: [
       {
@@ -333,7 +340,7 @@ Dry run only; no changes made.`,
   },
   shipper_answer_question: {
     whenToUse:
-      'Use this only after `shipper_groom` or `shipper_advance` returns an awaiting-answer session id. The answers map should use the exact question text returned by the paused worker.',
+      'Use this only after `shipper_groom` or `shipper_advance` returns an awaiting-answer session id. The answers map must include every exact question text from the currently displayed batch. If more batches are already pending from the same worker turn, the result is another single-batch awaiting_answer payload to answer before the worker can resume fully.',
     example: {
       call: {
         session_id: 'sess-abc123',
@@ -342,12 +349,20 @@ Dry run only; no changes made.`,
             'Keep the current MCP response shape.',
         },
       },
-      result: `Stage: shipper:new -> shipper:groomed (accept)
+      result: `Status: awaiting_answer
+Session: sess-abc123
+Tool use id: toolu_next
 
----
-Grooming complete.
+The headless worker called AskUserQuestion and is paused awaiting answers from the orchestrator.
+Reply with \`shipper_answer_question\` providing { session_id, answers } where answers is a map
+of question text -> your answer (free text).
 
-Session log: /tmp/shipper/session.log`,
+Questions (JSON):
+[
+  {
+    "question": "What should happen next?"
+  }
+]`,
     },
     errorModes: [
       {
@@ -358,6 +373,10 @@ Session log: /tmp/shipper/session.log`,
       {
         name: 'Completed before answer',
         message: 'Cannot submit an answer: shipper child already completed.',
+      },
+      {
+        name: 'Missing current-batch answers',
+        message: 'Missing answers for current question batch: <questions>',
       },
       {
         name: 'Unavailable stdin',

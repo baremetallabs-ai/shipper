@@ -25,6 +25,11 @@ export interface CompletedEventInfo {
 
 export type DeferStreamResult = DeferredEventInfo | CompletedEventInfo;
 
+export interface OrderedQuestionToolUse {
+  toolUseId: string;
+  questions: DeferQuestion[];
+}
+
 interface RawResultEvent {
   type?: unknown;
   session_id?: string;
@@ -39,6 +44,8 @@ interface RawResultEvent {
 export class StreamJsonDeferConsumer {
   private buffer = '';
   private lastResult: RawResultEvent | undefined;
+  private readonly orderedQuestionToolUses: OrderedQuestionToolUse[] = [];
+  private readonly seenQuestionToolUseIds = new Set<string>();
 
   consume(chunk: Buffer | string): void {
     const text = typeof chunk === 'string' ? chunk : chunk.toString('utf-8');
@@ -68,8 +75,13 @@ export class StreamJsonDeferConsumer {
     }
     if (!parsed || typeof parsed !== 'object') return;
     const obj = parsed as Record<string, unknown>;
-    if (obj.type !== 'result') return;
-    this.lastResult = obj;
+    if (obj.type === 'assistant') {
+      this.consumeAssistantEvent(obj);
+      return;
+    }
+    if (obj.type === 'result') {
+      this.lastResult = obj;
+    }
   }
 
   /** Returns a structured view of the final stream event, or `undefined` if no result event was seen. */
@@ -102,6 +114,40 @@ export class StreamJsonDeferConsumer {
       completed.stopReason = result.stop_reason;
     }
     return completed;
+  }
+
+  getQuestionToolUseOrder(): OrderedQuestionToolUse[] {
+    return this.orderedQuestionToolUses.map((toolUse) => ({
+      toolUseId: toolUse.toolUseId,
+      questions: [...toolUse.questions],
+    }));
+  }
+
+  private consumeAssistantEvent(event: Record<string, unknown>): void {
+    const message = event.message;
+    if (!message || typeof message !== 'object') return;
+    const content = (message as Record<string, unknown>).content;
+    if (!Array.isArray(content)) return;
+    for (const item of content) {
+      if (!item || typeof item !== 'object') continue;
+      const toolUse = item as Record<string, unknown>;
+      if (toolUse.type !== 'tool_use') continue;
+      if (toolUse.name !== 'AskUserQuestion') continue;
+      if (typeof toolUse.id !== 'string') continue;
+      if (this.seenQuestionToolUseIds.has(toolUse.id)) continue;
+      const input = toolUse.input;
+      const rawQuestions =
+        input && typeof input === 'object'
+          ? (input as Record<string, unknown>).questions
+          : undefined;
+      const questions = Array.isArray(rawQuestions)
+        ? rawQuestions
+            .map((q) => normalizeQuestion(q))
+            .filter((q): q is DeferQuestion => q !== undefined)
+        : [];
+      this.seenQuestionToolUseIds.add(toolUse.id);
+      this.orderedQuestionToolUses.push({ toolUseId: toolUse.id, questions });
+    }
   }
 }
 

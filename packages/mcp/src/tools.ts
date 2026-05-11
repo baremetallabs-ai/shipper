@@ -146,6 +146,9 @@ interface PendingSession {
   startedAt: Date;
   /** Repo slug for session log resolution. */
   repoSlug: string;
+  /** Current AskUserQuestion batch surfaced to the orchestrator. */
+  currentQuestions: unknown[];
+  currentToolUseId?: string;
 }
 
 const pendingSessions = new Map<string, PendingSession>();
@@ -196,6 +199,28 @@ function sanitizeQuestionsForOrchestrator(questions: unknown[]): unknown[] {
     if (typeof obj.header === 'string') out.header = obj.header;
     return out;
   });
+}
+
+function pendingSessionCurrentBatch(event: {
+  payload: { questions: unknown[]; toolUseId?: string };
+}): Pick<PendingSession, 'currentQuestions' | 'currentToolUseId'> {
+  return {
+    currentQuestions: event.payload.questions,
+    ...(event.payload.toolUseId !== undefined ? { currentToolUseId: event.payload.toolUseId } : {}),
+  };
+}
+
+function missingCurrentAnswers(session: PendingSession, answers: Record<string, string>): string[] {
+  const missing: string[] = [];
+  for (const question of session.currentQuestions) {
+    if (!question || typeof question !== 'object') continue;
+    const text = (question as Record<string, unknown>).question;
+    if (typeof text !== 'string') continue;
+    if (!Object.prototype.hasOwnProperty.call(answers, text)) {
+      missing.push(text);
+    }
+  }
+  return missing;
 }
 
 function issueSchema(): z.ZodNumber {
@@ -682,6 +707,7 @@ export const mcpToolDefinitions = [
               preStageLabel,
               startedAt,
               repoSlug: sessionRepo.repoSlug,
+              ...pendingSessionCurrentBatch(event),
             });
             return formatAwaitingAnswer({
               sessionId: event.sessionId,
@@ -760,6 +786,7 @@ export const mcpToolDefinitions = [
               preStageLabel: NEW_LABEL,
               startedAt,
               repoSlug: sessionRepo.repoSlug,
+              ...pendingSessionCurrentBatch(event),
             });
             return formatAwaitingAnswer({
               sessionId: event.sessionId,
@@ -1116,11 +1143,25 @@ export const mcpToolDefinitions = [
               `No pending shipper session with id "${session_id}". The worker may have already completed or the MCP server may have restarted.`
             );
           }
+          const missing = missingCurrentAnswers(session, answers);
+          if (missing.length > 0) {
+            session.runner.cancel();
+            clearPendingSession(session_id);
+            return formatToolError(
+              new Error(`Missing answers for current question batch: ${missing.join(', ')}`)
+            );
+          }
           await session.runner.answer(answers);
           const event = await session.runner.next();
           if (event.kind === 'deferred') {
             // Replace the entry under the (likely-same) sessionId with the latest payload context.
             // Session id rarely changes across the same claude run, but we guard anyway.
+            session.currentQuestions = event.payload.questions;
+            if (event.payload.toolUseId !== undefined) {
+              session.currentToolUseId = event.payload.toolUseId;
+            } else {
+              Reflect.deleteProperty(session, 'currentToolUseId');
+            }
             if (event.sessionId !== session_id) {
               pendingSessions.delete(session_id);
               pendingSessions.set(event.sessionId, session);

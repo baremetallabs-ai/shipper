@@ -981,7 +981,13 @@ describe('shipper_advance', () => {
 
 describe('shipper_advance + shipper_answer_question (defer/answer cycle)', () => {
   function makeRunner(events: unknown[], onAnswer?: (answers: Record<string, string>) => void) {
+    const answerCalls: Record<string, string>[] = [];
+    let cancelled = false;
     return {
+      answerCalls,
+      get cancelled() {
+        return cancelled;
+      },
       next: (): Promise<unknown> => {
         if (events.length === 0) {
           return Promise.reject(new Error('runner exhausted in test'));
@@ -989,11 +995,40 @@ describe('shipper_advance + shipper_answer_question (defer/answer cycle)', () =>
         return Promise.resolve(events.shift());
       },
       answer: (answers: Record<string, string>): Promise<void> => {
+        answerCalls.push(answers);
         onAnswer?.(answers);
         return Promise.resolve();
       },
-      cancel: (): void => {},
+      cancel: (): void => {
+        cancelled = true;
+      },
       isCompleted: (): boolean => events.length === 0,
+    };
+  }
+
+  function deferredEvent(sessionId: string, toolUseId: string, question: string): unknown {
+    return {
+      kind: 'deferred',
+      sessionId,
+      payload: {
+        sessionId,
+        toolUseId,
+        questions: [
+          {
+            question,
+            header: question,
+            options: [{ label: 'Default', description: 'default' }],
+            multiSelect: false,
+          },
+        ],
+      },
+    };
+  }
+
+  function completionEvent(): unknown {
+    return {
+      kind: 'completed',
+      result: { exitCode: 0, stdout: '', stderr: '', timedOut: false },
     };
   }
 
@@ -1134,6 +1169,117 @@ describe('shipper_advance + shipper_answer_question (defer/answer cycle)', () =>
       expect(second.isError).toBeUndefined();
       expect(second.content[0]?.text).toContain('Status: awaiting_answer');
       expect(second.content[0]?.text).toContain('Second?');
+    });
+  });
+
+  it.each([
+    {
+      tool: 'shipper_advance',
+      initialLabel: 'shipper:planned',
+      finalLabel: 'shipper:implemented',
+      expectedStage: 'Stage: shipper:planned -> shipper:implemented (accept)',
+      sessionStage: 'implement',
+    },
+    {
+      tool: 'shipper_groom',
+      initialLabel: 'shipper:new',
+      finalLabel: 'shipper:groomed',
+      expectedStage: 'Stage: shipper:new -> shipper:groomed (accept)',
+      sessionStage: 'groom',
+    },
+  ])('surfaces three pending batches one at a time for $tool', async (scenario) => {
+    await withFlag('1', async () => {
+      mockGh
+        .mockResolvedValueOnce(issueLabelsResponse(scenario.initialLabel))
+        .mockResolvedValueOnce(issueLabelsResponse(scenario.finalLabel));
+      const runner = makeRunner([
+        deferredEvent('sess-multi', 'A', 'A?'),
+        deferredEvent('sess-multi', 'B', 'B?'),
+        deferredEvent('sess-multi', 'C', 'C?'),
+        completionEvent(),
+      ]);
+      mockStartShipper.mockReturnValueOnce(runner);
+      mockFindLatestSessionMeta.mockResolvedValue({
+        issue: '42',
+        stage: scenario.sessionStage,
+        timestamp: '2026-04-29T00:00:00.000Z',
+        agent: 'claude',
+        model: 'sonnet',
+        repo: 'owner/repo',
+        exitCode: 0,
+        logFile: '/tmp/multi-defer.jsonl',
+      });
+      mockExtractFinalMessage.mockResolvedValue('Done.');
+      mockTryResolvePr.mockResolvedValue(undefined);
+
+      const getTool = await collectTools();
+      const initial = await getTool(scenario.tool)({ issue: 42 });
+      expect(initial.isError).toBeUndefined();
+      expect(initial.content[0]?.text).toContain('Status: awaiting_answer');
+      expect(initial.content[0]?.text).toContain('A?');
+      expect(initial.content[0]?.text).toContain('Tool use id: A');
+
+      const second = await getTool('shipper_answer_question')({
+        session_id: 'sess-multi',
+        answers: { 'A?': 'answer A' },
+      });
+      expect(second.isError).toBeUndefined();
+      expect(second.content[0]?.text).toContain('Status: awaiting_answer');
+      expect(second.content[0]?.text).toContain('B?');
+      expect(second.content[0]?.text).toContain('Tool use id: B');
+
+      const third = await getTool('shipper_answer_question')({
+        session_id: 'sess-multi',
+        answers: { 'B?': 'answer B' },
+      });
+      expect(third.isError).toBeUndefined();
+      expect(third.content[0]?.text).toContain('Status: awaiting_answer');
+      expect(third.content[0]?.text).toContain('C?');
+      expect(third.content[0]?.text).toContain('Tool use id: C');
+
+      const completion = await getTool('shipper_answer_question')({
+        session_id: 'sess-multi',
+        answers: { 'C?': 'answer C' },
+      });
+      expect(completion.isError).toBeUndefined();
+      expect(completion.content[0]?.text).toContain(scenario.expectedStage);
+      expect(runner.answerCalls).toEqual([
+        { 'A?': 'answer A' },
+        { 'B?': 'answer B' },
+        { 'C?': 'answer C' },
+      ]);
+      expect(runner.cancelled).toBe(false);
+    });
+  });
+
+  it('rejects missing answers for the current batch and clears the pending session', async () => {
+    await withFlag('1', async () => {
+      mockGh.mockResolvedValueOnce(issueLabelsResponse('shipper:planned'));
+      const runner = makeRunner([deferredEvent('sess-missing', 'First', 'First?')]);
+      mockStartShipper.mockReturnValueOnce(runner);
+
+      const getTool = await collectTools();
+      const initial = await getTool('shipper_advance')({ issue: 42 });
+      expect(initial.isError).toBeUndefined();
+      expect(initial.content[0]?.text).toContain('First?');
+
+      const missing = await getTool('shipper_answer_question')({
+        session_id: 'sess-missing',
+        answers: { 'Other?': 'value' },
+      });
+      expect(missing.isError).toBe(true);
+      expect(missing.content[0]?.text).toContain(
+        'Missing answers for current question batch: First?'
+      );
+      expect(runner.answerCalls).toEqual([]);
+      expect(runner.cancelled).toBe(true);
+
+      const secondAttempt = await getTool('shipper_answer_question')({
+        session_id: 'sess-missing',
+        answers: { 'First?': 'late' },
+      });
+      expect(secondAttempt.isError).toBe(true);
+      expect(secondAttempt.content[0]?.text).toContain('No pending shipper session');
     });
   });
 
