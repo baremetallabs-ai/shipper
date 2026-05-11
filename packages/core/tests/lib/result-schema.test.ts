@@ -59,19 +59,19 @@ describe('validateResult', () => {
   });
 
   it('rejects non-object input', () => {
-    expect(() => validateResult('bad')).toThrowError(
+    expect(() => validateResult('bad')).toThrow(
       new ResultValidationError(['result.json must be a JSON object'])
     );
   });
 
   it('rejects null input', () => {
-    expect(() => validateResult(null)).toThrowError(
+    expect(() => validateResult(null)).toThrow(
       new ResultValidationError(['result.json must be a JSON object'])
     );
   });
 
   it('reports every missing required field', () => {
-    expect(() => validateResult({})).toThrowError(
+    expect(() => validateResult({})).toThrow(
       "Invalid result.json:\n- missing required field 'verdict'\n- missing required field 'comment'"
     );
   });
@@ -82,7 +82,7 @@ describe('validateResult', () => {
         verdict: 'approved',
         comment: '.shipper/output/comment-248.md',
       })
-    ).toThrowError(
+    ).toThrow(
       "Invalid result.json:\n- 'verdict' must be one of: accept, reject, fail (got 'approved')"
     );
   });
@@ -93,7 +93,7 @@ describe('validateResult', () => {
         verdict: 'accept',
         comment: 42,
       })
-    ).toThrowError("Invalid result.json:\n- 'comment' must be a string path");
+    ).toThrow("Invalid result.json:\n- 'comment' must be a string path");
   });
 
   it('rejects comment paths outside .shipper/output', () => {
@@ -102,9 +102,7 @@ describe('validateResult', () => {
         verdict: 'accept',
         comment: '../comment-248.md',
       })
-    ).toThrowError(
-      "Invalid result.json:\n- 'comment' must be a relative path under .shipper/output"
-    );
+    ).toThrow("Invalid result.json:\n- 'comment' must be a relative path under .shipper/output");
   });
 
   it('rejects optional fields with non-string values', () => {
@@ -117,7 +115,7 @@ describe('validateResult', () => {
         replies: [],
         groom: {},
       })
-    ).toThrowError(
+    ).toThrow(
       "Invalid result.json:\n- 'pr_spec' must be a string path\n- 'review_payload' must be a string path\n- 'replies' must be a string path\n- 'groom' must be a string path"
     );
   });
@@ -132,7 +130,7 @@ describe('validateResult', () => {
         replies: '../replies',
         groom: '.shipper/input/groom.json',
       })
-    ).toThrowError(
+    ).toThrow(
       "Invalid result.json:\n- 'pr_spec' must be a relative path under .shipper/output\n- 'review_payload' must be a relative path under .shipper/output\n- 'replies' must be a relative path under .shipper/output\n- 'groom' must be a relative path under .shipper/output"
     );
   });
@@ -176,19 +174,19 @@ describe('validateNewResult', () => {
   });
 
   it('rejects non-object input', () => {
-    expect(() => validateNewResult('bad')).toThrowError(
+    expect(() => validateNewResult('bad')).toThrow(
       new ResultValidationError(['result.json must be a JSON object'])
     );
   });
 
   it('reports a missing created_issue field', () => {
-    expect(() => validateNewResult({})).toThrowError(
+    expect(() => validateNewResult({})).toThrow(
       "Invalid result.json:\n- missing required field 'created_issue'"
     );
   });
 
   it('rejects a non-object created_issue field', () => {
-    expect(() => validateNewResult({ created_issue: 'bad' })).toThrowError(
+    expect(() => validateNewResult({ created_issue: 'bad' })).toThrow(
       "Invalid result.json:\n- 'created_issue' must be a JSON object"
     );
   });
@@ -202,7 +200,7 @@ describe('validateNewResult', () => {
           url: 'https://github.com/owner/repo/issues/42',
         },
       })
-    ).toThrowError("Invalid result.json:\n- 'created_issue.number' must be a positive integer");
+    ).toThrow("Invalid result.json:\n- 'created_issue.number' must be a positive integer");
   });
 
   it.each(['title', 'url'] as const)('rejects a blank %s', (field) => {
@@ -214,7 +212,7 @@ describe('validateNewResult', () => {
           url: field === 'url' ? '' : 'https://github.com/owner/repo/issues/42',
         },
       })
-    ).toThrowError(`Invalid result.json:\n- 'created_issue.${field}' must be a non-empty string`);
+    ).toThrow(`Invalid result.json:\n- 'created_issue.${field}' must be a non-empty string`);
   });
 
   it.each(['title', 'url'] as const)('rejects a non-string %s', (field) => {
@@ -226,7 +224,7 @@ describe('validateNewResult', () => {
           url: field === 'url' ? 7 : 'https://github.com/owner/repo/issues/42',
         },
       })
-    ).toThrowError(`Invalid result.json:\n- 'created_issue.${field}' must be a non-empty string`);
+    ).toThrow(`Invalid result.json:\n- 'created_issue.${field}' must be a non-empty string`);
   });
 
   it('ignores unrelated extra fields', () => {
@@ -279,7 +277,7 @@ describe('readResultFile', () => {
   it('reports a missing result.json file', async () => {
     tempDir = await mkdtemp(path.join(tmpdir(), 'shipper-result-schema-'));
 
-    await expect(readResultFile(tempDir)).rejects.toThrowError(
+    await expect(readResultFile(tempDir)).rejects.toThrow(
       `Missing result.json at ${path.join(tempDir, 'result.json')}`
     );
   });
@@ -288,7 +286,7 @@ describe('readResultFile', () => {
     tempDir = await mkdtemp(path.join(tmpdir(), 'shipper-result-schema-'));
     await writeFile(path.join(tempDir, 'result.json'), '{bad json', 'utf-8');
 
-    await expect(readResultFile(tempDir)).rejects.toThrowError(
+    await expect(readResultFile(tempDir)).rejects.toThrow(
       new RegExp(`^Failed to parse ${escapeRegExp(path.join(tempDir, 'result.json'))}:`)
     );
   });
@@ -297,7 +295,7 @@ describe('readResultFile', () => {
     tempDir = await mkdtemp(path.join(tmpdir(), 'shipper-result-schema-'));
     await mkdir(path.join(tempDir, 'result.json'));
 
-    await expect(readResultFile(tempDir)).rejects.toThrowError(
+    await expect(readResultFile(tempDir)).rejects.toThrow(
       new RegExp(
         `^Failed to read result\\.json at ${escapeRegExp(path.join(tempDir, 'result.json'))}:`
       )
@@ -312,7 +310,7 @@ describe('readResultFile', () => {
       'utf-8'
     );
 
-    await expect(readResultFile(tempDir)).rejects.toThrowError(
+    await expect(readResultFile(tempDir)).rejects.toThrow(
       `Invalid result.json at ${path.join(tempDir, 'result.json')}:\n- missing required field 'comment'`
     );
   });
@@ -355,7 +353,7 @@ describe('readNewResultFile', () => {
     tempDir = await mkdtemp(path.join(tmpdir(), 'shipper-new-result-schema-'));
     const resultPath = path.join(tempDir, 'new.result.json');
 
-    await expect(readNewResultFile(resultPath)).rejects.toThrowError(
+    await expect(readNewResultFile(resultPath)).rejects.toThrow(
       `Missing result.json at ${resultPath}`
     );
   });
@@ -365,7 +363,7 @@ describe('readNewResultFile', () => {
     const resultPath = path.join(tempDir, 'new.result.json');
     await writeFile(resultPath, '{bad json', 'utf-8');
 
-    await expect(readNewResultFile(resultPath)).rejects.toThrowError(
+    await expect(readNewResultFile(resultPath)).rejects.toThrow(
       new RegExp(`^Failed to parse ${escapeRegExp(resultPath)}:`)
     );
   });
@@ -375,7 +373,7 @@ describe('readNewResultFile', () => {
     const resultPath = path.join(tempDir, 'new.result.json');
     await mkdir(resultPath);
 
-    await expect(readNewResultFile(resultPath)).rejects.toThrowError(
+    await expect(readNewResultFile(resultPath)).rejects.toThrow(
       new RegExp(`^Failed to read result\\.json at ${escapeRegExp(resultPath)}:`)
     );
   });
@@ -385,7 +383,7 @@ describe('readNewResultFile', () => {
     const resultPath = path.join(tempDir, 'new.result.json');
     await writeFile(resultPath, JSON.stringify({ created_issue: { number: 0 } }), 'utf-8');
 
-    await expect(readNewResultFile(resultPath)).rejects.toThrowError(
+    await expect(readNewResultFile(resultPath)).rejects.toThrow(
       `Invalid result.json at ${resultPath}:\n- 'created_issue.number' must be a positive integer\n- 'created_issue.title' must be a non-empty string\n- 'created_issue.url' must be a non-empty string`
     );
   });

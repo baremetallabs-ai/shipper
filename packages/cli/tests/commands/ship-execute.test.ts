@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import * as core from '@baremetallabs-ai/shipper-core';
 
 import { createFakeCore } from '../_harness/fake-core.js';
@@ -47,7 +47,7 @@ type FakeCore = ReturnType<typeof createFakeCore>;
 
 describe('shipOneIssue', () => {
   let fake: FakeCore;
-  let resolveModeSpy: ReturnType<typeof vi.spyOn>;
+  let resolveModeSpy: MockInstance;
 
   const scriptLabels = (labels: Array<string | undefined>): void => {
     fake.setIssue('42', { labels: labels[0] ? [labels[0]] : [] });

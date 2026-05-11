@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 
 import { createFakeCore } from '../_harness/fake-core.js';
 
@@ -86,7 +86,7 @@ async function flushMicrotasks(): Promise<void> {
 
 describe('shipAutoParallel', () => {
   let fake: FakeCore;
-  let logSpy: ReturnType<typeof vi.spyOn>;
+  let logSpy: MockInstance;
 
   beforeEach(() => {
     fake = createFakeCore();

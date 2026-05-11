@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import type { RunPromptOpts } from '@baremetallabs-ai/shipper-core';
 
 import { createFakeCore } from '../_harness/fake-core.js';
@@ -190,7 +190,7 @@ describe('prepareUnblockContext', () => {
 
 describe('unblockCommand', () => {
   let fake: FakeCore;
-  let cwdSpy: ReturnType<typeof vi.spyOn>;
+  let cwdSpy: MockInstance;
   let promptCalls: Array<{ name: string; opts: RunPromptOpts }>;
 
   const stubFetchedIssue = (issueNumber: string, commentBodies: string[]): void => {

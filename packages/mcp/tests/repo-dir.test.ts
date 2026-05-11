@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 
 const { mockExecFileAsync } = vi.hoisted(() => ({
   mockExecFileAsync:
@@ -40,7 +40,7 @@ describe('resolveAndEnterRepoDir', () => {
   const originalChdir = process.chdir.bind(process);
   const originalRepoDir = process.env.SHIPPER_REPO_DIR;
   const tempDirs: string[] = [];
-  let stderrWriteSpy: ReturnType<typeof vi.spyOn>;
+  let stderrWriteSpy: MockInstance<typeof process.stderr.write>;
 
   async function makeTempDir(prefix: string): Promise<string> {
     const dir = await mkdtemp(path.join(tmpdir(), prefix));

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 
 import { createFakeCore } from '../_harness/fake-core.js';
 
@@ -8,8 +8,8 @@ const repo = 'owner/repo';
 
 describe('priorityCommand', () => {
   let fake: FakeCore;
-  let logSpy: ReturnType<typeof vi.spyOn>;
-  let errorSpy: ReturnType<typeof vi.spyOn>;
+  let logSpy: MockInstance;
+  let errorSpy: MockInstance;
 
   const stubIssueView = (issueNumber: string, labels: string[], state = 'OPEN'): void => {
     fake.stubGh((args) => {
