@@ -94,13 +94,13 @@ flag exists.
 
 ### `SHIPPER_ISSUE_NUMBER`
 
-| Field              | Value                                                                                                         |
-| ------------------ | ------------------------------------------------------------------------------------------------------------- |
-| Set by             | Shipper for hooks when issue context exists.                                                                  |
-| Read by            | User-authored hook scripts.                                                                                   |
-| Default when unset | Outside Shipper hook execution, Shipper does not provide it; in hooks without issue context, it may be empty. |
-| Accepted values    | GitHub issue number string or empty string.                                                                   |
-| Example            | `test -n "$SHIPPER_ISSUE_NUMBER"`                                                                             |
+| Field              | Value                                                                                                                                                                                          |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Set by             | Shipper for hooks when issue context exists.                                                                                                                                                   |
+| Read by            | User-authored hook scripts.                                                                                                                                                                    |
+| Default when unset | Outside Shipper hook execution, Shipper does not provide it; for the `new` stage, it is empty because no issue exists yet; other hooks without issue context may also receive an empty string. |
+| Accepted values    | GitHub issue number string or empty string.                                                                                                                                                    |
+| Example            | `test -n "$SHIPPER_ISSUE_NUMBER"`                                                                                                                                                              |
 
 ### `SHIPPER_BRANCH_NAME`
 
