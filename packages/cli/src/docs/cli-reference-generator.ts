@@ -225,6 +225,10 @@ function frontmatter(title: string, description: string): string {
   return `---\ntitle: ${yamlString(title)}\ndescription: ${yamlString(description)}\n---\n\n`;
 }
 
+function fallbackIntro(description: string): string {
+  return /[.!?]$/.test(description) ? description : `${description}.`;
+}
+
 function escapeTableCell(value: string): string {
   return value.replaceAll('\\', '\\\\').replaceAll('|', '\\|').replaceAll('\n', '<br>');
 }
@@ -403,7 +407,7 @@ function renderGroupPage(group: GroupInfo): string {
   const groupExtras = groups[pathKey];
   const groupDescription = groupExtras?.description ?? group.description;
   const pageDescription = groupExtras?.pageDescription ?? groupDescription;
-  const intro = groupExtras?.intro ?? `${groupDescription}.`;
+  const intro = groupExtras?.intro ?? fallbackIntro(groupDescription);
   const rows = group.children.map((child) => {
     const childPath = commandPath(child.pathSegments);
     if (child.kind === 'group') {
