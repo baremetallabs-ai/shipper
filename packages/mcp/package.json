@@ -37,7 +37,7 @@
   "dependencies": {
     "@baremetallabs-ai/shipper-core": "3.0.1",
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "zod": "^4.0.0"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^22.12.0",
