@@ -45,8 +45,8 @@ export default defineConfig({
         {
           label: 'Reference',
           items: [
-            { label: 'CLI', autogenerate: { directory: 'reference/cli' } },
-            { label: 'MCP', autogenerate: { directory: 'reference/mcp' } },
+            { label: 'CLI', items: [{ autogenerate: { directory: 'reference/cli' } }] },
+            { label: 'MCP', items: [{ autogenerate: { directory: 'reference/mcp' } }] },
             { label: 'Settings', slug: 'reference/settings' },
             { label: '.shipper directory', slug: 'reference/shipper-directory' },
             { label: 'Hooks', slug: 'reference/hooks' },
