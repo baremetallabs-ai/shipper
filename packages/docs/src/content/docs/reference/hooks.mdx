@@ -73,13 +73,14 @@ it. Run `chmod +x .shipper/hooks/<hook-name>` to make the hook executable.
 
 Shipper passes runtime context to hook scripts through environment variables.
 
+For full per-variable detail, see [Environment variables](/reference/environment-variables/#hook-context).
+
 | Hook type                | Variables                                                                               |
 | ------------------------ | --------------------------------------------------------------------------------------- |
 | Stage hooks              | `SHIPPER_STAGE`, `SHIPPER_ISSUE_NUMBER`, `SHIPPER_BRANCH_NAME`                          |
 | Worktree lifecycle hooks | `SHIPPER_STAGE`, `SHIPPER_ISSUE_NUMBER`, `SHIPPER_BRANCH_NAME`, `SHIPPER_WORKTREE_PATH` |
 
 `SHIPPER_ISSUE_NUMBER` is empty for the `new` stage because no issue exists yet.
-`SHIPPER_BRANCH_NAME` is the branch the stage is operating on.
 
 ## Related: dependency install
 
