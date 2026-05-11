@@ -6,8 +6,7 @@ audience: agent
 
 # Agent cookbook
 
-Use these task-focused recipes to adjust how Shipper runs in a repository without republishing the
-full reference.
+With `audience: agent`, this cookbook is written for coding agents customizing Shipper inside a repository; use [Recipes](/guides/recipes/) for human-oriented task walkthroughs instead of agent-side setup and customization notes.
 
 - [Switch coding agents](./switch-coding-agent/)
 - [Eject a prompt](./eject-prompt/)

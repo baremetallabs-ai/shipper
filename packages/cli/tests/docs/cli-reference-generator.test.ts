@@ -100,6 +100,20 @@ describe('cli reference generator', () => {
         pr: { description: '' },
       });
     }).toThrow('Docs group description for "pr" is empty.');
+
+    expect(() => {
+      validateReferenceModel(model, commandExtras, {
+        ...groups,
+        pr: { ...groups.pr, pageDescription: '' },
+      });
+    }).toThrow('Docs group page description for "pr" is empty.');
+
+    expect(() => {
+      validateReferenceModel(model, commandExtras, {
+        ...groups,
+        pr: { ...groups.pr, intro: '' },
+      });
+    }).toThrow('Docs group intro for "pr" is empty.');
   });
 
   it('fails validation when a command or group has an empty description', () => {
@@ -153,6 +167,56 @@ describe('cli reference generator', () => {
     expect(
       existsSync(path.join(tempRoot, 'packages/docs/src/content/docs/reference/cli/agent.md'))
     ).toBe(false);
+  });
+
+  it('renders subgroup landing metadata without changing parent rows or child rows', async () => {
+    const tempRoot = await makeTempRoot();
+    await generateCliReference(tempRoot);
+
+    const cliDir = path.join(tempRoot, 'packages/docs/src/content/docs/reference/cli');
+    const [index, prIndex, issueIndex] = await Promise.all([
+      readFile(path.join(cliDir, 'index.md'), 'utf8'),
+      readFile(path.join(cliDir, 'pr/index.md'), 'utf8'),
+      readFile(path.join(cliDir, 'issue/index.md'), 'utf8'),
+    ]);
+
+    const prIntro =
+      '`shipper pr` covers the pull request side of the label-driven workflow: ' +
+      '`shipper pr open` runs when an issue reaches `shipper:implemented`, `shipper pr review` ' +
+      'runs when an issue reaches `shipper:pr-open`, and `shipper pr remediate` runs when an ' +
+      'issue reaches `shipper:pr-reviewed`. Most users invoke these through `shipper next` or ' +
+      '`shipper ship`, which dispatch the correct subcommand from the current workflow label; ' +
+      'see the [state machine](/concepts/state-machine/) for the full transition table.';
+    const issueIntro =
+      '`shipper issue` is the read-only inspection cluster for shipper-managed issues: it ' +
+      'surfaces workflow state (including `--status` short names such as `planned` and ' +
+      '`implemented`) without advancing labels, leaving future read/inspect subcommands in the ' +
+      'same group.';
+
+    expect(index).toContain('- [shipper issue](./issue/) - Issue commands');
+    expect(index).toContain('- [shipper pr](./pr/) - Pull request commands');
+
+    expect(prIndex).toContain(
+      "description: 'Follow pull request workflow stages from implemented issue through review and remediation.'"
+    );
+    expect(prIndex).toContain(`# shipper pr\n\n${prIntro}\n\n`);
+    expect(prIndex).toContain('/concepts/state-machine/');
+    expect(prIndex).toContain('- [shipper pr review](./review) - Review a pull request');
+    expect(prIndex).toContain(
+      '- [shipper pr open](./open) - Open a pull request for an implemented issue'
+    );
+    expect(prIndex).toContain(
+      '- [shipper pr remediate](./remediate) - Remediate a pull request after review feedback'
+    );
+
+    expect(issueIndex).toContain(
+      "description: 'Inspect shipper-managed issues by workflow state without advancing the pipeline.'"
+    );
+    expect(issueIndex).toContain(`# shipper issue\n\n${issueIntro}\n\n`);
+    expect(issueIndex).not.toContain('/concepts/state-machine/');
+    expect(issueIndex).toContain(
+      '- [shipper issue list](./list) - List shipper-managed issues by pipeline status'
+    );
   });
 
   it('reports drift with a diff and remediation line', async () => {

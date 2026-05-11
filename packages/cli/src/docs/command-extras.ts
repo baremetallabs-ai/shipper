@@ -32,6 +32,11 @@ export type CommandExtras = {
   exitCodes: CommandExitCode[];
   constraints?: string[];
 };
+export type CommandGroupExtras = {
+  description: string;
+  pageDescription?: string;
+  intro?: string;
+};
 
 const promptMcpConstraint = '--disable-mcp and --enable-mcp are mutually exclusive';
 const troubleshootingStaleLocks =
@@ -318,7 +323,27 @@ export const commandExtras: Record<CommandPath, CommandExtras> = {
   },
 };
 
-export const groups: Record<'pr' | 'issue', { description: string }> = {
-  pr: { description: 'Pull request commands' },
-  issue: { description: 'Issue commands' },
+export const groups: Record<'pr' | 'issue', CommandGroupExtras> = {
+  pr: {
+    description: 'Pull request commands',
+    pageDescription:
+      'Follow pull request workflow stages from implemented issue through review and remediation.',
+    intro:
+      '`shipper pr` covers the pull request side of the label-driven workflow: ' +
+      '`shipper pr open` runs when an issue reaches `shipper:implemented`, `shipper pr review` ' +
+      'runs when an issue reaches `shipper:pr-open`, and `shipper pr remediate` runs when an ' +
+      'issue reaches `shipper:pr-reviewed`. Most users invoke these through `shipper next` or ' +
+      '`shipper ship`, which dispatch the correct subcommand from the current workflow label; ' +
+      'see the [state machine](/concepts/state-machine/) for the full transition table.',
+  },
+  issue: {
+    description: 'Issue commands',
+    pageDescription:
+      'Inspect shipper-managed issues by workflow state without advancing the pipeline.',
+    intro:
+      '`shipper issue` is the read-only inspection cluster for shipper-managed issues: it ' +
+      'surfaces workflow state (including `--status` short names such as `planned` and ' +
+      '`implemented`) without advancing labels, leaving future read/inspect subcommands in the ' +
+      'same group.',
+  },
 };
