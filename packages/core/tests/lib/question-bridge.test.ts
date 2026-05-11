@@ -182,6 +182,89 @@ describe('driveQuestionBridge', () => {
     expect(await readAnswerFile(requestC)).toMatchObject({ answers: { 'C?': 'answer C' } });
   });
 
+  it('waits for the earliest unanswered ordered request before surfacing later requests', async () => {
+    const bridgeDir = path.join(workdir, 'bridge');
+    const requestB = await writeRequest(bridgeDir, 'B', 'B?');
+    const childExit = deferred<number>();
+    const markers: DeferMarkerPayload[] = [];
+    const answers: AnswerLine[] = [
+      { answers: { 'A?': 'answer A' } },
+      { answers: { 'B?': 'answer B' } },
+    ];
+
+    const drive = driveQuestionBridge({
+      bridgeDir,
+      streamConsumer: makeConsumer([
+        { id: 'A', question: 'A?' },
+        { id: 'B', question: 'B?' },
+      ]),
+      childExit: childExit.promise,
+      readAnswer: () => Promise.resolve(answers.shift() ?? { answers: {} }),
+      emitMarker: (payload) => markers.push(payload),
+      abortChild: vi.fn(),
+      pollIntervalMs: 5,
+      orderResolutionTimeoutMs: 1_000,
+    });
+
+    await sleep(25);
+    expect(markers).toEqual([]);
+
+    const requestA = await writeRequest(bridgeDir, 'A', 'A?');
+    await waitFor(() => (markers.length === 2 ? markers : undefined));
+    childExit.resolve(0);
+
+    await expect(drive).resolves.toBe(0);
+    expect(markers.map((marker) => marker.toolUseId)).toEqual(['A', 'B']);
+    expect(await readAnswerFile(requestA)).toMatchObject({ answers: { 'A?': 'answer A' } });
+    expect(await readAnswerFile(requestB)).toMatchObject({ answers: { 'B?': 'answer B' } });
+  });
+
+  it('rejects when the earliest ordered request never writes a request file', async () => {
+    const bridgeDir = path.join(workdir, 'bridge');
+    await writeRequest(bridgeDir, 'B', 'B?');
+    const abortChild = vi.fn();
+
+    await expect(
+      driveQuestionBridge({
+        bridgeDir,
+        streamConsumer: makeConsumer([
+          { id: 'A', question: 'A?' },
+          { id: 'B', question: 'B?' },
+        ]),
+        childExit: new Promise<number>(() => undefined),
+        readAnswer: () => Promise.resolve({ answers: { 'B?': 'answer B' } }),
+        emitMarker: vi.fn(),
+        abortChild,
+        pollIntervalMs: 5,
+        orderResolutionTimeoutMs: 20,
+      })
+    ).rejects.toThrow('tool_use_id A was observed in Claude stream-json order');
+    expect(abortChild).toHaveBeenCalledOnce();
+  });
+
+  it('rejects child exit after stream order appears but before the request file appears', async () => {
+    const bridgeDir = path.join(workdir, 'bridge');
+    const childExit = deferred<number>();
+    const abortChild = vi.fn();
+    const drive = driveQuestionBridge({
+      bridgeDir,
+      streamConsumer: makeConsumer([{ id: 'A', question: 'A?' }]),
+      childExit: childExit.promise,
+      readAnswer: () => Promise.resolve({ answers: { 'A?': 'answer A' } }),
+      emitMarker: vi.fn(),
+      abortChild,
+      pollIntervalMs: 5,
+      orderResolutionTimeoutMs: 1_000,
+    });
+
+    childExit.resolve(0);
+
+    await expect(drive).rejects.toThrow(
+      'Claude exited before AskUserQuestion tool_use_id A could be surfaced'
+    );
+    expect(abortChild).toHaveBeenCalledOnce();
+  });
+
   it('rejects missing current-batch answers without writing an answer file', async () => {
     const bridgeDir = path.join(workdir, 'bridge');
     const request = await writeRequest(bridgeDir, 'B', 'B?');

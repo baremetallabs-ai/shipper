@@ -55,6 +55,7 @@ export async function driveQuestionBridge(options: DriveQuestionBridgeOptions): 
   const dirs = await ensureBridgeDirs(options.bridgeDir);
   const answeredToolUseIds = new Set<string>();
   const unmatchedRequestFirstSeenAt = new Map<string, number>();
+  const missingOrderedRequestFirstSeenAt = new Map<string, number>();
   const childExitState: ChildExitState = { resolved: false };
 
   options.childExit.then(
@@ -77,6 +78,10 @@ export async function driveQuestionBridge(options: DriveQuestionBridgeOptions): 
       const unansweredRequests = requests.filter(
         (request) => !answeredToolUseIds.has(request.toolUseId)
       );
+      const orderedToolUses = options.streamConsumer.getQuestionToolUseOrder();
+      const nextToolUse = orderedToolUses.find(
+        (toolUse) => !answeredToolUseIds.has(toolUse.toolUseId)
+      );
 
       if (childExitState.resolved) {
         await throwIfFailureFileExists(dirs.failuresDir);
@@ -85,13 +90,17 @@ export async function driveQuestionBridge(options: DriveQuestionBridgeOptions): 
             `Claude exited while ${unansweredRequests.length} AskUserQuestion request(s) were pending`
           );
         }
+        if (nextToolUse) {
+          throw new Error(
+            `Claude exited before AskUserQuestion tool_use_id ${nextToolUse.toolUseId} could be surfaced`
+          );
+        }
         if (childExitState.error) {
           throw childExitState.error;
         }
         return childExitState.exitCode ?? 1;
       }
 
-      const orderedToolUses = options.streamConsumer.getQuestionToolUseOrder();
       const orderedToolUseIds = new Set(orderedToolUses.map((toolUse) => toolUse.toolUseId));
       const unmatchedRequests = unansweredRequests.filter(
         (request) => !orderedToolUseIds.has(request.toolUseId)
@@ -102,16 +111,18 @@ export async function driveQuestionBridge(options: DriveQuestionBridgeOptions): 
         orderResolutionTimeoutMs
       );
 
-      const nextToolUse = orderedToolUses.find(
-        (toolUse) =>
-          requestsByToolUseId.has(toolUse.toolUseId) && !answeredToolUseIds.has(toolUse.toolUseId)
-      );
-
       if (nextToolUse) {
         const request = requestsByToolUseId.get(nextToolUse.toolUseId);
         if (!request) {
-          throw new Error(`Ordered AskUserQuestion request ${nextToolUse.toolUseId} disappeared`);
+          throwIfOrderedRequestMissing(
+            nextToolUse.toolUseId,
+            missingOrderedRequestFirstSeenAt,
+            orderResolutionTimeoutMs
+          );
+          await sleep(pollIntervalMs);
+          continue;
         }
+        missingOrderedRequestFirstSeenAt.delete(nextToolUse.toolUseId);
         options.emitMarker({
           sessionId: request.sessionId,
           questions: request.questions,
@@ -248,6 +259,21 @@ function indexRequestsByToolUseId(
     requestsByToolUseId.set(request.toolUseId, request);
   }
   return requestsByToolUseId;
+}
+
+function throwIfOrderedRequestMissing(
+  toolUseId: string,
+  missingOrderedRequestFirstSeenAt: Map<string, number>,
+  orderResolutionTimeoutMs: number
+): void {
+  const now = Date.now();
+  const firstSeenAt = missingOrderedRequestFirstSeenAt.get(toolUseId) ?? now;
+  missingOrderedRequestFirstSeenAt.set(toolUseId, firstSeenAt);
+  if (now - firstSeenAt >= orderResolutionTimeoutMs) {
+    throw new Error(
+      `AskUserQuestion tool_use_id ${toolUseId} was observed in Claude stream-json order, but no bridge request file appeared`
+    );
+  }
 }
 
 function throwIfRequestsRemainUnordered(

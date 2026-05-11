@@ -92,6 +92,7 @@ const GH_MUTATION_PATTERNS = [
   /gh\s+pr\s+review\b/,
 ] as const;
 const MAX_INPUT_BYTES = 200_000;
+const QUESTION_BRIDGE_ABORT_DRAIN_TIMEOUT_MS = 2_000;
 const warnedPromptPaths = new Set<string>();
 
 interface WorktreeDirs {
@@ -660,6 +661,7 @@ async function spawnClaudeWithQuestionBridge(
   } catch (err) {
     logger.error(`Error: AskUserQuestion bridge failed: ${toErrorMessage(err)}`);
     abortController.abort();
+    await waitForChildExitAfterAbort(childExit);
     return 1;
   } finally {
     // The question bridge attaches a readline.Interface to process.stdin to read answers
@@ -667,6 +669,24 @@ async function spawnClaudeWithQuestionBridge(
     // loop alive — the CLI hangs after claude exits and the MCP parent never sees
     // the child close. Detach explicitly so the CLI can drain and exit.
     closeStdinReader();
+  }
+}
+
+async function waitForChildExitAfterAbort(childExit: Promise<number>): Promise<void> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<void>((resolve) => {
+    timeout = setTimeout(resolve, QUESTION_BRIDGE_ABORT_DRAIN_TIMEOUT_MS);
+  });
+  try {
+    await Promise.race([
+      childExit.then(
+        () => undefined,
+        () => undefined
+      ),
+      timeoutPromise,
+    ]);
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
