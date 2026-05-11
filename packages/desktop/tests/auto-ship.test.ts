@@ -336,7 +336,7 @@ describe('getActiveShipIssueNumbers', () => {
         status: 'complete',
         stateChangedAt,
         title: 'Ship #53',
-        detail: 'Complete',
+        detail: 'Ship succeeded',
         output: '',
         issueNumber: 53,
         cancelled: false,
@@ -429,7 +429,7 @@ describe('merge-aware background helpers', () => {
         repo: 'owner/repo',
         issueNumber: 70,
       })
-    ).toBe('Unblock completed');
+    ).toBe('Unblock succeeded');
   });
 
   it('returns cancelled detail before any other status-specific copy', () => {
@@ -538,7 +538,7 @@ describe('merge-aware background helpers', () => {
     expect(getBackgroundTitle('ship', 'owner/repo', 71, false)).toBe('Ship #71');
   });
 
-  it('distinguishes merge-enabled completed ships in the detail copy', () => {
+  it('distinguishes merge-enabled succeeded ships in the detail copy', () => {
     expect(
       getBackgroundDetail({
         command: 'ship',
@@ -547,7 +547,7 @@ describe('merge-aware background helpers', () => {
         issueNumber: 72,
         merge: true,
       })
-    ).toBe('Ship completed · merged');
+    ).toBe('Ship succeeded · merged');
     expect(
       getBackgroundDetail({
         command: 'ship',
@@ -556,7 +556,7 @@ describe('merge-aware background helpers', () => {
         issueNumber: 72,
         merge: false,
       })
-    ).toBe('Ship completed');
+    ).toBe('Ship succeeded');
   });
 
   it('uses the existing non-merge default detail copy for new, ship, and init commands', () => {

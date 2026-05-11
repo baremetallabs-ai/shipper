@@ -80,7 +80,7 @@ function getStatusLabel(status: ActionQueueStatus, cancelled: boolean | undefine
     case 'paused':
       return 'Paused';
     case 'complete':
-      return 'Complete';
+      return 'Succeeded';
     case 'failed':
       return 'Failed';
   }

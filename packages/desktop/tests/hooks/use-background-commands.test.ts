@@ -90,6 +90,14 @@ describe('useBackgroundCommands', () => {
           output: 'progress\n',
         })
       );
+      expect(result.current.toasts).toContainEqual(
+        expect.objectContaining({
+          sessionId: 'ship-1',
+          variant: 'success',
+          title: 'Ship #11 succeeded',
+          description: 'The background ship command succeeded.',
+        })
+      );
     });
 
     void result.current.handleShowBackgroundLogs('ship-1');
@@ -98,6 +106,113 @@ describe('useBackgroundCommands', () => {
       expect(shipper.api.getBackgroundOutput).toHaveBeenCalledWith('ship-1');
       expect(result.current.logViewer.open).toBe(true);
       expect(result.current.logViewer.content).toBe('complete log output');
+    });
+  });
+
+  it('shows succeeded copy for merge-enabled ship success toasts', async () => {
+    const shipper = createMockShipperApi();
+    shipper.install();
+    const { result } = renderHook(() =>
+      useBackgroundCommands({
+        activeRepo: 'owner/repo',
+        autoMergeRepos: new Set(),
+        checkInitState: vi.fn(() => Promise.resolve(undefined)),
+        pipelineBridgeRef: { current: createPipelineBridge() },
+      })
+    );
+    await flushHookEffects();
+
+    shipper.emitBackgroundStatus({
+      sessionId: 'ship-merge-success',
+      command: 'ship',
+      repo: 'owner/repo',
+      status: 'complete',
+      meta: { issueNumber: 12, merge: true },
+    });
+    await flushHookEffects();
+
+    await waitFor(() => {
+      expect(result.current.toasts).toContainEqual(
+        expect.objectContaining({
+          sessionId: 'ship-merge-success',
+          variant: 'success',
+          title: 'Ship #12 succeeded · merged',
+          description: 'The background ship command succeeded and merged.',
+        })
+      );
+    });
+  });
+
+  it('shows succeeded fallback copy for new command success toasts without an issue URL', async () => {
+    const shipper = createMockShipperApi();
+    shipper.install();
+    const { result } = renderHook(() =>
+      useBackgroundCommands({
+        activeRepo: 'owner/repo',
+        autoMergeRepos: new Set(),
+        checkInitState: vi.fn(() => Promise.resolve(undefined)),
+        pipelineBridgeRef: { current: createPipelineBridge() },
+      })
+    );
+    await flushHookEffects();
+
+    shipper.emitBackgroundStatus({
+      sessionId: 'new-success',
+      command: 'new',
+      repo: 'owner/repo',
+      status: 'complete',
+    });
+    await flushHookEffects();
+
+    await waitFor(() => {
+      expect(result.current.toasts).toContainEqual(
+        expect.objectContaining({
+          sessionId: 'new-success',
+          variant: 'success',
+          title: 'Issue created',
+          description: 'The new issue command succeeded.',
+        })
+      );
+    });
+  });
+
+  it('shows succeeded copy for unblock confirmation fallback toasts', async () => {
+    const shipper = createMockShipperApi();
+    shipper.install();
+    const pipelineBridge = createPipelineBridge();
+    vi.mocked(pipelineBridge.loadIssues).mockResolvedValue({
+      ok: false,
+      error: 'refresh failed',
+    });
+    const { result } = renderHook(() =>
+      useBackgroundCommands({
+        activeRepo: 'owner/repo',
+        autoMergeRepos: new Set(),
+        checkInitState: vi.fn(() => Promise.resolve(undefined)),
+        pipelineBridgeRef: { current: pipelineBridge },
+      })
+    );
+    await flushHookEffects();
+
+    shipper.emitBackgroundStatus({
+      sessionId: 'unblock-confirm-fallback',
+      command: 'unblock',
+      repo: 'owner/repo',
+      status: 'complete',
+      meta: { issueNumber: 70 },
+    });
+    await flushHookEffects();
+
+    await waitFor(() => {
+      expect(result.current.toasts).toContainEqual(
+        expect.objectContaining({
+          sessionId: 'unblock-confirm-fallback',
+          variant: 'cancelled',
+          title: 'Unblock #70 succeeded',
+          description:
+            'The unblock agent succeeded, but the latest issue state could not be confirmed.',
+        })
+      );
     });
   });
 

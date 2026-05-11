@@ -165,11 +165,11 @@ export function getBackgroundDetail({
       case 'new':
         return 'Issue created';
       case 'ship':
-        return merge ? 'Ship completed · merged' : 'Ship completed';
+        return merge ? 'Ship succeeded · merged' : 'Ship succeeded';
       case 'init':
-        return 'Initialization complete';
+        return 'Initialization succeeded';
       case 'unblock':
-        return 'Unblock completed';
+        return 'Unblock succeeded';
     }
   }
 

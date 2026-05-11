@@ -166,6 +166,25 @@ describe('ActionQueueDrawer', () => {
     expect(screen.getByText('Just now')).toBeTruthy();
   });
 
+  it('renders complete rows as succeeded with success styling', () => {
+    renderDrawer([
+      createCommand({
+        id: 'complete',
+        status: 'complete',
+        canCancel: false,
+        title: 'Terminal command',
+        detail: 'Ship succeeded',
+      }),
+    ]);
+
+    const statusLabel = screen.getByText('Succeeded');
+    const statusBadge = statusLabel.closest('[data-slot="badge"]');
+
+    expect(statusLabel).toBeTruthy();
+    expect(statusBadge?.getAttribute('data-variant')).toBe('success');
+    expect(screen.queryByText('Complete')).toBeNull();
+  });
+
   it('does not tick terminal row labels when active rows refresh', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(baseNow));
@@ -179,7 +198,7 @@ describe('ActionQueueDrawer', () => {
       }),
       createCommand({
         id: 'complete',
-        title: 'Complete command',
+        title: 'Terminal command',
         status: 'complete',
         canCancel: false,
         stateChangedAt: baseNow,
