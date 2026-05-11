@@ -106,11 +106,10 @@ finishes. Ships for different repositories are not serialized by this rule.
 
 ## Background Logs
 
-Use `Logs` from an eligible queue row to open the background log viewer. Queued rows expose `Logs`
-only after they have output to show; otherwise they have no log content until they start. Running
-commands stream output into the viewer as it arrives. Finished commands show the buffered output
-retained for that row. `New` rows use the same viewer after the desktop can load their JSONL log
-file.
+Use `Logs` from an eligible queue row to open the background log viewer. Queued rows generally have
+no log content until they start running. Running commands stream output into the viewer as it
+arrives. Finished commands show the buffered output retained for that row. `New` rows use the same
+viewer after the desktop can load their JSONL log file.
 
 The viewer follows the tail while you are scrolled to the bottom. If you scroll up to inspect earlier
 output, it stops auto-following and shows `Jump to latest`; selecting that control returns to the
