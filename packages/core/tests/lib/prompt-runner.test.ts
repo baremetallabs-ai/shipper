@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 
 type PromptStdout = EventEmitter & {
@@ -1636,7 +1637,7 @@ describe('runPrompt', () => {
     stdoutWriteMock.mockRestore();
   });
 
-  it('returns 1 and aborts Claude when the question bridge driver fails', async () => {
+  it('returns 1 after aborting Claude when the question bridge driver fails', async () => {
     resolveModeMock.mockReturnValue('headless');
     readFileMock.mockResolvedValueOnce(makePrompt('claude'));
     driveQuestionBridgeMock.mockRejectedValueOnce(new Error('bridge broke'));
@@ -1644,14 +1645,26 @@ describe('runPrompt', () => {
     const child = makeTimeoutChild();
     spawnMock.mockReturnValueOnce(child);
 
-    await expect(runPrompt('test', { mode: 'headless', repo: 'owner/repo' })).resolves.toBe(1);
+    let settled = false;
+    const run = runPrompt('test', { mode: 'headless', repo: 'owner/repo' }).then((result) => {
+      settled = true;
+      return result;
+    });
+
+    for (let attempt = 0; attempt < 10 && child.kill.mock.calls.length === 0; attempt += 1) {
+      await sleep(0);
+    }
 
     expect(child.kill).toHaveBeenCalledWith('SIGTERM');
     expect(errorMock).toHaveBeenCalledWith(
       '[shipper] Error: AskUserQuestion bridge failed: bridge broke'
     );
+    await sleep(0);
+    expect(settled).toBe(false);
+
     child.emit('close', 143);
     child.finishLog();
+    await expect(run).resolves.toBe(1);
     errorMock.mockRestore();
   });
 
