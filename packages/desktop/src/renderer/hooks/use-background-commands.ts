@@ -634,7 +634,7 @@ export function useBackgroundCommands({
                 description:
                   issueNumber && issueUrl
                     ? 'The new issue is ready in GitHub.'
-                    : 'The new issue command completed successfully.',
+                    : 'The new issue command succeeded.',
                 issueUrl,
                 issueLabel: issueNumber ? `Open issue #${issueNumber}` : undefined,
               }
@@ -646,14 +646,14 @@ export function useBackgroundCommands({
                   event.command === 'init'
                     ? `Initialized ${event.repo}`
                     : issueNumber
-                      ? `Ship #${issueNumber} ${merge ? 'merged' : 'finished'}`
-                      : 'Ship finished',
+                      ? `Ship #${issueNumber} succeeded${merge ? ' · merged' : ''}`
+                      : 'Ship succeeded',
                 description:
                   event.command === 'init'
                     ? 'Repository labels and settings were updated.'
                     : merge
-                      ? 'The background ship command completed and merged successfully.'
-                      : 'The background ship command completed successfully.',
+                      ? 'The background ship command succeeded and merged.'
+                      : 'The background ship command succeeded.',
               };
         pushToast(successToast);
       }
@@ -779,9 +779,9 @@ export function useBackgroundCommands({
               id: event.sessionId,
               sessionId: event.sessionId,
               variant: 'cancelled',
-              title: `Unblock #${issueNumber} completed`,
+              title: `Unblock #${issueNumber} succeeded`,
               description:
-                'The unblock agent finished, but the latest issue state could not be confirmed.',
+                'The unblock agent succeeded, but the latest issue state could not be confirmed.',
             });
             return;
           }
