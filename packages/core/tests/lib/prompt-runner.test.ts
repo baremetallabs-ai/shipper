@@ -21,6 +21,7 @@ type PromptStdin = EventEmitter & {
 };
 
 type PromptChild = EventEmitter & {
+  kill?: ReturnType<typeof vi.fn>;
   stdin?: PromptStdin;
   stderr?: EventEmitter;
   stdout?: PromptStdout;
@@ -74,6 +75,9 @@ const parseAgentUsageMock = vi
 const formatUsageLineMock = vi
   .fn<(usage: Record<string, number>) => string>()
   .mockReturnValue('Usage: 45 input │ 12 output │ 8 cache read │ 2 cache write tokens');
+const driveQuestionBridgeMock = vi.fn(async (opts: { childExit: Promise<number> }) => {
+  return await opts.childExit;
+});
 const resolveAgentMock = vi
   .fn<(promptName: string, agent?: string) => 'claude' | 'codex' | 'copilot'>()
   .mockReturnValue('claude');
@@ -170,6 +174,10 @@ vi.mock('../../src/lib/usage.js', () => ({
   formatUsageLine: (...args: unknown[]) => formatUsageLineMock(...args),
 }));
 
+vi.mock('../../src/lib/question-bridge.js', () => ({
+  driveQuestionBridge: (...args: unknown[]) => driveQuestionBridgeMock(...args),
+}));
+
 function mockSpawnResult(
   opts: {
     code?: number;
@@ -195,10 +203,12 @@ function mockSpawnResult(
     }) as PromptStdout;
     const stderr = new EventEmitter();
     const child = new EventEmitter() as PromptChild & {
+      kill: ReturnType<typeof vi.fn>;
       stdin?: PromptStdin;
       stderr?: EventEmitter;
       stdout?: PromptStdout;
     };
+    child.kill = vi.fn();
     child.stdin = Object.assign(new EventEmitter(), {
       end: vi.fn(),
       write: vi.fn(),
@@ -238,6 +248,8 @@ function mockSpawnResult(
 }
 
 const { TRUNCATION_THRESHOLD_BYTES } = await import('../../src/lib/output-protocol/protocol-io.js');
+const { SHIPPER_QUESTION_BRIDGE_DIR_ENV, SHIPPER_QUESTION_BRIDGE_TIMEOUT_MS_ENV } =
+  await import('../../src/lib/defer-bridge.js');
 const { withLogCapture } = await import('../../src/lib/logger.js');
 const { buildPromptCommand, runPrompt } = await import('../../src/lib/prompt-runner.js');
 
@@ -349,6 +361,10 @@ afterEach(() => {
   formatUsageLineMock.mockReturnValue(
     'Usage: 45 input │ 12 output │ 8 cache read │ 2 cache write tokens'
   );
+  driveQuestionBridgeMock.mockReset();
+  driveQuestionBridgeMock.mockImplementation(async (opts: { childExit: Promise<number> }) => {
+    return await opts.childExit;
+  });
   statSyncMock.mockImplementation(() => {
     throw new Error('ENOENT');
   });
@@ -1280,9 +1296,14 @@ describe('runPrompt', () => {
     );
     expect(spawnMock.mock.calls[0]?.[2]).toMatchObject({
       cwd: undefined,
-      env: process.env,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    const env = (spawnedOptions()?.env ?? {}) as Record<string, string>;
+    expect(env[SHIPPER_QUESTION_BRIDGE_DIR_ENV]).toContain(
+      path.join('.shipper', 'tmp', 'question-bridge-')
+    );
+    expect(env[SHIPPER_QUESTION_BRIDGE_TIMEOUT_MS_ENV]).toBe(String(60 * 60_000));
+    expect(driveQuestionBridgeMock).toHaveBeenCalledOnce();
     const writeMetaCall = writeSessionMetaMock.mock.calls[0];
     expect(writeMetaCall?.[0]).toContain('/home/user/.shipper/sessions/owner-repo/308-implement-');
     expect(writeMetaCall?.[1]).toMatchObject({
@@ -1615,6 +1636,25 @@ describe('runPrompt', () => {
     stdoutWriteMock.mockRestore();
   });
 
+  it('returns 1 and aborts Claude when the question bridge driver fails', async () => {
+    resolveModeMock.mockReturnValue('headless');
+    readFileMock.mockResolvedValueOnce(makePrompt('claude'));
+    driveQuestionBridgeMock.mockRejectedValueOnce(new Error('bridge broke'));
+    const errorMock = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const child = makeTimeoutChild();
+    spawnMock.mockReturnValueOnce(child);
+
+    await expect(runPrompt('test', { mode: 'headless', repo: 'owner/repo' })).resolves.toBe(1);
+
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(errorMock).toHaveBeenCalledWith(
+      '[shipper] Error: AskUserQuestion bridge failed: bridge broke'
+    );
+    child.emit('close', 143);
+    child.finishLog();
+    errorMock.mockRestore();
+  });
+
   it('resolves session paths for headless runs even when opts.repo is omitted', async () => {
     resolveModeMock.mockReturnValue('headless');
     readFileMock.mockResolvedValueOnce(makePrompt('claude'));
@@ -1693,7 +1733,7 @@ describe('runPrompt', () => {
     );
     expect(createWriteStreamMock).not.toHaveBeenCalled();
     expect(writeSessionMetaMock).not.toHaveBeenCalled();
-    // Claude headless always pipes stdout so the defer-bridge consumer can read stream-json,
+    // Claude headless always pipes stdout so the question bridge can read stream-json,
     // even when session logging is disabled. Stdin is ignored so the CLI's stdin (used to receive
     // deferred answers from the MCP parent) isn't shared with claude.
     expect(spawnMock.mock.calls[0]?.[2]).toMatchObject({
@@ -1903,6 +1943,8 @@ describe('runPrompt', () => {
       '-c',
       'sandbox_workspace_write.network_access=true',
     ]);
+    expect(spawnedOptions()?.env).toBe(process.env);
+    expect(driveQuestionBridgeMock).not.toHaveBeenCalled();
   });
 
   it('fills in missing codex headless args when exec is already present', async () => {

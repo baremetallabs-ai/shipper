@@ -90,6 +90,109 @@ describe('StreamJsonDeferConsumer', () => {
     expect(result?.kind).toBe('deferred');
   });
 
+  it('records AskUserQuestion tool uses in assistant content order', () => {
+    const consumer = new StreamJsonDeferConsumer();
+    consumer.consume(
+      makeStreamLines([
+        {
+          type: 'assistant',
+          message: {
+            content: [
+              {
+                type: 'tool_use',
+                id: 'A',
+                name: 'AskUserQuestion',
+                input: { questions: [{ ...SAMPLE_QUESTIONS[0], question: 'A?' }] },
+              },
+              {
+                type: 'tool_use',
+                id: 'B',
+                name: 'AskUserQuestion',
+                input: { questions: [{ ...SAMPLE_QUESTIONS[0], question: 'B?' }] },
+              },
+              {
+                type: 'tool_use',
+                id: 'C',
+                name: 'AskUserQuestion',
+                input: { questions: [{ ...SAMPLE_QUESTIONS[0], question: 'C?' }] },
+              },
+            ],
+          },
+        },
+      ])
+    );
+
+    expect(consumer.getQuestionToolUseOrder()).toEqual([
+      { toolUseId: 'A', questions: [{ ...SAMPLE_QUESTIONS[0], question: 'A?' }] },
+      { toolUseId: 'B', questions: [{ ...SAMPLE_QUESTIONS[0], question: 'B?' }] },
+      { toolUseId: 'C', questions: [{ ...SAMPLE_QUESTIONS[0], question: 'C?' }] },
+    ]);
+  });
+
+  it('records AskUserQuestion tool uses when assistant JSON arrives split across chunks', () => {
+    const consumer = new StreamJsonDeferConsumer();
+    const full = makeStreamLines([
+      {
+        type: 'assistant',
+        message: {
+          content: [
+            {
+              type: 'tool_use',
+              id: 'toolu_split',
+              name: 'AskUserQuestion',
+              input: { questions: SAMPLE_QUESTIONS },
+            },
+          ],
+        },
+      },
+    ]);
+    const split = Math.floor(full.length / 2);
+    consumer.consume(full.slice(0, split));
+    consumer.consume(full.slice(split));
+    consumer.flush();
+
+    expect(consumer.getQuestionToolUseOrder()).toEqual([
+      { toolUseId: 'toolu_split', questions: SAMPLE_QUESTIONS },
+    ]);
+  });
+
+  it('ignores non-question tool uses and duplicate AskUserQuestion ids', () => {
+    const consumer = new StreamJsonDeferConsumer();
+    consumer.consume(
+      makeStreamLines([
+        {
+          type: 'assistant',
+          message: {
+            content: [
+              {
+                type: 'tool_use',
+                id: 'toolu_shell',
+                name: 'Bash',
+                input: { command: 'pwd' },
+              },
+              {
+                type: 'tool_use',
+                id: 'toolu_question',
+                name: 'AskUserQuestion',
+                input: { questions: [{ ...SAMPLE_QUESTIONS[0], question: 'First?' }] },
+              },
+              {
+                type: 'tool_use',
+                id: 'toolu_question',
+                name: 'AskUserQuestion',
+                input: { questions: [{ ...SAMPLE_QUESTIONS[0], question: 'Duplicate?' }] },
+              },
+            ],
+          },
+        },
+      ])
+    );
+
+    expect(consumer.getQuestionToolUseOrder()).toEqual([
+      { toolUseId: 'toolu_question', questions: [{ ...SAMPLE_QUESTIONS[0], question: 'First?' }] },
+    ]);
+  });
+
   it('ignores malformed JSON lines', () => {
     const consumer = new StreamJsonDeferConsumer();
     consumer.consume('not json\n');
@@ -105,7 +208,7 @@ describe('StreamJsonDeferConsumer', () => {
     expect(consumer.getResult()).toBeUndefined();
   });
 
-  it('uses the last result event when multiple are emitted', () => {
+  it('keeps completion metadata from the final result event', () => {
     const consumer = new StreamJsonDeferConsumer();
     consumer.consume(
       makeStreamLines([

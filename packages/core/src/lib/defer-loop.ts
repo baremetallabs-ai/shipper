@@ -1,7 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import * as readline from 'node:readline';
-import { SHIPPER_DEFERRED_ANSWERS_ENV } from './defer-bridge.js';
 import type { DeferQuestion } from './defer-stream.js';
 import { logger } from './logger.js';
 
@@ -123,34 +120,17 @@ export async function readNextAnswerLine(): Promise<AnswerLine> {
   });
 }
 
-export interface AnswersFileResult {
-  path: string;
-}
-
-export async function writeAnswersFile(
-  cwd: string,
-  sessionId: string,
+export function findMissingAnswers(
+  questions: DeferQuestion[],
   answers: Record<string, string>
-): Promise<AnswersFileResult> {
-  const dir = path.join(cwd, '.shipper', 'tmp');
-  await mkdir(dir, { recursive: true });
-  const safeId = sessionId.replace(/[^A-Za-z0-9_-]/g, '_') || 'unknown';
-  const file = path.join(dir, `defer-answers-${safeId}.json`);
-  await writeFile(file, JSON.stringify(answers));
-  return { path: file };
-}
-
-export function setAnswersEnv(filePath: string): void {
-  process.env[SHIPPER_DEFERRED_ANSWERS_ENV] = filePath;
-}
-
-export function clearAnswersEnv(): void {
-  // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-  delete process.env[SHIPPER_DEFERRED_ANSWERS_ENV];
-}
-
-export function buildClaudeResumeArgs(baseArgs: string[], sessionId: string): string[] {
-  return [...baseArgs, '--resume', sessionId];
+): string[] {
+  const missing: string[] = [];
+  for (const question of questions) {
+    if (!Object.prototype.hasOwnProperty.call(answers, question.question)) {
+      missing.push(question.question);
+    }
+  }
+  return missing;
 }
 
 /** Logs a defer/resume cycle for visibility in CLI logs. */

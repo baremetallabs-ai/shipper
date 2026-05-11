@@ -11,7 +11,7 @@ Provide answers to a paused headless worker that called AskUserQuestion. The wor
 
 ## When to use
 
-Use this only after `shipper_groom` or `shipper_advance` returns an awaiting-answer session id. The answers map should use the exact question text returned by the paused worker.
+Use this only after `shipper_groom` or `shipper_advance` returns an awaiting-answer session id. The answers map must include every exact question text from the currently displayed batch. If more batches are already pending from the same worker turn, the result is another single-batch awaiting_answer payload to answer before the worker can resume fully.
 
 ## Behavior hints
 
@@ -38,18 +38,27 @@ Use this only after `shipper_groom` or `shipper_advance` returns an awaiting-ans
 ## Example result
 
 ```text
-Stage: shipper:new -> shipper:groomed (accept)
+Status: awaiting_answer
+Session: sess-abc123
+Tool use id: toolu_next
 
----
-Grooming complete.
+The headless worker called AskUserQuestion and is paused awaiting answers from the orchestrator.
+Reply with `shipper_answer_question` providing { session_id, answers } where answers is a map
+of question text -> your answer (free text).
 
-Session log: /tmp/shipper/session.log
+Questions (JSON):
+[
+  {
+    "question": "What should happen next?"
+  }
+]
 ```
 
 ## Error modes
 
 - Missing pending session: No pending shipper session with id "<session_id>". The worker may have already completed or the MCP server may have restarted.
 - Completed before answer: Cannot submit an answer: shipper child already completed.
+- Missing current-batch answers: Missing answers for current question batch: <questions>
 - Unavailable stdin: shipper child stdin is unavailable; cannot submit answer.
 - No more events: Shipper child has already completed; no more events.
 - Missing stage transition metadata: Unable to recover the stage transition from post-run metadata.
