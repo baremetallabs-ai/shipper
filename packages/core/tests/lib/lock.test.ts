@@ -54,6 +54,32 @@ function queueExecFileError(error: Error, stderr = 'HTTP 404 not found'): void {
   });
 }
 
+function queueExecFileDeferred(): {
+  resolve: (stdout?: string) => void;
+  reject: (error: Error, stderr?: string) => void;
+} {
+  let cb: ((...cbArgs: unknown[]) => void) | undefined;
+  execFileMock.mockImplementationOnce((_cmd: string, _args: string[], ...rest: unknown[]) => {
+    cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
+  });
+
+  const getCallback = () => {
+    if (!cb) {
+      throw new Error('Deferred execFile callback was not registered');
+    }
+    return cb;
+  };
+
+  return {
+    resolve: (stdout = '') => {
+      getCallback()(null, stdout, '');
+    },
+    reject: (error, stderr = 'HTTP 404 not found') => {
+      getCallback()(Object.assign(error, { stderr }));
+    },
+  };
+}
+
 function stderrMessages(): string[] {
   return stderrMock.mock.calls.map(([message]) => String(message));
 }
@@ -452,8 +478,9 @@ describe('withIssueLock', () => {
       );
       expect(renewalMessages).toHaveLength(1);
       expect(renewalMessages[0]).toContain('1 lock renewal failure');
-      expect(renewalMessages[0]).toContain('Warning: lock renewal failed for issue #42');
+      expect(renewalMessages[0]).toContain('lock renewal failed for issue #42');
       expect(renewalMessages[0]).toContain('HTTP 404 remove failed');
+      expect(renewalMessages[0]).not.toContain('latest failure: Warning:');
     } finally {
       vi.useRealTimers();
     }
@@ -496,7 +523,7 @@ describe('withIssueLock', () => {
       );
       expect(renewalMessages).toHaveLength(1);
       expect(renewalMessages[0]).toContain('1 lock renewal failure');
-      expect(renewalMessages[0]).toContain('Warning: lock re-add failed for issue #42');
+      expect(renewalMessages[0]).toContain('lock re-add failed for issue #42');
       expect(renewalMessages[0]).toContain('HTTP 404 add failed');
     } finally {
       vi.useRealTimers();
@@ -543,6 +570,65 @@ describe('withIssueLock', () => {
       expect(renewalMessages[0]).toContain('2 lock renewal failures');
       expect(renewalMessages[0]).toContain('HTTP 404 second remove failed');
       expect(renewalMessages[0]).not.toContain('HTTP 404 first remove failed');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('drains buffered renewals that finish after the buffered scope exits', async () => {
+    vi.useFakeTimers();
+    try {
+      // acquire: labels check + add-label
+      queueExecFileResult('shipper:groomed\n');
+      queueExecFileResult('');
+
+      // renewal: remove-label succeeds, add-label completes after the stage body exits
+      queueExecFileResult('');
+      const delayedAdd = queueExecFileDeferred();
+
+      // release: remove-label
+      queueExecFileResult('');
+
+      let resolveStage!: () => void;
+      const stageBody = new Promise<void>((resolve) => {
+        resolveStage = resolve;
+      });
+
+      const resultPromise = withIssueLock(repo, '42', async () => {
+        await withBufferedLockRenewalOutput(() => stageBody);
+      });
+
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+
+      expect(
+        stderrMessages().filter((message) => message.includes('lock re-add failed'))
+      ).toHaveLength(0);
+
+      let settled = false;
+      void resultPromise.then(
+        () => {
+          settled = true;
+        },
+        () => {
+          settled = true;
+        }
+      );
+
+      resolveStage();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(settled).toBe(false);
+
+      delayedAdd.reject(new Error('API unavailable'), 'HTTP 404 delayed add failed');
+
+      await expect(resultPromise).resolves.toBeUndefined();
+
+      const renewalMessages = stderrMessages().filter((message) =>
+        message.includes('lock renewal')
+      );
+      expect(renewalMessages).toHaveLength(1);
+      expect(renewalMessages[0]).toContain('1 lock renewal failure');
+      expect(renewalMessages[0]).toContain('lock re-add failed for issue #42');
+      expect(renewalMessages[0]).toContain('HTTP 404 delayed add failed');
     } finally {
       vi.useRealTimers();
     }
