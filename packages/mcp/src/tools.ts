@@ -861,23 +861,37 @@ export const mcpToolDefinitions = [
             runId,
           });
           let payload: { issueNumber: number; title: string; url: string } | undefined;
+          let missingPayloadDetail: string | undefined;
           if (!result.timedOut && result.exitCode === 0) {
             if (!sessionContext.resultFile) {
-              throw new Error(
-                'Successful issue creation run did not expose a persisted result file.'
-              );
+              missingPayloadDetail = [
+                'Unable to recover the created issue identity from post-run metadata.',
+                `Run ID: ${runId}`,
+                'Session result: <not found>',
+              ].join('\n');
+            } else {
+              try {
+                const newResult = await readNewResultFile(sessionContext.resultFile);
+                payload = {
+                  issueNumber: newResult.created_issue.number,
+                  title: newResult.created_issue.title,
+                  url: newResult.created_issue.url,
+                };
+              } catch (error) {
+                missingPayloadDetail = [
+                  'Unable to recover the created issue identity from post-run metadata.',
+                  `Run ID: ${runId}`,
+                  `Session result: ${sessionContext.resultFile}`,
+                  toErrorMessage(error),
+                ].join('\n');
+              }
             }
-            const newResult = await readNewResultFile(sessionContext.resultFile);
-            payload = {
-              issueNumber: newResult.created_issue.number,
-              title: newResult.created_issue.title,
-              url: newResult.created_issue.url,
-            };
           }
           return formatCreateIssueResult(result, payload, {
             command: 'shipper new <request> --mode headless',
             finalMessage: sessionContext.finalMessage,
             sessionLogPath: sessionContext.sessionLogPath,
+            missingPayloadDetail,
           });
         } catch (err) {
           return formatToolError(err);

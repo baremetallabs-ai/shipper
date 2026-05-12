@@ -137,11 +137,12 @@ export async function newCommand(
           let result: Awaited<ReturnType<typeof writeCreatedIssueResult>>;
           try {
             result = await writeCreatedIssueResult(wtPath, createdIssue);
+            const runId = process.env[SHIPPER_SESSION_RUN_ID_ENV] || undefined;
             await persistNewResultForLatestSession({
               repo,
               cwd: wtPath,
               since: startedAt,
-              runId: process.env[SHIPPER_SESSION_RUN_ID_ENV],
+              runId,
               result,
             });
           } catch (error) {

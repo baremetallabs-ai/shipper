@@ -282,13 +282,20 @@ export function formatCreateIssueResult(
     command: string;
     finalMessage?: string;
     sessionLogPath?: string;
+    missingPayloadDetail?: string;
   }
 ): ToolTextResult {
   if (!payload) {
+    const needsMissingIdentityDetail = !result.timedOut && result.exitCode === 0;
     return formatFailureSummary(result, {
       command: opts.command,
       sessionLogPath: opts.sessionLogPath,
       finalMessage: opts.finalMessage,
+      detail: needsMissingIdentityDetail
+        ? (opts.missingPayloadDetail ??
+          'Unable to recover the created issue identity from post-run metadata.')
+        : undefined,
+      forceError: needsMissingIdentityDetail,
     });
   }
 

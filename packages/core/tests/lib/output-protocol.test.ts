@@ -744,9 +744,9 @@ describe('output protocol helpers', () => {
         "'labels' is not supported; Shipper applies labels during issue creation",
       ],
       [
-        'leading title heading',
+        'missing request heading',
         { body: '\n\n# Title\n\n# Request\n\nDo something.' },
-        "issue body must not start with a '# Title' heading",
+        'issue body must start with a "# Request" heading',
       ],
     ])('rejects draft with %s', async (_name, opts, message) => {
       await writeNewIssueDraft(opts);

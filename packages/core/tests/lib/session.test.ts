@@ -914,6 +914,48 @@ describe('persistNewResultForLatestSession', () => {
     }
   });
 
+  it('derives the result sidecar from the metadata filename instead of trusting metadata', async () => {
+    const tempHome = mkdtempSync(path.join(tmpdir(), 'session-home-'));
+    mockHomeDir.value = tempHome;
+    const sessionDir = getSessionDir('owner-repo');
+    const metaFile = path.join(sessionDir, 'unlinked-new-2026-03-15T05-00-00-000Z.meta.json');
+    const derivedResultFile = path.join(
+      sessionDir,
+      'unlinked-new-2026-03-15T05-00-00-000Z.result.json'
+    );
+    const tamperedResultFile = path.join(tempHome, 'outside.result.json');
+
+    try {
+      writeSessionMetaSync(
+        metaFile,
+        buildMeta({
+          issue: 'unlinked',
+          stage: 'new',
+          timestamp: '2026-03-15T05:00:00.000Z',
+          resultFile: tamperedResultFile,
+          runId: 'run-a',
+        })
+      );
+
+      await expect(
+        persistNewResultForLatestSession({
+          repo: 'owner/repo',
+          since: new Date('2026-03-15T00:00:00.000Z'),
+          runId: 'run-a',
+          result: createdIssueResult,
+        })
+      ).resolves.toBe(derivedResultFile);
+
+      expect(JSON.parse(readFileSync(derivedResultFile, 'utf-8'))).toEqual(createdIssueResult);
+      expect(() => readFileSync(tamperedResultFile, 'utf-8')).toThrow();
+      expect(JSON.parse(readFileSync(metaFile, 'utf-8'))).toMatchObject({
+        resultFile: derivedResultFile,
+      });
+    } finally {
+      rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
   it('throws and does not write a sidecar when no matching metadata exists', async () => {
     const tempHome = mkdtempSync(path.join(tmpdir(), 'session-home-'));
     mockHomeDir.value = tempHome;
