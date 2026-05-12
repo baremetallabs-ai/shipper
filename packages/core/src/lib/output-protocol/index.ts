@@ -35,6 +35,7 @@ export type {
   GroomOpenManifest,
   GroomParent,
   GroomPriority,
+  GroomStageManifest,
   LoadedGroomManifest,
 } from './groom.js';
 

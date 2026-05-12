@@ -202,13 +202,30 @@ describe('output protocol helpers', () => {
     };
   }
 
+  function defaultGroomComment(manifest: Record<string, unknown>): string {
+    const closed =
+      typeof manifest.closed === 'object' &&
+      manifest.closed !== null &&
+      !Array.isArray(manifest.closed)
+        ? (manifest.closed as Record<string, unknown>)
+        : undefined;
+    if (closed?.outcome === 'duplicate' && typeof closed.duplicate_of === 'number') {
+      return `## Grooming Summary\n\nThe product owner confirmed this issue is a duplicate of #${closed.duplicate_of}.`;
+    }
+    if (closed?.outcome === 'not-planned' && typeof closed.rationale === 'string') {
+      return `## Grooming Summary\n\n${closed.rationale}`;
+    }
+    return '## Grooming Summary\n\nSummary.';
+  }
+
   async function writeValidGroomOutput(
     manifest: Record<string, unknown> = buildGroomManifest(),
-    result: Partial<ResultJson> = {}
+    result: Partial<ResultJson> = {},
+    commentText = defaultGroomComment(manifest)
   ): Promise<ResultJson> {
     const fullResult = buildResult({ groom: outputRelative('groom-248.json'), ...result });
     await writeResultFile(fullResult);
-    await writeOutputFile('comment-248.md', '## Grooming Summary\n\nSummary.');
+    await writeOutputFile('comment-248.md', commentText);
     await writeOutputJson('groom-248.json', manifest);
 
     const parent = manifest.parent;
@@ -861,6 +878,35 @@ describe('output protocol helpers', () => {
       );
 
       await expect(validateStageOutput(tempDir, 'groom')).resolves.toEqual(result);
+    });
+
+    it('rejects duplicate closed groom summaries missing the original issue reference', async () => {
+      await writeValidGroomOutput(
+        buildClosedGroomManifest(),
+        {},
+        '## Grooming Summary\n\nThe product owner confirmed this issue is a duplicate.'
+      );
+
+      await expect(validateStageOutput(tempDir, 'groom')).rejects.toThrow(
+        'groom comment file must reference closed.duplicate_of as #347'
+      );
+    });
+
+    it('rejects not-planned closed groom summaries missing the rationale', async () => {
+      await writeValidGroomOutput(
+        buildClosedGroomManifest({
+          closed: {
+            outcome: 'not-planned',
+            rationale: 'The product owner confirmed this work is out of scope.',
+          },
+        }),
+        {},
+        '## Grooming Summary\n\nClosed as not planned.'
+      );
+
+      await expect(validateStageOutput(tempDir, 'groom')).rejects.toThrow(
+        'groom comment file must include closed.rationale'
+      );
     });
 
     it('rejects duplicate closed groom manifests missing the original issue reference', async () => {
@@ -1823,6 +1869,37 @@ describe('output protocol helpers', () => {
       expect(ghMock).not.toHaveBeenCalled();
     });
 
+    it('rejects closed duplicate groom summaries before any GitHub writes', async () => {
+      const result = await writeValidGroomOutput(
+        buildClosedGroomManifest(),
+        {},
+        '## Grooming Summary\n\nClosed as duplicate.'
+      );
+
+      await expect(
+        processGroomResult({ repo: 'owner/repo', issueNumber: '248', cwd: tempDir, result })
+      ).rejects.toThrow('groom comment file must reference closed.duplicate_of as #347');
+      expect(ghMock).not.toHaveBeenCalled();
+    });
+
+    it('rejects closed not-planned groom summaries before any GitHub writes', async () => {
+      const result = await writeValidGroomOutput(
+        buildClosedGroomManifest({
+          closed: {
+            outcome: 'not-planned',
+            rationale: 'The product owner confirmed this work is out of scope.',
+          },
+        }),
+        {},
+        '## Grooming Summary\n\nClosed as not planned.'
+      );
+
+      await expect(
+        processGroomResult({ repo: 'owner/repo', issueNumber: '248', cwd: tempDir, result })
+      ).rejects.toThrow('groom comment file must include closed.rationale');
+      expect(ghMock).not.toHaveBeenCalled();
+    });
+
     it('posts duplicate closed groom summaries before closing and removing labels', async () => {
       const result = await writeValidGroomOutput(buildClosedGroomManifest());
 
@@ -1860,6 +1937,8 @@ describe('output protocol helpers', () => {
         'shipper:priority-high',
         '--remove-label',
         'shipper:priority-low',
+        '--remove-label',
+        'shipper:blocked',
       ]);
       expect(ghMock.mock.calls.flatMap(([args]) => args)).not.toContain('shipper:groomed');
     });
@@ -1908,6 +1987,8 @@ describe('output protocol helpers', () => {
         'shipper:priority-high',
         '--remove-label',
         'shipper:priority-low',
+        '--remove-label',
+        'shipper:blocked',
       ]);
       expect(ghMock.mock.calls.flatMap(([args]) => args)).not.toContain('shipper:groomed');
     });

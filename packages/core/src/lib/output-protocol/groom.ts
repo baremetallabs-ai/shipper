@@ -51,7 +51,8 @@ export interface GroomClosedManifest {
   closed: GroomClosedOutcome;
 }
 
-export type GroomManifest = GroomOpenManifest | GroomClosedManifest;
+export type GroomManifest = GroomOpenManifest;
+export type GroomStageManifest = GroomOpenManifest | GroomClosedManifest;
 
 export interface LoadedOutputFile {
   path: string;
@@ -70,7 +71,7 @@ export interface LoadedGroomFiles {
 
 export interface LoadedGroomManifest {
   abs: string;
-  manifest: GroomManifest;
+  manifest: GroomStageManifest;
   files: LoadedGroomFiles;
 }
 
@@ -123,7 +124,7 @@ function nonEmptyString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value : undefined;
 }
 
-function isClosedGroomManifest(manifest: GroomManifest): manifest is GroomClosedManifest {
+function isClosedGroomManifest(manifest: GroomStageManifest): manifest is GroomClosedManifest {
   return 'closed' in manifest;
 }
 
@@ -340,7 +341,7 @@ function parseOpenManifest(
   };
 }
 
-function parseManifest(data: unknown, errors: string[]): GroomManifest | undefined {
+function parseManifest(data: unknown, errors: string[]): GroomStageManifest | undefined {
   if (!isRecord(data)) {
     errors.push('groom manifest must be a JSON object');
     return undefined;
@@ -398,6 +399,34 @@ export function assertGroomedBody(body: string, label: string, errors: string[])
 
 export function replaceBlockingIssuePlaceholder(comment: string, issueNumber: number): string {
   return comment.replaceAll('{{blocking_issue}}', `#${issueNumber}`);
+}
+
+function normalizeDecisionText(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+export function validateClosedGroomSummary(
+  manifest: GroomStageManifest,
+  summary: string,
+  errors: string[]
+): void {
+  if (!isClosedGroomManifest(manifest)) {
+    return;
+  }
+
+  if (manifest.closed.outcome === 'duplicate') {
+    const duplicateReference = `#${manifest.closed.duplicate_of}`;
+    if (!summary.includes(duplicateReference)) {
+      errors.push(`groom comment file must reference closed.duplicate_of as ${duplicateReference}`);
+    }
+    return;
+  }
+
+  const normalizedSummary = normalizeDecisionText(summary);
+  const normalizedRationale = normalizeDecisionText(manifest.closed.rationale);
+  if (!normalizedSummary.includes(normalizedRationale)) {
+    errors.push('groom comment file must include closed.rationale');
+  }
 }
 
 async function validateLoadedFiles(
@@ -677,8 +706,13 @@ export async function processGroomResult(opts: {
   }
 
   const commentPath = resolveOutputPath(cwd, result.comment, 'comment path');
-  await readFile(commentPath, 'utf-8');
+  const commentText = await readFile(commentPath, 'utf-8');
   const { manifest, files } = await readGroomManifest(cwd, result.groom);
+  const commentErrors: string[] = [];
+  validateClosedGroomSummary(manifest, commentText, commentErrors);
+  if (commentErrors.length > 0) {
+    throw new Error(`Invalid groom comment at ${commentPath}:\n- ${commentErrors.join('\n- ')}`);
+  }
   const steps: StepRecord[] = [];
   const children: Array<ChildCreation | undefined> = [];
 
@@ -739,6 +773,8 @@ export async function processGroomResult(opts: {
             PRIORITY_HIGH_LABEL,
             '--remove-label',
             PRIORITY_LOW_LABEL,
+            '--remove-label',
+            BLOCKED_LABEL,
           ]).then(() => undefined)
         );
       }

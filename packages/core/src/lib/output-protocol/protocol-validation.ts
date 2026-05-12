@@ -7,7 +7,7 @@ import { toErrorMessage } from '../errors.js';
 import { getGhErrorDetail, isRecoverableReviewSubmissionGhError } from '../gh.js';
 import { readResultFile, ResultValidationError, type ResultJson } from '../result-schema.js';
 import type { StageName } from '../stage-transitions.js';
-import { readGroomManifest } from './groom.js';
+import { readGroomManifest, validateClosedGroomSummary } from './groom.js';
 
 const REVIEW_VALID_FILES_DISPLAY_LIMIT = 50;
 
@@ -164,25 +164,6 @@ async function readJsonFile(filePath: string, label: string): Promise<unknown> {
   } catch (error) {
     const message = toErrorMessage(error);
     throw new Error(`Failed to parse ${label} at ${filePath}: ${message}`);
-  }
-}
-
-async function assertReadableOutputFile(
-  cwd: string,
-  relativePath: string,
-  label: string
-): Promise<void> {
-  let abs: string;
-  try {
-    abs = resolveOutputPath(cwd, relativePath, label);
-  } catch (error) {
-    throw new Error(toErrorMessage(error));
-  }
-
-  try {
-    await readFile(abs, 'utf-8');
-  } catch (error) {
-    throw new Error(`${label} does not exist or cannot be read: ${abs}: ${toErrorMessage(error)}`);
   }
 }
 
@@ -398,8 +379,21 @@ export async function validateStageOutput(
     if (!result.groom) {
       throw new Error('groom accept requires a groom manifest in result.json');
     }
-    await assertReadableOutputFile(cwd, result.comment, 'groom comment file');
-    await readGroomManifest(cwd, result.groom);
+    const commentPath = resolveOutputPath(cwd, result.comment, 'groom comment file');
+    let commentText: string;
+    try {
+      commentText = await readFile(commentPath, 'utf-8');
+    } catch (error) {
+      throw new Error(
+        `groom comment file does not exist or cannot be read: ${commentPath}: ${toErrorMessage(error)}`
+      );
+    }
+    const { manifest } = await readGroomManifest(cwd, result.groom);
+    const commentErrors: string[] = [];
+    validateClosedGroomSummary(manifest, commentText, commentErrors);
+    if (commentErrors.length > 0) {
+      throw new Error(`Invalid groom comment at ${commentPath}:\n- ${commentErrors.join('\n- ')}`);
+    }
     return result;
   }
 

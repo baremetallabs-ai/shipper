@@ -147,6 +147,7 @@ export type {
   GroomOpenManifest,
   GroomParent,
   GroomPriority,
+  GroomStageManifest,
 } from './lib/output-protocol/index.js';
 export { checkShipperDir } from './lib/prerequisites.js';
 export type { PromptCommand } from './lib/prompt-runner.js';
