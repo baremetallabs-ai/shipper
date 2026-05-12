@@ -335,4 +335,29 @@ describe('prOpenCommand', () => {
     expect(fake.state.createdPrs).toEqual([]);
     expect(fake.state.postedComments).toEqual([]);
   });
+
+  it('enables buffered lock renewal output when pr_open resolves to interactive mode', async () => {
+    stubOpenPrSearch([]);
+    const resolveModeSpy = vi.spyOn(core, 'resolveMode').mockReturnValue('interactive');
+    const scaffoldSpy = vi
+      .spyOn(core, 'runStageScaffold')
+      .mockResolvedValue({ success: true, exitCode: 0 });
+
+    const { runPrOpenStage } = await import('../../src/commands/pr-open.js');
+
+    await expect(runPrOpenStage(repo, '239', 'default')).resolves.toEqual({
+      success: true,
+      exitCode: 0,
+    });
+
+    expect(resolveModeSpy).toHaveBeenCalledWith('pr_open', 'default');
+    expect(scaffoldSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: 'pr-open',
+        resultStage: 'pr_open',
+        initialFailure: 'propagate',
+        bufferLockRenewalOutput: true,
+      })
+    );
+  });
 });

@@ -210,6 +210,54 @@ describe('groomCommand', () => {
     expect(process.exitCode).toBe(0);
   });
 
+  it('wraps groom work with buffered lock renewal output for non-headless effective mode', async () => {
+    fake.setIssue('123', { labels: ['shipper:new'], title: 'Single issue' });
+    fake.scriptRunPrompt(async (name, opts) => {
+      promptCalls.push({ name, opts });
+      await writeGroomOutput(fake);
+      return 0;
+    });
+    const resolveModeSpy = vi.spyOn(core, 'resolveMode').mockReturnValue('interactive');
+    const bufferedSpy = vi
+      .spyOn(core, 'withBufferedLockRenewalOutput')
+      .mockImplementation(async (fn) => await fn());
+
+    const { runGroomStage } = await import('../../src/commands/groom.js');
+
+    await expect(runGroomStage(repo, '123')).resolves.toEqual({
+      success: true,
+      exitCode: 0,
+    });
+
+    expect(resolveModeSpy).toHaveBeenCalledWith('groom', undefined);
+    expect(bufferedSpy).toHaveBeenCalledTimes(1);
+    expect(fake.state.issues.get('123')?.labels.has('shipper:groomed')).toBe(true);
+  });
+
+  it('does not wrap groom work with buffered lock renewal output for headless mode', async () => {
+    fake.setIssue('123', { labels: ['shipper:new'], title: 'Single issue' });
+    fake.scriptRunPrompt(async (name, opts) => {
+      promptCalls.push({ name, opts });
+      await writeGroomOutput(fake);
+      return 0;
+    });
+    vi.spyOn(core, 'resolveMode').mockReturnValue('headless');
+    const bufferedSpy = vi
+      .spyOn(core, 'withBufferedLockRenewalOutput')
+      .mockImplementation(async (fn) => await fn());
+
+    const { runGroomStage } = await import('../../src/commands/groom.js');
+
+    await expect(runGroomStage(repo, '123', 'headless')).resolves.toEqual({
+      success: true,
+      exitCode: 0,
+    });
+
+    expect(bufferedSpy).not.toHaveBeenCalled();
+    expect(promptCalls[0]?.opts.mode).toBe('headless');
+    expect(fake.state.issues.get('123')?.labels.has('shipper:groomed')).toBe(true);
+  });
+
   it('creates a separate fake worktree for each issue in auto mode', async () => {
     fake.setIssue('101', { labels: ['shipper:new'], title: 'First issue' });
     fake.setIssue('102', { labels: ['shipper:new'], title: 'Second issue' });

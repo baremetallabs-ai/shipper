@@ -47,15 +47,24 @@ function queueExecFileResult(stdout: string): void {
   });
 }
 
-function queueExecFileError(error: Error): void {
+function queueExecFileError(error: Error, stderr = 'HTTP 404 not found'): void {
   execFileMock.mockImplementationOnce((_cmd: string, _args: string[], ...rest: unknown[]) => {
     const cb = rest[rest.length - 1] as (...cbArgs: unknown[]) => void;
-    cb(Object.assign(error, { stderr: 'HTTP 404 not found' }));
+    cb(Object.assign(error, { stderr }));
   });
 }
 
-const { isLockStale, acquireIssueLock, releaseIssueLock, withIssueLock } =
-  await import('../../src/lib/lock.js');
+function stderrMessages(): string[] {
+  return stderrMock.mock.calls.map(([message]) => String(message));
+}
+
+const {
+  isLockStale,
+  acquireIssueLock,
+  releaseIssueLock,
+  withBufferedLockRenewalOutput,
+  withIssueLock,
+} = await import('../../src/lib/lock.js');
 
 beforeEach(() => {
   execFileMock.mockReset();
@@ -142,6 +151,14 @@ describe('releaseIssueLock', () => {
   });
 });
 
+describe('withBufferedLockRenewalOutput', () => {
+  it('returns the callback result without logging when no issue lock is active', async () => {
+    await expect(withBufferedLockRenewalOutput(() => Promise.resolve('ok'))).resolves.toBe('ok');
+
+    expect(stderrMock).not.toHaveBeenCalled();
+  });
+});
+
 describe('withIssueLock', () => {
   it('passes through nested calls for the same issue', async () => {
     queueExecFileResult('shipper:groomed\n');
@@ -208,7 +225,7 @@ describe('withIssueLock', () => {
     );
   });
 
-  it('renews the lock on heartbeat interval', async () => {
+  it('renews the lock inline by default on heartbeat interval', async () => {
     vi.useFakeTimers();
     try {
       // acquire: labels check + add-label
@@ -254,7 +271,7 @@ describe('withIssueLock', () => {
     }
   });
 
-  it('logs warning and continues when renewal fails', async () => {
+  it('logs warning inline by default and continues when renewal fails', async () => {
     vi.useFakeTimers();
     try {
       // acquire: labels check + add-label
@@ -325,7 +342,7 @@ describe('withIssueLock', () => {
     }
   });
 
-  it('logs distinct warning when remove succeeds but add fails', async () => {
+  it('logs distinct warning inline by default when remove succeeds but add fails', async () => {
     vi.useFakeTimers();
     try {
       // acquire: labels check + add-label
@@ -354,6 +371,178 @@ describe('withIssueLock', () => {
 
       resolve();
       await expect(resultPromise).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('suppresses successful renewal output while buffered', async () => {
+    vi.useFakeTimers();
+    try {
+      // acquire: labels check + add-label
+      queueExecFileResult('shipper:groomed\n');
+      queueExecFileResult('');
+
+      // renewal: remove-label + add-label
+      queueExecFileResult('');
+      queueExecFileResult('');
+
+      // release: remove-label
+      queueExecFileResult('');
+
+      let resolve!: () => void;
+      const blocker = new Promise<void>((r) => {
+        resolve = r;
+      });
+
+      const resultPromise = withIssueLock(repo, '42', async () => {
+        await withBufferedLockRenewalOutput(() => blocker);
+      });
+
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+
+      expect(
+        stderrMessages().some((message) => message.includes('Lock renewed for issue #42'))
+      ).toBe(false);
+
+      resolve();
+      await resultPromise;
+
+      expect(
+        stderrMessages().some((message) => message.includes('Lock renewed for issue #42'))
+      ).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('buffers remove-label renewal failures and emits one deferred warning', async () => {
+    vi.useFakeTimers();
+    try {
+      // acquire: labels check + add-label
+      queueExecFileResult('shipper:groomed\n');
+      queueExecFileResult('');
+
+      // renewal remove-label fails
+      queueExecFileError(new Error('API unavailable'), 'HTTP 404 remove failed');
+
+      // release: remove-label
+      queueExecFileResult('');
+
+      let resolve!: () => void;
+      const blocker = new Promise<void>((r) => {
+        resolve = r;
+      });
+
+      const resultPromise = withIssueLock(repo, '42', async () => {
+        await withBufferedLockRenewalOutput(() => blocker);
+      });
+
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+
+      expect(
+        stderrMessages().filter((message) => message.includes('lock renewal failed'))
+      ).toHaveLength(0);
+
+      resolve();
+      await expect(resultPromise).resolves.toBeUndefined();
+
+      const renewalMessages = stderrMessages().filter((message) =>
+        message.includes('lock renewal')
+      );
+      expect(renewalMessages).toHaveLength(1);
+      expect(renewalMessages[0]).toContain('1 lock renewal failure');
+      expect(renewalMessages[0]).toContain('Warning: lock renewal failed for issue #42');
+      expect(renewalMessages[0]).toContain('HTTP 404 remove failed');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('buffers re-add renewal failures and emits one deferred warning', async () => {
+    vi.useFakeTimers();
+    try {
+      // acquire: labels check + add-label
+      queueExecFileResult('shipper:groomed\n');
+      queueExecFileResult('');
+
+      // renewal: remove-label succeeds, add-label fails
+      queueExecFileResult('');
+      queueExecFileError(new Error('API unavailable'), 'HTTP 404 add failed');
+
+      // release: remove-label
+      queueExecFileResult('');
+
+      let resolve!: () => void;
+      const blocker = new Promise<void>((r) => {
+        resolve = r;
+      });
+
+      const resultPromise = withIssueLock(repo, '42', async () => {
+        await withBufferedLockRenewalOutput(() => blocker);
+      });
+
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+
+      expect(
+        stderrMessages().filter((message) => message.includes('lock re-add failed'))
+      ).toHaveLength(0);
+
+      resolve();
+      await expect(resultPromise).resolves.toBeUndefined();
+
+      const renewalMessages = stderrMessages().filter((message) =>
+        message.includes('lock renewal')
+      );
+      expect(renewalMessages).toHaveLength(1);
+      expect(renewalMessages[0]).toContain('1 lock renewal failure');
+      expect(renewalMessages[0]).toContain('Warning: lock re-add failed for issue #42');
+      expect(renewalMessages[0]).toContain('HTTP 404 add failed');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('summarizes multiple buffered failures with the latest failure message', async () => {
+    vi.useFakeTimers();
+    try {
+      // acquire: labels check + add-label
+      queueExecFileResult('shipper:groomed\n');
+      queueExecFileResult('');
+
+      // two renewal remove-label failures
+      queueExecFileError(new Error('API unavailable'), 'HTTP 404 first remove failed');
+      queueExecFileError(new Error('API unavailable'), 'HTTP 404 second remove failed');
+
+      // release: remove-label
+      queueExecFileResult('');
+
+      let resolve!: () => void;
+      const blocker = new Promise<void>((r) => {
+        resolve = r;
+      });
+
+      const resultPromise = withIssueLock(repo, '42', async () => {
+        await withBufferedLockRenewalOutput(() => blocker);
+      });
+
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+
+      expect(
+        stderrMessages().filter((message) => message.includes('lock renewal failed'))
+      ).toHaveLength(0);
+
+      resolve();
+      await expect(resultPromise).resolves.toBeUndefined();
+
+      const renewalMessages = stderrMessages().filter((message) =>
+        message.includes('lock renewal')
+      );
+      expect(renewalMessages).toHaveLength(1);
+      expect(renewalMessages[0]).toContain('2 lock renewal failures');
+      expect(renewalMessages[0]).toContain('HTTP 404 second remove failed');
+      expect(renewalMessages[0]).not.toContain('HTTP 404 first remove failed');
     } finally {
       vi.useRealTimers();
     }

@@ -6,6 +6,7 @@ import {
   logger,
   parsePrFilesPages,
   parseDiffHunks,
+  resolveMode,
   resolveRef,
   runStageScaffold,
   simpleInvoker,
@@ -23,6 +24,7 @@ export async function runPrReviewStage(
   model?: string,
   disableMcp?: boolean
 ): Promise<StageRunResult> {
+  const effectiveMode = resolveMode('pr_review', mode);
   return await runStageScaffold({
     repo,
     issueNumber,
@@ -31,6 +33,7 @@ export async function runPrReviewStage(
     createBranch: false,
     initialFailure: 'crash',
     prNumber: { value: pr },
+    bufferLockRenewalOutput: effectiveMode === 'interactive',
     resolveLocked: async () => {
       const repoRoot = await getRepoRoot();
       const branch = await getBranchForPR(repo, pr);

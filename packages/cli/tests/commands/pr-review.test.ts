@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as core from '@baremetallabs-ai/shipper-core';
 import type { RunPromptOpts } from '@baremetallabs-ai/shipper-core';
 
 import { createFakeCore } from '../_harness/fake-core.js';
@@ -524,5 +525,28 @@ describe('prReviewCommand', () => {
     expect(fake.state.postedComments.at(-1)?.body).toContain('The `pr_review` agent run exited');
     expect(fake.state.issues.get('10')?.labels).toEqual(new Set(['shipper:pr-open']));
     expect(fake.state.submittedReviews).toEqual([]);
+  });
+
+  it('enables buffered lock renewal output when pr_review resolves to interactive mode', async () => {
+    const resolveModeSpy = vi.spyOn(core, 'resolveMode').mockReturnValue('interactive');
+    const scaffoldSpy = vi
+      .spyOn(core, 'runStageScaffold')
+      .mockResolvedValue({ success: true, exitCode: 0 });
+
+    const { runPrReviewStage } = await import('../../src/commands/pr-review.js');
+
+    await expect(runPrReviewStage(repo, '10', '42', 'interactive')).resolves.toEqual({
+      success: true,
+      exitCode: 0,
+    });
+
+    expect(resolveModeSpy).toHaveBeenCalledWith('pr_review', 'interactive');
+    expect(scaffoldSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: 'pr-review',
+        resultStage: 'pr_review',
+        bufferLockRenewalOutput: true,
+      })
+    );
   });
 });
