@@ -38,7 +38,9 @@ describe('groom prompts', () => {
         'utf-8'
       );
 
-      expect(prompt).toContain('After all other product decisions are resolved');
+      expect(prompt).toContain(
+        'For ordinary open-workflow grooming, after all other product decisions are resolved'
+      );
       expect(prompt).toContain('**High**');
       expect(prompt).toContain('**Normal**');
       expect(prompt).toContain('**Low**');
@@ -63,8 +65,35 @@ describe('groom prompts', () => {
       expect(prompt).toContain(
         'Present the finding to the product owner using the interactive question-asking tool'
       );
-      expect(prompt).toContain('Record the duplicate decision in the grooming artifacts');
+      expect(prompt).toContain('Record a closed `duplicate` outcome in the grooming artifacts');
+      expect(prompt).toContain('explicit confirmation');
+      expect(prompt).toContain('Stop before Phase 3');
+      expect(prompt).toContain('product-owner-confirmed duplicate of #<N>');
+      expect(prompt).toContain('closed.outcome: "duplicate"');
+      expect(prompt).toContain('closed.duplicate_of: <N>');
       expect(prompt).toContain('Reclassify the relationship as **Overlap**');
+      expect(prompt).not.toContain('Record the duplicate decision in the grooming artifacts');
+      expect(prompt).not.toContain('normal groomed parent body');
+      expect(prompt).not.toContain('Use `decomposition.kind: "none"`');
+    }
+  );
+
+  it.each(['claude', 'codex', 'copilot'])(
+    'documents not-planned closed outcome handling for %s',
+    (agent) => {
+      const prompt = readFileSync(
+        new URL(`../../src/prompts/${agent}/groom.md`, import.meta.url),
+        'utf-8'
+      );
+
+      expect(prompt).toContain('closed `not-planned` outcome');
+      expect(prompt).toContain('already done');
+      expect(prompt).toContain('firmly out of scope');
+      expect(prompt).toContain('explicitly declined');
+      expect(prompt).toContain('explicit product-owner confirmation');
+      expect(prompt).toContain('closed.outcome: "not-planned"');
+      expect(prompt).toContain('closed.rationale');
+      expect(prompt).toContain('free-text rationale');
     }
   );
 
@@ -84,6 +113,16 @@ describe('groom prompts', () => {
       expect(prompt).toContain('decomposition');
       expect(prompt).toContain('kind');
       expect(prompt).toContain('children');
+      expect(prompt).toContain('Closed duplicate manifest');
+      expect(prompt).toContain('"closed"');
+      expect(prompt).toContain('"outcome": "duplicate"');
+      expect(prompt).toContain('"duplicate_of": 123');
+      expect(prompt).toContain('Closed not-planned manifest');
+      expect(prompt).toContain('"outcome": "not-planned"');
+      expect(prompt).toContain('"rationale"');
+      expect(prompt).toContain(
+        'Closed outcomes must not include a parent body file, child issues, blocked state, or priority.'
+      );
       expect(prompt).toContain('{{blocking_issue}}');
       expect(prompt).toContain("excludes the parent's decomposition recommendation section");
       expect(prompt).not.toContain('gh issue edit');

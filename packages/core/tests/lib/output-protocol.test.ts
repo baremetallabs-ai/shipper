@@ -184,24 +184,53 @@ describe('output protocol helpers', () => {
     };
   }
 
+  function buildClosedGroomManifest(
+    overrides: Partial<{
+      closed: Record<string, unknown>;
+      parent: Record<string, unknown>;
+      decomposition: Record<string, unknown>;
+    }> = {}
+  ) {
+    return {
+      closed: {
+        outcome: 'duplicate',
+        duplicate_of: 347,
+        ...overrides.closed,
+      },
+      ...(overrides.parent ? { parent: overrides.parent } : {}),
+      ...(overrides.decomposition ? { decomposition: overrides.decomposition } : {}),
+    };
+  }
+
   async function writeValidGroomOutput(
-    manifest = buildGroomManifest(),
+    manifest: Record<string, unknown> = buildGroomManifest(),
     result: Partial<ResultJson> = {}
   ): Promise<ResultJson> {
     const fullResult = buildResult({ groom: outputRelative('groom-248.json'), ...result });
     await writeResultFile(fullResult);
     await writeOutputFile('comment-248.md', '## Grooming Summary\n\nSummary.');
     await writeOutputJson('groom-248.json', manifest);
-    const parent = manifest.parent as Record<string, unknown>;
-    if (typeof parent.body_file === 'string') {
-      await writeOutputFile(path.basename(parent.body_file), groomedBody('Parent body.'));
+
+    const parent = manifest.parent;
+    if (typeof parent === 'object' && parent !== null && !Array.isArray(parent)) {
+      const parentRecord = parent as Record<string, unknown>;
+      if (typeof parentRecord.body_file === 'string') {
+        await writeOutputFile(path.basename(parentRecord.body_file), groomedBody('Parent body.'));
+      }
+      const parentBlocked = parentRecord.blocked as Record<string, unknown> | undefined;
+      if (typeof parentBlocked?.comment_file === 'string') {
+        await writeOutputFile(path.basename(parentBlocked.comment_file), '## Blocked\n\nBlocked.');
+      }
     }
-    const parentBlocked = parent.blocked as Record<string, unknown> | undefined;
-    if (typeof parentBlocked?.comment_file === 'string') {
-      await writeOutputFile(path.basename(parentBlocked.comment_file), '## Blocked\n\nBlocked.');
-    }
-    const decomposition = manifest.decomposition as Record<string, unknown>;
-    const children = Array.isArray(decomposition.children) ? decomposition.children : [];
+
+    const decomposition = manifest.decomposition;
+    const decompositionRecord =
+      typeof decomposition === 'object' && decomposition !== null && !Array.isArray(decomposition)
+        ? (decomposition as Record<string, unknown>)
+        : {};
+    const children = Array.isArray(decompositionRecord.children)
+      ? decompositionRecord.children
+      : [];
     for (const [index, child] of children.entries()) {
       if (typeof child !== 'object' || child === null) {
         continue;
@@ -814,6 +843,111 @@ describe('output protocol helpers', () => {
 
       await expect(validateStageOutput(tempDir, 'groom')).resolves.toEqual(result);
     });
+
+    it('accepts a valid duplicate closed groom manifest', async () => {
+      const result = await writeValidGroomOutput(buildClosedGroomManifest());
+
+      await expect(validateStageOutput(tempDir, 'groom')).resolves.toEqual(result);
+    });
+
+    it('accepts a valid not-planned closed groom manifest', async () => {
+      const result = await writeValidGroomOutput(
+        buildClosedGroomManifest({
+          closed: {
+            outcome: 'not-planned',
+            rationale: 'The product owner confirmed this work is out of scope.',
+          },
+        })
+      );
+
+      await expect(validateStageOutput(tempDir, 'groom')).resolves.toEqual(result);
+    });
+
+    it('rejects duplicate closed groom manifests missing the original issue reference', async () => {
+      await writeValidGroomOutput(
+        buildClosedGroomManifest({ closed: { duplicate_of: undefined } })
+      );
+
+      await expect(validateStageOutput(tempDir, 'groom')).rejects.toThrow(
+        "'closed.duplicate_of' must be a positive integer"
+      );
+    });
+
+    it.each([
+      ['missing', undefined],
+      ['empty', ''],
+    ])('rejects not-planned closed groom manifests with %s rationale', async (_name, rationale) => {
+      await writeValidGroomOutput(
+        buildClosedGroomManifest({
+          closed: {
+            outcome: 'not-planned',
+            rationale,
+          },
+        })
+      );
+
+      await expect(validateStageOutput(tempDir, 'groom')).rejects.toThrow(
+        "'closed.rationale' must be a non-empty string"
+      );
+    });
+
+    it('rejects closed groom manifests with an invalid outcome', async () => {
+      await writeValidGroomOutput(buildClosedGroomManifest({ closed: { outcome: 'completed' } }));
+
+      await expect(validateStageOutput(tempDir, 'groom')).rejects.toThrow(
+        "'closed.outcome' must be one of: duplicate, not-planned"
+      );
+    });
+
+    it.each([
+      [
+        'parent.title',
+        { parent: { title: 'Do not update the title' } },
+        "'parent.title' cannot be set when 'closed' is present",
+      ],
+      [
+        'parent.body_file',
+        { parent: { body_file: outputRelative('issue-body-248.md') } },
+        "'parent.body_file' cannot be set when 'closed' is present",
+      ],
+      [
+        'parent.blocked',
+        { parent: { blocked: { comment_file: outputRelative('blocked-comment-248.md') } } },
+        "'parent.blocked' cannot be set when 'closed' is present",
+      ],
+      [
+        'parent.priority',
+        { parent: { priority: 'high' } },
+        "'parent.priority' cannot be set when 'closed' is present",
+      ],
+      [
+        'decomposition.kind',
+        { decomposition: { kind: 'none' } },
+        "'decomposition.kind' cannot be set when 'closed' is present",
+      ],
+      [
+        'decomposition.children',
+        {
+          decomposition: {
+            children: [
+              {
+                title: 'child',
+                body_file: outputRelative('child-body.md'),
+                grooming_comment_file: outputRelative('child-comment.md'),
+              },
+            ],
+          },
+        },
+        "'decomposition.children' must be empty or omitted when 'closed' is present",
+      ],
+    ])(
+      'rejects closed groom manifests that also set %s',
+      async (_field, overrides, expectedError) => {
+        await writeValidGroomOutput(buildClosedGroomManifest(overrides));
+
+        await expect(validateStageOutput(tempDir, 'groom')).rejects.toThrow(expectedError);
+      }
+    );
 
     it('rejects groom output when the top-level comment file is missing', async () => {
       await writeValidGroomOutput();
@@ -1676,6 +1810,137 @@ describe('output protocol helpers', () => {
         processGroomResult({ repo: 'owner/repo', issueNumber: '248', cwd: tempDir, result })
       ).rejects.toThrow('ENOENT');
       expect(ghMock).not.toHaveBeenCalled();
+    });
+
+    it('rejects invalid closed groom manifests before any GitHub writes', async () => {
+      const result = await writeValidGroomOutput(
+        buildClosedGroomManifest({ parent: { priority: 'high' } })
+      );
+
+      await expect(
+        processGroomResult({ repo: 'owner/repo', issueNumber: '248', cwd: tempDir, result })
+      ).rejects.toThrow("'parent.priority' cannot be set when 'closed' is present");
+      expect(ghMock).not.toHaveBeenCalled();
+    });
+
+    it('posts duplicate closed groom summaries before closing and removing labels', async () => {
+      const result = await writeValidGroomOutput(buildClosedGroomManifest());
+
+      await expect(
+        processGroomResult({ repo: 'owner/repo', issueNumber: '248', cwd: tempDir, result })
+      ).resolves.toEqual(result);
+
+      expect(ghMock).toHaveBeenNthCalledWith(1, [
+        'issue',
+        'comment',
+        '248',
+        '-R',
+        'owner/repo',
+        '--body-file',
+        outputAbs('comment-248.md'),
+      ]);
+      expect(ghMock).toHaveBeenNthCalledWith(2, [
+        'issue',
+        'close',
+        '248',
+        '-R',
+        'owner/repo',
+        '--duplicate-of',
+        '347',
+      ]);
+      expect(ghMock).toHaveBeenNthCalledWith(3, [
+        'issue',
+        'edit',
+        '248',
+        '-R',
+        'owner/repo',
+        '--remove-label',
+        'shipper:new',
+        '--remove-label',
+        'shipper:priority-high',
+        '--remove-label',
+        'shipper:priority-low',
+      ]);
+      expect(ghMock.mock.calls.flatMap(([args]) => args)).not.toContain('shipper:groomed');
+    });
+
+    it('posts not-planned closed groom summaries before closing and removing labels', async () => {
+      const result = await writeValidGroomOutput(
+        buildClosedGroomManifest({
+          closed: {
+            outcome: 'not-planned',
+            rationale: 'The product owner confirmed this work is out of scope.',
+          },
+        })
+      );
+
+      await expect(
+        processGroomResult({ repo: 'owner/repo', issueNumber: '248', cwd: tempDir, result })
+      ).resolves.toEqual(result);
+
+      expect(ghMock).toHaveBeenNthCalledWith(1, [
+        'issue',
+        'comment',
+        '248',
+        '-R',
+        'owner/repo',
+        '--body-file',
+        outputAbs('comment-248.md'),
+      ]);
+      expect(ghMock).toHaveBeenNthCalledWith(2, [
+        'issue',
+        'close',
+        '248',
+        '-R',
+        'owner/repo',
+        '--reason',
+        'not planned',
+      ]);
+      expect(ghMock).toHaveBeenNthCalledWith(3, [
+        'issue',
+        'edit',
+        '248',
+        '-R',
+        'owner/repo',
+        '--remove-label',
+        'shipper:new',
+        '--remove-label',
+        'shipper:priority-high',
+        '--remove-label',
+        'shipper:priority-low',
+      ]);
+      expect(ghMock.mock.calls.flatMap(([args]) => args)).not.toContain('shipper:groomed');
+    });
+
+    it('posts a groom post-flight failure comment when closed groom close fails', async () => {
+      const result = await writeValidGroomOutput(buildClosedGroomManifest());
+      ghMock
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })
+        .mockRejectedValueOnce(new Error('close failed'))
+        .mockResolvedValueOnce({ stdout: '', stderr: '' });
+
+      await expect(
+        processGroomResult({ repo: 'owner/repo', issueNumber: '248', cwd: tempDir, result })
+      ).rejects.toThrow('Groom post-flight failed');
+
+      expect(ghMock.mock.calls.some(([args]) => args[0] === 'issue' && args[1] === 'edit')).toBe(
+        false
+      );
+      expect(ghMock.mock.calls.at(-1)?.[0]).toEqual([
+        'issue',
+        'comment',
+        '248',
+        '-R',
+        'owner/repo',
+        '--body',
+        expect.stringContaining('## Groom Post-flight Failure'),
+      ]);
+      const failureBody = ghMock.mock.calls.at(-1)?.[0]?.at(-1);
+      expect(failureBody).toEqual(expect.stringContaining('post parent grooming summary'));
+      expect(failureBody).toEqual(expect.stringContaining('close parent issue: close failed'));
+      expect(failureBody).toEqual(
+        expect.stringContaining('remove closed parent labels: close parent issue failed')
+      );
     });
 
     it('creates full-replacement children, posts scoped comments, and closes the parent', async () => {

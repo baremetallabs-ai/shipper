@@ -1352,6 +1352,39 @@ describe('shipper_groom', () => {
     });
   });
 
+  it('reports a closed groom outcome as an accepted terminal transition', async () => {
+    await withFlag('1', async () => {
+      mockGh
+        .mockResolvedValueOnce(issueLabelsResponse('shipper:new'))
+        .mockResolvedValueOnce(issueLabelsStateResponse('CLOSED'));
+      mockSpawnShipper.mockResolvedValue({
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+        timedOut: false,
+      });
+      mockFindLatestSessionMeta.mockResolvedValue({
+        issue: '42',
+        stage: 'groom',
+        timestamp: '2026-04-29T00:00:00.000Z',
+        agent: 'claude',
+        model: 'sonnet',
+        repo: 'owner/repo',
+        exitCode: 0,
+        logFile: '/tmp/groom-closed.jsonl',
+      });
+      mockExtractFinalMessage.mockResolvedValue('Issue closed.');
+
+      const getTool = await collectTools();
+      const result = await getTool('shipper_groom')({ issue: 42 });
+
+      expect(result.isError).toBeUndefined();
+      const text = result.content[0]?.text ?? '';
+      expect(text).toContain('Stage: shipper:new -> closed (accept)');
+      expect(text).not.toContain('Unable to recover the stage transition');
+    });
+  });
+
   it('returns awaiting_answer when the worker defers and resumes through shipper_answer_question', async () => {
     await withFlag('1', async () => {
       mockGh
@@ -1417,6 +1450,73 @@ describe('shipper_groom', () => {
       expect(completion.content[0]?.text).toContain(
         'Stage: shipper:new -> shipper:groomed (accept)'
       );
+    });
+  });
+
+  it('reports a deferred closed groom outcome as an accepted terminal transition', async () => {
+    await withFlag('1', async () => {
+      mockGh
+        .mockResolvedValueOnce(issueLabelsResponse('shipper:new'))
+        .mockResolvedValueOnce(issueLabelsStateResponse('CLOSED'));
+
+      const events: unknown[] = [
+        {
+          kind: 'deferred',
+          sessionId: 'sess-groom-closed',
+          payload: {
+            sessionId: 'sess-groom-closed',
+            questions: [
+              {
+                question: 'Close as duplicate?',
+                header: 'Duplicate',
+                options: [
+                  { label: 'Yes', description: 'close' },
+                  { label: 'No', description: 'continue' },
+                ],
+                multiSelect: false,
+              },
+            ],
+          },
+        },
+        {
+          kind: 'completed',
+          result: { exitCode: 0, stdout: '', stderr: '', timedOut: false },
+        },
+      ];
+      mockStartShipper.mockReturnValueOnce({
+        next: (): Promise<unknown> =>
+          events.length === 0
+            ? Promise.reject(new Error('exhausted'))
+            : Promise.resolve(events.shift()),
+        answer: (): Promise<void> => Promise.resolve(),
+        cancel: (): void => {},
+        isCompleted: (): boolean => events.length === 0,
+      });
+      mockFindLatestSessionMeta.mockResolvedValue({
+        issue: '42',
+        stage: 'groom',
+        timestamp: '2026-04-29T00:00:00.000Z',
+        agent: 'claude',
+        model: 'sonnet',
+        repo: 'owner/repo',
+        exitCode: 0,
+        logFile: '/tmp/groom-closed-defer.jsonl',
+      });
+      mockExtractFinalMessage.mockResolvedValue('Closed.');
+
+      const getTool = await collectTools();
+      const initial = await getTool('shipper_groom')({ issue: 42 });
+      expect(initial.isError).toBeUndefined();
+      expect(initial.content[0]?.text).toContain('Status: awaiting_answer');
+
+      const completion = await getTool('shipper_answer_question')({
+        session_id: 'sess-groom-closed',
+        answers: { 'Close as duplicate?': 'Yes' },
+      });
+      expect(completion.isError).toBeUndefined();
+      const text = completion.content[0]?.text ?? '';
+      expect(text).toContain('Stage: shipper:new -> closed (accept)');
+      expect(text).not.toContain('Unable to recover the stage transition');
     });
   });
 });
