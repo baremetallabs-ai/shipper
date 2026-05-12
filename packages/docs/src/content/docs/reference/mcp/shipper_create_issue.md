@@ -5,11 +5,11 @@ description: 'Create a new GitHub issue from a plain-text request.'
 
 # shipper_create_issue
 
-Create a new GitHub issue from a plain-text request. Spawns `shipper new <request> --mode headless`, which runs an agent to research the codebase and draft an issue tagged `shipper:new`. Requires a non-empty request.
+Create a new GitHub issue from a plain-text request. Spawns `shipper new <request> --mode headless`; the agent drafts under `.shipper/output/`, then Shipper validates, creates the issue, applies `shipper:new`, and records the created issue identity. Requires a non-empty request.
 
 ## When to use
 
-Use this when the user has a plain-language request that should become a researched GitHub issue rather than immediate code changes. The success result is sourced from the headless agent's `.shipper/output/result.json` `created_issue` record; the transcript is used only for the final-message wrap-up.
+Use this when the user has a plain-language request that should become a researched GitHub issue rather than immediate code changes. The headless agent writes a draft under `.shipper/output/`, Shipper validates the draft, creates the GitHub issue, applies `shipper:new`, and records the final `created_issue` identity. The transcript is used only for the final-message wrap-up.
 
 ## Behavior hints
 
@@ -43,7 +43,6 @@ Session log: /tmp/shipper/session.log
 
 ## Error modes
 
-- Missing or invalid created issue metadata: On exit 0, Shipper returns an error if the matching session metadata, persisted result file, or valid created_issue record is missing. Inspect the session log to see whether an issue was created.
 - Timed out worker: [timed out] shipper new <request> --mode headless
 - Failed worker: [exit <code>] shipper new <request> --mode headless
 

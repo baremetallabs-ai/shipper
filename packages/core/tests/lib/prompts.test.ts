@@ -5,12 +5,12 @@ import { parseFrontmatter } from '../../src/lib/frontmatter.js';
 const nonBindingIntakeMarker =
   '*Non-binding intake interpretation: grooming may validate, revise, or discard these assumptions. The Request section remains the source of truth.*';
 
-const expectedRelevantDocumentationSection = `# Relevant Documentation (optional — include only if relevant docs are found)
+const expectedRelevantDocumentationSection = `# Relevant Documentation (optional - include only if relevant docs are found)
 
-Scan the repository for documentation files (e.g., README.md, docs/, CONTRIBUTING.md, CHANGELOG.md) relevant to the request, then list the 3-5 most relevant entries. For each, label as:
+Scan the repository for documentation files (for example, README.md, docs/, CONTRIBUTING.md, CHANGELOG.md) relevant to the request, then list the 3-5 most relevant entries. For each, label as:
 
-- **Relevant context** — provides useful background for the feature area
-- **May need updating** — the requested change would likely make this doc stale
+- **Relevant context** - provides useful background for the feature area
+- **May need updating** - the requested change would likely make this doc stale
 
 For example:
 
@@ -375,7 +375,7 @@ describe('new prompts', () => {
         'Technical pointers belong in Starting Point or Relevant Documentation.'
       );
       expect(prompt).toContain(
-        'Technical references — file paths, module or component names, class/function names, API shapes, data schemas, and library or technology choices — are permitted **only** in the Starting Point and Relevant Documentation sections. The Request and Interpretation sections must stay product-oriented.'
+        'Technical references - file paths, module or component names, class/function names, API shapes, data schemas, and library or technology choices - are permitted **only** in the Starting Point and Relevant Documentation sections. The Request and Interpretation sections must stay product-oriented.'
       );
     }
   );
@@ -398,27 +398,37 @@ describe('new prompts', () => {
   );
 
   it.each(['claude', 'codex', 'copilot'])(
-    'records created issue identity after successful gh issue create for %s',
+    'writes draft protocol artifacts and avoids GitHub mutation instructions for %s',
     (agent) => {
       const prompt = readFileSync(
         new URL(`../../src/prompts/${agent}/new.md`, import.meta.url),
         'utf-8'
       );
 
-      expect(prompt).toContain('.shipper/tmp/issue-<timestamp>.md');
       expect(prompt).toContain('.shipper/output/result.json');
-      expect(prompt).toContain('after `gh issue create` succeeds');
-      expect(prompt).toContain('created_issue');
-      expect(prompt).toContain('"number"');
+      expect(prompt).toContain('.shipper/output/issue-draft.json');
+      expect(prompt).toContain('.shipper/output/issue-body.md');
+      expect(prompt).toContain('"issue_draft"');
       expect(prompt).toContain('"title"');
-      expect(prompt).toContain('"url"');
-      expect(prompt).toContain('Parse the issue number from the trailing `/issues/<number>`');
+      expect(prompt).toContain('"body_file"');
       expect(prompt).toContain('Use JSON-safe writing');
-      expect(prompt).toContain(
-        'If any `gh issue create` step fails, report the error and do not write a success `result.json`.'
-      );
+      expect(prompt).not.toContain('gh issue create');
+      expect(prompt).not.toContain('.shipper/tmp/');
+      expect(prompt).not.toContain('"created_issue"');
+      expect(prompt).not.toContain('--label "shipper:new"');
+      expect(prompt).not.toMatch(/^# Title$/m);
     }
   );
+
+  it('does not allow Claude to run issue creation directly', () => {
+    const prompt = readFileSync(
+      new URL('../../src/prompts/claude/new.md', import.meta.url),
+      'utf-8'
+    );
+
+    const { frontmatter } = parseFrontmatter(prompt);
+    expect(frontmatter.args.join('\n')).not.toContain('Bash(gh issue create *)');
+  });
 });
 
 describe('plan/design escape-hatch softening', () => {

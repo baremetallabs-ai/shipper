@@ -183,7 +183,7 @@ Questions (JSON):
   },
   shipper_create_issue: {
     whenToUse:
-      "Use this when the user has a plain-language request that should become a researched GitHub issue rather than immediate code changes. The success result is sourced from the headless agent's `.shipper/output/result.json` `created_issue` record; the transcript is used only for the final-message wrap-up.",
+      'Use this when the user has a plain-language request that should become a researched GitHub issue rather than immediate code changes. The headless agent writes a draft under `.shipper/output/`, Shipper validates the draft, creates the GitHub issue, applies `shipper:new`, and records the final `created_issue` identity. The transcript is used only for the final-message wrap-up.',
     example: {
       call: { request: 'Add generated MCP reference pages for the docs site' },
       result: `Created issue: #42 Add generated MCP reference pages for the docs site
@@ -195,11 +195,6 @@ Created a scoped implementation issue.
 Session log: /tmp/shipper/session.log`,
     },
     errorModes: [
-      {
-        name: 'Missing or invalid created issue metadata',
-        message:
-          'On exit 0, Shipper returns an error if the matching session metadata, persisted result file, or valid created_issue record is missing. Inspect the session log to see whether an issue was created.',
-      },
       {
         name: 'Timed out worker',
         message: '[timed out] shipper new <request> --mode headless',

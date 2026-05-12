@@ -1,3 +1,5 @@
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import * as core from '@baremetallabs-ai/shipper-core';
 import type { RunPromptOpts } from '@baremetallabs-ai/shipper-core';
@@ -7,6 +9,7 @@ import { createFakeCore } from '../_harness/fake-core.js';
 type FakeCore = ReturnType<typeof createFakeCore>;
 
 const repo = 'owner/repo';
+const defaultDraftTitle = 'Add generated MCP reference pages';
 const { execFileMock, randomBytesMock } = vi.hoisted(() => ({
   execFileMock: vi.fn(),
   randomBytesMock: vi.fn<(size: number) => Buffer>(),
@@ -14,6 +17,39 @@ const { execFileMock, randomBytesMock } = vi.hoisted(() => ({
 
 function createExecFileError(message: string): Error & { code: number } {
   return Object.assign(new Error(message), { code: 128 });
+}
+
+async function writeNewDraft(
+  cwd: string,
+  title = defaultDraftTitle,
+  body = '# Request\n\nAdd generated MCP reference pages.'
+): Promise<void> {
+  const outputDir = path.join(cwd, '.shipper', 'output');
+  await mkdir(outputDir, { recursive: true });
+  await writeFile(path.join(outputDir, 'issue-body.md'), body, 'utf-8');
+  await writeFile(
+    path.join(outputDir, 'issue-draft.json'),
+    JSON.stringify(
+      {
+        title,
+        body_file: '.shipper/output/issue-body.md',
+      },
+      null,
+      2
+    ),
+    'utf-8'
+  );
+  await writeFile(
+    path.join(outputDir, 'result.json'),
+    JSON.stringify(
+      {
+        issue_draft: '.shipper/output/issue-draft.json',
+      },
+      null,
+      2
+    ),
+    'utf-8'
+  );
 }
 
 vi.mock('node:child_process', async () => {
@@ -56,6 +92,7 @@ describe('newCommand', () => {
   let fake: FakeCore;
   let promptCalls: Array<{ name: string; opts: RunPromptOpts }>;
   let errorSpy: MockInstance;
+  let persistNewResultSpy: MockInstance;
 
   const importCommand = async () => await import('../../src/commands/new.js');
 
@@ -80,6 +117,7 @@ describe('newCommand', () => {
     fake.install();
     promptCalls = [];
     delete process.env.SHIPPER_HEADLESS;
+    delete process.env.SHIPPER_SESSION_RUN_ID;
     process.exitCode = undefined;
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-04-22T02:38:36Z'));
@@ -96,8 +134,12 @@ describe('newCommand', () => {
     randomBytesMock.mockReset();
     randomBytesMock.mockReturnValue(Buffer.from('a3f91c', 'hex'));
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    fake.scriptRunPrompt((name, opts) => {
+    persistNewResultSpy = vi
+      .spyOn(core, 'persistNewResultForLatestSession')
+      .mockResolvedValue('/tmp/unlinked-new.result.json');
+    fake.scriptRunPrompt(async (name, opts) => {
       promptCalls.push({ name, opts });
+      await writeNewDraft(fake.wtPath());
       return 0;
     });
     stubDefaultBranch();
@@ -105,6 +147,7 @@ describe('newCommand', () => {
 
   afterEach(async () => {
     process.exitCode = undefined;
+    delete process.env.SHIPPER_SESSION_RUN_ID;
     errorSpy.mockRestore();
     vi.useRealTimers();
     vi.restoreAllMocks();
@@ -116,6 +159,7 @@ describe('newCommand', () => {
     const withStageHooksSpy = vi.spyOn(core, 'withStageHooks');
     const withWorktreeSpy = vi.spyOn(core, 'withWorktree');
     const runPromptSpy = vi.spyOn(core, 'runPrompt');
+    const scrubOutputDirSpy = vi.spyOn(core, 'scrubOutputDir');
     const { newCommand } = await importCommand();
 
     await expect(
@@ -156,12 +200,53 @@ describe('newCommand', () => {
         },
       },
     ]);
+    expect(scrubOutputDirSpy).toHaveBeenCalledWith(fake.wtPath());
     expect(withStageHooksSpy.mock.invocationCallOrder[0]).toBeLessThan(
       withWorktreeSpy.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER
     );
     expect(withWorktreeSpy.mock.invocationCallOrder[0]).toBeLessThan(
+      scrubOutputDirSpy.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER
+    );
+    expect(scrubOutputDirSpy.mock.invocationCallOrder[0]).toBeLessThan(
       runPromptSpy.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER
     );
+    expect([...fake.state.issues.values()]).toHaveLength(1);
+    const createdIssue = [...fake.state.issues.values()][0];
+    expect(createdIssue).toMatchObject({
+      number: '1',
+      title: defaultDraftTitle,
+      body: '# Request\n\nAdd generated MCP reference pages.',
+      url: 'https://github.com/owner/repo/issues/1',
+    });
+    expect(createdIssue?.labels.has('shipper:new')).toBe(true);
+    await expect(
+      readFile(path.join(fake.wtPath(), '.shipper/output/result.json'), 'utf-8')
+    ).resolves.toBe(
+      `${JSON.stringify(
+        {
+          created_issue: {
+            number: 1,
+            title: defaultDraftTitle,
+            url: 'https://github.com/owner/repo/issues/1',
+          },
+        },
+        null,
+        2
+      )}\n`
+    );
+    expect(persistNewResultSpy).toHaveBeenCalledWith({
+      repo,
+      cwd: fake.wtPath(),
+      since: new Date('2026-04-22T02:38:36Z'),
+      runId: undefined,
+      result: {
+        created_issue: {
+          number: 1,
+          title: defaultDraftTitle,
+          url: 'https://github.com/owner/repo/issues/1',
+        },
+      },
+    });
     expect(execFileMock).toHaveBeenCalledWith(
       'git',
       ['branch', '-d', branchName],
@@ -187,6 +272,29 @@ describe('newCommand', () => {
       })
     );
     expect(process.exitCode).toBe(0);
+  });
+
+  it('passes SHIPPER_SESSION_RUN_ID through session result persistence', async () => {
+    process.env.SHIPPER_SESSION_RUN_ID = 'run-123';
+    vi.spyOn(core, 'resolveBaseBranch').mockResolvedValueOnce('main');
+    const { newCommand } = await importCommand();
+
+    await expect(newCommand(repo, ['my', 'request'])).resolves.toBeUndefined();
+
+    expect(persistNewResultSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repo,
+        cwd: fake.wtPath(),
+        runId: 'run-123',
+        result: {
+          created_issue: {
+            number: 1,
+            title: defaultDraftTitle,
+            url: 'https://github.com/owner/repo/issues/1',
+          },
+        },
+      })
+    );
   });
 
   it('runs interactively with no user input when no mode override is provided', async () => {
@@ -276,6 +384,83 @@ describe('newCommand', () => {
       })
     );
     expect(process.exitCode).toBe(0);
+  });
+
+  it('retries an invalid draft and creates exactly one labeled issue after repair', async () => {
+    const { newCommand } = await importCommand();
+    fake.scriptRunPrompt(async (name, opts) => {
+      promptCalls.push({ name, opts });
+      if (promptCalls.length === 1) {
+        await writeNewDraft(fake.wtPath(), '');
+        return 0;
+      }
+
+      await writeNewDraft(fake.wtPath(), 'Repaired issue title');
+      return 0;
+    });
+
+    await expect(
+      newCommand(repo, ['my', 'request'], { mode: 'headless' })
+    ).resolves.toBeUndefined();
+
+    expect(promptCalls).toHaveLength(2);
+    expect(promptCalls[1]?.opts.userInput).toContain(
+      'Your previous output was invalid. Fix the following'
+    );
+    expect([...fake.state.issues.values()]).toHaveLength(1);
+    const createdIssue = [...fake.state.issues.values()][0];
+    expect(createdIssue?.title).toBe('Repaired issue title');
+    expect(createdIssue?.labels.has('shipper:new')).toBe(true);
+    expect(process.exitCode).toBe(0);
+  });
+
+  it('exits non-zero and creates no issue when draft validation is exhausted', async () => {
+    const { newCommand } = await importCommand();
+    fake.scriptRunPrompt(async (name, opts) => {
+      promptCalls.push({ name, opts });
+      await writeNewDraft(fake.wtPath(), '');
+      return 0;
+    });
+
+    await expect(
+      newCommand(repo, ['my', 'request'], { mode: 'headless' })
+    ).resolves.toBeUndefined();
+
+    expect(promptCalls).toHaveLength(3);
+    expect([...fake.state.issues.values()]).toHaveLength(0);
+    expect(persistNewResultSpy).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[shipper] Invalid new issue draft: Invalid issue draft')
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('exits non-zero without final result persistence when issue creation fails', async () => {
+    fake.stubGh((args) => {
+      if (args[0] === 'issue' && args[1] === 'create') {
+        throw fake.makeGhError(args, {
+          stderr: 'GraphQL: Resource not accessible by integration',
+          code: 1,
+        });
+      }
+
+      return undefined;
+    });
+    const { newCommand } = await importCommand();
+
+    await expect(
+      newCommand(repo, ['my', 'request'], { mode: 'headless' })
+    ).resolves.toBeUndefined();
+
+    expect([...fake.state.issues.values()]).toHaveLength(0);
+    await expect(
+      readFile(path.join(fake.wtPath(), '.shipper/output/result.json'), 'utf-8')
+    ).resolves.toContain('"issue_draft"');
+    expect(persistNewResultSpy).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('GraphQL: Resource not accessible by integration')
+    );
+    expect(process.exitCode).toBe(1);
   });
 
   it('surfaces base-branch resolution failures without falling back to the caller checkout', async () => {

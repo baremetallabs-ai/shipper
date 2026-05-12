@@ -36,11 +36,12 @@ shipper new Add a CLI flag for stale lock cleanup
 
 ## Exit Codes
 
-| Code | When                                                                    |
-| ---- | ----------------------------------------------------------------------- |
-| 0    | The issue creation agent completes successfully.                        |
-| 1    | Preflight, validation, worktree setup, hooks, or agent execution fails. |
+| Code | When                                                                                                 |
+| ---- | ---------------------------------------------------------------------------------------------------- |
+| 0    | Shipper creates the issue from a validated agent draft.                                              |
+| 1    | Preflight, draft validation, GitHub issue creation, worktree setup, hooks, or agent execution fails. |
 
 ## Constraints
 
 - --disable-mcp and --enable-mcp are mutually exclusive
+- Local .shipper/prompts/<agent>/new.md overrides written for the old gh issue create contract must be re-ejected with `shipper eject new` or migrated to the .shipper/output/issue-draft.json protocol.

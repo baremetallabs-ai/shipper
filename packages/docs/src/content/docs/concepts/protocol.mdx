@@ -54,10 +54,16 @@ resolved transition.
 PR-stage labels are mirrored onto the pull request with a separate best-effort `gh pr edit` call.
 The issue label transition is still the source of truth for workflow state.
 
-Some non-result-protocol flows still perform their own GitHub mutations. For example, `shipper new`
-creates the issue and applies `shipper:new`, and grooming updates the issue body/comments as part of
-the prompt-owned workflow. Those direct mutations are separate from the result-file transition
-contract used by downstream stages.
+`shipper new` is the narrow exception to the normal result-file shape because it runs before an
+issue exists. The `new` agent writes pre-create draft files under `.shipper/output/`: `result.json`
+contains `issue_draft`, which points at `issue-draft.json`; that draft contains a structured `title`
+and an `issue-body.md` path. The `new` draft does not use `verdict` or `comment`, and `comment` is
+optional only for this stage. Shipper validates the draft with the standard correction retry budget,
+creates the GitHub issue, applies `shipper:new`, and overwrites `result.json` with the final
+`created_issue` identity.
+
+Grooming still updates the issue body/comments as part of its workflow. Those direct edits are
+separate from the result-file transition contract used by downstream stages.
 
 ## MCP loading policy
 

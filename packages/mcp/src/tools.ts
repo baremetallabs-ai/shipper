@@ -48,9 +48,6 @@ import {
   formatSpawnResult,
   formatToolError,
   formatUnblockResult,
-  INVALID_CREATED_ISSUE_RESULT_DETAIL,
-  MISSING_CREATE_ISSUE_SESSION_METADATA_DETAIL,
-  MISSING_CREATED_ISSUE_RESULT_FILE_DETAIL,
   spawnShipper,
   startShipper,
   type ShipperRunner,
@@ -839,7 +836,7 @@ export const mcpToolDefinitions = [
   defineTool({
     name: 'shipper_create_issue',
     description:
-      'Create a new GitHub issue from a plain-text request. Spawns `shipper new <request> --mode headless`, which runs an agent to research the codebase and draft an issue tagged `shipper:new`. Requires a non-empty request.',
+      'Create a new GitHub issue from a plain-text request. Spawns `shipper new <request> --mode headless`; the agent drafts under `.shipper/output/`, then Shipper validates, creates the issue, applies `shipper:new`, and records the created issue identity. Requires a non-empty request.',
     inputSchema: {
       request: z.string().min(1).describe('Plain-text request for the issue creation agent.'),
     },
@@ -864,32 +861,23 @@ export const mcpToolDefinitions = [
             runId,
           });
           let payload: { issueNumber: number; title: string; url: string } | undefined;
-          let missingPayloadDetail: string | undefined;
           if (!result.timedOut && result.exitCode === 0) {
-            if (sessionContext.resultFile) {
-              try {
-                const newResult = await readNewResultFile(sessionContext.resultFile);
-                payload = {
-                  issueNumber: newResult.created_issue.number,
-                  title: newResult.created_issue.title,
-                  url: newResult.created_issue.url,
-                };
-              } catch (error) {
-                missingPayloadDetail = `${INVALID_CREATED_ISSUE_RESULT_DETAIL}\n${toErrorMessage(
-                  error
-                )}`;
-              }
-            } else {
-              missingPayloadDetail = sessionContext.sessionLogPath
-                ? MISSING_CREATED_ISSUE_RESULT_FILE_DETAIL
-                : MISSING_CREATE_ISSUE_SESSION_METADATA_DETAIL;
+            if (!sessionContext.resultFile) {
+              throw new Error(
+                'Successful issue creation run did not expose a persisted result file.'
+              );
             }
+            const newResult = await readNewResultFile(sessionContext.resultFile);
+            payload = {
+              issueNumber: newResult.created_issue.number,
+              title: newResult.created_issue.title,
+              url: newResult.created_issue.url,
+            };
           }
           return formatCreateIssueResult(result, payload, {
             command: 'shipper new <request> --mode headless',
             finalMessage: sessionContext.finalMessage,
             sessionLogPath: sessionContext.sessionLogPath,
-            missingPayloadDetail,
           });
         } catch (err) {
           return formatToolError(err);

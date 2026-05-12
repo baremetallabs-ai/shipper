@@ -43,7 +43,16 @@ agent. Ejected prompts are committed under `.shipper/prompts/<agent>/`.
    Shipper resolves `.shipper/prompts/<agent>/<name>.md` first. If that local override does not
    exist, Shipper falls back to the bundled prompt.
 
-5. Check the CLI reference for command details.
+5. Migrate old `new` prompt overrides before running them.
+
+   Local `.shipper/prompts/<agent>/new.md` overrides written for the old issue-creation contract are
+   out of date if they run `gh issue create`, write `.shipper/tmp/issue-<timestamp>.md`, or emit
+   `created_issue` directly. Shipper now owns GitHub issue creation and `shipper:new` label
+   application. A migrated `new` override must write `.shipper/output/result.json` with
+   `issue_draft`, plus `.shipper/output/issue-draft.json` and `.shipper/output/issue-body.md`.
+   The fastest migration path is to run `shipper eject new` again and then reapply local copy edits.
+
+6. Check the CLI reference for command details.
 
    Use [Reference > CLI > shipper eject](/reference/cli/eject/) for the generated command
    reference.

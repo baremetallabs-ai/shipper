@@ -36,6 +36,7 @@ const {
   findLatestSessionMeta,
   getSessionDir,
   getSessionPaths,
+  persistNewResultForLatestSession,
   resolveSessionRepo,
   writeSessionMeta,
 } = await import('../../src/lib/session.js');
@@ -766,6 +767,168 @@ describe('findLatestSessionMeta', () => {
         stage: 'implement',
         logFile: '/tmp/valid.jsonl',
       });
+    } finally {
+      rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('persistNewResultForLatestSession', () => {
+  const createdIssueResult = {
+    created_issue: {
+      number: 42,
+      title: 'Add generated MCP reference pages',
+      url: 'https://github.com/owner/repo/issues/42',
+    },
+  };
+
+  it('finds the latest matching unlinked/new session and overwrites its result sidecar', async () => {
+    const tempHome = mkdtempSync(path.join(tmpdir(), 'session-home-'));
+    mockHomeDir.value = tempHome;
+    const sessionDir = getSessionDir('owner-repo');
+    const olderResult = path.join(sessionDir, 'unlinked-new-2026-03-15T04-00-00-000Z.result.json');
+    const latestResult = path.join(sessionDir, 'unlinked-new-2026-03-15T05-00-00-000Z.result.json');
+
+    try {
+      writeSessionMetaSync(
+        path.join(sessionDir, 'unlinked-new-2026-03-15T04-00-00-000Z.meta.json'),
+        buildMeta({
+          issue: 'unlinked',
+          stage: 'new',
+          timestamp: '2026-03-15T04:00:00.000Z',
+          resultFile: olderResult,
+          runId: 'run-a',
+        })
+      );
+      writeSessionMetaSync(
+        path.join(sessionDir, 'unlinked-new-2026-03-15T05-00-00-000Z.meta.json'),
+        buildMeta({
+          issue: 'unlinked',
+          stage: 'new',
+          timestamp: '2026-03-15T05:00:00.000Z',
+          resultFile: latestResult,
+          runId: 'run-a',
+        })
+      );
+      writeFileSync(latestResult, '{"issue_draft":".shipper/output/issue-draft.json"}\n', 'utf-8');
+
+      await expect(
+        persistNewResultForLatestSession({
+          repo: 'owner/repo',
+          since: new Date('2026-03-15T00:00:00.000Z'),
+          runId: 'run-a',
+          result: createdIssueResult,
+        })
+      ).resolves.toBe(latestResult);
+
+      expect(JSON.parse(readFileSync(latestResult, 'utf-8'))).toEqual(createdIssueResult);
+      expect(() => readFileSync(olderResult, 'utf-8')).toThrow();
+    } finally {
+      rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it('filters by run id when persisting the final new result', async () => {
+    const tempHome = mkdtempSync(path.join(tmpdir(), 'session-home-'));
+    mockHomeDir.value = tempHome;
+    const sessionDir = getSessionDir('owner-repo');
+    const firstResult = path.join(sessionDir, 'unlinked-new-2026-03-15T04-00-00-000Z.result.json');
+    const secondResult = path.join(sessionDir, 'unlinked-new-2026-03-15T05-00-00-000Z.result.json');
+
+    try {
+      writeSessionMetaSync(
+        path.join(sessionDir, 'unlinked-new-2026-03-15T04-00-00-000Z.meta.json'),
+        buildMeta({
+          issue: 'unlinked',
+          stage: 'new',
+          timestamp: '2026-03-15T04:00:00.000Z',
+          resultFile: firstResult,
+          runId: 'run-a',
+        })
+      );
+      writeSessionMetaSync(
+        path.join(sessionDir, 'unlinked-new-2026-03-15T05-00-00-000Z.meta.json'),
+        buildMeta({
+          issue: 'unlinked',
+          stage: 'new',
+          timestamp: '2026-03-15T05:00:00.000Z',
+          resultFile: secondResult,
+          runId: 'run-b',
+        })
+      );
+
+      await expect(
+        persistNewResultForLatestSession({
+          repo: 'owner/repo',
+          since: new Date('2026-03-15T00:00:00.000Z'),
+          runId: 'run-a',
+          result: createdIssueResult,
+        })
+      ).resolves.toBe(firstResult);
+
+      expect(JSON.parse(readFileSync(firstResult, 'utf-8'))).toEqual(createdIssueResult);
+      expect(() => readFileSync(secondResult, 'utf-8')).toThrow();
+    } finally {
+      rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it('adds resultFile to metadata when the matched session lacks it', async () => {
+    const tempHome = mkdtempSync(path.join(tmpdir(), 'session-home-'));
+    mockHomeDir.value = tempHome;
+    const sessionDir = getSessionDir('owner-repo');
+    const metaFile = path.join(sessionDir, 'unlinked-new-2026-03-15T05-00-00-000Z.meta.json');
+    const derivedResultFile = path.join(
+      sessionDir,
+      'unlinked-new-2026-03-15T05-00-00-000Z.result.json'
+    );
+
+    try {
+      writeSessionMetaSync(
+        metaFile,
+        buildMeta({
+          issue: 'unlinked',
+          stage: 'new',
+          timestamp: '2026-03-15T05:00:00.000Z',
+          runId: 'run-a',
+        })
+      );
+
+      await expect(
+        persistNewResultForLatestSession({
+          repo: 'owner/repo',
+          since: new Date('2026-03-15T00:00:00.000Z'),
+          runId: 'run-a',
+          result: createdIssueResult,
+        })
+      ).resolves.toBe(derivedResultFile);
+
+      expect(JSON.parse(readFileSync(derivedResultFile, 'utf-8'))).toEqual(createdIssueResult);
+      expect(JSON.parse(readFileSync(metaFile, 'utf-8'))).toMatchObject({
+        issue: 'unlinked',
+        stage: 'new',
+        resultFile: derivedResultFile,
+      });
+    } finally {
+      rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it('throws and does not write a sidecar when no matching metadata exists', async () => {
+    const tempHome = mkdtempSync(path.join(tmpdir(), 'session-home-'));
+    mockHomeDir.value = tempHome;
+
+    try {
+      await expect(
+        persistNewResultForLatestSession({
+          repo: 'owner/repo',
+          since: new Date('2026-03-15T00:00:00.000Z'),
+          runId: 'run-a',
+          result: createdIssueResult,
+        })
+      ).rejects.toThrow('Could not find session metadata for owner/repo unlinked/new');
+
+      expect(() => readFileSync(getSessionDir('owner-repo'), 'utf-8')).toThrow();
     } finally {
       rmSync(tempHome, { recursive: true, force: true });
     }

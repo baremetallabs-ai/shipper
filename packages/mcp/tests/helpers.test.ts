@@ -132,25 +132,6 @@ describe('tool-specific result formatters', () => {
     expect(result.content[0]?.text).not.toContain('full transcript');
   });
 
-  it('forces isError when structured payload recovery fails after an exit-0 run', () => {
-    const result = formatCreateIssueResult(
-      { exitCode: 0, stdout: '', stderr: '', timedOut: false },
-      undefined,
-      {
-        command: 'shipper new <request> --mode headless',
-        finalMessage: 'Created issue draft and printed the summary.',
-        sessionLogPath: '/tmp/create.jsonl',
-      }
-    );
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0]?.text).toContain(
-      'did not record created_issue in .shipper/output/result.json'
-    );
-    expect(result.content[0]?.text).toContain('Created issue draft and printed the summary.');
-    expect(result.content[0]?.text).toContain('Session log: /tmp/create.jsonl');
-  });
-
   it('does not add missing-identity detail for non-zero create-issue runs', () => {
     const result = formatCreateIssueResult(
       {
@@ -170,7 +151,6 @@ describe('tool-specific result formatters', () => {
     expect(result.content[0]?.text).toContain('[exit 2] shipper new <request> --mode headless');
     expect(result.content[0]?.text).toContain('fatal: gh issue create failed');
     expect(result.content[0]?.text).toContain('Session log: /tmp/create.jsonl');
-    expect(result.content[0]?.text).not.toContain('did not record created_issue');
   });
 
   it('does not add missing-identity detail for timed-out create-issue runs', () => {
@@ -191,7 +171,6 @@ describe('tool-specific result formatters', () => {
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toContain('[timed out] shipper new <request> --mode headless');
     expect(result.content[0]?.text).toContain('Session log: /tmp/create.jsonl');
-    expect(result.content[0]?.text).not.toContain('did not record created_issue');
   });
 
   it('renders session-log-missing markers on structured success paths', () => {

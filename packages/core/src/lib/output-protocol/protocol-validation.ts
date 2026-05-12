@@ -8,6 +8,7 @@ import { getGhErrorDetail, isRecoverableReviewSubmissionGhError } from '../gh.js
 import { readResultFile, ResultValidationError, type ResultJson } from '../result-schema.js';
 import type { StageName } from '../stage-transitions.js';
 import { readGroomManifest, validateClosedGroomSummary } from './groom.js';
+import { readNewIssueDraft, type ValidatedNewIssueDraft } from './new.js';
 
 const REVIEW_VALID_FILES_DISPLAY_LIMIT = 50;
 
@@ -423,16 +424,14 @@ export async function validateStageOutput(
 
 const MAX_VALIDATION_ATTEMPTS = 3;
 
-export async function retryOnInvalidOutput(opts: {
-  cwd: string;
-  stage: StageName;
-  prFiles?: Set<string>;
-  diffHunks?: Map<string, DiffFileHunks>;
+async function retryOnInvalidProtocolOutput<T>(opts: {
+  validate: () => Promise<T>;
   retry: (correctionMessage: string) => Promise<number>;
-}): Promise<ResultJson> {
+  label: string;
+}): Promise<T> {
   for (let attempt = 1; attempt <= MAX_VALIDATION_ATTEMPTS; attempt++) {
     try {
-      return await validateStageOutput(opts.cwd, opts.stage, opts.prFiles, opts.diffHunks);
+      return await opts.validate();
     } catch (error) {
       if (attempt === MAX_VALIDATION_ATTEMPTS) {
         throw error;
@@ -444,7 +443,33 @@ export async function retryOnInvalidOutput(opts: {
     }
   }
 
-  throw new Error('Unreachable: retryOnInvalidOutput exhausted attempts without returning.');
+  throw new Error(`Unreachable: ${opts.label} exhausted attempts without returning.`);
+}
+
+export async function retryOnInvalidOutput(opts: {
+  cwd: string;
+  stage: StageName;
+  prFiles?: Set<string>;
+  diffHunks?: Map<string, DiffFileHunks>;
+  retry: (correctionMessage: string) => Promise<number>;
+}): Promise<ResultJson> {
+  return await retryOnInvalidProtocolOutput({
+    validate: async () =>
+      await validateStageOutput(opts.cwd, opts.stage, opts.prFiles, opts.diffHunks),
+    retry: opts.retry,
+    label: 'retryOnInvalidOutput',
+  });
+}
+
+export async function retryOnInvalidNewIssueDraft(opts: {
+  cwd: string;
+  retry: (correctionMessage: string) => Promise<number>;
+}): Promise<ValidatedNewIssueDraft> {
+  return await retryOnInvalidProtocolOutput({
+    validate: async () => await readNewIssueDraft(opts.cwd),
+    retry: opts.retry,
+    label: 'retryOnInvalidNewIssueDraft',
+  });
 }
 
 export interface PrReviewRetryContext {

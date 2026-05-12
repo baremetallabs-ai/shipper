@@ -105,6 +105,7 @@ export { executeMerge, getLinkedIssueNumber, postMerge } from './lib/merge-execu
 export { parseDiffHunks } from './lib/output-protocol/index.js';
 export {
   executeTransition,
+  createIssueFromDraft,
   GroomPostFlightError,
   handleAgentCrash,
   postComment,
@@ -113,12 +114,14 @@ export {
   processGroomResult,
   processResult,
   readGroomManifest,
+  retryOnInvalidNewIssueDraft,
   retryOnInvalidOutput,
   scrubOutputDir,
   setupProtocolDirs,
   truncateLargeInput,
   validateStageOutput,
   writeContextFile,
+  writeCreatedIssueResult,
 } from './lib/output-protocol/index.js';
 export type {
   GroomBlocked,
@@ -172,6 +175,7 @@ export {
   aggregateAllIssueUsage,
   aggregateSessionUsage,
   findLatestSessionMeta,
+  persistNewResultForLatestSession,
   resolveSessionRepo,
   SHIPPER_SESSION_RUN_ID_ENV,
 } from './lib/session.js';

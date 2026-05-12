@@ -86,10 +86,16 @@ const COPILOT_HEADLESS_FLAGS = [
   '--no-ask-user',
 ] as const;
 const GH_MUTATION_PATTERNS = [
+  /gh\s+issue\s+create\b/,
   /gh\s+issue\s+edit\b/,
   /gh\s+issue\s+comment\b/,
   /gh\s+pr\s+create\b/,
   /gh\s+pr\s+review\b/,
+] as const;
+const NEW_PROMPT_OLD_CONTRACT_PATTERNS = [
+  /gh\s+issue\s+create\b/,
+  /\.shipper\/tmp\/issue-/,
+  /"created_issue"\s*:/,
 ] as const;
 const MAX_INPUT_BYTES = 200_000;
 const QUESTION_BRIDGE_ABORT_DRAIN_TIMEOUT_MS = 2_000;
@@ -424,8 +430,15 @@ async function resolvePromptCommand(
   }
 
   const { frontmatter, body } = parseFrontmatter(raw);
+  const hasNewPromptOldContract =
+    name === 'new' && NEW_PROMPT_OLD_CONTRACT_PATTERNS.some((pattern) => pattern.test(raw));
 
-  if (
+  if (isLocalOverride && !warnedPromptPaths.has(promptPath) && hasNewPromptOldContract) {
+    warnedPromptPaths.add(promptPath);
+    logger.warn(
+      `Warning: Ejected prompt 'new' uses the old issue-creation contract.\nResponsibility for gh issue create moved to Shipper. Old new prompts will fail the draft protocol. Re-eject with 'shipper eject new' or migrate the prompt to write .shipper/output/issue-draft.json.`
+    );
+  } else if (
     isLocalOverride &&
     !warnedPromptPaths.has(promptPath) &&
     GH_MUTATION_PATTERNS.some((pattern) => pattern.test(body))

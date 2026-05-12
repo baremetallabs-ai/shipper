@@ -84,9 +84,13 @@ Representative runtime files include `pr-diff.patch`, `pr-files.json`, `pr-metad
 
 Representative runtime files include `result.json`, `comment-<number>.md`,
 `grooming-comment-<number>.md`, `groom-<number>.json`, `blocked-comment-<number>.md`,
-`issue-body-<number>.md`, `child-<number>-1-body.md`, `pr-body-<number>.md`,
-`pr-spec-<number>.json`, `review-payload-<number>.json`, and `replies/<comment-id>.md`. This list
-is not exhaustive.
+`issue-draft.json`, `issue-body.md`, `issue-body-<number>.md`, `child-<number>-1-body.md`,
+`pr-body-<number>.md`, `pr-spec-<number>.json`, `review-payload-<number>.json`, and
+`replies/<comment-id>.md`. This list is not exhaustive.
+
+During `shipper new`, the agent writes `result.json`, `issue-draft.json`, and `issue-body.md`.
+After Shipper validates the draft and creates the GitHub issue, Shipper overwrites `result.json`
+with the final `created_issue` record.
 
 ### `README.md`
 

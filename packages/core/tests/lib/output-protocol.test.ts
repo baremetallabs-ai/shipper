@@ -22,6 +22,7 @@ vi.mock('../../src/lib/gh.js', async () => {
 const { GhError } = await import('../../src/lib/gh.js');
 
 const {
+  createIssueFromDraft,
   createPrFromSpec,
   createPrFromSpecWithMetadata,
   PROTOCOL_INPUT_DIR,
@@ -34,7 +35,9 @@ const {
   processGroomResult,
   processResult,
   parseDiffHunks,
+  readNewIssueDraft,
   retryPrReviewOutputAndSubmission,
+  retryOnInvalidNewIssueDraft,
   retryOnInvalidOutput,
   scrubOutputDir,
   submitReviewPayload,
@@ -42,6 +45,7 @@ const {
   truncateLargeInput,
   validateStageOutput,
   writeContextFile,
+  writeCreatedIssueResult,
 } = await import('../../src/lib/output-protocol/index.js');
 
 describe('output protocol helpers', () => {
@@ -274,6 +278,38 @@ describe('output protocol helpers', () => {
       }
     }
     return fullResult;
+  }
+
+  async function writeNewIssueDraft(
+    opts: {
+      result?: Record<string, unknown>;
+      draft?: Record<string, unknown>;
+      body?: string;
+    } = {}
+  ): Promise<void> {
+    await writeResultFile({
+      issue_draft: outputRelative('issue-draft.json'),
+      ...opts.result,
+    });
+    await writeOutputJson('issue-draft.json', {
+      title: 'Add generated MCP reference pages',
+      body_file: outputRelative('issue-body.md'),
+      ...opts.draft,
+    });
+    await writeOutputFile(
+      'issue-body.md',
+      opts.body ??
+        [
+          '# Request',
+          '',
+          'Add generated MCP reference pages.',
+          '',
+          '# Interpretation',
+          '',
+          '<!-- prettier-ignore -->',
+          '*Non-binding intake interpretation: grooming may validate, revise, or discard these assumptions. The Request section remains the source of truth.*',
+        ].join('\n')
+    );
   }
 
   function buildReviewDiffFixture(): string {
@@ -626,6 +662,176 @@ describe('output protocol helpers', () => {
     ).resolves.toEqual({
       url: 'https://github.com/owner/repo/pull/248',
       number: 248,
+    });
+  });
+
+  describe('new issue draft protocol', () => {
+    it('accepts a valid pre-create issue draft result', async () => {
+      await writeNewIssueDraft();
+
+      await expect(readNewIssueDraft(tempDir)).resolves.toEqual({
+        title: 'Add generated MCP reference pages',
+        body_file: outputRelative('issue-body.md'),
+        bodyPath: outputAbs('issue-body.md'),
+        issue_draft: outputRelative('issue-draft.json'),
+        draftPath: outputAbs('issue-draft.json'),
+        resultPath: outputAbs('result.json'),
+      });
+    });
+
+    it.each([
+      [
+        'missing issue_draft',
+        { result: { issue_draft: undefined } },
+        "'issue_draft' must be a string path",
+      ],
+      [
+        'absolute issue_draft',
+        { result: { issue_draft: '/tmp/issue-draft.json' } },
+        "'issue_draft' must be a relative path under .shipper/output",
+      ],
+      [
+        'non-output issue_draft',
+        { result: { issue_draft: 'issue-draft.json' } },
+        "'issue_draft' must be a relative path under .shipper/output",
+      ],
+      [
+        'old created_issue result',
+        {
+          result: {
+            issue_draft: undefined,
+            created_issue: {
+              number: 42,
+              title: 'Old contract',
+              url: 'https://github.com/owner/repo/issues/42',
+            },
+          },
+        },
+        "result.json must not contain 'created_issue'",
+      ],
+      [
+        'normal-stage verdict/comment result',
+        {
+          result: {
+            verdict: 'accept',
+            comment: outputRelative('comment-248.md'),
+          },
+        },
+        "result.json must not contain 'verdict'",
+      ],
+    ])('rejects %s', async (_name, opts, message) => {
+      await writeNewIssueDraft(opts);
+
+      await expect(readNewIssueDraft(tempDir)).rejects.toThrow(message);
+    });
+
+    it.each([
+      ['missing title', { draft: { title: undefined } }, "'title' must be a string"],
+      ['blank title', { draft: { title: '   ' } }, "'title' must be a non-empty string"],
+      [
+        'absolute body_file',
+        { draft: { body_file: '/tmp/issue-body.md' } },
+        "'body_file' must be a relative path under .shipper/output",
+      ],
+      [
+        'non-output body_file',
+        { draft: { body_file: 'issue-body.md' } },
+        "'body_file' must be a relative path under .shipper/output",
+      ],
+      [
+        'agent-provided labels',
+        { draft: { labels: ['shipper:new'] } },
+        "'labels' is not supported; Shipper applies labels during issue creation",
+      ],
+      [
+        'leading title heading',
+        { body: '\n\n# Title\n\n# Request\n\nDo something.' },
+        "issue body must not start with a '# Title' heading",
+      ],
+    ])('rejects draft with %s', async (_name, opts, message) => {
+      await writeNewIssueDraft(opts);
+
+      await expect(readNewIssueDraft(tempDir)).rejects.toThrow(message);
+    });
+
+    it('rejects a missing body file', async () => {
+      await writeNewIssueDraft({ draft: { body_file: outputRelative('missing-body.md') } });
+
+      await expect(readNewIssueDraft(tempDir)).rejects.toThrow(
+        'issue body path does not exist or cannot be read'
+      );
+    });
+
+    it('creates a GitHub issue from a validated draft and applies shipper:new', async () => {
+      await writeNewIssueDraft();
+      const draft = await readNewIssueDraft(tempDir);
+      ghMock.mockResolvedValueOnce({
+        stdout: 'https://github.com/owner/repo/issues/42\n',
+        stderr: '',
+      });
+
+      await expect(createIssueFromDraft('owner/repo', draft)).resolves.toEqual({
+        number: 42,
+        title: 'Add generated MCP reference pages',
+        url: 'https://github.com/owner/repo/issues/42',
+      });
+
+      expect(ghMock).toHaveBeenCalledWith([
+        'issue',
+        'create',
+        '-R',
+        'owner/repo',
+        '--title',
+        'Add generated MCP reference pages',
+        '--body-file',
+        outputAbs('issue-body.md'),
+        '--label',
+        'shipper:new',
+      ]);
+      await expect(readFile(outputAbs('issue-body.md'), 'utf-8')).resolves.toContain('# Request');
+    });
+
+    it('rejects issue creation output without a parseable issue number', async () => {
+      await writeNewIssueDraft();
+      const draft = await readNewIssueDraft(tempDir);
+      ghMock.mockResolvedValueOnce({
+        stdout: 'https://github.com/owner/repo/pull/42\n',
+        stderr: '',
+      });
+
+      await expect(createIssueFromDraft('owner/repo', draft)).rejects.toThrow(
+        'Failed to parse issue number from created issue URL'
+      );
+    });
+
+    it('writes the final created_issue result', async () => {
+      await expect(
+        writeCreatedIssueResult(tempDir, {
+          number: 42,
+          title: 'Add generated MCP reference pages',
+          url: 'https://github.com/owner/repo/issues/42',
+        })
+      ).resolves.toEqual({
+        created_issue: {
+          number: 42,
+          title: 'Add generated MCP reference pages',
+          url: 'https://github.com/owner/repo/issues/42',
+        },
+      });
+
+      await expect(readFile(outputAbs('result.json'), 'utf-8')).resolves.toBe(
+        `${JSON.stringify(
+          {
+            created_issue: {
+              number: 42,
+              title: 'Add generated MCP reference pages',
+              url: 'https://github.com/owner/repo/issues/42',
+            },
+          },
+          null,
+          2
+        )}\n`
+      );
     });
   });
 
@@ -2627,6 +2833,122 @@ describe('output protocol helpers', () => {
           retry: retryMock,
         })
       ).rejects.toThrow("'title' must be a string");
+
+      expect(retryMock).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('retryOnInvalidNewIssueDraft', () => {
+    it('does not retry when output is already valid', async () => {
+      const retryMock = vi.fn<(message: string) => Promise<number>>().mockResolvedValue(1);
+      await writeNewIssueDraft();
+
+      await expect(
+        retryOnInvalidNewIssueDraft({
+          cwd: tempDir,
+          retry: retryMock,
+        })
+      ).resolves.toEqual({
+        title: 'Add generated MCP reference pages',
+        body_file: outputRelative('issue-body.md'),
+        bodyPath: outputAbs('issue-body.md'),
+        issue_draft: outputRelative('issue-draft.json'),
+        draftPath: outputAbs('issue-draft.json'),
+        resultPath: outputAbs('result.json'),
+      });
+
+      expect(retryMock).not.toHaveBeenCalled();
+    });
+
+    it('returns the revalidated draft after retry repairs it', async () => {
+      const retryMock = vi
+        .fn<(message: string) => Promise<number>>()
+        .mockImplementation(async () => {
+          await writeNewIssueDraft();
+          return 0;
+        });
+      await writeResultFile({});
+
+      await expect(
+        retryOnInvalidNewIssueDraft({
+          cwd: tempDir,
+          retry: retryMock,
+        })
+      ).resolves.toEqual(
+        expect.objectContaining({
+          title: 'Add generated MCP reference pages',
+          bodyPath: outputAbs('issue-body.md'),
+        })
+      );
+
+      expect(retryMock).toHaveBeenCalledTimes(1);
+      expect(retryMock).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'Your previous output was invalid. Fix the following and produce a valid .shipper/output/result.json:'
+        )
+      );
+    });
+
+    it('refreshes correction messages on the second invalid draft', async () => {
+      const retryMock = vi
+        .fn<(message: string) => Promise<number>>()
+        .mockImplementation(async () => {
+          if (retryMock.mock.calls.length === 1) {
+            await writeNewIssueDraft({ draft: { title: '' } });
+            return 0;
+          }
+
+          await writeNewIssueDraft();
+          return 0;
+        });
+      await writeOutputFile('result.json', '{invalid');
+
+      await expect(
+        retryOnInvalidNewIssueDraft({
+          cwd: tempDir,
+          retry: retryMock,
+        })
+      ).resolves.toEqual(expect.objectContaining({ title: 'Add generated MCP reference pages' }));
+
+      expect(retryMock).toHaveBeenCalledTimes(2);
+      expect(retryMock.mock.calls[1]?.[0]).toContain("'title' must be a non-empty string");
+      expect(retryMock.mock.calls[1]?.[0]).not.toContain('Failed to parse');
+    });
+
+    it('accepts valid retry output even when the retry exit code is non-zero', async () => {
+      const retryMock = vi
+        .fn<(message: string) => Promise<number>>()
+        .mockImplementation(async () => {
+          await writeNewIssueDraft();
+          return 17;
+        });
+      await writeResultFile({});
+
+      await expect(
+        retryOnInvalidNewIssueDraft({
+          cwd: tempDir,
+          retry: retryMock,
+        })
+      ).resolves.toEqual(expect.objectContaining({ title: 'Add generated MCP reference pages' }));
+
+      expect(retryMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('rethrows the final validation error after the third attempt', async () => {
+      const retryMock = vi
+        .fn<(message: string) => Promise<number>>()
+        .mockImplementation(async () => {
+          await writeNewIssueDraft({ draft: { title: '' } });
+          return 0;
+        });
+      await writeResultFile({});
+
+      await expect(
+        retryOnInvalidNewIssueDraft({
+          cwd: tempDir,
+          retry: retryMock,
+        })
+      ).rejects.toThrow("'title' must be a non-empty string");
 
       expect(retryMock).toHaveBeenCalledTimes(2);
     });

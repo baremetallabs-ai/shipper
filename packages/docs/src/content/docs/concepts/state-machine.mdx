@@ -117,9 +117,10 @@ example, after a successful design:
 gh issue edit <ISSUE> --add-label "shipper:designed" --remove-label "shipper:groomed"
 ```
 
-`shipper new` and grooming still perform prompt-owned GitHub mutations such as issue creation,
-issue-body edits, comments, and the initial `shipper:new` / `shipper:groomed` labels. The
-result-file transition contract owns the downstream workflow stages.
+`shipper new` is Shipper-owned after draft validation: the agent writes draft files under
+`.shipper/output/`, then Shipper creates the GitHub issue and applies `shipper:new`. Grooming still
+performs issue-body edits/comments and applies the initial `shipper:groomed` transition through its
+post-flight flow. The result-file transition contract owns the downstream workflow stages.
 
 ### Rollback paths
 

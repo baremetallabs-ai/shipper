@@ -2,8 +2,9 @@ import { execFile } from 'node:child_process';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { hasErrorCode, toError } from './errors.js';
+import { hasErrorCode, toError, toErrorMessage } from './errors.js';
 import { logger } from './logger.js';
+import type { NewResultJson } from './result-schema.js';
 import type { TokenUsage } from './usage.js';
 
 export const SHIPPER_SESSION_RUN_ID_ENV = 'SHIPPER_SESSION_RUN_ID';
@@ -27,6 +28,11 @@ export interface SessionMeta {
 export interface SessionRepoInfo {
   repo: string;
   repoSlug: string;
+}
+
+interface SessionMetaMatch {
+  meta: SessionMeta;
+  metaFile: string;
 }
 
 export function getSessionDir(repoSlug: string): string {
@@ -141,6 +147,16 @@ export async function findLatestSessionMeta(opts: {
   since: Date;
   runId?: string;
 }): Promise<SessionMeta | undefined> {
+  return (await findLatestSessionMetaMatch(opts))?.meta;
+}
+
+async function findLatestSessionMetaMatch(opts: {
+  repoSlug: string;
+  issue: string;
+  stage: string;
+  since: Date;
+  runId?: string;
+}): Promise<SessionMetaMatch | undefined> {
   const sessionDir = getSessionDir(opts.repoSlug);
   let entries: string[];
   try {
@@ -184,10 +200,61 @@ export async function findLatestSessionMeta(opts: {
       break;
     }
 
-    return parsed;
+    return {
+      meta: parsed,
+      metaFile: path.join(sessionDir, entry),
+    };
   }
 
   return undefined;
+}
+
+export async function persistNewResultForLatestSession(opts: {
+  repo: string;
+  cwd?: string;
+  since: Date;
+  runId?: string;
+  result: NewResultJson;
+}): Promise<string> {
+  const sessionRepo = await resolveSessionRepo({ repo: opts.repo, cwd: opts.cwd });
+  const match = await findLatestSessionMetaMatch({
+    repoSlug: sessionRepo.repoSlug,
+    issue: 'unlinked',
+    stage: 'new',
+    since: opts.since,
+    ...(opts.runId === undefined ? {} : { runId: opts.runId }),
+  });
+
+  if (!match) {
+    throw new Error(
+      `Could not find session metadata for ${sessionRepo.repo} unlinked/new at or after ${opts.since.toISOString()}`
+    );
+  }
+
+  const resultFile =
+    match.meta.resultFile ?? match.metaFile.replace(/\.meta\.json$/, '.result.json');
+
+  try {
+    await mkdir(path.dirname(resultFile), { recursive: true });
+    await writeFile(resultFile, `${JSON.stringify(opts.result, null, 2)}\n`, 'utf-8');
+  } catch (error) {
+    throw new Error(
+      `Failed to persist created_issue result to ${resultFile}: ${toErrorMessage(error)}`
+    );
+  }
+
+  try {
+    await writeSessionMeta(match.metaFile, {
+      ...match.meta,
+      resultFile,
+    });
+  } catch (error) {
+    throw new Error(
+      `Failed to update session metadata with created_issue result at ${match.metaFile}: ${toErrorMessage(error)}`
+    );
+  }
+
+  return resultFile;
 }
 
 async function aggregateSessionUsageDefault(
