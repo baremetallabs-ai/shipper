@@ -1,6 +1,6 @@
 import { toErrorMessage } from './errors.js';
 import { withStageHooks } from './hooks.js';
-import { withIssueLock } from './lock.js';
+import { withBufferedLockRenewalOutput, withIssueLock } from './lock.js';
 import { logger } from './logger.js';
 import {
   handleAgentCrash,
@@ -45,6 +45,7 @@ export interface StageScaffoldOpts {
   createBranch: boolean;
   initialFailure: 'crash' | 'propagate';
   prNumber?: { value: string | undefined };
+  bufferLockRenewalOutput?: boolean;
   resolveLocked: () => Promise<{ repoRoot: string; branch: string; baseBranch?: string }>;
   invoker: StageInvokerFactory;
 }
@@ -150,124 +151,133 @@ export async function runStageScaffold(opts: StageScaffoldOpts): Promise<StageRu
       opts.stage,
       { issueNumber: opts.issueNumber, branchName: branch },
       async () => {
-        return await withWorktree(
-          {
-            repoRoot,
-            branch,
-            createBranch: opts.createBranch,
-            ...(baseBranch !== undefined ? { baseBranch } : {}),
-            issueNumber: opts.issueNumber,
-            stage: opts.stage,
-          },
-          async (wtPath) => {
-            await scrubOutputDir(wtPath);
-            const invocation = opts.invoker({ wtPath, repoRoot, branch, baseBranch });
-            const crashOptions = {
-              cwd: wtPath,
-              detailFilename: `${opts.resultStage}-failure-detail.txt`,
-            };
-            let setupCtx: StageSetupResult | undefined;
-            try {
-              setupCtx = (await invocation.setup?.()) ?? undefined;
-            } catch (error) {
-              const detail = toErrorMessage(error);
-              logger.error(detail);
-              await handleAgentCrash(
-                opts.repo,
-                opts.issueNumber,
-                opts.resultStage,
-                detail,
-                undefined,
-                crashOptions
-              );
-              return { success: false, exitCode: 1, error: detail } satisfies StageRunResult;
-            }
-
-            const initialCode = await invocation.initial();
-            if (initialCode !== 0) {
-              const detail = `Agent exited with code ${initialCode}`;
-              if (opts.initialFailure === 'crash') {
+        const runStageBody = async (): Promise<StageRunResult> =>
+          await withWorktree(
+            {
+              repoRoot,
+              branch,
+              createBranch: opts.createBranch,
+              ...(baseBranch !== undefined ? { baseBranch } : {}),
+              issueNumber: opts.issueNumber,
+              stage: opts.stage,
+            },
+            async (wtPath) => {
+              await scrubOutputDir(wtPath);
+              const invocation = opts.invoker({ wtPath, repoRoot, branch, baseBranch });
+              const crashOptions = {
+                cwd: wtPath,
+                detailFilename: `${opts.resultStage}-failure-detail.txt`,
+              };
+              let setupCtx: StageSetupResult | undefined;
+              try {
+                setupCtx = (await invocation.setup?.()) ?? undefined;
+              } catch (error) {
+                const detail = toErrorMessage(error);
                 logger.error(detail);
                 await handleAgentCrash(
                   opts.repo,
                   opts.issueNumber,
                   opts.resultStage,
                   detail,
-                  `The \`${opts.resultStage}\` agent run exited with code ${initialCode}.`,
+                  undefined,
                   crashOptions
                 );
                 return { success: false, exitCode: 1, error: detail } satisfies StageRunResult;
               }
-              return {
-                success: false,
-                exitCode: initialCode,
-                error: detail,
-              } satisfies StageRunResult;
-            }
 
-            try {
-              let result: ResultJson;
-              let reviewSubmitted = false;
-              if (opts.resultStage === 'pr_review') {
-                const prNumber = opts.prNumber?.value;
-                if (!prNumber) {
-                  throw new Error('pr_review submission requires a PR number');
+              const initialCode = await invocation.initial();
+              if (initialCode !== 0) {
+                const detail = `Agent exited with code ${initialCode}`;
+                if (opts.initialFailure === 'crash') {
+                  logger.error(detail);
+                  await handleAgentCrash(
+                    opts.repo,
+                    opts.issueNumber,
+                    opts.resultStage,
+                    detail,
+                    `The \`${opts.resultStage}\` agent run exited with code ${initialCode}.`,
+                    crashOptions
+                  );
+                  return { success: false, exitCode: 1, error: detail } satisfies StageRunResult;
                 }
-
-                const retryResult = await retryPrReviewOutputAndSubmission({
-                  cwd: wtPath,
-                  ...(setupCtx ?? {}),
-                  retry: (userInput) => invocation.retry(userInput),
-                  submitReviewPayload: async (payloadPath) => {
-                    await submitReviewPayload(opts.repo, prNumber, wtPath, payloadPath);
-                  },
-                  refreshContext: async () => (await invocation.setup?.()) ?? undefined,
-                });
-                result = retryResult.result;
-                reviewSubmitted = retryResult.reviewSubmitted;
-              } else {
-                result = await retryOnInvalidOutput({
-                  cwd: wtPath,
-                  stage: opts.resultStage,
-                  ...(setupCtx ?? {}),
-                  retry: (userInput) => invocation.retry(userInput),
-                });
+                return {
+                  success: false,
+                  exitCode: initialCode,
+                  error: detail,
+                } satisfies StageRunResult;
               }
 
-              await processResult({
-                repo: opts.repo,
-                issueNumber: opts.issueNumber,
-                stage: opts.resultStage,
-                cwd: wtPath,
-                result,
-                ...(opts.prNumber !== undefined ? { prNumber: opts.prNumber.value } : {}),
-                ...(opts.resultStage === 'pr_review'
-                  ? { reviewPayloadAlreadySubmitted: reviewSubmitted }
-                  : {}),
-              });
-              return result.verdict === 'accept'
-                ? ({ success: true, exitCode: 0, verdict: result.verdict } satisfies StageRunResult)
-                : ({
-                    success: false,
-                    exitCode: 1,
-                    error: `Stage returned verdict "${result.verdict}".`,
-                    verdict: result.verdict,
-                  } satisfies StageRunResult);
-            } catch (error) {
-              const detail = toErrorMessage(error);
-              logger.error(detail);
-              await handleAgentCrash(
-                opts.repo,
-                opts.issueNumber,
-                opts.resultStage,
-                detail,
-                undefined,
-                crashOptions
-              );
-              return { success: false, exitCode: 1, error: detail } satisfies StageRunResult;
+              try {
+                let result: ResultJson;
+                let reviewSubmitted = false;
+                if (opts.resultStage === 'pr_review') {
+                  const prNumber = opts.prNumber?.value;
+                  if (!prNumber) {
+                    throw new Error('pr_review submission requires a PR number');
+                  }
+
+                  const retryResult = await retryPrReviewOutputAndSubmission({
+                    cwd: wtPath,
+                    ...(setupCtx ?? {}),
+                    retry: (userInput) => invocation.retry(userInput),
+                    submitReviewPayload: async (payloadPath) => {
+                      await submitReviewPayload(opts.repo, prNumber, wtPath, payloadPath);
+                    },
+                    refreshContext: async () => (await invocation.setup?.()) ?? undefined,
+                  });
+                  result = retryResult.result;
+                  reviewSubmitted = retryResult.reviewSubmitted;
+                } else {
+                  result = await retryOnInvalidOutput({
+                    cwd: wtPath,
+                    stage: opts.resultStage,
+                    ...(setupCtx ?? {}),
+                    retry: (userInput) => invocation.retry(userInput),
+                  });
+                }
+
+                await processResult({
+                  repo: opts.repo,
+                  issueNumber: opts.issueNumber,
+                  stage: opts.resultStage,
+                  cwd: wtPath,
+                  result,
+                  ...(opts.prNumber !== undefined ? { prNumber: opts.prNumber.value } : {}),
+                  ...(opts.resultStage === 'pr_review'
+                    ? { reviewPayloadAlreadySubmitted: reviewSubmitted }
+                    : {}),
+                });
+                return result.verdict === 'accept'
+                  ? ({
+                      success: true,
+                      exitCode: 0,
+                      verdict: result.verdict,
+                    } satisfies StageRunResult)
+                  : ({
+                      success: false,
+                      exitCode: 1,
+                      error: `Stage returned verdict "${result.verdict}".`,
+                      verdict: result.verdict,
+                    } satisfies StageRunResult);
+              } catch (error) {
+                const detail = toErrorMessage(error);
+                logger.error(detail);
+                await handleAgentCrash(
+                  opts.repo,
+                  opts.issueNumber,
+                  opts.resultStage,
+                  detail,
+                  undefined,
+                  crashOptions
+                );
+                return { success: false, exitCode: 1, error: detail } satisfies StageRunResult;
+              }
             }
-          }
-        );
+          );
+
+        return opts.bufferLockRenewalOutput === true
+          ? await withBufferedLockRenewalOutput(runStageBody)
+          : await runStageBody();
       }
     );
   });

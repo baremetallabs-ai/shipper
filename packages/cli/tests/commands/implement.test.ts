@@ -216,4 +216,28 @@ describe('implementCommand', () => {
     expect(fake.state.postedComments).toEqual([]);
     expect(fake.state.issues.get('239')?.labels).toEqual(new Set(['shipper:planned']));
   });
+
+  it('enables buffered lock renewal output when implement resolves to interactive mode', async () => {
+    const resolveModeSpy = vi.spyOn(core, 'resolveMode').mockReturnValue('interactive');
+    const scaffoldSpy = vi
+      .spyOn(core, 'runStageScaffold')
+      .mockResolvedValue({ success: true, exitCode: 0 });
+
+    const { runImplementStage } = await import('../../src/commands/implement.js');
+
+    await expect(runImplementStage(repo, '239', 'default')).resolves.toEqual({
+      success: true,
+      exitCode: 0,
+    });
+
+    expect(resolveModeSpy).toHaveBeenCalledWith('implement', 'default');
+    expect(scaffoldSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: 'implement',
+        resultStage: 'implement',
+        initialFailure: 'propagate',
+        bufferLockRenewalOutput: true,
+      })
+    );
+  });
 });

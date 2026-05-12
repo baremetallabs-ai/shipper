@@ -5,6 +5,59 @@ import { gh } from './gh.js';
 import { logger } from './logger.js';
 import { getSettings } from './settings.js';
 
+type RenewalOutputMode = 'inline' | 'buffered';
+
+interface LockRenewalReporter {
+  mode: RenewalOutputMode;
+  bufferDepth: number;
+  failureCount: number;
+  latestFailureMessage: string | undefined;
+}
+
+interface IssueLockContext {
+  repo: string;
+  issueNumber: string;
+  renewalReporter: LockRenewalReporter;
+}
+
+function createLockRenewalReporter(): LockRenewalReporter {
+  return {
+    mode: 'inline',
+    bufferDepth: 0,
+    failureCount: 0,
+    latestFailureMessage: undefined,
+  };
+}
+
+function reportRenewalSuccess(reporter: LockRenewalReporter | undefined, message: string): void {
+  if (reporter?.mode === 'buffered') {
+    return;
+  }
+  logger.error(message);
+}
+
+function reportRenewalFailure(reporter: LockRenewalReporter | undefined, message: string): void {
+  if (reporter?.mode !== 'buffered') {
+    logger.error(message);
+    return;
+  }
+
+  reporter.failureCount += 1;
+  reporter.latestFailureMessage = message;
+}
+
+function flushBufferedRenewalFailures(reporter: LockRenewalReporter): void {
+  if (reporter.failureCount > 0 && reporter.latestFailureMessage) {
+    const plural = reporter.failureCount === 1 ? 'failure' : 'failures';
+    logger.error(
+      `Warning: ${reporter.failureCount} lock renewal ${plural} occurred during interactive stage; latest failure: ${reporter.latestFailureMessage}`
+    );
+  }
+
+  reporter.failureCount = 0;
+  reporter.latestFailureMessage = undefined;
+}
+
 export async function isLockStale(repo: string, issueNumber: string): Promise<boolean> {
   let output: string;
   try {
@@ -110,11 +163,23 @@ export async function renewIssueLock(
   issueNumber: string,
   cancelled: { value: boolean }
 ): Promise<void> {
+  await renewIssueLockWithReporter(repo, issueNumber, cancelled);
+}
+
+async function renewIssueLockWithReporter(
+  repo: string,
+  issueNumber: string,
+  cancelled: { value: boolean },
+  reporter?: LockRenewalReporter
+): Promise<void> {
   // Remove the existing label. If this fails, the label is still present — safe to bail.
   try {
     await gh(['issue', 'edit', issueNumber, '-R', repo, '--remove-label', 'shipper:locked']);
   } catch (err) {
-    logger.error(`Warning: lock renewal failed for issue #${issueNumber}: ${toErrorMessage(err)}`);
+    reportRenewalFailure(
+      reporter,
+      `Warning: lock renewal failed for issue #${issueNumber}: ${toErrorMessage(err)}`
+    );
     return;
   }
 
@@ -125,15 +190,38 @@ export async function renewIssueLock(
   // Re-add the label to create a fresh timeline event.
   try {
     await gh(['issue', 'edit', issueNumber, '-R', repo, '--add-label', 'shipper:locked']);
-    logger.error(`Lock renewed for issue #${issueNumber}`);
+    reportRenewalSuccess(reporter, `Lock renewed for issue #${issueNumber}`);
   } catch (err) {
-    logger.error(
+    reportRenewalFailure(
+      reporter,
       `Warning: lock re-add failed for issue #${issueNumber} — lock is absent until next heartbeat: ${toErrorMessage(err)}`
     );
   }
 }
 
-const issueLockContext = new AsyncLocalStorage<{ repo: string; issueNumber: string }>();
+const issueLockContext = new AsyncLocalStorage<IssueLockContext>();
+
+export async function withBufferedLockRenewalOutput<T>(fn: () => Promise<T>): Promise<T> {
+  const activeLock = issueLockContext.getStore();
+  if (!activeLock) {
+    return await fn();
+  }
+
+  const reporter = activeLock.renewalReporter;
+  const previousMode = reporter.mode;
+  reporter.bufferDepth += 1;
+  reporter.mode = 'buffered';
+
+  try {
+    return await fn();
+  } finally {
+    reporter.bufferDepth -= 1;
+    if (reporter.bufferDepth === 0) {
+      flushBufferedRenewalFailures(reporter);
+      reporter.mode = previousMode;
+    }
+  }
+}
 
 export async function withIssueLock<T>(
   repo: string,
@@ -149,8 +237,18 @@ export async function withIssueLock<T>(
 
   const heartbeatMs = (getSettings().lockTimeoutMinutes / 3) * 60_000;
   const heartbeatCancelled = { value: false };
+  const lockContext: IssueLockContext = {
+    repo,
+    issueNumber,
+    renewalReporter: createLockRenewalReporter(),
+  };
   const heartbeatTimer = setInterval(() => {
-    void renewIssueLock(repo, issueNumber, heartbeatCancelled);
+    void renewIssueLockWithReporter(
+      repo,
+      issueNumber,
+      heartbeatCancelled,
+      lockContext.renewalReporter
+    );
   }, heartbeatMs);
   heartbeatTimer.unref();
 
@@ -184,7 +282,7 @@ export async function withIssueLock<T>(
   process.on('exit', onExit);
 
   try {
-    return await issueLockContext.run({ repo, issueNumber }, fn);
+    return await issueLockContext.run(lockContext, fn);
   } finally {
     stopHeartbeat();
     process.removeListener('SIGINT', onSignal);

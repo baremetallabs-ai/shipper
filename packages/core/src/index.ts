@@ -95,6 +95,7 @@ export {
   isLockStale,
   releaseIssueLock,
   renewIssueLock,
+  withBufferedLockRenewalOutput,
   withIssueLock,
 } from './lib/lock.js';
 export type { Logger } from './lib/logger.js';

@@ -5,6 +5,7 @@ import {
   getSettings,
   logger,
   resolveBaseBranch,
+  resolveMode,
   runStageScaffold,
   transportInvoker,
 } from '@baremetallabs-ai/shipper-core';
@@ -19,6 +20,7 @@ export async function runImplementStage(
   model?: string,
   disableMcp?: boolean
 ): Promise<StageRunResult> {
+  const effectiveMode = resolveMode('implement', mode);
   return await runStageScaffold({
     repo,
     issueNumber: issue,
@@ -26,6 +28,7 @@ export async function runImplementStage(
     resultStage: 'implement',
     createBranch: true,
     initialFailure: 'propagate',
+    bufferLockRenewalOutput: effectiveMode === 'interactive',
     resolveLocked: async () => {
       const repoRoot = await getRepoRoot();
       const branch = await generateBranchName(repo, issue);

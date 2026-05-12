@@ -5,6 +5,7 @@ import {
   getSettings,
   logger,
   resolveBaseBranch,
+  resolveMode,
   resolveRef,
   tryResolvePrForIssue,
   runStageScaffold,
@@ -21,6 +22,7 @@ export async function runPrOpenStage(
   model?: string,
   disableMcp?: boolean
 ): Promise<StageRunResult> {
+  const effectiveMode = resolveMode('pr_open', mode);
   const existingPrNumber = await tryResolvePrForIssue(repo, Number(issue));
 
   const settings = getSettings();
@@ -34,6 +36,7 @@ export async function runPrOpenStage(
     createBranch: false,
     initialFailure: 'propagate',
     prNumber: { value: existingPrNumber },
+    bufferLockRenewalOutput: effectiveMode === 'interactive',
     resolveLocked: async () => {
       const repoRoot = await getRepoRoot();
       const branch = await findBranchForIssue(issue);

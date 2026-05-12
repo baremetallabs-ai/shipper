@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as core from '@baremetallabs-ai/shipper-core';
 import type { RunPromptOpts } from '@baremetallabs-ai/shipper-core';
 
 import { createFakeCore } from '../_harness/fake-core.js';
@@ -151,5 +152,127 @@ describe('designCommand', () => {
     expect(process.exitCode).toBe(1);
     expect(fake.state.postedComments.at(-1)?.body).toContain('The `design` agent run exited');
     expect(fake.state.issues.get('123')?.labels).toEqual(new Set(['shipper:groomed']));
+  });
+
+  it('keeps a successful interactive stage result and label transition after a buffered renewal failure', async () => {
+    vi.useFakeTimers();
+    try {
+      fake.setIssue('123', { labels: ['shipper:groomed'], title: 'Design issue' });
+      let lockRemoveAttempts = 0;
+      fake.stubGh((args) => {
+        if (
+          args[0] === 'issue' &&
+          args[1] === 'edit' &&
+          args[2] === '123' &&
+          args.includes('--remove-label') &&
+          args.includes('shipper:locked')
+        ) {
+          lockRemoveAttempts += 1;
+          if (lockRemoveAttempts === 1) {
+            throw fake.makeGhError(args, { stderr: 'gh: renewal failed (HTTP 404)' });
+          }
+        }
+        return undefined;
+      });
+
+      let markPromptStarted!: () => void;
+      const promptStarted = new Promise<void>((resolve) => {
+        markPromptStarted = resolve;
+      });
+      let finishPrompt!: () => void;
+      const promptBlocker = new Promise<void>((resolve) => {
+        finishPrompt = resolve;
+      });
+      fake.scriptRunPrompt(async (name, opts) => {
+        promptCalls.push({ name, opts });
+        markPromptStarted();
+        await promptBlocker;
+        await fake.writeStageOutput({
+          result: { verdict: 'accept', comment: '.shipper/output/comment-123.md' },
+          commentBody: 'Design accepted after renewal failure.',
+        });
+        return 0;
+      });
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const errorMessages = (): string[] => errorSpy.mock.calls.map(([message]) => String(message));
+
+      const { runDesignStage } = await import('../../src/commands/design.js');
+
+      const resultPromise = runDesignStage(repo, '123', 'interactive');
+      await promptStarted;
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+
+      expect(
+        errorMessages().filter((message) => message.includes('lock renewal failed'))
+      ).toHaveLength(0);
+
+      finishPrompt();
+      await expect(resultPromise).resolves.toEqual({
+        success: true,
+        exitCode: 0,
+        verdict: 'accept',
+      });
+
+      const renewalMessages = errorMessages().filter((message) => message.includes('lock renewal'));
+      expect(renewalMessages).toHaveLength(1);
+      expect(renewalMessages[0]).toContain('1 lock renewal failure');
+      expect(renewalMessages[0]).toContain('gh: renewal failed (HTTP 404)');
+      expect(fake.state.labelTransitions).toEqual(
+        expect.arrayContaining([
+          {
+            target: 'issue',
+            number: '123',
+            add: ['shipper:designed'],
+            remove: ['shipper:groomed'],
+          },
+        ])
+      );
+      expect(fake.state.issues.get('123')?.labels).toEqual(new Set(['shipper:designed']));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('enables buffered lock renewal output when design resolves to interactive mode', async () => {
+    const resolveModeSpy = vi.spyOn(core, 'resolveMode').mockReturnValue('interactive');
+    const scaffoldSpy = vi
+      .spyOn(core, 'runStageScaffold')
+      .mockResolvedValue({ success: true, exitCode: 0 });
+
+    const { runDesignStage } = await import('../../src/commands/design.js');
+
+    await expect(runDesignStage(repo, '123', 'default')).resolves.toEqual({
+      success: true,
+      exitCode: 0,
+    });
+
+    expect(resolveModeSpy).toHaveBeenCalledWith('design', 'default');
+    expect(scaffoldSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: 'design',
+        resultStage: 'design',
+        bufferLockRenewalOutput: true,
+      })
+    );
+  });
+
+  it('does not enable buffered lock renewal output when design resolves to headless mode', async () => {
+    vi.spyOn(core, 'resolveMode').mockReturnValue('headless');
+    const scaffoldSpy = vi
+      .spyOn(core, 'runStageScaffold')
+      .mockResolvedValue({ success: true, exitCode: 0 });
+
+    const { runDesignStage } = await import('../../src/commands/design.js');
+
+    await expect(runDesignStage(repo, '123', 'headless')).resolves.toEqual({
+      success: true,
+      exitCode: 0,
+    });
+
+    expect(scaffoldSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bufferLockRenewalOutput: false,
+      })
+    );
   });
 });

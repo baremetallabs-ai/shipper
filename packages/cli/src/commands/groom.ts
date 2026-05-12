@@ -20,6 +20,7 @@ import {
   scrubOutputDir,
   toErrorMessage,
   validateStageOutput,
+  withBufferedLockRenewalOutput,
   withIssueLock,
   withStageHooks,
   withWorktree,
@@ -45,6 +46,7 @@ export async function runGroomStage(
   model?: string,
   disableMcp?: boolean
 ): Promise<StageRunResult> {
+  const bufferLockRenewalOutput = resolveMode('groom', mode) !== 'headless';
   const code = await withIssueLock(repo, issueStr, async () => {
     const repoRoot = await getRepoRoot();
     const branch = await generateBranchName(repo, issueStr);
@@ -54,95 +56,101 @@ export async function runGroomStage(
     return await withStageHooks(
       'groom',
       { issueNumber: issueStr, branchName: branch },
-      async () =>
-        await withWorktree(
-          {
-            repoRoot,
-            branch,
-            createBranch: true,
-            baseBranch,
-            issueNumber: issueStr,
-            stage: 'groom',
-          },
-          async (wtPath) => {
-            await scrubOutputDir(wtPath);
-            const desktopControlDir = resolveDesktopControlDir();
-            if (desktopControlDir) {
-              await writeDesktopControlState(desktopControlDir, {
-                stage: 'groom',
-                worktreePath: wtPath,
-                outputDir: path.resolve(wtPath, PROTOCOL_OUTPUT_DIR),
-              });
-            }
+      async () => {
+        const runStageBody = async (): Promise<number> =>
+          await withWorktree(
+            {
+              repoRoot,
+              branch,
+              createBranch: true,
+              baseBranch,
+              issueNumber: issueStr,
+              stage: 'groom',
+            },
+            async (wtPath) => {
+              await scrubOutputDir(wtPath);
+              const desktopControlDir = resolveDesktopControlDir();
+              if (desktopControlDir) {
+                await writeDesktopControlState(desktopControlDir, {
+                  stage: 'groom',
+                  worktreePath: wtPath,
+                  outputDir: path.resolve(wtPath, PROTOCOL_OUTPUT_DIR),
+                });
+              }
 
-            const processGroomOutput = async (allowRetry: boolean): Promise<number> => {
-              try {
-                const result = allowRetry
-                  ? await retryOnInvalidOutput({
+              const processGroomOutput = async (allowRetry: boolean): Promise<number> => {
+                try {
+                  const result = allowRetry
+                    ? await retryOnInvalidOutput({
+                        cwd: wtPath,
+                        stage: 'groom',
+                        retry: (userInput) =>
+                          runPrompt('groom', {
+                            repo,
+                            issueRef: issueStr,
+                            cwd: wtPath,
+                            mode,
+                            agent,
+                            model,
+                            disableMcp,
+                            userInput,
+                          }),
+                      })
+                    : await validateStageOutput(wtPath, 'groom');
+
+                  await processGroomResult({ repo, issueNumber: issueStr, cwd: wtPath, result });
+                  return 0;
+                } catch (error) {
+                  const detail = toErrorMessage(error);
+                  logger.error(detail);
+                  if (!(error instanceof GroomPostFlightError) || !error.failureCommentPosted) {
+                    await handleAgentCrash(repo, issueStr, 'groom', detail, undefined, {
                       cwd: wtPath,
-                      stage: 'groom',
-                      retry: (userInput) =>
-                        runPrompt('groom', {
-                          repo,
-                          issueRef: issueStr,
-                          cwd: wtPath,
-                          mode,
-                          agent,
-                          model,
-                          disableMcp,
-                          userInput,
-                        }),
-                    })
-                  : await validateStageOutput(wtPath, 'groom');
-
-                await processGroomResult({ repo, issueNumber: issueStr, cwd: wtPath, result });
-                return 0;
-              } catch (error) {
-                const detail = toErrorMessage(error);
-                logger.error(detail);
-                if (!(error instanceof GroomPostFlightError) || !error.failureCommentPosted) {
-                  await handleAgentCrash(repo, issueStr, 'groom', detail, undefined, {
-                    cwd: wtPath,
-                    detailFilename: 'groom-failure-detail.txt',
-                  });
+                      detailFilename: 'groom-failure-detail.txt',
+                    });
+                  }
+                  return 1;
                 }
+              };
+
+              const exitCode = await runPrompt('groom', {
+                repo,
+                issueRef: issueStr,
+                cwd: wtPath,
+                mode,
+                agent,
+                model,
+                disableMcp,
+              });
+
+              const desktopFinalizeRequested =
+                desktopControlDir !== null && (await isDesktopFinalizeRequested(desktopControlDir));
+              if (desktopFinalizeRequested) {
+                return await processGroomOutput(false);
+              }
+
+              if (exitCode !== 0) {
+                const detail = `Agent exited with code ${exitCode}`;
+                logger.error(detail);
+                await handleAgentCrash(
+                  repo,
+                  issueStr,
+                  'groom',
+                  detail,
+                  `The \`groom\` agent run exited with code ${exitCode}.`,
+                  { cwd: wtPath, detailFilename: 'groom-failure-detail.txt' }
+                );
                 return 1;
               }
-            };
 
-            const exitCode = await runPrompt('groom', {
-              repo,
-              issueRef: issueStr,
-              cwd: wtPath,
-              mode,
-              agent,
-              model,
-              disableMcp,
-            });
-
-            const desktopFinalizeRequested =
-              desktopControlDir !== null && (await isDesktopFinalizeRequested(desktopControlDir));
-            if (desktopFinalizeRequested) {
-              return await processGroomOutput(false);
+              return await processGroomOutput(true);
             }
+          );
 
-            if (exitCode !== 0) {
-              const detail = `Agent exited with code ${exitCode}`;
-              logger.error(detail);
-              await handleAgentCrash(
-                repo,
-                issueStr,
-                'groom',
-                detail,
-                `The \`groom\` agent run exited with code ${exitCode}.`,
-                { cwd: wtPath, detailFilename: 'groom-failure-detail.txt' }
-              );
-              return 1;
-            }
-
-            return await processGroomOutput(true);
-          }
-        )
+        return bufferLockRenewalOutput
+          ? await withBufferedLockRenewalOutput(runStageBody)
+          : await runStageBody();
+      }
     );
   });
   return code === 0

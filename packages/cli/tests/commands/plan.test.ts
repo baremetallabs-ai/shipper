@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as core from '@baremetallabs-ai/shipper-core';
 import type { RunPromptOpts } from '@baremetallabs-ai/shipper-core';
 
 import { createFakeCore } from '../_harness/fake-core.js';
@@ -172,5 +173,28 @@ describe('planCommand', () => {
     ).resolves.toBeUndefined();
 
     expect(promptCalls[0]?.opts.disableMcp).toBe(true);
+  });
+
+  it('enables buffered lock renewal output when plan resolves to interactive mode', async () => {
+    const resolveModeSpy = vi.spyOn(core, 'resolveMode').mockReturnValue('interactive');
+    const scaffoldSpy = vi
+      .spyOn(core, 'runStageScaffold')
+      .mockResolvedValue({ success: true, exitCode: 0 });
+
+    const { runPlanStage } = await import('../../src/commands/plan.js');
+
+    await expect(runPlanStage(repo, '123', 'interactive')).resolves.toEqual({
+      success: true,
+      exitCode: 0,
+    });
+
+    expect(resolveModeSpy).toHaveBeenCalledWith('plan', 'interactive');
+    expect(scaffoldSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: 'plan',
+        resultStage: 'plan',
+        bufferLockRenewalOutput: true,
+      })
+    );
   });
 });

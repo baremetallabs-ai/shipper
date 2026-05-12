@@ -76,6 +76,16 @@ const withIssueLockMock = vi.fn<
   events.push('withIssueLock');
   return fn();
 });
+const withBufferedLockRenewalOutputMock = vi.fn<(fn: () => Promise<unknown>) => Promise<unknown>>(
+  async (fn) => {
+    events.push('withBufferedLockRenewalOutput:start');
+    try {
+      return await fn();
+    } finally {
+      events.push('withBufferedLockRenewalOutput:end');
+    }
+  }
+);
 const withStageHooksMock = vi.fn<
   (
     stage: string,
@@ -106,6 +116,8 @@ vi.mock('../../src/lib/hooks.js', () => ({
 }));
 
 vi.mock('../../src/lib/lock.js', () => ({
+  withBufferedLockRenewalOutput: (fn: () => Promise<unknown>) =>
+    withBufferedLockRenewalOutputMock(fn),
   withIssueLock: (repo: string, issue: string, fn: () => Promise<unknown>) =>
     withIssueLockMock(repo, issue, fn),
 }));
@@ -243,6 +255,7 @@ describe('runStageScaffold', () => {
       'retryPrReviewOutputAndSubmission',
       'processResult',
     ]);
+    expect(withBufferedLockRenewalOutputMock).not.toHaveBeenCalled();
     expect(withStageHooksMock).toHaveBeenCalledWith(
       'pr-review',
       { issueNumber: '123', branchName: 'shipper/123-branch' },
@@ -288,6 +301,53 @@ describe('runStageScaffold', () => {
       '.shipper/output/review-payload.json'
     );
     await expect(retryOpts.refreshContext?.()).resolves.toEqual({ prFiles, diffHunks });
+  });
+
+  it('wraps the worktree body with buffered lock renewal output when requested', async () => {
+    await expect(
+      runStageScaffold({
+        repo: 'owner/repo',
+        issueNumber: '123',
+        stage: 'plan',
+        resultStage: 'plan',
+        createBranch: true,
+        initialFailure: 'crash',
+        bufferLockRenewalOutput: true,
+        resolveLocked: () => {
+          events.push('resolveLocked');
+          return Promise.resolve({
+            repoRoot: '/tmp/fake-repo',
+            branch: 'shipper/123-branch',
+            baseBranch: 'main',
+          });
+        },
+        invoker: () =>
+          buildInvocation({
+            initial: () => {
+              events.push('initial');
+              return Promise.resolve(0);
+            },
+          }),
+      })
+    ).resolves.toEqual({
+      success: true,
+      exitCode: 0,
+      verdict: 'accept',
+    });
+
+    expect(events).toEqual([
+      'withIssueLock',
+      'resolveLocked',
+      'withStageHooks',
+      'withBufferedLockRenewalOutput:start',
+      'withWorktree',
+      'scrubOutputDir',
+      'initial',
+      'retryOnInvalidOutput',
+      'processResult',
+      'withBufferedLockRenewalOutput:end',
+    ]);
+    expect(withBufferedLockRenewalOutputMock).toHaveBeenCalledTimes(1);
   });
 
   it('logs and reports agent crashes for simple-stage non-zero initial exits', async () => {
