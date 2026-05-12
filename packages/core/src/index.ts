@@ -129,6 +129,7 @@ export type {
   GroomOpenManifest,
   GroomParent,
   GroomPriority,
+  GroomStageManifest,
 } from './lib/output-protocol/index.js';
 export { __installFakeTransports } from './lib/testing-seams.js';
 export {
