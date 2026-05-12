@@ -100,10 +100,10 @@ Before proceeding to Phase 3, check whether any issue from the Phase 2 scan was 
 
 1. Present the finding to the product owner using the interactive question-asking tool. Identify the original issue by number and title, explain why the current issue appears to be a duplicate, and ask for explicit confirmation before taking action.
 2. **If the product owner confirms the duplicate:**
-   - Record the duplicate decision in the grooming artifacts rather than mutating GitHub directly.
-   - Produce a normal groomed parent body whose summary and out-of-scope sections state that the issue is a confirmed duplicate of #<N>.
-   - Produce a grooming summary comment documenting the duplicate decision.
-   - Use `decomposition.kind: "none"` and priority `normal` unless the product owner explicitly chose another priority.
+   - Record a closed `duplicate` outcome in the grooming artifacts rather than mutating GitHub directly.
+   - Stop before Phase 3. Do not collect requirements, acceptance criteria, priority, child issues, blocked state, or a parent body file for an issue that is being closed.
+   - Produce a grooming summary comment that includes the Phase 2 cross-issue findings and states that the issue is a product-owner-confirmed duplicate of #<N>.
+   - Produce a closed manifest with `closed.outcome: "duplicate"` and `closed.duplicate_of: <N>`.
 3. **If the product owner rejects the duplicate finding:**
    - Reclassify the relationship as **Overlap** in the Phase 2 results.
    - Proceed to Phase 3 as normal.
@@ -121,6 +121,8 @@ Ask targeted questions to close every open product decision. Use the four catego
 
 Ask as many or as few questions as the issue demands. Simple issues may need 2–3 questions; complex issues may need 10+. Use judgment.
 
+During Phase 3, if the dialogue reveals that the requested work is already done, firmly out of scope, or explicitly declined, you may propose a closed `not-planned` outcome. Use the interactive question-asking tool and obtain explicit product-owner confirmation before recording it. If confirmed, stop ordinary grooming questions, do not ask for priority, and produce a grooming summary comment that includes the Phase 2 cross-issue findings plus the free-text rationale for closing as not planned. Produce a closed manifest with `closed.outcome: "not-planned"` and a non-empty `closed.rationale`. If the product owner does not confirm the `not-planned` outcome, continue ordinary grooming.
+
 **Ask questions using the interactive question-asking tool.** Do not output questions as formatted text. Each question must include:
 
 - **The question itself** — clear and specific
@@ -129,7 +131,7 @@ Ask as many or as few questions as the issue demands. Simple issues may need 2�
 
 Ask in logical batches. Do not re-ask things already answered in the issue or comments — incorporate them. Answers often surface follow-up questions — continue until all product decisions are resolved.
 
-After all other product decisions are resolved, ask one final question about issue priority:
+For ordinary open-workflow grooming, after all other product decisions are resolved, ask one final question about issue priority:
 
 - **High** — This issue should be processed before normal-priority work across the entire pipeline.
 - **Normal** (default) — Standard priority. No priority label is applied.
@@ -143,7 +145,9 @@ This determines the `shipper:priority-high` or `shipper:priority-low` label appl
 
 ### Phase 4: Compile groomed outputs
 
-Once all product decisions are resolved, produce two artifacts.
+For ordinary open-workflow grooming, once all product decisions are resolved, produce the two artifacts below.
+
+For a confirmed closed outcome (`duplicate` from Phase 2 or `not-planned` from Phase 3), do not produce an updated issue body, requirements, acceptance criteria, priority, blocked state, or decomposition. Produce only the grooming summary comment and the closed manifest described in the output section. The grooming summary comment is the in-issue close record: it must include the Phase 2 cross-issue findings and either the duplicate target `#<N>` or the not-planned rationale.
 
 #### Artifact 1 — Updated issue body (implementation-ready)
 
@@ -189,7 +193,7 @@ Reportable items include:
 
 After producing the final groomed content, create ignored files under `.shipper/output/`. These files are absent from a clean worktree; create them during every run. Do not use temp directories for protocol artifacts.
 
-Never run mutating GitHub commands. Shipper will update the parent issue, create child issues, post comments, close full-replacement parents, and apply `shipper:groomed`, `shipper:blocked`, `shipper:priority-high`, and `shipper:priority-low` labels after you exit.
+Never run mutating GitHub commands. Shipper will update the parent issue, create child issues, post comments, close full-replacement or closed-outcome parents, and apply labels after you exit.
 
 Create `.shipper/output/result.json`:
 
@@ -201,7 +205,9 @@ Create `.shipper/output/result.json`:
 }
 ```
 
-Create the grooming summary comment at the `comment` path. Create the groom manifest at the `groom` path:
+Create the grooming summary comment at the `comment` path. Create the groom manifest at the `groom` path in exactly one of these modes.
+
+Open grooming manifest:
 
 ```json
 {
@@ -232,6 +238,30 @@ Create the grooming summary comment at the `comment` path. Create the groom mani
 ```
 
 Use only `high`, `normal`, or `low` for priority. Choosing `normal` tells the orchestrator to remove both priority labels.
+
+Closed duplicate manifest:
+
+```json
+{
+  "closed": {
+    "outcome": "duplicate",
+    "duplicate_of": 123
+  }
+}
+```
+
+Closed not-planned manifest:
+
+```json
+{
+  "closed": {
+    "outcome": "not-planned",
+    "rationale": "The product owner confirmed this work is out of scope."
+  }
+}
+```
+
+Closed outcomes must not include a parent body file, child issues, blocked state, or priority. The grooming summary comment is the close record and must include Phase 2 cross-issue findings plus the duplicate target or not-planned rationale.
 
 ### Decomposition encoding
 

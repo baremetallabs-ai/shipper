@@ -140,8 +140,11 @@ export {
 export type {
   GroomBlocked,
   GroomChildIssue,
+  GroomClosedManifest,
+  GroomClosedOutcome,
   GroomDecompositionKind,
   GroomManifest,
+  GroomOpenManifest,
   GroomParent,
   GroomPriority,
 } from './lib/output-protocol/index.js';

@@ -35,13 +35,23 @@ export interface GroomChildIssue {
   blocked?: GroomBlocked;
 }
 
-export interface GroomManifest {
+export interface GroomOpenManifest {
   parent: GroomParent;
   decomposition: {
     kind: GroomDecompositionKind;
     children: GroomChildIssue[];
   };
 }
+
+export type GroomClosedOutcome =
+  | { outcome: 'duplicate'; duplicate_of: number }
+  | { outcome: 'not-planned'; rationale: string };
+
+export interface GroomClosedManifest {
+  closed: GroomClosedOutcome;
+}
+
+export type GroomManifest = GroomOpenManifest | GroomClosedManifest;
 
 export interface LoadedOutputFile {
   path: string;
@@ -95,6 +105,7 @@ export class GroomPostFlightError extends Error {
 
 const GROOM_PRIORITIES = new Set<GroomPriority>(['high', 'normal', 'low']);
 const DECOMPOSITION_KINDS = new Set<GroomDecompositionKind>(['none', 'partial', 'full']);
+const CLOSED_GROOM_OUTCOMES = new Set<GroomClosedOutcome['outcome']>(['duplicate', 'not-planned']);
 const REQUIRED_GROOMED_HEADINGS = [
   '# Summary',
   '# Requirements',
@@ -110,6 +121,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function nonEmptyString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+function isClosedGroomManifest(manifest: GroomManifest): manifest is GroomClosedManifest {
+  return 'closed' in manifest;
 }
 
 function validateStringField(
@@ -177,12 +192,83 @@ function validateBlocked(
   };
 }
 
-function parseManifest(data: unknown, errors: string[]): GroomManifest | undefined {
-  if (!isRecord(data)) {
-    errors.push('groom manifest must be a JSON object');
+function validateClosedOpenConflicts(data: Record<string, unknown>, errors: string[]): void {
+  if (data.parent !== undefined) {
+    if (!isRecord(data.parent)) {
+      errors.push("'parent' must be an object when 'closed' is present");
+    } else {
+      if (data.parent.title !== undefined) {
+        errors.push("'parent.title' cannot be set when 'closed' is present");
+      }
+      if (data.parent.body_file !== undefined) {
+        errors.push("'parent.body_file' cannot be set when 'closed' is present");
+      }
+      if (data.parent.blocked !== undefined) {
+        errors.push("'parent.blocked' cannot be set when 'closed' is present");
+      }
+      if (data.parent.priority !== undefined) {
+        errors.push("'parent.priority' cannot be set when 'closed' is present");
+      }
+    }
+  }
+
+  if (data.decomposition !== undefined) {
+    if (!isRecord(data.decomposition)) {
+      errors.push("'decomposition' must be an object when 'closed' is present");
+    } else {
+      if (data.decomposition.kind !== undefined) {
+        errors.push("'decomposition.kind' cannot be set when 'closed' is present");
+      }
+      if (data.decomposition.children !== undefined) {
+        if (!Array.isArray(data.decomposition.children) || data.decomposition.children.length > 0) {
+          errors.push("'decomposition.children' must be empty or omitted when 'closed' is present");
+        }
+      }
+    }
+  }
+}
+
+function parseClosedManifest(
+  data: Record<string, unknown>,
+  errors: string[]
+): GroomClosedManifest | undefined {
+  validateClosedOpenConflicts(data, errors);
+
+  if (!isRecord(data.closed)) {
+    errors.push("'closed' must be an object");
     return undefined;
   }
 
+  const outcomeValue = data.closed.outcome;
+  if (
+    typeof outcomeValue !== 'string' ||
+    !CLOSED_GROOM_OUTCOMES.has(outcomeValue as GroomClosedOutcome['outcome'])
+  ) {
+    errors.push("'closed.outcome' must be one of: duplicate, not-planned");
+    return undefined;
+  }
+
+  if (outcomeValue === 'duplicate') {
+    const duplicateOf = data.closed.duplicate_of;
+    if (typeof duplicateOf !== 'number' || !Number.isInteger(duplicateOf) || duplicateOf <= 0) {
+      errors.push("'closed.duplicate_of' must be a positive integer");
+      return undefined;
+    }
+    return { closed: { outcome: 'duplicate', duplicate_of: duplicateOf } };
+  }
+
+  const rationale = nonEmptyString(data.closed.rationale);
+  if (!rationale) {
+    errors.push("'closed.rationale' must be a non-empty string");
+    return undefined;
+  }
+  return { closed: { outcome: 'not-planned', rationale } };
+}
+
+function parseOpenManifest(
+  data: Record<string, unknown>,
+  errors: string[]
+): GroomOpenManifest | undefined {
   if (!isRecord(data.parent)) {
     errors.push("'parent' must be an object");
     return undefined;
@@ -254,6 +340,19 @@ function parseManifest(data: unknown, errors: string[]): GroomManifest | undefin
   };
 }
 
+function parseManifest(data: unknown, errors: string[]): GroomManifest | undefined {
+  if (!isRecord(data)) {
+    errors.push('groom manifest must be a JSON object');
+    return undefined;
+  }
+
+  if (data.closed !== undefined) {
+    return parseClosedManifest(data, errors);
+  }
+
+  return parseOpenManifest(data, errors);
+}
+
 async function readOutputText(
   cwd: string,
   relativePath: string,
@@ -303,7 +402,7 @@ export function replaceBlockingIssuePlaceholder(comment: string, issueNumber: nu
 
 async function validateLoadedFiles(
   cwd: string,
-  manifest: GroomManifest,
+  manifest: GroomOpenManifest,
   errors: string[]
 ): Promise<LoadedGroomFiles> {
   const parentBody = manifest.parent.body_file
@@ -399,7 +498,7 @@ async function validateLoadedFiles(
   };
 }
 
-function validateManifestState(manifest: GroomManifest, errors: string[]): void {
+function validateManifestState(manifest: GroomOpenManifest, errors: string[]): void {
   const { kind, children } = manifest.decomposition;
 
   if (kind === 'none' && children.length > 0) {
@@ -459,12 +558,14 @@ export async function readGroomManifest(
 
   const errors: string[] = [];
   const manifest = parseManifest(parsed, errors);
-  if (manifest) {
+  if (manifest && !isClosedGroomManifest(manifest)) {
     validateManifestState(manifest, errors);
   }
 
   let files: LoadedGroomFiles | undefined;
-  if (manifest) {
+  if (manifest && isClosedGroomManifest(manifest)) {
+    files = { children: [] };
+  } else if (manifest) {
     try {
       files = await validateLoadedFiles(cwd, manifest, errors);
     } catch {
@@ -596,6 +697,78 @@ export async function processGroomResult(opts: {
   const skip = (name: string, detail: string) => {
     record({ name, status: 'skipped', detail });
   };
+
+  if (isClosedGroomManifest(manifest)) {
+    await run('post parent grooming summary', () =>
+      gh(['issue', 'comment', issueNumber, '-R', repo, '--body-file', commentPath]).then(
+        () => undefined
+      )
+    );
+
+    if (hasFailed()) {
+      skip('close parent issue', 'post parent grooming summary failed');
+      skip('remove closed parent labels', 'post parent grooming summary failed');
+    } else {
+      const closeArgs =
+        manifest.closed.outcome === 'duplicate'
+          ? [
+              'issue',
+              'close',
+              issueNumber,
+              '-R',
+              repo,
+              '--duplicate-of',
+              String(manifest.closed.duplicate_of),
+            ]
+          : ['issue', 'close', issueNumber, '-R', repo, '--reason', 'not planned'];
+      await run('close parent issue', () => gh(closeArgs).then(() => undefined));
+
+      if (hasFailed()) {
+        skip('remove closed parent labels', 'close parent issue failed');
+      } else {
+        await run('remove closed parent labels', () =>
+          gh([
+            'issue',
+            'edit',
+            issueNumber,
+            '-R',
+            repo,
+            '--remove-label',
+            NEW_LABEL,
+            '--remove-label',
+            PRIORITY_HIGH_LABEL,
+            '--remove-label',
+            PRIORITY_LOW_LABEL,
+          ]).then(() => undefined)
+        );
+      }
+    }
+
+    if (!hasFailed()) {
+      return result;
+    }
+
+    const failureDetail = formatFailureComment(steps);
+    const failureBody = await truncateLargeInput(
+      cwd,
+      failureDetail,
+      'groom-post-flight-failure.txt'
+    );
+    try {
+      await gh(['issue', 'comment', issueNumber, '-R', repo, '--body', failureBody]);
+    } catch (error) {
+      throw new GroomPostFlightError(
+        `Groom post-flight failed, and posting the failure comment also failed: ${toErrorMessage(error)}`,
+        steps,
+        { failureCommentPosted: false, detail: failureDetail }
+      );
+    }
+
+    throw new GroomPostFlightError('Groom post-flight failed; posted failure comment', steps, {
+      failureCommentPosted: true,
+      detail: failureDetail,
+    });
+  }
 
   if (manifest.decomposition.kind !== 'full') {
     const args = ['issue', 'edit', issueNumber, '-R', repo];

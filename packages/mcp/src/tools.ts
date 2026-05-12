@@ -464,6 +464,22 @@ function resolveAdvanceOutcome(
   return undefined;
 }
 
+function resolveClosedGroomOutcome(
+  preStageLabel: string | undefined,
+  postIssue: GhIssueLabelsState
+): { from: string; to: string; verdict: AdvanceVerdict } | undefined {
+  if (preStageLabel !== NEW_LABEL || postIssue.state !== 'CLOSED') {
+    return undefined;
+  }
+
+  const postLabels = postIssue.labels.map((label) => label.name);
+  if (postLabels.includes(NEW_LABEL)) {
+    return undefined;
+  }
+
+  return { from: NEW_LABEL, to: 'closed', verdict: 'accept' };
+}
+
 function resolveNoopAdvanceOutcome(
   preStageLabel: string | undefined,
   result: { exitCode: number; timedOut: boolean }
@@ -801,6 +817,7 @@ export const mcpToolDefinitions = [
           const postIssue = await fetchIssueLabels(repo, issue);
           const postLabels = postIssue.labels.map((label) => label.name);
           const outcome =
+            resolveClosedGroomOutcome(NEW_LABEL, postIssue) ??
             resolveAdvanceOutcome(NEW_LABEL, postLabels) ??
             resolveNoopAdvanceOutcome(NEW_LABEL, result);
           const sessionContext = await resolveSessionContext({
@@ -1188,6 +1205,7 @@ export const mcpToolDefinitions = [
           const preStageLabel = session.preStageLabel ?? undefined;
           const preStage = parseAdvanceStage(preStageLabel);
           const outcome =
+            resolveClosedGroomOutcome(preStageLabel, postIssue) ??
             resolveAdvanceOutcome(preStageLabel, postLabels) ??
             resolveNoopAdvanceOutcome(preStageLabel, result);
           const sessionContext = preStage

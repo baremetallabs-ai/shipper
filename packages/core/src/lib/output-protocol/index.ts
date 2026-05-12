@@ -28,8 +28,11 @@ export {
 export type {
   GroomBlocked,
   GroomChildIssue,
+  GroomClosedManifest,
+  GroomClosedOutcome,
   GroomDecompositionKind,
   GroomManifest,
+  GroomOpenManifest,
   GroomParent,
   GroomPriority,
   LoadedGroomManifest,
