@@ -1668,6 +1668,39 @@ describe('shipper_create_issue', () => {
     expect(mockGh).not.toHaveBeenCalled();
   });
 
+  it('returns a contextual failure after an exit-0 run without a persisted result file', async () => {
+    mockSpawnShipper.mockResolvedValue({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      timedOut: false,
+    });
+    mockFindLatestSessionMeta.mockResolvedValue({
+      issue: 'unlinked',
+      stage: 'new',
+      timestamp: '2026-04-21T00:00:00.000Z',
+      agent: 'claude',
+      model: 'sonnet',
+      repo: 'owner/repo',
+      exitCode: 0,
+      logFile: '/tmp/fallback.jsonl',
+    });
+    mockExtractFinalMessage.mockResolvedValue('Created the issue and wrote a summary.');
+
+    const getTool = await collectTools();
+    const result = await getTool('shipper_create_issue')({ request: 'Fallback' });
+    const text = result.content[0]?.text ?? '';
+
+    expect(result.isError).toBe(true);
+    expect(text).toContain('Unable to recover the created issue identity from post-run metadata.');
+    expect(text).toContain('Run ID: 00000000-0000-4000-8000-000000000000');
+    expect(text).toContain('Session result: <not found>');
+    expect(text).toContain('Created the issue and wrote a summary.');
+    expect(text).toContain('Session log: /tmp/fallback.jsonl');
+    expect(mockReadNewResultFile).not.toHaveBeenCalled();
+    expect(mockGh).not.toHaveBeenCalled();
+  });
+
   it('returns the existing focused failure summary for non-zero shipper new results', async () => {
     mockSpawnShipper.mockResolvedValue({
       exitCode: 1,

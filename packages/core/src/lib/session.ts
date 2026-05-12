@@ -231,8 +231,7 @@ export async function persistNewResultForLatestSession(opts: {
     );
   }
 
-  const resultFile =
-    match.meta.resultFile ?? match.metaFile.replace(/\.meta\.json$/, '.result.json');
+  const resultFile = deriveSessionResultFile(sessionRepo.repoSlug, match.metaFile);
 
   try {
     await mkdir(path.dirname(resultFile), { recursive: true });
@@ -255,6 +254,22 @@ export async function persistNewResultForLatestSession(opts: {
   }
 
   return resultFile;
+}
+
+function deriveSessionResultFile(repoSlug: string, metaFile: string): string {
+  const sessionDir = path.resolve(getSessionDir(repoSlug));
+  const resolvedMetaFile = path.resolve(metaFile);
+  const relativeMetaFile = path.relative(sessionDir, resolvedMetaFile);
+  if (relativeMetaFile.startsWith('..') || path.isAbsolute(relativeMetaFile)) {
+    throw new Error(`Session metadata file is outside the session directory: ${metaFile}`);
+  }
+
+  const basename = path.basename(resolvedMetaFile);
+  if (!basename.endsWith('.meta.json')) {
+    throw new Error(`Session metadata file has unexpected name: ${metaFile}`);
+  }
+
+  return path.join(sessionDir, basename.replace(/\.meta\.json$/, '.result.json'));
 }
 
 async function aggregateSessionUsageDefault(

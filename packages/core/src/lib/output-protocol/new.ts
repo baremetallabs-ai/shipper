@@ -129,14 +129,11 @@ function validateNewIssueDraft(data: unknown, draftPath: string): NewIssueDraftJ
 }
 
 function validateBodyTemplate(body: string, bodyPath: string): void {
-  const firstNonEmptyLine = body
-    .split(/\r?\n/)
-    .find((line) => line.trim().length > 0)
-    ?.trim();
+  const firstNonEmptyLine = body.match(/^\s*([^\s].*)$/m)?.[1]?.trim();
 
-  if (firstNonEmptyLine === '# Title') {
+  if (firstNonEmptyLine !== '# Request') {
     throw new ResultValidationError(
-      ["issue body must not start with a '# Title' heading"],
+      ['issue body must start with a "# Request" heading'],
       `Invalid issue body at ${bodyPath}`
     );
   }

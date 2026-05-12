@@ -153,6 +153,26 @@ describe('tool-specific result formatters', () => {
     expect(result.content[0]?.text).toContain('Session log: /tmp/create.jsonl');
   });
 
+  it('forces isError and preserves context when create-issue metadata is missing after exit 0', () => {
+    const result = formatCreateIssueResult(
+      { exitCode: 0, stdout: '', stderr: '', timedOut: false },
+      undefined,
+      {
+        command: 'shipper new <request> --mode headless',
+        finalMessage: 'Created issue draft and printed the summary.',
+        sessionLogPath: '/tmp/create.jsonl',
+        missingPayloadDetail: 'Unable to recover created issue identity for run-123.',
+      }
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain(
+      'Unable to recover created issue identity for run-123.'
+    );
+    expect(result.content[0]?.text).toContain('Created issue draft and printed the summary.');
+    expect(result.content[0]?.text).toContain('Session log: /tmp/create.jsonl');
+  });
+
   it('does not add missing-identity detail for timed-out create-issue runs', () => {
     const result = formatCreateIssueResult(
       {

@@ -297,6 +297,20 @@ describe('newCommand', () => {
     );
   });
 
+  it('normalizes a blank SHIPPER_SESSION_RUN_ID before session result persistence', async () => {
+    process.env.SHIPPER_SESSION_RUN_ID = '';
+    vi.spyOn(core, 'resolveBaseBranch').mockResolvedValueOnce('main');
+    const { newCommand } = await importCommand();
+
+    await expect(newCommand(repo, ['my', 'request'])).resolves.toBeUndefined();
+
+    expect(persistNewResultSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: undefined,
+      })
+    );
+  });
+
   it('runs interactively with no user input when no mode override is provided', async () => {
     vi.spyOn(core, 'resolveBaseBranch').mockResolvedValueOnce('main');
     const { newCommand } = await importCommand();
