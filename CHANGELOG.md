@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `shipper new` now uses the output protocol: agents draft issue artifacts under
+  `.shipper/output/`, then Shipper validates the draft, creates the GitHub issue, applies
+  `shipper:new`, and records the final `created_issue` identity.
+
+### Migration notes
+
+- Local `.shipper/prompts/<agent>/new.md` overrides written for the old `gh issue create` contract
+  must be re-ejected with `shipper eject new` or migrated to write `.shipper/output/result.json`
+  with `issue_draft`, plus `.shipper/output/issue-draft.json` and
+  `.shipper/output/issue-body.md`.
+
 ## [3.0.1]
 
 ### Added

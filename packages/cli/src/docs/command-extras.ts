@@ -116,10 +116,16 @@ export const commandExtras: Record<CommandPath, CommandExtras> = {
       },
     ],
     exitCodes: [
-      { code: 0, when: 'The issue creation agent completes successfully.' },
-      { code: 1, when: 'Preflight, validation, worktree setup, hooks, or agent execution fails.' },
+      { code: 0, when: 'Shipper creates the issue from a validated agent draft.' },
+      {
+        code: 1,
+        when: 'Preflight, draft validation, GitHub issue creation, worktree setup, hooks, or agent execution fails.',
+      },
     ],
-    constraints: promptConstraints,
+    constraints: [
+      ...promptConstraints,
+      'Local .shipper/prompts/<agent>/new.md overrides written for the old gh issue create contract must be re-ejected with `shipper eject new` or migrated to the .shipper/output/issue-draft.json protocol.',
+    ],
   },
   adopt: {
     examples: [

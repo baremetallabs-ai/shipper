@@ -54,14 +54,6 @@ interface UnblockPayload {
 
 const MISSING_FINAL_MESSAGE_LINE =
   'No final message was captured in this run. See session log for details.';
-export const DEFAULT_MISSING_CREATED_ISSUE_DETAIL =
-  'The new agent exited successfully but did not record created_issue in .shipper/output/result.json. Inspect the session log to see whether an issue was created.';
-export const MISSING_CREATED_ISSUE_RESULT_FILE_DETAIL =
-  'The new agent exited successfully but Shipper did not persist .shipper/output/result.json into session metadata. Inspect the session log to see whether an issue was created.';
-export const MISSING_CREATE_ISSUE_SESSION_METADATA_DETAIL =
-  'The new agent exited successfully but Shipper could not find session metadata for this issue-creation run. Inspect the agent output and session logs to see whether an issue was created.';
-export const INVALID_CREATED_ISSUE_RESULT_DETAIL =
-  'The new agent exited successfully and Shipper found a persisted result file, but it could not be read or validated as a created_issue result.';
 const STDERR_TAIL_LIMIT = 4_096;
 
 export async function spawnShipper(
@@ -290,19 +282,13 @@ export function formatCreateIssueResult(
     command: string;
     finalMessage?: string;
     sessionLogPath?: string;
-    missingPayloadDetail?: string;
   }
 ): ToolTextResult {
   if (!payload) {
-    const needsMissingIdentityDetail = !result.timedOut && result.exitCode === 0;
     return formatFailureSummary(result, {
       command: opts.command,
       sessionLogPath: opts.sessionLogPath,
       finalMessage: opts.finalMessage,
-      detail: needsMissingIdentityDetail
-        ? (opts.missingPayloadDetail ?? DEFAULT_MISSING_CREATED_ISSUE_DETAIL)
-        : undefined,
-      forceError: needsMissingIdentityDetail,
     });
   }
 

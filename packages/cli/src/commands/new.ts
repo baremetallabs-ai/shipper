@@ -5,11 +5,18 @@ import {
   getRepoRoot,
   getSettings,
   logger,
+  persistNewResultForLatestSession,
   resolveBaseBranch,
   resolveMode,
   runPrompt,
+  scrubOutputDir,
+  SHIPPER_SESSION_RUN_ID_ENV,
+  createIssueFromDraft,
+  retryOnInvalidNewIssueDraft,
+  toErrorMessage,
   withStageHooks,
   withWorktree,
+  writeCreatedIssueResult,
   type AgentName,
   type CommandMode,
 } from '@baremetallabs-ai/shipper-core';
@@ -86,18 +93,67 @@ export async function newCommand(
           baseBranch,
           stage: 'new',
         },
-        async (wtPath) =>
-          await runPrompt('new', {
-            userInput: request || undefined,
-            repo,
-            cwd: wtPath,
-            baseBranch,
-            mode: options.mode,
-            agent: options.agent,
-            model: options.model,
-            disableMcp: options.disableMcp,
-            logFile: options.logFile,
-          })
+        async (wtPath) => {
+          const startedAt = new Date();
+          await scrubOutputDir(wtPath);
+
+          const runNewPrompt = async (userInput?: string): Promise<number> =>
+            await runPrompt('new', {
+              userInput,
+              repo,
+              cwd: wtPath,
+              baseBranch,
+              mode: options.mode,
+              agent: options.agent,
+              model: options.model,
+              disableMcp: options.disableMcp,
+              logFile: options.logFile,
+            });
+
+          const initialExitCode = await runNewPrompt(request || undefined);
+          if (initialExitCode !== 0) {
+            return initialExitCode;
+          }
+
+          let draft: Awaited<ReturnType<typeof retryOnInvalidNewIssueDraft>>;
+          try {
+            draft = await retryOnInvalidNewIssueDraft({
+              cwd: wtPath,
+              retry: async (userInput) => await runNewPrompt(userInput),
+            });
+          } catch (error) {
+            logger.error(`Invalid new issue draft: ${toErrorMessage(error)}`);
+            return 1;
+          }
+
+          let createdIssue: Awaited<ReturnType<typeof createIssueFromDraft>>;
+          try {
+            createdIssue = await createIssueFromDraft(repo, draft);
+          } catch (error) {
+            logger.error(toErrorMessage(error));
+            return 1;
+          }
+
+          let result: Awaited<ReturnType<typeof writeCreatedIssueResult>>;
+          try {
+            result = await writeCreatedIssueResult(wtPath, createdIssue);
+            await persistNewResultForLatestSession({
+              repo,
+              cwd: wtPath,
+              since: startedAt,
+              runId: process.env[SHIPPER_SESSION_RUN_ID_ENV],
+              result,
+            });
+          } catch (error) {
+            logger.error(toErrorMessage(error));
+            return 1;
+          }
+
+          logger.log(
+            `Created issue: #${createdIssue.number} ${createdIssue.title}\nURL: ${createdIssue.url}`
+          );
+          return 0;
+        }
       );
     });
   } finally {

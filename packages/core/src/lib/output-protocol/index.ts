@@ -13,9 +13,14 @@ export {
 export {
   formatCorrectionMessage,
   retryPrReviewOutputAndSubmission,
+  retryOnInvalidNewIssueDraft,
   retryOnInvalidOutput,
   validateStageOutput,
 } from './protocol-validation.js';
+
+export { createIssueFromDraft, readNewIssueDraft, writeCreatedIssueResult } from './new.js';
+
+export type { NewIssueDraftJson, NewIssueDraftResultJson, ValidatedNewIssueDraft } from './new.js';
 
 export {
   GroomPostFlightError,

@@ -712,6 +712,77 @@ describe('runPrompt', () => {
     warnMock.mockRestore();
   });
 
+  it('includes gh issue create in generic local override mutation detection', async () => {
+    readFileMock.mockResolvedValueOnce(
+      ['---', 'cmd: claude', '---', '', 'gh issue create --title "New issue"'].join('\n')
+    );
+    const warnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockSpawnResult();
+
+    await expect(runPrompt('test-create', {})).resolves.toBe(0);
+
+    expect(warnMock).toHaveBeenCalledWith(
+      "[shipper] Warning: Ejected prompt 'test-create' contains gh commands for state mutations.\nThese are now handled by shipper. Re-eject with 'shipper eject test-create' or manually update."
+    );
+    warnMock.mockRestore();
+  });
+
+  it('warns for local new overrides that still write temporary issue bodies', async () => {
+    readFileMock.mockResolvedValueOnce(
+      ['---', 'cmd: claude', '---', '', 'Write .shipper/tmp/issue-<timestamp>.md'].join('\n')
+    );
+    const warnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockSpawnResult();
+
+    await expect(runPrompt('new', {})).resolves.toBe(0);
+
+    expect(warnMock).toHaveBeenCalledTimes(1);
+    expect(warnMock).toHaveBeenCalledWith(
+      expect.stringContaining("Ejected prompt 'new' uses the old issue-creation contract")
+    );
+    expect(warnMock).toHaveBeenCalledWith(
+      expect.stringContaining('.shipper/output/issue-draft.json')
+    );
+    expect(spawnMock).toHaveBeenCalled();
+    warnMock.mockRestore();
+  });
+
+  it('warns for local new overrides that emit created_issue directly', async () => {
+    resolveAgentMock.mockReturnValue('codex');
+    readFileMock.mockResolvedValueOnce(
+      ['---', 'cmd: codex', '---', '', '{ "created_issue": { "number": 42 } }'].join('\n')
+    );
+    const warnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockSpawnResult();
+
+    await expect(runPrompt('new', {})).resolves.toBe(0);
+
+    expect(warnMock).toHaveBeenCalledTimes(1);
+    expect(warnMock).toHaveBeenCalledWith(
+      expect.stringContaining("Ejected prompt 'new' uses the old issue-creation contract")
+    );
+    expect(spawnMock).toHaveBeenCalled();
+    warnMock.mockRestore();
+  });
+
+  it('does not also emit the generic mutation warning for old local new overrides', async () => {
+    resolveAgentMock.mockReturnValue('copilot');
+    readFileMock.mockResolvedValueOnce(
+      ['---', 'cmd: copilot', '---', '', 'Run gh issue create after drafting.'].join('\n')
+    );
+    const warnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockSpawnResult();
+
+    await expect(runPrompt('new', {})).resolves.toBe(0);
+
+    expect(warnMock).toHaveBeenCalledTimes(1);
+    expect(warnMock.mock.calls[0]?.[0]).toContain(
+      "Ejected prompt 'new' uses the old issue-creation contract"
+    );
+    expect(warnMock.mock.calls[0]?.[0]).not.toContain('contains gh commands for state mutations');
+    warnMock.mockRestore();
+  });
+
   it('warns only once per process for the same local override prompt', async () => {
     readFileMock.mockResolvedValue(
       ['---', 'cmd: claude', '---', '', 'gh issue edit 248 --add-label "shipper:planned"'].join(

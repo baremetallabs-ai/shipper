@@ -165,6 +165,7 @@ export type { SessionMeta, SessionRepoInfo } from './lib/session.js';
 export {
   getSessionDir,
   getSessionPaths,
+  persistNewResultForLatestSession,
   resolveSessionRepo,
   SHIPPER_SESSION_RUN_ID_ENV,
   writeSessionMeta,
