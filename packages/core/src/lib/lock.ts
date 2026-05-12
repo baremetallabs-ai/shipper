@@ -12,6 +12,7 @@ interface LockRenewalReporter {
   bufferDepth: number;
   failureCount: number;
   latestFailureMessage: string | undefined;
+  inFlightRenewals: Set<Promise<void>>;
 }
 
 interface IssueLockContext {
@@ -26,6 +27,7 @@ function createLockRenewalReporter(): LockRenewalReporter {
     bufferDepth: 0,
     failureCount: 0,
     latestFailureMessage: undefined,
+    inFlightRenewals: new Set(),
   };
 }
 
@@ -38,7 +40,7 @@ function reportRenewalSuccess(reporter: LockRenewalReporter | undefined, message
 
 function reportRenewalFailure(reporter: LockRenewalReporter | undefined, message: string): void {
   if (reporter?.mode !== 'buffered') {
-    logger.error(message);
+    logger.error(`Warning: ${message}`);
     return;
   }
 
@@ -56,6 +58,12 @@ function flushBufferedRenewalFailures(reporter: LockRenewalReporter): void {
 
   reporter.failureCount = 0;
   reporter.latestFailureMessage = undefined;
+}
+
+async function drainBufferedRenewals(reporter: LockRenewalReporter): Promise<void> {
+  while (reporter.inFlightRenewals.size > 0) {
+    await Promise.allSettled([...reporter.inFlightRenewals]);
+  }
 }
 
 export async function isLockStale(repo: string, issueNumber: string): Promise<boolean> {
@@ -178,7 +186,7 @@ async function renewIssueLockWithReporter(
   } catch (err) {
     reportRenewalFailure(
       reporter,
-      `Warning: lock renewal failed for issue #${issueNumber}: ${toErrorMessage(err)}`
+      `lock renewal failed for issue #${issueNumber}: ${toErrorMessage(err)}`
     );
     return;
   }
@@ -194,7 +202,7 @@ async function renewIssueLockWithReporter(
   } catch (err) {
     reportRenewalFailure(
       reporter,
-      `Warning: lock re-add failed for issue #${issueNumber} — lock is absent until next heartbeat: ${toErrorMessage(err)}`
+      `lock re-add failed for issue #${issueNumber} — lock is absent until next heartbeat: ${toErrorMessage(err)}`
     );
   }
 }
@@ -217,6 +225,7 @@ export async function withBufferedLockRenewalOutput<T>(fn: () => Promise<T>): Pr
   } finally {
     reporter.bufferDepth -= 1;
     if (reporter.bufferDepth === 0) {
+      await drainBufferedRenewals(reporter);
       flushBufferedRenewalFailures(reporter);
       reporter.mode = previousMode;
     }
@@ -243,12 +252,13 @@ export async function withIssueLock<T>(
     renewalReporter: createLockRenewalReporter(),
   };
   const heartbeatTimer = setInterval(() => {
-    void renewIssueLockWithReporter(
-      repo,
-      issueNumber,
-      heartbeatCancelled,
-      lockContext.renewalReporter
-    );
+    const reporter = lockContext.renewalReporter;
+    const renewal = renewIssueLockWithReporter(repo, issueNumber, heartbeatCancelled, reporter);
+    const trackedRenewal = renewal.finally(() => {
+      reporter.inFlightRenewals.delete(trackedRenewal);
+    });
+    reporter.inFlightRenewals.add(trackedRenewal);
+    void trackedRenewal.catch(() => undefined);
   }, heartbeatMs);
   heartbeatTimer.unref();
 
