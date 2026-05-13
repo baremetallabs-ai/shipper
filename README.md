@@ -53,7 +53,8 @@ shipper ship --auto
 
 The project currently includes the CLI, a supported macOS desktop app, an MCP server, and
 three-agent support for `claude`, `codex`, and `copilot`. The workflow is GitHub-only today.
-Desktop distribution is macOS arm64-only today.
+The CLI and MCP run on macOS and Linux (Node.js 18+); Windows is untested. Desktop distribution
+is macOS arm64-only today.
 
 ## Architecture
 

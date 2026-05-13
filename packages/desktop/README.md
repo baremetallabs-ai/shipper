@@ -18,7 +18,8 @@ https://github.com/baremetallabs-ai/shipper/releases
 
 The distributed artifacts are macOS arm64 DMG and zip builds. The app is unsigned and not
 code-signed today, so macOS may require the usual manual confirmation before first launch. Windows
-and Linux builds are not currently distributed.
+and Linux desktop builds are not currently distributed (the CLI and MCP run on macOS and Linux
+via npm).
 
 ## Operating Guide
 
