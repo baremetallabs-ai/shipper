@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { BackgroundLogViewer } from '../../src/renderer/components/background-log-viewer.js';
@@ -19,6 +19,24 @@ interface PreElementLike {
   focus: () => void;
   style: {
     opacity: string;
+  };
+}
+
+interface ViewerPreElement extends PreElementLike {
+  classList: {
+    contains: (token: string) => boolean;
+  };
+  parentElement: {
+    classList: {
+      contains: (token: string) => boolean;
+    };
+  } | null;
+  textContent: string | null;
+}
+
+interface NavigatorLike {
+  clipboard?: {
+    writeText: (value: string) => Promise<void>;
   };
 }
 
@@ -93,18 +111,18 @@ function renderViewer(overrides: Partial<React.ComponentProps<typeof BackgroundL
 
   return {
     ...result,
-    getPre: (): PreElementLike => getViewerPre(),
+    getPre: (): ViewerPreElement => getViewerPre(),
     onOpenChange,
   };
 }
 
-function getViewerPre(): PreElementLike {
+function getViewerPre(): ViewerPreElement {
   const documentLike = globalThis.document as {
     querySelector: (selector: string) => unknown;
   };
   const pre = documentLike.querySelector('pre.background-log-viewer');
   expect(pre).toBeTruthy();
-  return pre as PreElementLike;
+  return pre as ViewerPreElement;
 }
 
 function getActiveElement(): unknown {
@@ -120,6 +138,17 @@ function scrollViewer(pre: PreElementLike): void {
 
 function getMaxScrollTop(metrics: PreMetricsState): number {
   return Math.max(0, metrics.scrollHeight - metrics.clientHeight);
+}
+
+function expectHorizontalScrollContract(pre: ViewerPreElement): void {
+  expect(pre.parentElement?.classList.contains('min-w-0')).toBe(true);
+  expect(pre.classList.contains('w-full')).toBe(true);
+  expect(pre.classList.contains('min-w-0')).toBe(true);
+  expect(pre.classList.contains('overflow-x-auto')).toBe(true);
+  expect(pre.classList.contains('overflow-y-auto')).toBe(true);
+  expect(pre.classList.contains('whitespace-pre')).toBe(true);
+  expect(pre.classList.contains('whitespace-pre-wrap')).toBe(false);
+  expect(pre.classList.contains('overflow-auto')).toBe(false);
 }
 
 describe('BackgroundLogViewer', () => {
@@ -148,6 +177,22 @@ describe('BackgroundLogViewer', () => {
       expect(pre.scrollTop).toBe(getMaxScrollTop(metrics.state));
       expect(pre.style.opacity).toBe('1');
       expect(screen.getByText('No log output yet.')).toBeTruthy();
+    } finally {
+      metrics.restore();
+    }
+  });
+
+  it('preserves long buffered output without wrapping and keeps scrolling bounded', () => {
+    const metrics = mockPreMetrics({ clientHeight: 200, scrollHeight: 240, scrollTop: 0 });
+    const longToken = `https://example.test/${'a'.repeat(180)}?sha=${'b'.repeat(64)}`;
+    const content = `first  line\n  spaced    output\n${longToken}`;
+
+    try {
+      const { getPre } = renderViewer({ content });
+      const pre = getPre();
+
+      expect(pre.textContent).toBe(content);
+      expectHorizontalScrollContract(pre);
     } finally {
       metrics.restore();
     }
@@ -213,6 +258,66 @@ describe('BackgroundLogViewer', () => {
       expect(metrics.state.scrollTop).toBe(getMaxScrollTop(metrics.state));
     } finally {
       metrics.restore();
+    }
+  });
+
+  it('pins live appended long output to the tail while preserving the horizontal scroll contract', () => {
+    const metrics = mockPreMetrics({ clientHeight: 200, scrollHeight: 400, scrollTop: 0 });
+    const longToken = `https://example.test/${'a'.repeat(180)}?sha=${'b'.repeat(64)}`;
+    const content = `line 1\n${longToken}`;
+
+    try {
+      const { getPre, rerender } = renderViewer({ content: 'line 1' });
+      const pre = getPre();
+
+      expect(pre.scrollTop).toBe(getMaxScrollTop(metrics.state));
+
+      metrics.state.scrollHeight = 700;
+      rerender(
+        <BackgroundLogViewer
+          open
+          title="Background logs"
+          content={content}
+          onOpenChange={vi.fn()}
+        />
+      );
+
+      expect(pre.textContent).toBe(content);
+      expectHorizontalScrollContract(pre);
+      expect(pre.scrollTop).toBe(getMaxScrollTop(metrics.state));
+    } finally {
+      metrics.restore();
+    }
+  });
+
+  it('copies complete long log content', async () => {
+    const metrics = mockPreMetrics({ clientHeight: 200, scrollHeight: 240, scrollTop: 0 });
+    const longToken = `https://example.test/${'a'.repeat(180)}?sha=${'b'.repeat(64)}`;
+    const content = `first  line\n  spaced    output\n${longToken}`;
+    const writeText = vi.fn<(value: string) => Promise<void>>().mockResolvedValue(undefined);
+    const navigatorLike = globalThis.navigator as NavigatorLike;
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigatorLike, 'clipboard');
+
+    Object.defineProperty(navigatorLike, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+
+    try {
+      renderViewer({ content });
+      fireEvent.click(screen.getByRole('button', { name: 'Copy logs to clipboard' }));
+
+      await waitFor(() => {
+        expect(writeText).toHaveBeenCalledTimes(1);
+      });
+      expect(writeText).toHaveBeenCalledWith(content);
+    } finally {
+      metrics.restore();
+      if (clipboardDescriptor) {
+        Object.defineProperty(navigatorLike, 'clipboard', clipboardDescriptor);
+      } else {
+        Reflect.deleteProperty(navigatorLike, 'clipboard');
+      }
     }
   });
 

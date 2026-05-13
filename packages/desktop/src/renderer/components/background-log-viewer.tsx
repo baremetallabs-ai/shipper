@@ -144,12 +144,12 @@ export function BackgroundLogViewer({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="relative">
+        <div className="relative min-w-0">
           <pre
             ref={handleContentRef}
             onScroll={handleScroll}
             tabIndex={-1}
-            className="background-log-viewer max-h-[70vh] overflow-auto px-6 py-5 text-sm whitespace-pre-wrap text-foreground"
+            className="background-log-viewer max-h-[70vh] w-full min-w-0 overflow-x-auto overflow-y-auto px-6 py-5 text-sm whitespace-pre text-foreground"
             style={{ opacity: initialScrollPending ? 0 : 1 }}
             aria-busy={initialScrollPending || undefined}
           >
