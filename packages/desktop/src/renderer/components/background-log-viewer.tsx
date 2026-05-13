@@ -148,8 +148,10 @@ export function BackgroundLogViewer({
           <pre
             ref={handleContentRef}
             onScroll={handleScroll}
-            tabIndex={-1}
-            className="background-log-viewer max-h-[70vh] w-full min-w-0 overflow-x-auto overflow-y-auto px-6 py-5 text-sm whitespace-pre text-foreground"
+            role="region"
+            aria-label="Command log output"
+            tabIndex={0}
+            className="background-log-viewer max-h-[70vh] w-full min-w-0 overflow-x-auto overflow-y-auto px-6 py-5 text-sm whitespace-pre text-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:ring-inset"
             style={{ opacity: initialScrollPending ? 0 : 1 }}
             aria-busy={initialScrollPending || undefined}
           >
