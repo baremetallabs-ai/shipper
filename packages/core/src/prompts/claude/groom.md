@@ -269,7 +269,7 @@ Full-replacement open grooming manifest (`full`, omit the entire `parent` key):
 }
 ```
 
-Use only `high`, `normal`, or `low` for priority. Every child in every decomposition kind must include `priority`: `high`, `normal`, or `low`; child priority is never inherited from parent priority. Choosing `normal` tells the orchestrator to remove both priority labels.
+Use only `high`, `normal`, or `low` for priority. Every child in every decomposition kind must include `priority`: `high`, `normal`, or `low`; child priority is never inherited from parent priority. For newly created children, `normal` means no priority label is added. For a parent that remains open, `normal` removes both existing priority labels during parent label reconciliation.
 
 Closed duplicate manifest:
 

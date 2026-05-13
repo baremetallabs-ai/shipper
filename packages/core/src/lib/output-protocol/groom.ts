@@ -336,7 +336,7 @@ function parseOpenManifest(
   }
 
   if (kind === 'full') {
-    if (data.parent !== undefined) {
+    if ('parent' in data) {
       errors.push("'parent' is not allowed when decomposition.kind is full");
       return undefined;
     }
@@ -676,6 +676,24 @@ function parentLabelArgs(parent: GroomParent): string[] {
   return args;
 }
 
+function removeClosedParentLabelsArgs(issueNumber: string, repo: string): string[] {
+  return [
+    'issue',
+    'edit',
+    issueNumber,
+    '-R',
+    repo,
+    '--remove-label',
+    NEW_LABEL,
+    '--remove-label',
+    PRIORITY_HIGH_LABEL,
+    '--remove-label',
+    PRIORITY_LOW_LABEL,
+    '--remove-label',
+    BLOCKED_LABEL,
+  ];
+}
+
 function formatFailureComment(steps: StepRecord[]): string {
   const formatList = (status: StepRecord['status']) => {
     const filtered = steps.filter((step) => step.status === status);
@@ -783,21 +801,7 @@ export async function processGroomResult(opts: {
         skip('remove closed parent labels', 'close parent issue failed');
       } else {
         await run('remove closed parent labels', () =>
-          gh([
-            'issue',
-            'edit',
-            issueNumber,
-            '-R',
-            repo,
-            '--remove-label',
-            NEW_LABEL,
-            '--remove-label',
-            PRIORITY_HIGH_LABEL,
-            '--remove-label',
-            PRIORITY_LOW_LABEL,
-            '--remove-label',
-            BLOCKED_LABEL,
-          ]).then(() => undefined)
+          gh(removeClosedParentLabelsArgs(issueNumber, repo)).then(() => undefined)
         );
       }
     }
@@ -982,14 +986,23 @@ export async function processGroomResult(opts: {
       children.filter(Boolean).length === manifest.decomposition.children.length;
     if (!allChildrenCreated) {
       skip('close parent issue', 'not all children were created');
+      skip('remove closed parent labels', 'not all children were created');
     } else if (hasFailed()) {
       skip('close parent issue', 'one or more earlier post-flight operations failed');
+      skip('remove closed parent labels', 'one or more earlier post-flight operations failed');
     } else {
       const childList = children.filter((child): child is ChildCreation => child !== undefined);
       const body = decompositionComment(childList);
       await run('close parent issue', () =>
         gh(['issue', 'close', issueNumber, '-R', repo, '--comment', body]).then(() => undefined)
       );
+      if (hasFailed()) {
+        skip('remove closed parent labels', 'close parent issue failed');
+      } else {
+        await run('remove closed parent labels', () =>
+          gh(removeClosedParentLabelsArgs(issueNumber, repo)).then(() => undefined)
+        );
+      }
     }
   } else if (hasFailed()) {
     skip('apply parent labels', 'one or more earlier post-flight operations failed');

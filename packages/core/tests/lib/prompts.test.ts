@@ -47,7 +47,10 @@ describe('groom prompts', () => {
       expect(prompt).toContain('shipper:priority-high');
       expect(prompt).toContain('shipper:priority-low');
       expect(prompt).toContain(
-        'Choosing `normal` tells the orchestrator to remove both priority labels.'
+        'For newly created children, `normal` means no priority label is added.'
+      );
+      expect(prompt).toContain(
+        'For a parent that remains open, `normal` removes both existing priority labels during parent label reconciliation.'
       );
     }
   );
@@ -145,6 +148,9 @@ describe('groom prompts', () => {
       expect(prompt).toContain('"kind": "full"');
       expect(prompt).toContain('omit the entire `parent` key');
       expect(prompt).toContain('Every child in every decomposition kind must include `priority`');
+      expect(prompt).toContain(
+        'For newly created children, `normal` means no priority label is added.'
+      );
       expect(prompt).toContain('"priority": "high"');
       expect(prompt).toContain('"priority": "normal"');
       expect(prompt).toContain('"priority": "low"');

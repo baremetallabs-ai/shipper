@@ -2448,7 +2448,7 @@ describe('output protocol helpers', () => {
       expect(ghMock.mock.calls.some(([args]) => args.some((arg) => arg.includes('#301')))).toBe(
         true
       );
-      expect(ghMock.mock.calls.at(-1)?.[0]).toEqual([
+      expect(ghMock.mock.calls.at(-2)?.[0]).toEqual([
         'issue',
         'close',
         '248',
@@ -2457,9 +2457,26 @@ describe('output protocol helpers', () => {
         '--comment',
         expect.stringContaining('## Decomposed'),
       ]);
-      expect(ghMock.mock.calls.some(([args]) => args[0] === 'issue' && args[1] === 'edit')).toBe(
-        false
-      );
+      expect(ghMock.mock.calls.at(-1)?.[0]).toEqual([
+        'issue',
+        'edit',
+        '248',
+        '-R',
+        'owner/repo',
+        '--remove-label',
+        'shipper:new',
+        '--remove-label',
+        'shipper:priority-high',
+        '--remove-label',
+        'shipper:priority-low',
+        '--remove-label',
+        'shipper:blocked',
+      ]);
+      expect(
+        ghMock.mock.calls.some(
+          ([args]) => args[0] === 'issue' && args[1] === 'edit' && args.includes('--add-label')
+        )
+      ).toBe(false);
     });
 
     it('keeps the full-replacement parent open when an earlier post-flight write fails', async () => {
