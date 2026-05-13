@@ -995,6 +995,9 @@ describe('runPrompt', () => {
     expect(spawnedArgs().indexOf('--disallowed-tools=AskUserQuestion')).toBeLessThan(
       spawnedArgs().indexOf('--append-system-prompt')
     );
+    expect(spawnedOptions()).toMatchObject({
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     const env = (spawnedOptions()?.env ?? {}) as Record<string, string | undefined>;
     expect(env[SHIPPER_QUESTION_BRIDGE_DIR_ENV]).toBeUndefined();
     expect(env[SHIPPER_QUESTION_BRIDGE_TIMEOUT_MS_ENV]).toBeUndefined();
@@ -1712,7 +1715,7 @@ describe('runPrompt', () => {
     // The createWriteStream should receive the override path, not the session path
     expect(createWriteStreamMock).toHaveBeenCalledWith(overridePath);
     expect(spawnMock.mock.calls[0]?.[2]).toMatchObject({
-      stdio: ['inherit', 'pipe', 'pipe'],
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
 
     // Session metadata should still be written under ~/.shipper/sessions/...
@@ -1815,7 +1818,7 @@ describe('runPrompt', () => {
 
     expect(stdoutWriteMock).toHaveBeenCalledWith('headless output\n');
     expect(spawnMock.mock.calls[0]?.[2]).toMatchObject({
-      stdio: ['inherit', 'pipe', 'pipe'],
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
 
     stdoutWriteMock.mockRestore();

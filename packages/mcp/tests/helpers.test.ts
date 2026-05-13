@@ -107,9 +107,7 @@ describe('shipper process helpers', () => {
 
       const options = spawnMock.mock.calls[0]?.[2] as { env?: Record<string, string> };
       expect(options.env).toMatchObject({ SHIPPER_SESSION_RUN_ID: 'run-123' });
-      expect(Object.prototype.hasOwnProperty.call(options.env ?? {}, SHIPPER_MCP_BRIDGE_ENV)).toBe(
-        false
-      );
+      expect(SHIPPER_MCP_BRIDGE_ENV in (options.env ?? {})).toBe(false);
     } finally {
       restoreMcpBridgeEnv(original);
     }

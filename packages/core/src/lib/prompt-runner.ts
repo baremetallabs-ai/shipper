@@ -849,14 +849,17 @@ async function runPromptDefault(name: string, opts: RunPromptOpts): Promise<numb
         });
       } catch (err) {
         logger.warn(
-          `Warning: Failed to install AskUserQuestion defer bridge in ${runCwd}: ${toErrorMessage(err)}`
+          `Failed to install AskUserQuestion defer bridge in ${runCwd}: ${toErrorMessage(err)}`
         );
       }
     }
 
     const exitCode = useQuestionBridge
       ? await spawnClaudeWithQuestionBridge(args, baseSpawnOpts, runCwd)
-      : await spawnAsync(agent, args, baseSpawnOpts);
+      : await spawnAsync(agent, args, {
+          ...baseSpawnOpts,
+          ...(isHeadlessClaude ? { stdinIgnore: true } : {}),
+        });
     let usage: TokenUsage | undefined;
     const persistedResultFile = await persistPromptResult(opts.cwd, resultFile);
 

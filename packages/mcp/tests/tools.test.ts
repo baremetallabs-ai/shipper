@@ -1593,9 +1593,7 @@ describe('shipper_create_issue', () => {
     );
     expect(mockStartShipper).not.toHaveBeenCalled();
     const createIssueEnv = spawnShipperEnv();
-    expect(Object.prototype.hasOwnProperty.call(createIssueEnv, SHIPPER_MCP_BRIDGE_ENV)).toBe(
-      false
-    );
+    expect(SHIPPER_MCP_BRIDGE_ENV in createIssueEnv).toBe(false);
     expect(mockFindLatestSessionMeta).toHaveBeenCalledWith(
       expect.objectContaining({
         issue: 'unlinked',
@@ -1823,7 +1821,7 @@ describe('shipper_unblock', () => {
       timeoutMs: 60 * 60 * 1000,
     });
     const unblockEnv = spawnShipperEnv();
-    expect(Object.prototype.hasOwnProperty.call(unblockEnv, SHIPPER_MCP_BRIDGE_ENV)).toBe(false);
+    expect(SHIPPER_MCP_BRIDGE_ENV in unblockEnv).toBe(false);
   });
 
   it('falls back to label-diff recovery when result.json is unavailable', async () => {
@@ -1950,7 +1948,7 @@ describe('shipper_merge', () => {
       timeoutMs: 5 * 60 * 1000,
     });
     const mergeEnv = spawnShipperEnv();
-    expect(Object.prototype.hasOwnProperty.call(mergeEnv, SHIPPER_MCP_BRIDGE_ENV)).toBe(false);
+    expect(SHIPPER_MCP_BRIDGE_ENV in mergeEnv).toBe(false);
   });
 });
 
