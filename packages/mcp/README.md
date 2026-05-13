@@ -61,6 +61,11 @@ At a feature level, the MCP server exposes:
 - Experimental MCP-driven grooming for `shipper:new` issues, gated by
   `SHIPPER_EXPERIMENTAL_MCP_GROOMING`.
 
+Streamed `shipper_advance` and `shipper_groom` runs are spawned with
+`SHIPPER_MCP_BRIDGE=1` so `shipper_answer_question` can answer `AskUserQuestion` deferrals. The
+one-shot MCP tools use non-bridged child processes and do not expose `AskUserQuestion` to headless
+Claude.
+
 The generated MCP reference documents every tool schema, result shape, and error mode.
 
 ## Documentation

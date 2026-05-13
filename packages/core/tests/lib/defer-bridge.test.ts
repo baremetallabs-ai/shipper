@@ -8,10 +8,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   CLAUDE_SETTINGS_RELATIVE_PATH,
   DEFER_BRIDGE_RELATIVE_PATH,
+  SHIPPER_MCP_BRIDGE_ENV,
   SHIPPER_QUESTION_BRIDGE_DIR_ENV,
   SHIPPER_QUESTION_BRIDGE_TIMEOUT_MS_ENV,
   buildClaudeSettings,
   installDeferBridge,
+  isMcpBridgeEnabled,
 } from '../../src/lib/defer-bridge.js';
 
 interface RunBridgeResult {
@@ -162,6 +164,17 @@ async function expectFailureFile(bridgeDir: string): Promise<void> {
   }
   throw new Error('Timed out waiting for bridge failure file');
 }
+
+describe('isMcpBridgeEnabled', () => {
+  it('returns true only for the literal value 1', () => {
+    expect(isMcpBridgeEnabled({ [SHIPPER_MCP_BRIDGE_ENV]: '1' })).toBe(true);
+    expect(isMcpBridgeEnabled({})).toBe(false);
+    expect(isMcpBridgeEnabled({ [SHIPPER_MCP_BRIDGE_ENV]: '' })).toBe(false);
+    expect(isMcpBridgeEnabled({ [SHIPPER_MCP_BRIDGE_ENV]: '0' })).toBe(false);
+    expect(isMcpBridgeEnabled({ [SHIPPER_MCP_BRIDGE_ENV]: 'true' })).toBe(false);
+    expect(isMcpBridgeEnabled({ [SHIPPER_MCP_BRIDGE_ENV]: 'yes' })).toBe(false);
+  });
+});
 
 describe('installDeferBridge', () => {
   let workdir: string;

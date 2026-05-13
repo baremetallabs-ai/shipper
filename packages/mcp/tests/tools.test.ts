@@ -101,6 +101,8 @@ vi.mock('../src/docs/corpus.js', () => ({
 
 import { registerInitErrorTools, registerTools, toolNames } from '../src/tools.js';
 
+const SHIPPER_MCP_BRIDGE_ENV = 'SHIPPER_MCP_BRIDGE';
+
 type Handler = (args: Record<string, unknown>) => Promise<{
   content: { type: string; text: string }[];
   isError?: boolean;
@@ -116,6 +118,11 @@ type ToolGetter = ((name: string) => Handler) & {
   ) => Promise<Awaited<ReturnType<Handler>>>;
   names: () => string[];
 };
+
+interface SpawnShipperCallOptions {
+  timeoutMs: number;
+  env?: Record<string, string | undefined>;
+}
 
 async function collectTools(): Promise<ToolGetter> {
   const registrations = new Map<
@@ -303,6 +310,11 @@ function withFlag<T>(value: string | undefined, fn: () => T | Promise<T>): Promi
       process.env.SHIPPER_EXPERIMENTAL_MCP_GROOMING = original;
     }
   });
+}
+
+function spawnShipperEnv(callIndex = 0): Record<string, string | undefined> {
+  const calls = mockSpawnShipper.mock.calls as unknown as [string[], SpawnShipperCallOptions][];
+  return calls[callIndex]?.[1].env ?? {};
 }
 
 describe('registerTools', () => {
@@ -841,7 +853,7 @@ describe('shipper_advance', () => {
     const result = await getTool('shipper_advance')({ issue: 42 });
     const text = result.content[0]?.text ?? '';
 
-    expect(mockSpawnShipper).toHaveBeenCalledWith(['next', '42', '--mode', 'headless'], {
+    expect(mockStartShipper).toHaveBeenCalledWith(['next', '42', '--mode', 'headless'], {
       timeoutMs: 60 * 60 * 1000,
     });
     expect(result.isError).toBeUndefined();
@@ -974,6 +986,7 @@ describe('shipper_advance', () => {
     const result = await getTool('shipper_advance')({ issue: 42 });
 
     expect(mockSpawnShipper).not.toHaveBeenCalled();
+    expect(mockStartShipper).not.toHaveBeenCalled();
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toContain('interactively');
   });
@@ -1346,7 +1359,7 @@ describe('shipper_groom', () => {
       expect(text).toContain('Stage: shipper:new -> shipper:groomed (accept)');
       expect(text).toContain('Issue groomed.');
       expect(text).toContain('Session log: /tmp/groom.jsonl');
-      expect(mockSpawnShipper).toHaveBeenCalledWith(['groom', '42', '--mode', 'headless'], {
+      expect(mockStartShipper).toHaveBeenCalledWith(['groom', '42', '--mode', 'headless'], {
         timeoutMs: 60 * 60 * 1000,
       });
     });
@@ -1578,6 +1591,11 @@ describe('shipper_create_issue', () => {
         env: { SHIPPER_SESSION_RUN_ID: '00000000-0000-4000-8000-000000000000' },
       }
     );
+    expect(mockStartShipper).not.toHaveBeenCalled();
+    const createIssueEnv = spawnShipperEnv();
+    expect(Object.prototype.hasOwnProperty.call(createIssueEnv, SHIPPER_MCP_BRIDGE_ENV)).toBe(
+      false
+    );
     expect(mockFindLatestSessionMeta).toHaveBeenCalledWith(
       expect.objectContaining({
         issue: 'unlinked',
@@ -1800,6 +1818,12 @@ describe('shipper_unblock', () => {
     expect(result.content[0]?.text).toContain('Reason: Dependency landed upstream.');
     expect(result.content[0]?.text).toContain('The issue is now unblocked.');
     expect(result.content[0]?.text).toContain('Session log: /tmp/unblock.jsonl');
+    expect(mockStartShipper).not.toHaveBeenCalled();
+    expect(mockSpawnShipper).toHaveBeenCalledWith(['unblock', '42', '--mode', 'headless'], {
+      timeoutMs: 60 * 60 * 1000,
+    });
+    const unblockEnv = spawnShipperEnv();
+    expect(Object.prototype.hasOwnProperty.call(unblockEnv, SHIPPER_MCP_BRIDGE_ENV)).toBe(false);
   });
 
   it('falls back to label-diff recovery when result.json is unavailable', async () => {
@@ -1921,6 +1945,12 @@ describe('shipper_merge', () => {
     expect(result.content[0]?.text).toContain('[exit 0] shipper merge --once');
     expect(result.content[0]?.text).toContain('--- stdout ---');
     expect(result.content[0]?.text).toContain('merged one PR');
+    expect(mockStartShipper).not.toHaveBeenCalled();
+    expect(mockSpawnShipper).toHaveBeenCalledWith(['merge', '--once'], {
+      timeoutMs: 5 * 60 * 1000,
+    });
+    const mergeEnv = spawnShipperEnv();
+    expect(Object.prototype.hasOwnProperty.call(mergeEnv, SHIPPER_MCP_BRIDGE_ENV)).toBe(false);
   });
 });
 

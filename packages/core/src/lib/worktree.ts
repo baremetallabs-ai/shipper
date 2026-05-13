@@ -4,10 +4,9 @@ import { access, mkdir, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { installDeferBridge } from './defer-bridge.js';
 import { runAdvisoryHook, runWorktreeHook } from './hooks.js';
-import { createLogger, logger } from './logger.js';
-import { toError, toErrorMessage } from './errors.js';
+import { createLogger } from './logger.js';
+import { toError } from './errors.js';
 import { getSettings } from './settings.js';
 import {
   execAsync,
@@ -32,10 +31,6 @@ export function getWorktreePath(repoRoot: string, branch: string): string {
   const repoName = path.basename(repoRoot);
   const safeBranch = branch.replace(/\//g, '-');
   return path.join(WORKTREES_DIR, `${repoName}--wt--${safeBranch}`);
-}
-
-function questionBridgeHookTimeoutSeconds(agentTimeoutMinutes: number): number {
-  return agentTimeoutMinutes > 0 ? agentTimeoutMinutes * 60 : 24 * 60 * 60;
 }
 
 export interface CreateWorktreeOpts {
@@ -284,15 +279,6 @@ async function withWorktreeDefault<T>(
 
     worktreeLogger.worktreeStep('running setup hooks');
     await runWorktreeHook('worktree-setup', hookEnv, wtPath);
-    try {
-      await installDeferBridge(wtPath, {
-        timeoutSeconds: questionBridgeHookTimeoutSeconds(settings.agentTimeoutMinutes),
-      });
-    } catch (err) {
-      logger.warn(
-        `Warning: Failed to install AskUserQuestion defer bridge in ${wtPath}: ${toErrorMessage(err)}`
-      );
-    }
     worktreeLogger.worktreeStep('running agent');
     return await fn(wtPath);
   } finally {

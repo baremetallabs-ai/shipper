@@ -5,6 +5,7 @@ export * from './lib/frontmatter.js';
 export * from './lib/result-schema.js';
 
 export { getRepoRoot } from './lib/branch.js';
+export { SHIPPER_MCP_BRIDGE_ENV, isMcpBridgeEnabled } from './lib/defer-bridge.js';
 export type { FailedStep } from './lib/checks.js';
 export { formatZodPath, ghJson, parseGhJson } from './lib/gh-json.js';
 export type {

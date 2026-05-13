@@ -1,5 +1,29 @@
-import { describe, it, expect } from 'vitest';
-import {
+import { EventEmitter } from 'node:events';
+import { SHIPPER_MCP_BRIDGE_ENV } from '@baremetallabs-ai/shipper-core';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+type MockChild = EventEmitter & {
+  stdout: EventEmitter;
+  stderr: EventEmitter;
+  stdin: EventEmitter & {
+    write: ReturnType<typeof vi.fn>;
+    end: ReturnType<typeof vi.fn>;
+  };
+  kill: ReturnType<typeof vi.fn>;
+};
+
+const spawnMock =
+  vi.fn<(command: string, args?: string[], options?: Record<string, unknown>) => MockChild>();
+
+vi.mock('node:child_process', async () => {
+  const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+  return {
+    ...actual,
+    spawn: (...args: unknown[]) => spawnMock(...args),
+  };
+});
+
+const {
   formatAdvanceResult,
   formatCreateIssueResult,
   formatResetPreview,
@@ -7,7 +31,90 @@ import {
   formatSpawnResult,
   formatToolError,
   formatUnblockResult,
-} from '../src/helpers.js';
+  spawnShipper,
+  startShipper,
+} = await import('../src/helpers.js');
+
+function makeMockChild(code = 0): MockChild {
+  const child = new EventEmitter() as MockChild;
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.stdin = Object.assign(new EventEmitter(), {
+    write: vi.fn(),
+    end: vi.fn(),
+  });
+  child.kill = vi.fn(() => {
+    child.emit('close', null);
+  });
+  globalThis.queueMicrotask(() => {
+    child.emit('close', code);
+  });
+  return child;
+}
+
+function restoreMcpBridgeEnv(value: string | undefined): void {
+  if (value === undefined) {
+    Reflect.deleteProperty(process.env, SHIPPER_MCP_BRIDGE_ENV);
+    return;
+  }
+  process.env[SHIPPER_MCP_BRIDGE_ENV] = value;
+}
+
+afterEach(() => {
+  spawnMock.mockReset();
+});
+
+describe('shipper process helpers', () => {
+  it('sets the MCP bridge handshake for streamed shipper children', async () => {
+    const original = process.env[SHIPPER_MCP_BRIDGE_ENV];
+    process.env[SHIPPER_MCP_BRIDGE_ENV] = 'not-1';
+    spawnMock.mockReturnValueOnce(makeMockChild());
+
+    try {
+      const runner = startShipper(['next', '42', '--mode', 'headless'], { timeoutMs: 1000 });
+      await expect(runner.next()).resolves.toMatchObject({ kind: 'completed' });
+      const expectedEnv: Record<string, string> = { [SHIPPER_MCP_BRIDGE_ENV]: '1' };
+
+      expect(spawnMock).toHaveBeenCalledWith(
+        'shipper',
+        ['next', '42', '--mode', 'headless'],
+        expect.objectContaining({
+          cwd: process.cwd(),
+          stdio: ['pipe', 'pipe', 'pipe'],
+        })
+      );
+      const options = spawnMock.mock.calls[0]?.[2] as
+        | { env?: Record<string, string | undefined> }
+        | undefined;
+      expect(options?.env).toMatchObject(expectedEnv);
+    } finally {
+      restoreMcpBridgeEnv(original);
+    }
+  });
+
+  it('strips the MCP bridge handshake from one-shot shipper children', async () => {
+    const original = process.env[SHIPPER_MCP_BRIDGE_ENV];
+    process.env[SHIPPER_MCP_BRIDGE_ENV] = '1';
+    spawnMock.mockReturnValueOnce(makeMockChild());
+
+    try {
+      await expect(
+        spawnShipper(['merge', '42'], {
+          timeoutMs: 1000,
+          env: { [SHIPPER_MCP_BRIDGE_ENV]: '1', SHIPPER_SESSION_RUN_ID: 'run-123' },
+        })
+      ).resolves.toMatchObject({ exitCode: 0, timedOut: false });
+
+      const options = spawnMock.mock.calls[0]?.[2] as { env?: Record<string, string> };
+      expect(options.env).toMatchObject({ SHIPPER_SESSION_RUN_ID: 'run-123' });
+      expect(Object.prototype.hasOwnProperty.call(options.env ?? {}, SHIPPER_MCP_BRIDGE_ENV)).toBe(
+        false
+      );
+    } finally {
+      restoreMcpBridgeEnv(original);
+    }
+  });
+});
 
 describe('formatToolError', () => {
   it('returns isError with Error message', () => {

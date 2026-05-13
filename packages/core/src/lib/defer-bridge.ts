@@ -3,9 +3,14 @@ import path from 'node:path';
 
 export const SHIPPER_QUESTION_BRIDGE_DIR_ENV = 'SHIPPER_QUESTION_BRIDGE_DIR';
 export const SHIPPER_QUESTION_BRIDGE_TIMEOUT_MS_ENV = 'SHIPPER_QUESTION_BRIDGE_TIMEOUT_MS';
+export const SHIPPER_MCP_BRIDGE_ENV = 'SHIPPER_MCP_BRIDGE';
 
 export const DEFER_BRIDGE_RELATIVE_PATH = path.join('.shipper', 'defer-bridge.mjs');
 export const CLAUDE_SETTINGS_RELATIVE_PATH = path.join('.claude', 'settings.json');
+
+export function isMcpBridgeEnabled(env: Record<string, string | undefined> = process.env): boolean {
+  return env[SHIPPER_MCP_BRIDGE_ENV] === '1';
+}
 
 const BRIDGE_SCRIPT = `#!/usr/bin/env node
 import { randomUUID } from 'node:crypto';

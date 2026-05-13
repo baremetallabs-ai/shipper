@@ -28,6 +28,7 @@ const runAdvisoryHookMock =
 const runWorktreeHookMock =
   vi.fn<(event: string, env: Record<string, string>, cwd: string) => Promise<void>>();
 const getSettingsMock = vi.fn<() => Record<string, unknown>>();
+const installDeferBridgeMock = vi.fn<(...args: unknown[]) => Promise<void>>();
 const errorMock = vi.spyOn(console, 'error').mockImplementation(() => {});
 
 vi.mock('node:child_process', async () => {
@@ -67,6 +68,10 @@ vi.mock('../../src/lib/hooks.js', () => ({
 
 vi.mock('../../src/lib/settings.js', () => ({
   getSettings: (...args: unknown[]) => getSettingsMock(...args),
+}));
+
+vi.mock('../../src/lib/defer-bridge.js', () => ({
+  installDeferBridge: (...args: unknown[]) => installDeferBridgeMock(...args),
 }));
 
 function mockSpawnSuccess(): void {
@@ -168,6 +173,7 @@ beforeEach(() => {
   runAdvisoryHookMock.mockReset();
   runWorktreeHookMock.mockReset();
   getSettingsMock.mockReset();
+  installDeferBridgeMock.mockReset();
   errorMock.mockClear();
   errorMock.mockImplementation(() => {});
 
@@ -449,6 +455,7 @@ describe('withWorktree', () => {
     });
 
     expect(result).toBe('ok');
+    expect(installDeferBridgeMock).not.toHaveBeenCalled();
     expect(callOrder).toEqual([
       '[shipper]   worktree: creating branch',
       '[shipper]   worktree: installing dependencies',

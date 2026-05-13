@@ -156,6 +156,7 @@ export {
 export type { DeferQuestion, DeferQuestionOption } from './lib/defer-stream.js';
 export type { AnswerLine, DeferMarkerPayload } from './lib/defer-loop.js';
 export { DEFER_MARKER_PREFIX, DEFER_MARKER_SUFFIX, parseDeferMarker } from './lib/defer-loop.js';
+export { SHIPPER_MCP_BRIDGE_ENV, isMcpBridgeEnabled } from './lib/defer-bridge.js';
 export type { RunPromptOpts } from './lib/prompt-runner.js';
 export { buildPromptCommand, runPrompt } from './lib/prompt-runner.js';
 export { agentPrompts } from './lib/prompts.js';
