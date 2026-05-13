@@ -26,11 +26,13 @@ interface ViewerPreElement extends PreElementLike {
   classList: {
     contains: (token: string) => boolean;
   };
+  getAttribute: (name: string) => string | null;
   parentElement: {
     classList: {
       contains: (token: string) => boolean;
     };
   } | null;
+  tabIndex: number;
   textContent: string | null;
 }
 
@@ -147,8 +149,15 @@ function expectHorizontalScrollContract(pre: ViewerPreElement): void {
   expect(pre.classList.contains('overflow-x-auto')).toBe(true);
   expect(pre.classList.contains('overflow-y-auto')).toBe(true);
   expect(pre.classList.contains('whitespace-pre')).toBe(true);
+  expect(pre.classList.contains('outline-none')).toBe(true);
+  expect(pre.classList.contains('focus-visible:ring-[3px]')).toBe(true);
+  expect(pre.classList.contains('focus-visible:ring-ring/50')).toBe(true);
+  expect(pre.classList.contains('focus-visible:ring-inset')).toBe(true);
   expect(pre.classList.contains('whitespace-pre-wrap')).toBe(false);
   expect(pre.classList.contains('overflow-auto')).toBe(false);
+  expect(pre.getAttribute('role')).toBe('region');
+  expect(pre.getAttribute('aria-label')).toBe('Command log output');
+  expect(pre.tabIndex).toBe(0);
 }
 
 describe('BackgroundLogViewer', () => {
