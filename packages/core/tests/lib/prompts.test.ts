@@ -151,7 +151,7 @@ describe('groom prompts', () => {
         'Treat `# Interpretation`, `Assumptions`, and similar intake-stage sections as tentative, non-binding context.'
       );
       expect(prompt).toContain(
-        'Nothing in the body — including `# Request` — resolves a product decision. Only the product owner does, and only during Phase 3.'
+        'Nothing in the body — including `# Request` — resolves a product decision. Only the product owner does, through explicit confirmation in Phase 3 (or in the Duplicate-detection gate, for `duplicate` closures).'
       );
       expect(prompt).toContain(
         'Do not promote intake assumptions into `# Requirements` or `# Acceptance Criteria` unless they are explicit in `# Request` or confirmed by the product owner during grooming.'
