@@ -4,7 +4,8 @@ description: Canonical reference for user-facing Shipper environment variables, 
 ---
 
 This is the canonical reference for user-facing Shipper environment variables. Internal IPC,
-build-time, Electron, cache, and worktree implementation variables are intentionally excluded.
+build-time, Electron, cache, and worktree implementation variables are intentionally excluded except
+for the Shipper-set MCP bridge handoff documented below.
 
 ## Auth tokens
 
@@ -52,6 +53,18 @@ build-time, Electron, cache, and worktree implementation variables are intention
 
 The MCP server's corpus-unavailable error message names `SHIPPER_DOCS_PATH` when this fallback
 may be needed.
+
+## Internal Shipper-set variables
+
+### `SHIPPER_MCP_BRIDGE`
+
+| Field              | Value                                                                                           |
+| ------------------ | ----------------------------------------------------------------------------------------------- |
+| Set by             | MCP server streamed orchestration helper for `shipper_advance` and `shipper_groom`.             |
+| Read by            | Core prompt runner bridge gate and Claude bridge artifact installation.                         |
+| Default when unset | Bridge disabled; headless Claude runs outside the streamed MCP path disallow `AskUserQuestion`. |
+| Accepted values    | Exactly `1`; every other value behaves as unset.                                                |
+| Example            | Set internally by Shipper; users should not set it as a feature flag.                           |
 
 ## Runtime overrides
 

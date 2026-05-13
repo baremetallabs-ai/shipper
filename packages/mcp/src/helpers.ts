@@ -3,6 +3,7 @@ import type { ArtifactScan, DeferMarkerPayload, ResetResult } from '@baremetalla
 import {
   DEFER_MARKER_PREFIX,
   parseDeferMarker,
+  SHIPPER_MCP_BRIDGE_ENV,
   toErrorMessage,
 } from '@baremetallabs-ai/shipper-core';
 
@@ -61,9 +62,11 @@ export async function spawnShipper(
   opts: { timeoutMs: number; env?: Record<string, string | undefined> }
 ): Promise<SpawnResult> {
   return new Promise((resolve, reject) => {
+    const childEnv = { ...process.env, ...(opts.env ?? {}) };
+    Reflect.deleteProperty(childEnv, SHIPPER_MCP_BRIDGE_ENV);
     const child = spawn('shipper', args, {
       cwd: process.cwd(),
-      env: opts.env ? { ...process.env, ...opts.env } : process.env,
+      env: childEnv,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
@@ -135,9 +138,10 @@ interface PendingResolver {
  * Between defers, caller calls `runner.answer(...)` to feed the worker its answer.
  */
 export function startShipper(args: string[], opts: { timeoutMs: number }): ShipperRunner {
+  const childEnv = { ...process.env, [SHIPPER_MCP_BRIDGE_ENV]: '1' };
   const child: ChildProcess = spawn('shipper', args, {
     cwd: process.cwd(),
-    env: process.env,
+    env: childEnv,
     stdio: ['pipe', 'pipe', 'pipe'],
   });
 

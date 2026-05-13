@@ -2,7 +2,16 @@ import { EventEmitter } from 'node:events';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type MockInstance,
+} from 'vitest';
 
 type PromptStdout = EventEmitter & {
   pipe: (destination: EventEmitter) => EventEmitter;
@@ -79,6 +88,9 @@ const formatUsageLineMock = vi
 const driveQuestionBridgeMock = vi.fn(async (opts: { childExit: Promise<number> }) => {
   return await opts.childExit;
 });
+const installDeferBridgeMock = vi
+  .fn<(workdir: string, opts: { timeoutSeconds: number }) => Promise<void>>()
+  .mockResolvedValue(undefined);
 const resolveAgentMock = vi
   .fn<(promptName: string, agent?: string) => 'claude' | 'codex' | 'copilot'>()
   .mockReturnValue('claude');
@@ -97,6 +109,7 @@ const getSettingsMock = vi.fn<() => { agentTimeoutMinutes: number }>().mockRetur
 const stdinPipeMock = vi.spyOn(process.stdin, 'pipe').mockImplementation(() => undefined as never);
 const stdinUnpipeMock = vi.spyOn(process.stdin, 'unpipe').mockImplementation(() => process.stdin);
 const stdinPauseMock = vi.spyOn(process.stdin, 'pause').mockImplementation(() => process.stdin);
+const originalMcpBridgeEnv = process.env.SHIPPER_MCP_BRIDGE;
 
 vi.mock('node:child_process', async () => {
   const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
@@ -179,6 +192,17 @@ vi.mock('../../src/lib/question-bridge.js', () => ({
   driveQuestionBridge: (...args: unknown[]) => driveQuestionBridgeMock(...args),
 }));
 
+vi.mock('../../src/lib/defer-bridge.js', async () => {
+  const actual = await vi.importActual<typeof import('../../src/lib/defer-bridge.js')>(
+    '../../src/lib/defer-bridge.js'
+  );
+  return {
+    ...actual,
+    installDeferBridge: (...args: [string, { timeoutSeconds: number }]) =>
+      installDeferBridgeMock(...args),
+  };
+});
+
 function mockSpawnResult(
   opts: {
     code?: number;
@@ -249,10 +273,31 @@ function mockSpawnResult(
 }
 
 const { TRUNCATION_THRESHOLD_BYTES } = await import('../../src/lib/output-protocol/protocol-io.js');
-const { SHIPPER_QUESTION_BRIDGE_DIR_ENV, SHIPPER_QUESTION_BRIDGE_TIMEOUT_MS_ENV } =
-  await import('../../src/lib/defer-bridge.js');
+const {
+  SHIPPER_MCP_BRIDGE_ENV,
+  SHIPPER_QUESTION_BRIDGE_DIR_ENV,
+  SHIPPER_QUESTION_BRIDGE_TIMEOUT_MS_ENV,
+} = await import('../../src/lib/defer-bridge.js');
 const { withLogCapture } = await import('../../src/lib/logger.js');
 const { buildPromptCommand, runPrompt } = await import('../../src/lib/prompt-runner.js');
+
+async function withMcpBridgeEnv<T>(value: string | undefined, fn: () => Promise<T>): Promise<T> {
+  const previous = process.env[SHIPPER_MCP_BRIDGE_ENV];
+  if (value === undefined) {
+    Reflect.deleteProperty(process.env, SHIPPER_MCP_BRIDGE_ENV);
+  } else {
+    process.env[SHIPPER_MCP_BRIDGE_ENV] = value;
+  }
+  try {
+    return await fn();
+  } finally {
+    if (previous === undefined) {
+      Reflect.deleteProperty(process.env, SHIPPER_MCP_BRIDGE_ENV);
+    } else {
+      process.env[SHIPPER_MCP_BRIDGE_ENV] = previous;
+    }
+  }
+}
 
 function makePrompt(
   cmd: 'claude' | 'codex' | 'copilot',
@@ -276,6 +321,10 @@ function spawnedArgs(): string[] {
 
 function spawnedOptions(): Record<string, unknown> | undefined {
   return spawnMock.mock.calls[0]?.[2];
+}
+
+function askUserQuestionArgCount(args: string[]): number {
+  return args.filter((arg) => arg.includes('AskUserQuestion')).length;
 }
 
 function spawnedChild(): PromptChild {
@@ -334,6 +383,10 @@ function makeLogStream(): MockLogStream {
 
 createWriteStreamMock.mockImplementation(() => makeLogStream());
 
+beforeEach(() => {
+  Reflect.deleteProperty(process.env, SHIPPER_MCP_BRIDGE_ENV);
+});
+
 afterEach(() => {
   vi.clearAllMocks();
   spawnMock.mockReset();
@@ -366,6 +419,8 @@ afterEach(() => {
   driveQuestionBridgeMock.mockImplementation(async (opts: { childExit: Promise<number> }) => {
     return await opts.childExit;
   });
+  installDeferBridgeMock.mockReset();
+  installDeferBridgeMock.mockResolvedValue(undefined);
   statSyncMock.mockImplementation(() => {
     throw new Error('ENOENT');
   });
@@ -373,6 +428,14 @@ afterEach(() => {
   mkdirMock.mockResolvedValue(undefined);
   copyFileMock.mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
   createWriteStreamMock.mockImplementation(() => makeLogStream());
+});
+
+afterAll(() => {
+  if (originalMcpBridgeEnv === undefined) {
+    Reflect.deleteProperty(process.env, SHIPPER_MCP_BRIDGE_ENV);
+  } else {
+    process.env[SHIPPER_MCP_BRIDGE_ENV] = originalMcpBridgeEnv;
+  }
 });
 
 describe('runPrompt', () => {
@@ -917,15 +980,56 @@ describe('runPrompt', () => {
     expect(spawnedArgs().filter((arg) => arg === '--output-format')).toHaveLength(1);
   });
 
+  it('disallows AskUserQuestion for unbridged headless claude runs', async () => {
+    resolveModeMock.mockReturnValue('headless');
+    readFileMock.mockResolvedValueOnce(makePrompt('claude'));
+    mockSpawnResult();
+
+    await runPrompt('test', { mode: 'headless' });
+
+    expect(installDeferBridgeMock).not.toHaveBeenCalled();
+    expect(driveQuestionBridgeMock).not.toHaveBeenCalled();
+    expect(
+      spawnedArgs().filter((arg) => arg === '--disallowed-tools=AskUserQuestion')
+    ).toHaveLength(1);
+    expect(spawnedArgs().indexOf('--disallowed-tools=AskUserQuestion')).toBeLessThan(
+      spawnedArgs().indexOf('--append-system-prompt')
+    );
+    const env = (spawnedOptions()?.env ?? {}) as Record<string, string | undefined>;
+    expect(env[SHIPPER_QUESTION_BRIDGE_DIR_ENV]).toBeUndefined();
+    expect(env[SHIPPER_QUESTION_BRIDGE_TIMEOUT_MS_ENV]).toBeUndefined();
+  });
+
+  it.each<[string, string[]]>([
+    ['kebab equals', ['--disallowed-tools=AskUserQuestion']],
+    ['camel equals', ['--disallowedTools=AskUserQuestion']],
+    ['kebab separate value', ['--disallowed-tools', 'AskUserQuestion']],
+  ])('does not duplicate existing AskUserQuestion disallow args for %s', async (_label, args) => {
+    resolveModeMock.mockReturnValue('headless');
+    readFileMock.mockResolvedValueOnce(makePrompt('claude', args));
+    mockSpawnResult();
+
+    await runPrompt('test', { mode: 'headless' });
+
+    expect(askUserQuestionArgCount(spawnedArgs())).toBe(1);
+    expect(installDeferBridgeMock).not.toHaveBeenCalled();
+    expect(driveQuestionBridgeMock).not.toHaveBeenCalled();
+  });
+
   it('strips -p for claude interactive mode', async () => {
     resolveModeMock.mockReturnValue('interactive');
     readFileMock.mockResolvedValueOnce(makePrompt('claude', ['-p', '--model', 'opus']));
     mockSpawnResult();
 
-    await runPrompt('test', { mode: 'interactive' });
+    await withMcpBridgeEnv('1', async () => {
+      await runPrompt('test', { mode: 'interactive' });
+    });
 
     expect(spawnedArgs()).not.toContain('-p');
     expect(spawnedArgs()).toContain('--model');
+    expect(spawnedArgs().some((arg) => arg.includes('AskUserQuestion'))).toBe(false);
+    expect(installDeferBridgeMock).not.toHaveBeenCalled();
+    expect(driveQuestionBridgeMock).not.toHaveBeenCalled();
   });
 
   it('leaves frontmatter args unchanged for default mode', async () => {
@@ -1205,7 +1309,9 @@ describe('runPrompt', () => {
     readFileMock.mockResolvedValueOnce(makePrompt('copilot'));
     mockSpawnResult();
 
-    await runPrompt('test', { mode: 'headless' });
+    await withMcpBridgeEnv('1', async () => {
+      await runPrompt('test', { mode: 'headless' });
+    });
 
     expect(spawnedArgs()).toEqual([
       '--autopilot',
@@ -1217,6 +1323,9 @@ describe('runPrompt', () => {
       '-p',
       'prompt body',
     ]);
+    expect(spawnedArgs().some((arg) => arg.includes('AskUserQuestion'))).toBe(false);
+    expect(installDeferBridgeMock).not.toHaveBeenCalled();
+    expect(driveQuestionBridgeMock).not.toHaveBeenCalled();
   });
 
   it('strips copilot headless flags and -p for interactive mode', async () => {
@@ -1349,9 +1458,11 @@ describe('runPrompt', () => {
     readFileMock.mockResolvedValueOnce(makePrompt('claude'));
     mockSpawnResult();
 
-    await expect(
-      runPrompt('implement', { mode: 'headless', repo: 'owner/repo', issueRef: '308' })
-    ).resolves.toBe(0);
+    await withMcpBridgeEnv('1', async () => {
+      await expect(
+        runPrompt('implement', { mode: 'headless', repo: 'owner/repo', issueRef: '308' })
+      ).resolves.toBe(0);
+    });
 
     expect(resolveSessionRepoMock).toHaveBeenCalledWith({ repo: 'owner/repo', cwd: undefined });
     expect(getSessionPathsMock).toHaveBeenCalledWith(
@@ -1370,11 +1481,13 @@ describe('runPrompt', () => {
       cwd: undefined,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    expect(installDeferBridgeMock).toHaveBeenCalledWith(process.cwd(), { timeoutSeconds: 3600 });
     const env = (spawnedOptions()?.env ?? {}) as Record<string, string>;
     expect(env[SHIPPER_QUESTION_BRIDGE_DIR_ENV]).toContain(
       path.join('.shipper', 'tmp', 'question-bridge-')
     );
     expect(env[SHIPPER_QUESTION_BRIDGE_TIMEOUT_MS_ENV]).toBe(String(60 * 60_000));
+    expect(spawnedArgs().some((arg) => arg.includes('AskUserQuestion'))).toBe(false);
     expect(driveQuestionBridgeMock).toHaveBeenCalledOnce();
     const writeMetaCall = writeSessionMetaMock.mock.calls[0];
     expect(writeMetaCall?.[0]).toContain('/home/user/.shipper/sessions/owner-repo/308-implement-');
@@ -1599,7 +1712,7 @@ describe('runPrompt', () => {
     // The createWriteStream should receive the override path, not the session path
     expect(createWriteStreamMock).toHaveBeenCalledWith(overridePath);
     expect(spawnMock.mock.calls[0]?.[2]).toMatchObject({
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['inherit', 'pipe', 'pipe'],
     });
 
     // Session metadata should still be written under ~/.shipper/sessions/...
@@ -1702,7 +1815,7 @@ describe('runPrompt', () => {
 
     expect(stdoutWriteMock).toHaveBeenCalledWith('headless output\n');
     expect(spawnMock.mock.calls[0]?.[2]).toMatchObject({
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['inherit', 'pipe', 'pipe'],
     });
 
     stdoutWriteMock.mockRestore();
@@ -1716,26 +1829,28 @@ describe('runPrompt', () => {
     const child = makeTimeoutChild();
     spawnMock.mockReturnValueOnce(child);
 
-    let settled = false;
-    const run = runPrompt('test', { mode: 'headless', repo: 'owner/repo' }).then((result) => {
-      settled = true;
-      return result;
-    });
+    await withMcpBridgeEnv('1', async () => {
+      let settled = false;
+      const run = runPrompt('test', { mode: 'headless', repo: 'owner/repo' }).then((result) => {
+        settled = true;
+        return result;
+      });
 
-    for (let attempt = 0; attempt < 10 && child.kill.mock.calls.length === 0; attempt += 1) {
+      for (let attempt = 0; attempt < 10 && child.kill.mock.calls.length === 0; attempt += 1) {
+        await sleep(0);
+      }
+
+      expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+      expect(errorMock).toHaveBeenCalledWith(
+        '[shipper] Error: AskUserQuestion bridge failed: bridge broke'
+      );
       await sleep(0);
-    }
+      expect(settled).toBe(false);
 
-    expect(child.kill).toHaveBeenCalledWith('SIGTERM');
-    expect(errorMock).toHaveBeenCalledWith(
-      '[shipper] Error: AskUserQuestion bridge failed: bridge broke'
-    );
-    await sleep(0);
-    expect(settled).toBe(false);
-
-    child.emit('close', 143);
-    child.finishLog();
-    await expect(run).resolves.toBe(1);
+      child.emit('close', 143);
+      child.finishLog();
+      await expect(run).resolves.toBe(1);
+    });
     errorMock.mockRestore();
   });
 
@@ -1817,11 +1932,8 @@ describe('runPrompt', () => {
     );
     expect(createWriteStreamMock).not.toHaveBeenCalled();
     expect(writeSessionMetaMock).not.toHaveBeenCalled();
-    // Claude headless always pipes stdout so the question bridge can read stream-json,
-    // even when session logging is disabled. Stdin is ignored so the CLI's stdin (used to receive
-    // deferred answers from the MCP parent) isn't shared with claude.
     expect(spawnMock.mock.calls[0]?.[2]).toMatchObject({
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: 'inherit',
     });
     expect(spawnedArgs()).toContain('--output-format');
     warnMock.mockRestore();
@@ -2018,7 +2130,9 @@ describe('runPrompt', () => {
     readFileMock.mockResolvedValueOnce(makePrompt('codex'));
     mockSpawnResult();
 
-    await runPrompt('test', { mode: 'headless' });
+    await withMcpBridgeEnv('1', async () => {
+      await runPrompt('test', { mode: 'headless' });
+    });
 
     expect(spawnedArgs().slice(0, 5)).toEqual([
       'exec',
@@ -2027,6 +2141,8 @@ describe('runPrompt', () => {
       '-c',
       'sandbox_workspace_write.network_access=true',
     ]);
+    expect(spawnedArgs().some((arg) => arg.includes('AskUserQuestion'))).toBe(false);
+    expect(installDeferBridgeMock).not.toHaveBeenCalled();
     expect(spawnedOptions()?.env).toBe(process.env);
     expect(driveQuestionBridgeMock).not.toHaveBeenCalled();
   });

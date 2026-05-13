@@ -4,6 +4,8 @@ import { copyFile, mkdir, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import {
+  installDeferBridge,
+  isMcpBridgeEnabled,
   SHIPPER_QUESTION_BRIDGE_DIR_ENV,
   SHIPPER_QUESTION_BRIDGE_TIMEOUT_MS_ENV,
 } from './defer-bridge.js';
@@ -99,6 +101,8 @@ const NEW_PROMPT_OLD_CONTRACT_PATTERNS = [
 ] as const;
 const MAX_INPUT_BYTES = 200_000;
 const QUESTION_BRIDGE_ABORT_DRAIN_TIMEOUT_MS = 2_000;
+const ASK_USER_QUESTION_TOOL = 'AskUserQuestion';
+const CLAUDE_DISALLOWED_TOOL_FLAGS = ['--disallowed-tools', '--disallowedTools'] as const;
 const warnedPromptPaths = new Set<string>();
 
 interface WorktreeDirs {
@@ -152,6 +156,41 @@ function resolveWorktreeGitDir(cwd: string): WorktreeDirs | undefined {
     logger.warn(`Warning: Failed to read .git file at ${dotGit}. Skipping --add-dir.`);
     return undefined;
   }
+}
+
+function questionBridgeHookTimeoutSeconds(agentTimeoutMinutes: number): number {
+  return agentTimeoutMinutes > 0 ? agentTimeoutMinutes * 60 : 24 * 60 * 60;
+}
+
+function disallowedToolsValueIncludesAskUserQuestion(value: string): boolean {
+  return value
+    .split(/[,\s]+/)
+    .filter(Boolean)
+    .includes(ASK_USER_QUESTION_TOOL);
+}
+
+function hasAskUserQuestionDisallowed(args: string[]): boolean {
+  for (let idx = 0; idx < args.length; idx += 1) {
+    const arg = args[idx];
+    if (arg === undefined) continue;
+    for (const flag of CLAUDE_DISALLOWED_TOOL_FLAGS) {
+      if (arg === flag) {
+        const value = args[idx + 1];
+        if (value && disallowedToolsValueIncludesAskUserQuestion(value)) return true;
+      } else if (arg.startsWith(`${flag}=`)) {
+        const value = arg.slice(flag.length + 1);
+        if (disallowedToolsValueIncludesAskUserQuestion(value)) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function disallowAskUserQuestion(args: string[]): void {
+  if (hasAskUserQuestionDisallowed(args)) return;
+  const appendSystemPromptIdx = args.indexOf('--append-system-prompt');
+  const insertIdx = appendSystemPromptIdx === -1 ? args.length : appendSystemPromptIdx;
+  args.splice(insertIdx, 0, `--disallowed-tools=${ASK_USER_QUESTION_TOOL}`);
 }
 
 interface SpawnAsyncOpts {
@@ -794,9 +833,29 @@ async function runPromptDefault(name: string, opts: RunPromptOpts): Promise<numb
         graceMs: DESKTOP_AGENT_GRACE_TIMEOUT_MS,
       };
     }
-    const useDeferLoop = agent === 'claude' && effectiveMode === 'headless';
-    const exitCode = useDeferLoop
-      ? await spawnClaudeWithQuestionBridge(args, baseSpawnOpts, opts.cwd ?? process.cwd())
+    const bridgeEnabled = isMcpBridgeEnabled();
+    const isHeadlessClaude = agent === 'claude' && effectiveMode === 'headless';
+    const useQuestionBridge = bridgeEnabled && isHeadlessClaude;
+    const runCwd = opts.cwd ?? process.cwd();
+
+    if (isHeadlessClaude && !bridgeEnabled) {
+      disallowAskUserQuestion(args);
+    }
+
+    if (useQuestionBridge) {
+      try {
+        await installDeferBridge(runCwd, {
+          timeoutSeconds: questionBridgeHookTimeoutSeconds(timeoutMinutes),
+        });
+      } catch (err) {
+        logger.warn(
+          `Warning: Failed to install AskUserQuestion defer bridge in ${runCwd}: ${toErrorMessage(err)}`
+        );
+      }
+    }
+
+    const exitCode = useQuestionBridge
+      ? await spawnClaudeWithQuestionBridge(args, baseSpawnOpts, runCwd)
       : await spawnAsync(agent, args, baseSpawnOpts);
     let usage: TokenUsage | undefined;
     const persistedResultFile = await persistPromptResult(opts.cwd, resultFile);
