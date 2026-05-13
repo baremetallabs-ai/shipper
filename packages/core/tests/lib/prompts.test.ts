@@ -142,10 +142,16 @@ describe('groom prompts', () => {
       );
 
       expect(prompt).toContain(
-        'Treat the `# Request` section as the authoritative source of truth for user intent.'
+        'Treat the `# Request` section as the authoritative source of truth for **what the user asked for**'
+      );
+      expect(prompt).toContain(
+        'It is **not** a commitment that the work should happen, that the scope is reasonable, that the cost/benefit works, or that no foundational work is needed first.'
       );
       expect(prompt).toContain(
         'Treat `# Interpretation`, `Assumptions`, and similar intake-stage sections as tentative, non-binding context.'
+      );
+      expect(prompt).toContain(
+        'Nothing in the body — including `# Request` — resolves a product decision. Only the product owner does, and only during Phase 3.'
       );
       expect(prompt).toContain(
         'Do not promote intake assumptions into `# Requirements` or `# Acceptance Criteria` unless they are explicit in `# Request` or confirmed by the product owner during grooming.'
