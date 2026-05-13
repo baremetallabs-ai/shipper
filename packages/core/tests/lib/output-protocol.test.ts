@@ -1061,6 +1061,162 @@ describe('output protocol helpers', () => {
       );
     });
 
+    it('accepts full groom output without a parent block', async () => {
+      const result = await writeValidGroomOutput({
+        decomposition: {
+          kind: 'full',
+          children: [
+            {
+              title: 'feat: child one',
+              body_file: outputRelative('child-248-1-body.md'),
+              grooming_comment_file: outputRelative('child-248-1-grooming-comment.md'),
+              priority: 'normal',
+            },
+          ],
+        },
+      });
+
+      await expect(validateStageOutput(tempDir, 'groom')).resolves.toEqual(result);
+    });
+
+    it.each([
+      ['empty object', {}],
+      ['title', { title: 'Updated parent title' }],
+      ['body_file', { body_file: outputRelative('issue-body-248.md') }],
+      ['priority', { priority: 'high' }],
+      ['blocked', { blocked: { comment_file: outputRelative('parent-blocked.md') } }],
+    ])('rejects full groom output with parent payload %s', async (_name, parent) => {
+      await writeValidGroomOutput({
+        parent,
+        decomposition: {
+          kind: 'full',
+          children: [
+            {
+              title: 'feat: child one',
+              body_file: outputRelative('child-248-1-body.md'),
+              grooming_comment_file: outputRelative('child-248-1-grooming-comment.md'),
+              priority: 'normal',
+            },
+          ],
+        },
+      });
+
+      await expect(validateStageOutput(tempDir, 'groom')).rejects.toThrow(
+        "'parent' is not allowed when decomposition.kind is full"
+      );
+    });
+
+    it.each(['none', 'partial'] as const)(
+      'rejects %s groom output without a parent object',
+      async (kind) => {
+        await writeValidGroomOutput({
+          decomposition: {
+            kind,
+            children:
+              kind === 'partial'
+                ? [
+                    {
+                      title: 'feat: child one',
+                      body_file: outputRelative('child-248-1-body.md'),
+                      grooming_comment_file: outputRelative('child-248-1-grooming-comment.md'),
+                      priority: 'normal',
+                    },
+                  ]
+                : [],
+          },
+        });
+
+        await expect(validateStageOutput(tempDir, 'groom')).rejects.toThrow(
+          "'parent' must be an object"
+        );
+      }
+    );
+
+    it.each(['none', 'partial'] as const)(
+      'rejects %s groom output without parent.body_file',
+      async (kind) => {
+        await writeValidGroomOutput(
+          buildGroomManifest({
+            parent: { body_file: undefined },
+            decomposition: {
+              kind,
+              children:
+                kind === 'partial'
+                  ? [
+                      {
+                        title: 'feat: child one',
+                        body_file: outputRelative('child-248-1-body.md'),
+                        grooming_comment_file: outputRelative('child-248-1-grooming-comment.md'),
+                        priority: 'normal',
+                      },
+                    ]
+                  : [],
+            },
+          })
+        );
+
+        await expect(validateStageOutput(tempDir, 'groom')).rejects.toThrow(
+          "'parent.body_file' is required when decomposition.kind is none or partial"
+        );
+      }
+    );
+
+    it.each(['none', 'partial'] as const)(
+      'rejects %s groom output without parent.priority',
+      async (kind) => {
+        await writeValidGroomOutput(
+          buildGroomManifest({
+            parent: { priority: undefined },
+            decomposition: {
+              kind,
+              children:
+                kind === 'partial'
+                  ? [
+                      {
+                        title: 'feat: child one',
+                        body_file: outputRelative('child-248-1-body.md'),
+                        grooming_comment_file: outputRelative('child-248-1-grooming-comment.md'),
+                        priority: 'normal',
+                      },
+                    ]
+                  : [],
+            },
+          })
+        );
+
+        await expect(validateStageOutput(tempDir, 'groom')).rejects.toThrow(
+          "'parent.priority' must be one of: high, normal, low"
+        );
+      }
+    );
+
+    it('rejects groom children that omit priority with a zero-based child index', async () => {
+      await writeValidGroomOutput(
+        buildGroomManifest({
+          decomposition: {
+            kind: 'partial',
+            children: [
+              {
+                title: 'feat: child one',
+                body_file: outputRelative('child-248-1-body.md'),
+                grooming_comment_file: outputRelative('child-248-1-grooming-comment.md'),
+                priority: 'normal',
+              },
+              {
+                title: 'feat: child two',
+                body_file: outputRelative('child-248-2-body.md'),
+                grooming_comment_file: outputRelative('child-248-2-grooming-comment.md'),
+              },
+            ],
+          },
+        })
+      );
+
+      await expect(validateStageOutput(tempDir, 'groom')).rejects.toThrow(
+        "'decomposition.children[1].priority' must be one of: high, normal, low"
+      );
+    });
+
     it('accepts valid groom output', async () => {
       const result = await writeValidGroomOutput();
 
@@ -2231,83 +2387,101 @@ describe('output protocol helpers', () => {
     });
 
     it('creates full-replacement children, posts scoped comments, and closes the parent', async () => {
-      const result = await writeValidGroomOutput(
-        buildGroomManifest({
-          parent: { body_file: undefined, priority: 'normal' },
-          decomposition: {
-            kind: 'full',
-            children: [
-              {
-                title: 'feat: child one',
-                body_file: outputRelative('child-1-body.md'),
-                grooming_comment_file: outputRelative('child-1-comment.md'),
+      const result = await writeValidGroomOutput({
+        decomposition: {
+          kind: 'full',
+          children: [
+            {
+              title: 'feat: child one',
+              body_file: outputRelative('child-1-body.md'),
+              grooming_comment_file: outputRelative('child-1-comment.md'),
+              priority: 'high',
+            },
+            {
+              title: 'feat: child two',
+              body_file: outputRelative('child-2-body.md'),
+              grooming_comment_file: outputRelative('child-2-comment.md'),
+              priority: 'normal',
+              blocked: {
+                depends_on_child_index: 0,
+                comment_file: outputRelative('child-2-blocked.md'),
               },
-              {
-                title: 'feat: child two',
-                body_file: outputRelative('child-2-body.md'),
-                grooming_comment_file: outputRelative('child-2-comment.md'),
-                blocked: {
-                  depends_on_child_index: 0,
-                  comment_file: outputRelative('child-2-blocked.md'),
-                },
-              },
-            ],
-          },
-        })
-      );
+            },
+            {
+              title: 'feat: child three',
+              body_file: outputRelative('child-3-body.md'),
+              grooming_comment_file: outputRelative('child-3-comment.md'),
+              priority: 'low',
+            },
+          ],
+        },
+      });
       ghMock
         .mockResolvedValueOnce({ stdout: '', stderr: '' })
         .mockResolvedValueOnce({ stdout: 'https://github.com/owner/repo/issues/301\n', stderr: '' })
         .mockResolvedValueOnce({ stdout: 'https://github.com/owner/repo/issues/302\n', stderr: '' })
+        .mockResolvedValueOnce({ stdout: 'https://github.com/owner/repo/issues/303\n', stderr: '' })
         .mockResolvedValue({ stdout: '', stderr: '' });
 
       await expect(
         processGroomResult({ repo: 'owner/repo', issueNumber: '248', cwd: tempDir, result })
       ).resolves.toEqual(result);
 
-      expect(ghMock.mock.calls[1]?.[0]).toEqual([
+      expect(ghMock.mock.calls[0]?.[0]).toEqual([
         'issue',
-        'create',
+        'comment',
+        '248',
         '-R',
         'owner/repo',
-        '--title',
-        'feat: child one',
         '--body-file',
-        outputAbs('child-1-body.md'),
-        '--label',
-        'shipper:groomed',
+        outputAbs('comment-248.md'),
       ]);
-      expect(ghMock.mock.calls[2]?.[0]).toContain('shipper:blocked');
+      const createCalls = ghMock.mock.calls
+        .map(([args]) => args)
+        .filter((args) => args[0] === 'issue' && args[1] === 'create');
+      expect(createCalls).toHaveLength(3);
+      expect(createCalls[0]).toContain('shipper:priority-high');
+      expect(createCalls[1]).not.toContain('shipper:priority-high');
+      expect(createCalls[1]).not.toContain('shipper:priority-low');
+      expect(createCalls[1]).toContain('shipper:blocked');
+      expect(createCalls[2]).toContain('shipper:priority-low');
       expect(ghMock.mock.calls.some(([args]) => args.some((arg) => arg.includes('#301')))).toBe(
         true
       );
-      expect(ghMock.mock.calls.at(-1)?.[0]?.slice(0, 4)).toEqual(['issue', 'close', '248', '-R']);
+      expect(ghMock.mock.calls.at(-1)?.[0]).toEqual([
+        'issue',
+        'close',
+        '248',
+        '-R',
+        'owner/repo',
+        '--comment',
+        expect.stringContaining('## Decomposed'),
+      ]);
       expect(ghMock.mock.calls.some(([args]) => args[0] === 'issue' && args[1] === 'edit')).toBe(
         false
       );
     });
 
     it('keeps the full-replacement parent open when an earlier post-flight write fails', async () => {
-      const result = await writeValidGroomOutput(
-        buildGroomManifest({
-          parent: { body_file: undefined, priority: 'normal' },
-          decomposition: {
-            kind: 'full',
-            children: [
-              {
-                title: 'feat: child one',
-                body_file: outputRelative('child-1-body.md'),
-                grooming_comment_file: outputRelative('child-1-comment.md'),
-              },
-              {
-                title: 'feat: child two',
-                body_file: outputRelative('child-2-body.md'),
-                grooming_comment_file: outputRelative('child-2-comment.md'),
-              },
-            ],
-          },
-        })
-      );
+      const result = await writeValidGroomOutput({
+        decomposition: {
+          kind: 'full',
+          children: [
+            {
+              title: 'feat: child one',
+              body_file: outputRelative('child-1-body.md'),
+              grooming_comment_file: outputRelative('child-1-comment.md'),
+              priority: 'high',
+            },
+            {
+              title: 'feat: child two',
+              body_file: outputRelative('child-2-body.md'),
+              grooming_comment_file: outputRelative('child-2-comment.md'),
+              priority: 'low',
+            },
+          ],
+        },
+      });
       ghMock.mockImplementation((args) => {
         if (args[0] === 'issue' && args[1] === 'create') {
           return Promise.resolve({
@@ -2415,6 +2589,7 @@ describe('output protocol helpers', () => {
                 title: 'feat: child',
                 body_file: outputRelative('child-body.md'),
                 grooming_comment_file: outputRelative('child-comment.md'),
+                priority: 'high',
               },
             ],
           },
@@ -2433,6 +2608,11 @@ describe('output protocol helpers', () => {
       expect(ghMock.mock.calls.some(([args]) => args[0] === 'issue' && args[1] === 'create')).toBe(
         true
       );
+      const createCall = ghMock.mock.calls.find(
+        ([args]) => args[0] === 'issue' && args[1] === 'create'
+      )?.[0];
+      expect(createCall).toContain('shipper:priority-high');
+      expect(createCall).not.toContain('shipper:priority-low');
       expect(
         ghMock.mock.calls.some(([args]) => args.includes(outputAbs('parent-blocked.md')))
       ).toBe(true);

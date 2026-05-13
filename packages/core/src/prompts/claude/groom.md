@@ -209,7 +209,7 @@ Create `.shipper/output/result.json`:
 
 Create the grooming summary comment at the `comment` path. Create the groom manifest at the `groom` path in exactly one of these modes.
 
-Open grooming manifest:
+Parent-updating open grooming manifest (`none` or `partial`):
 
 ```json
 {
@@ -239,7 +239,37 @@ Open grooming manifest:
 }
 ```
 
-Use only `high`, `normal`, or `low` for priority. Choosing `normal` tells the orchestrator to remove both priority labels.
+Full-replacement open grooming manifest (`full`, omit the entire `parent` key):
+
+```json
+{
+  "decomposition": {
+    "kind": "full",
+    "children": [
+      {
+        "title": "fix(scope): first replacement child",
+        "body_file": ".shipper/output/child-<number>-1-body.md",
+        "grooming_comment_file": ".shipper/output/child-<number>-1-grooming-comment.md",
+        "priority": "high"
+      },
+      {
+        "title": "fix(scope): second replacement child",
+        "body_file": ".shipper/output/child-<number>-2-body.md",
+        "grooming_comment_file": ".shipper/output/child-<number>-2-grooming-comment.md",
+        "priority": "normal"
+      },
+      {
+        "title": "fix(scope): third replacement child",
+        "body_file": ".shipper/output/child-<number>-3-body.md",
+        "grooming_comment_file": ".shipper/output/child-<number>-3-grooming-comment.md",
+        "priority": "low"
+      }
+    ]
+  }
+}
+```
+
+Use only `high`, `normal`, or `low` for priority. Every child in every decomposition kind must include `priority`: `high`, `normal`, or `low`; child priority is never inherited from parent priority. Choosing `normal` tells the orchestrator to remove both priority labels.
 
 Closed duplicate manifest:
 
@@ -267,9 +297,9 @@ Closed outcomes must not include a parent body file, child issues, blocked state
 
 ### Decomposition encoding
 
-- `none`: `children: []`; parent `body_file` is required; parent remains open.
-- `partial`: `children` is non-empty; parent `body_file` is required and contains only remaining parent scope.
-- `full`: `children` is non-empty; omit parent `body_file`; Shipper closes the parent after creating children.
+- `none`: `parent` is required; parent `body_file` is required; parent `priority` is required; `children: []`; parent remains open.
+- `partial`: `parent` is required; parent `body_file` is required and contains only remaining parent scope; parent `priority` is required; `children` is non-empty; parent remains open.
+- `full`: `children` is non-empty; omit the entire `parent` key; Shipper closes the parent after creating children.
 
 Every parent or child body file must contain the standard groomed issue headings: `# Summary`, `# Requirements`, `# Acceptance Criteria`, `# Related Issues`, `# Out of Scope`, and `# Open Questions`.
 

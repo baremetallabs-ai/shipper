@@ -31,17 +31,26 @@ export interface GroomChildIssue {
   title: string;
   body_file: string;
   grooming_comment_file: string;
-  priority?: GroomPriority;
+  priority: GroomPriority;
   blocked?: GroomBlocked;
 }
 
-export interface GroomOpenManifest {
+export interface GroomParentOpenManifest {
   parent: GroomParent;
   decomposition: {
-    kind: GroomDecompositionKind;
+    kind: 'none' | 'partial';
     children: GroomChildIssue[];
   };
 }
+
+export interface GroomFullOpenManifest {
+  decomposition: {
+    kind: 'full';
+    children: GroomChildIssue[];
+  };
+}
+
+export type GroomOpenManifest = GroomParentOpenManifest | GroomFullOpenManifest;
 
 export type GroomClosedOutcome =
   | { outcome: 'duplicate'; duplicate_of: number }
@@ -126,6 +135,12 @@ function nonEmptyString(value: unknown): string | undefined {
 
 function isClosedGroomManifest(manifest: GroomStageManifest): manifest is GroomClosedManifest {
   return 'closed' in manifest;
+}
+
+function isGroomParentOpenManifest(
+  manifest: GroomOpenManifest
+): manifest is GroomParentOpenManifest {
+  return manifest.decomposition.kind !== 'full';
 }
 
 function validateStringField(
@@ -270,19 +285,10 @@ function parseOpenManifest(
   data: Record<string, unknown>,
   errors: string[]
 ): GroomOpenManifest | undefined {
-  if (!isRecord(data.parent)) {
-    errors.push("'parent' must be an object");
-    return undefined;
-  }
   if (!isRecord(data.decomposition)) {
     errors.push("'decomposition' must be an object");
     return undefined;
   }
-
-  const title = validateStringField(data.parent, 'title', 'parent', errors, false);
-  const bodyFile = validateStringField(data.parent, 'body_file', 'parent', errors, false);
-  const parentPriority = validatePriority(data.parent.priority, 'parent.priority', errors);
-  const parentBlocked = validateBlocked(data.parent.blocked, 'parent.blocked', errors);
 
   const kindValue = data.decomposition.kind;
   if (
@@ -291,7 +297,9 @@ function parseOpenManifest(
   ) {
     errors.push("'decomposition.kind' must be one of: none, partial, full");
   }
-  const kind = kindValue as GroomDecompositionKind;
+  const kind = DECOMPOSITION_KINDS.has(kindValue as GroomDecompositionKind)
+    ? (kindValue as GroomDecompositionKind)
+    : undefined;
 
   if (!Array.isArray(data.decomposition.children)) {
     errors.push("'decomposition.children' must be an array");
@@ -308,25 +316,46 @@ function parseOpenManifest(
     const childTitle = validateStringField(child, 'title', label, errors);
     const childBody = validateStringField(child, 'body_file', label, errors);
     const childComment = validateStringField(child, 'grooming_comment_file', label, errors);
-    const childPriority =
-      child.priority === undefined
-        ? undefined
-        : validatePriority(child.priority, `${label}.priority`, errors);
+    const childPriority = validatePriority(child.priority, `${label}.priority`, errors);
     const childBlocked = validateBlocked(child.blocked, `${label}.blocked`, errors);
 
-    if (!childTitle || !childBody || !childComment) {
+    if (!childTitle || !childBody || !childComment || !childPriority) {
       return;
     }
     children.push({
       title: childTitle,
       body_file: childBody,
       grooming_comment_file: childComment,
-      ...(childPriority ? { priority: childPriority } : {}),
+      priority: childPriority,
       ...(childBlocked ? { blocked: childBlocked } : {}),
     });
   });
 
-  if (!parentPriority || !DECOMPOSITION_KINDS.has(kind)) {
+  if (!kind) {
+    return undefined;
+  }
+
+  if (kind === 'full') {
+    if (data.parent !== undefined) {
+      errors.push("'parent' is not allowed when decomposition.kind is full");
+      return undefined;
+    }
+    return {
+      decomposition: { kind, children },
+    };
+  }
+
+  if (!isRecord(data.parent)) {
+    errors.push("'parent' must be an object");
+    return undefined;
+  }
+
+  const title = validateStringField(data.parent, 'title', 'parent', errors, false);
+  const bodyFile = validateStringField(data.parent, 'body_file', 'parent', errors, false);
+  const parentPriority = validatePriority(data.parent.priority, 'parent.priority', errors);
+  const parentBlocked = validateBlocked(data.parent.blocked, 'parent.blocked', errors);
+
+  if (!parentPriority) {
     return undefined;
   }
 
@@ -434,16 +463,12 @@ async function validateLoadedFiles(
   manifest: GroomOpenManifest,
   errors: string[]
 ): Promise<LoadedGroomFiles> {
-  const parentBody = manifest.parent.body_file
-    ? await readOutputText(cwd, manifest.parent.body_file, 'parent body_file', errors)
+  const parent = isGroomParentOpenManifest(manifest) ? manifest.parent : undefined;
+  const parentBody = parent?.body_file
+    ? await readOutputText(cwd, parent.body_file, 'parent body_file', errors)
     : undefined;
-  const parentBlockedComment = manifest.parent.blocked
-    ? await readOutputText(
-        cwd,
-        manifest.parent.blocked.comment_file,
-        'parent blocked comment_file',
-        errors
-      )
+  const parentBlockedComment = parent?.blocked
+    ? await readOutputText(cwd, parent.blocked.comment_file, 'parent blocked comment_file', errors)
     : undefined;
 
   const children = await Promise.all(
@@ -502,7 +527,7 @@ async function validateLoadedFiles(
   });
 
   if (
-    manifest.parent.blocked?.depends_on_child_index !== undefined &&
+    parent?.blocked?.depends_on_child_index !== undefined &&
     parentBlockedComment &&
     !parentBlockedComment.text.includes('{{blocking_issue}}')
   ) {
@@ -529,6 +554,7 @@ async function validateLoadedFiles(
 
 function validateManifestState(manifest: GroomOpenManifest, errors: string[]): void {
   const { kind, children } = manifest.decomposition;
+  const parent = isGroomParentOpenManifest(manifest) ? manifest.parent : undefined;
 
   if (kind === 'none' && children.length > 0) {
     errors.push("'decomposition.children' must be empty when kind is none");
@@ -536,14 +562,11 @@ function validateManifestState(manifest: GroomOpenManifest, errors: string[]): v
   if ((kind === 'partial' || kind === 'full') && children.length === 0) {
     errors.push("'decomposition.children' must not be empty when kind is partial or full");
   }
-  if (kind === 'full' && manifest.parent.body_file) {
-    errors.push("'parent.body_file' must be omitted when decomposition.kind is full");
-  }
-  if ((kind === 'none' || kind === 'partial') && !manifest.parent.body_file) {
+  if (parent && !parent.body_file) {
     errors.push("'parent.body_file' is required when decomposition.kind is none or partial");
   }
 
-  const parentDependency = manifest.parent.blocked?.depends_on_child_index;
+  const parentDependency = parent?.blocked?.depends_on_child_index;
   if (parentDependency !== undefined && parentDependency >= children.length) {
     errors.push("'parent.blocked.depends_on_child_index' must point at an existing child");
   }
@@ -619,15 +642,14 @@ function parseIssueNumberFromUrl(url: string): number {
   return issueNumber;
 }
 
-function childLabels(child: GroomChildIssue, parentPriority: GroomPriority): string[] {
+function childLabels(child: GroomChildIssue): string[] {
   const labels = [GROOMED_LABEL];
   if (child.blocked) {
     labels.push(BLOCKED_LABEL);
   }
-  const priority = child.priority ?? parentPriority;
-  if (priority === 'high') {
+  if (child.priority === 'high') {
     labels.push(PRIORITY_HIGH_LABEL);
-  } else if (priority === 'low') {
+  } else if (child.priority === 'low') {
     labels.push(PRIORITY_LOW_LABEL);
   }
   return labels;
@@ -806,10 +828,12 @@ export async function processGroomResult(opts: {
     });
   }
 
-  if (manifest.decomposition.kind !== 'full') {
+  const parent = isGroomParentOpenManifest(manifest) ? manifest.parent : undefined;
+
+  if (parent) {
     const args = ['issue', 'edit', issueNumber, '-R', repo];
-    if (manifest.parent.title) {
-      args.push('--title', manifest.parent.title);
+    if (parent.title) {
+      args.push('--title', parent.title);
     }
     if (files.parentBody) {
       args.push('--body-file', files.parentBody.path);
@@ -824,7 +848,7 @@ export async function processGroomResult(opts: {
   );
 
   for (const [index, child] of manifest.decomposition.children.entries()) {
-    const labels = childLabels(child, manifest.parent.priority);
+    const labels = childLabels(child);
     const args = [
       'issue',
       'create',
@@ -914,8 +938,8 @@ export async function processGroomResult(opts: {
     );
   }
 
-  if (manifest.parent.blocked) {
-    const dependencyIndex = manifest.parent.blocked.depends_on_child_index;
+  if (parent?.blocked) {
+    const dependencyIndex = parent.blocked.depends_on_child_index;
     if (!files.parentBlockedComment) {
       skip('post parent blocked comment', 'blocked comment file failed validation');
     } else {
@@ -969,9 +993,9 @@ export async function processGroomResult(opts: {
     }
   } else if (hasFailed()) {
     skip('apply parent labels', 'one or more earlier post-flight operations failed');
-  } else {
+  } else if (parent) {
     await run('apply parent labels', () =>
-      gh(['issue', 'edit', issueNumber, '-R', repo, ...parentLabelArgs(manifest.parent)]).then(
+      gh(['issue', 'edit', issueNumber, '-R', repo, ...parentLabelArgs(parent)]).then(
         () => undefined
       )
     );

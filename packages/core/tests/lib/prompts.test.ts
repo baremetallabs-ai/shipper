@@ -134,6 +134,31 @@ describe('groom prompts', () => {
   );
 
   it.each(['claude', 'codex', 'copilot'])(
+    'documents full-replacement manifests and required child priority for %s',
+    (agent) => {
+      const prompt = readFileSync(
+        new URL(`../../src/prompts/${agent}/groom.md`, import.meta.url),
+        'utf-8'
+      );
+
+      expect(prompt).toContain('Full-replacement open grooming manifest');
+      expect(prompt).toContain('"kind": "full"');
+      expect(prompt).toContain('omit the entire `parent` key');
+      expect(prompt).toContain('Every child in every decomposition kind must include `priority`');
+      expect(prompt).toContain('"priority": "high"');
+      expect(prompt).toContain('"priority": "normal"');
+      expect(prompt).toContain('"priority": "low"');
+
+      const sectionStart = prompt.indexOf('Full-replacement open grooming manifest');
+      const sectionEnd = prompt.indexOf('Closed duplicate manifest', sectionStart);
+      expect(sectionStart).toBeGreaterThanOrEqual(0);
+      expect(sectionEnd).toBeGreaterThan(sectionStart);
+      const fullReplacementExample = prompt.slice(sectionStart, sectionEnd);
+      expect(fullReplacementExample).not.toContain('"parent"');
+    }
+  );
+
+  it.each(['claude', 'codex', 'copilot'])(
     'treats intake interpretation as tentative context for %s',
     (agent) => {
       const prompt = readFileSync(
