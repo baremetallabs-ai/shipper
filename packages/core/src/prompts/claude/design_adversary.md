@@ -147,23 +147,3 @@ The verdict is always `accept`. Adversarial review is a critique, not a stage ga
 Do not mutate GitHub directly. The orchestrator handles comments after you exit.
 
 The `.shipper/output/` directory is gitignored by design — the orchestrator reads output files directly from the filesystem, not from git. Do not modify `.shipper/.gitignore`.
-
----
-
-## Environment failure escape hatch
-
-`verdict: fail` is reserved for failures that block this stage's own work. The only sanctioned triggers are:
-
-- The agent cannot read the repository or the issue body it needs as input.
-- The agent cannot write output files under `.shipper/output/` (for example `comment-<number>.md` or `result.json`).
-
-Any other denial — including sandbox denials for commands the agent ran during exploration — does not trigger the escape hatch. Continue with the evidence already gathered.
-
-**When a sanctioned fail trigger fires:**
-
-1. Stop immediately. Do not retry.
-2. Write the failure report to `.shipper/output/comment-<number>.md`.
-3. Write `.shipper/output/result.json` with `"verdict": "fail"` and the comment path.
-4. Stop.
-
----

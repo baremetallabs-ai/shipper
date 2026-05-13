@@ -896,10 +896,12 @@ describe('adversarialInvoker', () => {
       'postComment',
       'scrubOutputDir',
       'exec:reset --hard origin/main',
+      'exec:clean -fd --exclude=.shipper',
       'runPrompt:design_adversary',
       'postComment',
       'scrubOutputDir',
       'exec:reset --hard origin/main',
+      'exec:clean -fd --exclude=.shipper',
       'runPrompt:design',
     ]);
     expect(runPromptMock).toHaveBeenCalledTimes(3);
@@ -920,7 +922,9 @@ describe('adversarialInvoker', () => {
       'runPrompt:design',
     ]);
     expect(postCommentMock).toHaveBeenCalledTimes(4);
-    expect(execAsyncMock).toHaveBeenCalledTimes(4);
+    // Each round resets twice (after designer comment, after adversary comment),
+    // and each reset runs both `git reset` and `git clean` → 4 resets × 2 commands = 8.
+    expect(execAsyncMock).toHaveBeenCalledTimes(8);
   });
 
   it('returns 0 without posting when round-1 designer rejects (scaffold processes the rejection)', async () => {

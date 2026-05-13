@@ -157,6 +157,17 @@ export function adversarialInvoker(args: {
           `Failed to reset worktree to ${resetTarget}: ${formatCommandFailure('git', ['reset', '--hard', resetTarget], result)}`
         );
       }
+      // Remove untracked files the previous round may have left behind. Excludes
+      // .shipper/ because scrubOutputDir already handled .shipper/output and other
+      // .shipper/ state (locks, etc.) is orchestrator-owned.
+      const cleanResult = await execAsync('git', ['clean', '-fd', '--exclude=.shipper'], {
+        cwd: wtPath,
+      });
+      if (cleanResult.code !== 0) {
+        throw new Error(
+          `Failed to clean untracked files: ${formatCommandFailure('git', ['clean', '-fd', '--exclude=.shipper'], cleanResult)}`
+        );
+      }
     };
 
     type IntermediateOutcome =
@@ -164,6 +175,9 @@ export function adversarialInvoker(args: {
       | { kind: 'reject' }
       | { kind: 'invalid' };
 
+    // Both inspect helpers validate against the 'design' stage schema because the
+    // adversary writes the same result.json shape (verdict + comment path); there is
+    // no separate `design_adversary` StageName.
     const inspectIntermediate = async (): Promise<IntermediateOutcome> => {
       try {
         const result = await validateStageOutput(wtPath, 'design');
