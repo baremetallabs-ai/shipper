@@ -25,6 +25,7 @@ function buildIssueList(
 describe('designCommand', () => {
   let fake: FakeCore;
   let promptCalls: Array<{ name: string; opts: RunPromptOpts }>;
+  let savedDesignAdversaryFlag: string | undefined;
 
   const stubDefaultBranch = (branch = 'main'): void => {
     fake.stubGh((args) => {
@@ -60,6 +61,8 @@ describe('designCommand', () => {
   };
 
   beforeEach(() => {
+    savedDesignAdversaryFlag = process.env[core.DESIGN_ADVERSARY_FLAG];
+    Reflect.deleteProperty(process.env, core.DESIGN_ADVERSARY_FLAG);
     fake = createFakeCore();
     fake.install();
     promptCalls = [];
@@ -68,6 +71,11 @@ describe('designCommand', () => {
   });
 
   afterEach(async () => {
+    if (savedDesignAdversaryFlag === undefined) {
+      Reflect.deleteProperty(process.env, core.DESIGN_ADVERSARY_FLAG);
+    } else {
+      process.env[core.DESIGN_ADVERSARY_FLAG] = savedDesignAdversaryFlag;
+    }
     process.exitCode = undefined;
     vi.restoreAllMocks();
     await fake.dispose();
