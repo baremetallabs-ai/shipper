@@ -39,8 +39,10 @@ If the agent discovers:
   `shipper plan`.
 - Oversized scope -> recommend splitting into additional issues created in `shipper:new`.
 
-User repositories hard-fail when `.shipper/settings.json` has a stale or missing `cliVersion`;
-rerun `shipper init` to refresh the runtime fingerprint. The
+User repositories warn and proceed when the installed CLI is newer than the recorded `cliVersion`
+only within the same major version. They hard-fail for missing or unreadable fingerprints, installed
+CLI downgrades, and major-version drift; rerun `shipper init` to refresh the runtime fingerprint.
+The
 [`SHIPPER_SKIP_VERSION_CHECK` runtime override](/reference/environment-variables/#runtime-overrides)
 is available as a temporary escape hatch, and `0.0.0-dev` on either side bypasses the runtime check
 for development builds. Inside this Shipper repository, the runtime check still downgrades stale or
