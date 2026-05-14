@@ -112,18 +112,20 @@ repository. If the install is legitimate but slow, raise `hookTimeoutMinutes` fo
 
 ### Symptom
 
-Shipper reports a version mismatch or refuses to run because the repository's recorded `cliVersion`
-does not match the CLI that is running now.
+Shipper warns or refuses to run because the repository's recorded `cliVersion` does not match the
+CLI that is running now.
 
 ### Cause
 
-`shipper init` records the Shipper CLI version in `.shipper/settings.json`. A stale or missing
-`cliVersion` means the repository configuration may not match the installed CLI.
+`shipper init` records the Shipper CLI version in `.shipper/settings.json`. If the installed CLI is
+newer only within the same major version, Shipper allows the command with a warning. Missing or
+unreadable fingerprints, installed CLI downgrades, and major-version drift are blocked because the
+repository may have been initialized against incompatible or newer Shipper behavior.
 
 ### Recovery
 
 Rerun `shipper init` from the repository root to refresh Shipper-managed files and the recorded
-`cliVersion`. Use the
+`cliVersion`. This also clears repeated same-major warnings by refreshing the fingerprint. Use the
 [`SHIPPER_SKIP_VERSION_CHECK` runtime override](/reference/environment-variables/#runtime-overrides)
 only as a temporary escape hatch when you must run before refreshing the repository configuration.
 
