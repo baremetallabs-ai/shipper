@@ -17,9 +17,6 @@ function parseComparableVersion(value: unknown): ComparableVersion | undefined {
   if (!match) return undefined;
 
   const [, majorText, minorText, patchText] = match;
-  if (majorText === undefined || minorText === undefined || patchText === undefined) {
-    return undefined;
-  }
 
   const major = Number(majorText);
   const minor = Number(minorText);

@@ -25,6 +25,7 @@ function buildIssueList(
 describe('designCommand', () => {
   let fake: FakeCore;
   let promptCalls: Array<{ name: string; opts: RunPromptOpts }>;
+  let hadDesignAdversaryFlag: boolean;
   let savedDesignAdversaryFlag: string | undefined;
 
   const stubDefaultBranch = (branch = 'main'): void => {
@@ -61,8 +62,9 @@ describe('designCommand', () => {
   };
 
   beforeEach(() => {
+    hadDesignAdversaryFlag = core.DESIGN_ADVERSARY_FLAG in process.env;
     savedDesignAdversaryFlag = process.env[core.DESIGN_ADVERSARY_FLAG];
-    Reflect.deleteProperty(process.env, core.DESIGN_ADVERSARY_FLAG);
+    delete process.env.SHIPPER_EXPERIMENTAL_DESIGN_ADVERSARY;
     fake = createFakeCore();
     fake.install();
     promptCalls = [];
@@ -71,8 +73,8 @@ describe('designCommand', () => {
   });
 
   afterEach(async () => {
-    if (savedDesignAdversaryFlag === undefined) {
-      Reflect.deleteProperty(process.env, core.DESIGN_ADVERSARY_FLAG);
+    if (!hadDesignAdversaryFlag) {
+      delete process.env.SHIPPER_EXPERIMENTAL_DESIGN_ADVERSARY;
     } else {
       process.env[core.DESIGN_ADVERSARY_FLAG] = savedDesignAdversaryFlag;
     }
