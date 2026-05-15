@@ -324,7 +324,6 @@ export function useRepos({
         setActiveRepo(nextActiveRepo);
         setAutoMergeRepos(new Set(nextAutoMergeRepos));
         backgroundBridgeRef.current?.clearAutoShipStateForRepo(repo);
-        pipelineBridgeRef.current?.clearStageCacheForRepo(repo);
 
         if (repo === activeRepo) {
           resetRepoState();

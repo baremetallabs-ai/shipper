@@ -8,7 +8,6 @@ import {
   type ListIssueItem,
 } from '@baremetallabs-ai/shipper-core';
 
-import { syncWorkflowStageCacheForRepo } from '../lib/app-utils.js';
 import { getShipperApi } from '../lib/shipper-api.js';
 import { PIPELINE_COLUMNS } from '../lib/constants.js';
 import type {
@@ -29,7 +28,6 @@ interface UseIssuePipelineOptions {
 
 export interface UseIssuePipelineResult {
   issues: PipelineIssue[];
-  stageCache: Map<string, string>;
   isLoading: boolean;
   fetchError: string | null;
   lastUpdated: Date | null;
@@ -57,7 +55,6 @@ export interface UseIssuePipelineResult {
   loadIssues: (repo: string) => Promise<IssueListResult | null>;
   refreshIssuesForActiveRepo: (repo: string) => Promise<void>;
   clearIssueState: () => void;
-  clearStageCacheForRepo: (repo: string) => void;
   getIssueByNumber: (issueNumber: number) => ListIssueItem | undefined;
   handleRefresh: () => Promise<void>;
   trackPausedIssue: (issueNumber: number) => void;
@@ -89,7 +86,6 @@ export function useIssuePipeline({
   pushToast,
 }: UseIssuePipelineOptions): UseIssuePipelineResult {
   const [issues, setIssues] = useState<PipelineIssue[]>([]);
-  const [stageCache, setStageCache] = useState<Map<string, string>>(new Map());
   const [isLoading, setIsLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [resetSelection, setResetSelection] = useState<ResetSelection | null>(null);
@@ -168,10 +164,6 @@ export function useIssuePipeline({
     setSettingPriorityIssues(new Set());
   }, []);
 
-  const clearStageCacheForRepo = useCallback((repo: string) => {
-    setStageCache((current) => syncWorkflowStageCacheForRepo(current, repo, []));
-  }, []);
-
   const getIssueByNumber = useCallback(
     (issueNumber: number) => issues.find((issue) => issue.number === issueNumber),
     [issues]
@@ -195,7 +187,6 @@ export function useIssuePipeline({
       }
 
       setIssues(result.issues);
-      setStageCache((current) => syncWorkflowStageCacheForRepo(current, repo, result.issues));
       setLastUpdated(new Date());
       return result;
     } catch (error) {
@@ -531,7 +522,7 @@ export function useIssuePipeline({
       trackUnblockIssue(issue.number);
 
       try {
-        await getShipperApi().spawnBackgroundUnblock(issue.number, activeRepo);
+        await getShipperApi().spawnBackgroundUnblock(issue.number, activeRepo, issue.title);
       } catch (error) {
         pushToast({
           id: `unblock-spawn-error-${issue.number}`,
@@ -556,7 +547,6 @@ export function useIssuePipeline({
 
   return {
     issues,
-    stageCache,
     isLoading,
     fetchError,
     lastUpdated,
@@ -581,7 +571,6 @@ export function useIssuePipeline({
     loadIssues,
     refreshIssuesForActiveRepo,
     clearIssueState,
-    clearStageCacheForRepo,
     getIssueByNumber,
     handleRefresh,
     trackPausedIssue,

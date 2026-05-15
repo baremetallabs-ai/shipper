@@ -15,7 +15,6 @@ function createPipelineBridge(): IssuePipelineBridge {
   return {
     loadIssues: vi.fn(() => Promise.resolve({ ok: true, issues: [] } satisfies IssueListResult)),
     clearIssueState: vi.fn(),
-    clearStageCacheForRepo: vi.fn(),
     setFetchError: vi.fn(),
     trackUnblockIssue: vi.fn(),
     clearUnblockIssue: vi.fn(),
@@ -218,7 +217,6 @@ describe('useRepos', () => {
     await result.current.handleCloseRepo('owner/next');
     await waitFor(() => {
       expect(backgroundBridge.clearAutoShipStateForRepo).toHaveBeenCalledWith('owner/next');
-      expect(pipelineBridge.clearStageCacheForRepo).toHaveBeenCalledWith('owner/next');
       expect(pipelineBridge.clearIssueState).not.toHaveBeenCalled();
     });
   });

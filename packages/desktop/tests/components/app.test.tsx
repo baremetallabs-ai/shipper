@@ -3,6 +3,7 @@
 import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { BLOCKED_LABEL, PLANNED_LABEL, READY_LABEL } from '@baremetallabs-ai/shipper-core';
 
 const state = vi.hoisted(() => ({
   reposState: {},
@@ -260,7 +261,6 @@ function resetMockState(): void {
     clearIssueState: vi.fn(),
     clearPausedIssue: vi.fn(),
     clearResetIssue: vi.fn(),
-    clearStageCacheForRepo: vi.fn(),
     clearUnblockIssue: vi.fn(),
     closeNotPlannedIssue: null,
     columnMap: new Map<string, unknown[]>(),
@@ -291,7 +291,6 @@ function resetMockState(): void {
     setIsNewIssueOpen: vi.fn(),
     setResetSelection: vi.fn(),
     settingPriorityIssues: new Set<number>(),
-    stageCache: new Map<string, unknown>(),
     trackPausedIssue: vi.fn(),
     trackResetIssue: vi.fn(),
     trackUnblockIssue: vi.fn(),
@@ -330,12 +329,24 @@ function createBackgroundShipCommand(
     repo: 'owner/repo',
     status: 'running',
     stateChangedAt: Date.parse('2026-04-03T12:00:00.000Z'),
-    title: 'Ship #42',
-    detail: 'Shipping #42...',
     output: '',
     cancelled: false,
     issueNumber: 42,
+    issueTitle: 'Carried issue title',
+    issueUrl: 'https://github.com/owner/repo/issues/42',
     ...overrides,
+  };
+}
+
+function createPipelineIssue(number: number, title: string, labels: string[]) {
+  return {
+    number,
+    title,
+    labels,
+    state: 'OPEN' as const,
+    author: 'octocat',
+    createdAt: '2026-04-03T00:00:00Z',
+    url: `https://github.com/owner/repo/issues/${number}`,
   };
 }
 
@@ -594,6 +605,9 @@ describe('App setup launch', () => {
       resolveShip = resolve;
     });
     state.spawnBackgroundShipMock.mockReturnValue(shipPromise);
+    vi.mocked(
+      state.pipelineState.getIssueByNumber as (issueNumber: number) => unknown
+    ).mockReturnValue(createPipelineIssue(42, 'Current issue title', [PLANNED_LABEL]));
 
     const { rerender } = render(<App />);
 
@@ -608,7 +622,13 @@ describe('App setup launch', () => {
     fireEvent.click(issue42Button);
 
     expect(state.spawnBackgroundShipMock).toHaveBeenCalledTimes(1);
-    expect(state.spawnBackgroundShipMock).toHaveBeenCalledWith(42, 'owner/repo', false);
+    expect(state.spawnBackgroundShipMock).toHaveBeenCalledWith(
+      42,
+      'owner/repo',
+      false,
+      undefined,
+      'Current issue title'
+    );
 
     await act(async () => {
       resolveShip?.({ sessionId: 'bg-ship-42' });
@@ -630,7 +650,7 @@ describe('App setup launch', () => {
     expect(screen.getByRole('button', { name: 'Ship issue 42' })).toHaveProperty('disabled', false);
   });
 
-  it('passes stateChangedAt into action queue commands for all background command kinds', () => {
+  it('passes stateChangedAt into Activity commands for all background command kinds', () => {
     const stateChangedAtById = new Map([
       ['bg-new', Date.parse('2026-04-03T12:00:00.000Z')],
       ['bg-ship', Date.parse('2026-04-03T12:01:00.000Z')],
@@ -643,27 +663,23 @@ describe('App setup launch', () => {
         createBackgroundShipCommand({
           id: 'bg-new',
           command: 'new',
-          title: 'New issue',
           issueNumber: undefined,
           stateChangedAt: stateChangedAtById.get('bg-new'),
         }),
         createBackgroundShipCommand({
           id: 'bg-ship',
           command: 'ship',
-          title: 'Ship #42',
           stateChangedAt: stateChangedAtById.get('bg-ship'),
         }),
         createBackgroundShipCommand({
           id: 'bg-init',
           command: 'init',
-          title: 'Init repo',
           issueNumber: undefined,
           stateChangedAt: stateChangedAtById.get('bg-init'),
         }),
         createBackgroundShipCommand({
           id: 'bg-unblock',
           command: 'unblock',
-          title: 'Unblock #43',
           issueNumber: 43,
           stateChangedAt: stateChangedAtById.get('bg-unblock'),
         }),
@@ -680,6 +696,86 @@ describe('App setup launch', () => {
     for (const command of commands ?? []) {
       expect(command.stateChangedAt).toBe(stateChangedAtById.get(command.id));
     }
+  });
+
+  it('maps current issue data into Activity drawer command props without stale cross-repo stage data', () => {
+    vi.mocked(
+      state.pipelineState.getIssueByNumber as (issueNumber: number) => unknown
+    ).mockImplementation((issueNumber) => {
+      if (issueNumber === 42) {
+        return createPipelineIssue(42, 'Current ready title', [READY_LABEL]);
+      }
+
+      if (issueNumber === 43) {
+        return createPipelineIssue(43, 'Blocked current title', [PLANNED_LABEL, BLOCKED_LABEL]);
+      }
+
+      return undefined;
+    });
+    state.backgroundState = {
+      ...state.backgroundState,
+      backgroundCommands: [
+        createBackgroundShipCommand({
+          id: 'active-ship',
+          status: 'complete',
+          issueNumber: 42,
+          issueTitle: 'Stale carried title',
+          prMerged: false,
+        }),
+        createBackgroundShipCommand({
+          id: 'active-unblock',
+          command: 'unblock',
+          status: 'complete',
+          issueNumber: 43,
+          issueTitle: 'Stale unblock title',
+        }),
+        createBackgroundShipCommand({
+          id: 'other-repo-ship',
+          repo: 'other/repo',
+          status: 'complete',
+          issueNumber: 44,
+          issueTitle: 'Other repo carried title',
+          issueUrl: 'https://github.com/other/repo/issues/44',
+        }),
+      ],
+    };
+
+    render(<App />);
+
+    const commands = state.actionQueueDrawerProps?.commands as
+      | Array<{
+          id: string;
+          issueTitle?: string;
+          workflowStage?: string;
+          stillBlocked?: boolean;
+          prMerged?: boolean;
+        }>
+      | undefined;
+    expect(commands).toContainEqual(
+      expect.objectContaining({
+        id: 'active-ship',
+        issueTitle: 'Current ready title',
+        workflowStage: 'Ready',
+        stillBlocked: false,
+        prMerged: false,
+      })
+    );
+    expect(commands).toContainEqual(
+      expect.objectContaining({
+        id: 'active-unblock',
+        issueTitle: 'Blocked current title',
+        workflowStage: 'Planned',
+        stillBlocked: true,
+      })
+    );
+    expect(commands).toContainEqual(
+      expect.objectContaining({
+        id: 'other-repo-ship',
+        issueTitle: 'Other repo carried title',
+        workflowStage: undefined,
+        stillBlocked: false,
+      })
+    );
   });
 
   it('does not clear pending Ship feedback for stale commands from the same issue', async () => {
@@ -742,6 +838,9 @@ describe('App setup launch', () => {
   it('prompts before shipping a paused issue and shows pending feedback only after confirm', async () => {
     state.pipelineState.pausedIssues = new Set<number>([42]);
     state.spawnBackgroundShipMock.mockReturnValue(new Promise(() => {}));
+    vi.mocked(
+      state.pipelineState.getIssueByNumber as (issueNumber: number) => unknown
+    ).mockReturnValue(createPipelineIssue(42, 'Paused current title', [PLANNED_LABEL]));
 
     render(<App />);
 
@@ -758,7 +857,13 @@ describe('App setup launch', () => {
     });
 
     expect(state.backgroundState.handleResumeIssue).toHaveBeenCalledWith(42, 'owner/repo');
-    expect(state.spawnBackgroundShipMock).toHaveBeenCalledWith(42, 'owner/repo', false);
+    expect(state.spawnBackgroundShipMock).toHaveBeenCalledWith(
+      42,
+      'owner/repo',
+      false,
+      undefined,
+      'Paused current title'
+    );
     expect(screen.getByRole('button', { name: 'Ship issue 42' })).toHaveProperty('disabled', true);
   });
 

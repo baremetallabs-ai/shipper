@@ -23,10 +23,13 @@ export interface ActionQueueItem {
   command: ActionQueueCommand;
   status: ActionQueueStatus;
   stateChangedAt: number;
-  title: string;
   repo: string;
-  detail?: string;
+  issueNumber?: number;
+  issueUrl?: string;
+  issueTitle?: string;
   workflowStage?: string;
+  stillBlocked?: boolean;
+  prMerged?: boolean;
   canCancel: boolean;
   canShowLogs: boolean;
   cancelled?: boolean;
@@ -89,13 +92,13 @@ function getStatusLabel(status: ActionQueueStatus, cancelled: boolean | undefine
 function getCommandLabel(command: ActionQueueCommand): string {
   switch (command) {
     case 'new':
-      return 'New';
+      return 'NEW';
     case 'ship':
-      return 'Ship';
+      return 'SHIP';
     case 'init':
-      return 'Init';
+      return 'INIT';
     case 'unblock':
-      return 'Unblock';
+      return 'UNBLOCK';
   }
 }
 
@@ -132,6 +135,39 @@ function formatAbsoluteStateChangeTime(stateChangedAt: number): string {
 
 function isActiveStatus(status: ActionQueueStatus): boolean {
   return status === 'queued' || status === 'running';
+}
+
+function getIssueHref(item: ActionQueueItem): string | undefined {
+  if (item.issueNumber === undefined) {
+    return undefined;
+  }
+
+  return item.issueUrl ?? `https://github.com/${item.repo}/issues/${item.issueNumber}`;
+}
+
+function getResolvedWorkflowStage(item: ActionQueueItem): string | undefined {
+  const workflowStage = item.workflowStage?.trim();
+  return workflowStage && workflowStage.length > 0 ? workflowStage : undefined;
+}
+
+function getStatusOrStageLabel(item: ActionQueueItem): string {
+  if (item.status !== 'complete') {
+    return getStatusLabel(item.status, item.cancelled);
+  }
+
+  if (item.command === 'new' || item.command === 'init') {
+    return 'Succeeded';
+  }
+
+  if (item.command === 'ship') {
+    return item.prMerged === true ? 'Succeeded' : (getResolvedWorkflowStage(item) ?? 'Succeeded');
+  }
+
+  return item.stillBlocked === true ? 'Blocked' : (getResolvedWorkflowStage(item) ?? 'Succeeded');
+}
+
+function getActionTargetLabel(item: ActionQueueItem): string {
+  return item.issueNumber ? `#${item.issueNumber}` : getCommandLabel(item.command).toLowerCase();
 }
 
 function StatusIcon({ status }: { status: ActionQueueStatus }): JSX.Element {
@@ -194,7 +230,7 @@ export function ActionQueueDrawer({
     [commandIndexById, commands]
   );
   const toggleAriaLabel =
-    activeCount > 0 ? `Open action queue (${activeCount} active)` : 'Open action queue';
+    activeCount > 0 ? `Open activity (${activeCount} active)` : 'Open activity';
 
   useEffect(() => {
     const panel = panelRef.current;
@@ -250,7 +286,7 @@ export function ActionQueueDrawer({
       >
         <div className="flex h-full min-w-[300px] flex-col bg-background">
           <div className="flex items-center justify-between border-b border-border px-3 py-2">
-            <h2 className="text-sm font-semibold">Action Queue</h2>
+            <h2 className="text-sm font-semibold">Activity</h2>
             {hasClearable ? (
               <Button
                 type="button"
@@ -265,7 +301,7 @@ export function ActionQueueDrawer({
           </div>
           <div className="flex-1 overflow-y-auto">
             {sortedCommands.length === 0 ? (
-              <div className="px-4 py-6 text-sm text-muted-foreground">No active actions</div>
+              <div className="px-4 py-6 text-sm text-muted-foreground">No activity yet</div>
             ) : (
               sortedCommands.map((item) => {
                 const referenceNow = isActiveStatus(item.status) ? now : terminalNow;
@@ -274,6 +310,9 @@ export function ActionQueueDrawer({
                   referenceNow
                 );
                 const absoluteTime = formatAbsoluteStateChangeTime(item.stateChangedAt);
+                const issueHref = getIssueHref(item);
+                const statusOrStageLabel = getStatusOrStageLabel(item);
+                const actionTargetLabel = getActionTargetLabel(item);
 
                 return (
                   <article
@@ -285,20 +324,38 @@ export function ActionQueueDrawer({
                     </div>
                     <div className="min-w-0 flex-1 space-y-2">
                       <div className="flex flex-wrap items-center gap-2">
-                        <p className="truncate text-sm font-medium text-foreground">{item.title}</p>
                         <Badge variant="outline" className="uppercase tracking-[0.12em]">
                           {getCommandLabel(item.command)}
                         </Badge>
+                        {item.issueNumber !== undefined && issueHref ? (
+                          <a
+                            href={issueHref}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-sm font-medium text-foreground underline-offset-2 hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                          >
+                            #{item.issueNumber}
+                          </a>
+                        ) : null}
                         <span aria-live="polite" aria-atomic="true">
                           <Badge variant={getStatusBadgeVariant(item.status)}>
-                            {getStatusLabel(item.status, item.cancelled)}
+                            {statusOrStageLabel}
                           </Badge>
                         </span>
+                      </div>
+                      {item.issueTitle ? (
+                        <p className="truncate text-sm font-medium text-foreground">
+                          {item.issueTitle}
+                        </p>
+                      ) : null}
+                      <div className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+                        <span className="truncate">{item.repo}</span>
+                        <span aria-hidden="true">·</span>
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <button
                               type="button"
-                              className="rounded-sm text-xs text-muted-foreground outline-none underline-offset-2 hover:text-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                              className="flex-shrink-0 rounded-sm outline-none underline-offset-2 hover:text-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
                               aria-label={`${relativeTime}; state changed ${absoluteTime}`}
                               title={absoluteTime}
                             >
@@ -309,16 +366,7 @@ export function ActionQueueDrawer({
                           </TooltipTrigger>
                           <TooltipContent>{absoluteTime}</TooltipContent>
                         </Tooltip>
-                        {item.workflowStage ? (
-                          <Badge variant="default" className="text-[10px]">
-                            {item.workflowStage}
-                          </Badge>
-                        ) : null}
                       </div>
-                      <p className="truncate text-xs text-muted-foreground">{item.repo}</p>
-                      {item.detail ? (
-                        <p className="truncate text-xs text-muted-foreground">{item.detail}</p>
-                      ) : null}
                       <div className="flex flex-wrap items-center gap-1">
                         {item.canShowLogs ? (
                           <Button
@@ -337,14 +385,15 @@ export function ActionQueueDrawer({
                           <Button
                             type="button"
                             variant="ghost"
-                            size="icon"
-                            className="size-7 text-muted-foreground hover:text-destructive"
-                            aria-label={`Stop ${item.title}`}
+                            size="sm"
+                            className="h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-destructive"
+                            aria-label={`Stop ${actionTargetLabel}`}
                             onClick={() => {
                               onCancel(item.id);
                             }}
                           >
-                            <Square className="size-3.5 fill-current" />
+                            <Square className="size-3.5 fill-current" aria-hidden="true" />
+                            Stop
                           </Button>
                         ) : null}
                         {item.status === 'failed' ||
@@ -353,14 +402,15 @@ export function ActionQueueDrawer({
                           <Button
                             type="button"
                             variant="ghost"
-                            size="icon"
-                            className="size-7 text-muted-foreground"
-                            aria-label={`Dismiss ${item.title}`}
+                            size="sm"
+                            className="h-7 gap-1 px-2 text-xs text-muted-foreground"
+                            aria-label={`Dismiss ${actionTargetLabel}`}
                             onClick={() => {
                               onDismiss(item.id);
                             }}
                           >
-                            <X className="size-3.5" />
+                            <X className="size-3.5" aria-hidden="true" />
+                            Dismiss
                           </Button>
                         ) : null}
                       </div>
@@ -377,7 +427,7 @@ export function ActionQueueDrawer({
         type="button"
         onClick={onToggle}
         className="relative flex w-5 flex-shrink-0 cursor-pointer items-center justify-center border-r border-border bg-background text-muted-foreground outline-none transition-[color,box-shadow] hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-        aria-label={open ? 'Close action queue' : toggleAriaLabel}
+        aria-label={open ? 'Close activity' : toggleAriaLabel}
       >
         {open ? (
           <ChevronLeft className="h-4 w-4" />

@@ -17,17 +17,13 @@ import {
 } from '@baremetallabs-ai/shipper-core';
 import {
   getActiveShipIssueNumbers,
-  getBackgroundDetail,
   getBackgroundRetryPayload,
-  getBackgroundTitle,
   getNextAutoShipFailureState,
   selectInitialAutoUnblockIssue,
-  getWorkflowStageCacheKey,
   getWorkflowStageDisplayName,
   selectNextAutoShipIssue,
   selectNextAutoUnblockIssue,
   sortBlockedIssuesByStagePriority,
-  syncWorkflowStageCacheForRepo,
 } from '../src/renderer/lib/app-utils.js';
 import type { BackgroundCommandState, TimelineLabelEvent } from '../src/renderer/types.js';
 
@@ -311,8 +307,6 @@ describe('getActiveShipIssueNumbers', () => {
         repo: 'owner/repo',
         status: 'queued',
         stateChangedAt,
-        title: 'Ship #51',
-        detail: 'Queued',
         output: '',
         issueNumber: 51,
         cancelled: false,
@@ -323,8 +317,6 @@ describe('getActiveShipIssueNumbers', () => {
         repo: 'owner/repo',
         status: 'running',
         stateChangedAt,
-        title: 'Ship #52',
-        detail: 'Running',
         output: '',
         issueNumber: 52,
         cancelled: false,
@@ -335,8 +327,6 @@ describe('getActiveShipIssueNumbers', () => {
         repo: 'owner/repo',
         status: 'complete',
         stateChangedAt,
-        title: 'Ship #53',
-        detail: 'Ship succeeded',
         output: '',
         issueNumber: 53,
         cancelled: false,
@@ -347,8 +337,6 @@ describe('getActiveShipIssueNumbers', () => {
         repo: 'owner/repo',
         status: 'failed',
         stateChangedAt,
-        title: 'Ship #54',
-        detail: 'Failed',
         output: '',
         issueNumber: 54,
         cancelled: false,
@@ -359,8 +347,6 @@ describe('getActiveShipIssueNumbers', () => {
         repo: 'owner/repo',
         status: 'running',
         stateChangedAt,
-        title: 'Ship #55',
-        detail: 'Cancelled',
         output: '',
         issueNumber: 55,
         cancelled: true,
@@ -371,8 +357,6 @@ describe('getActiveShipIssueNumbers', () => {
         repo: 'owner/other',
         status: 'queued',
         stateChangedAt,
-        title: 'Ship #56',
-        detail: 'Queued',
         output: '',
         issueNumber: 56,
         cancelled: false,
@@ -383,8 +367,6 @@ describe('getActiveShipIssueNumbers', () => {
         repo: 'owner/repo',
         status: 'running',
         stateChangedAt,
-        title: 'New issue',
-        detail: 'Running',
         output: '',
         cancelled: false,
       },
@@ -394,8 +376,6 @@ describe('getActiveShipIssueNumbers', () => {
         repo: 'owner/repo',
         status: 'running',
         stateChangedAt,
-        title: 'Unblock #57',
-        detail: 'Running',
         output: '',
         issueNumber: 57,
         cancelled: false,
@@ -406,184 +386,7 @@ describe('getActiveShipIssueNumbers', () => {
   });
 });
 
-describe('merge-aware background helpers', () => {
-  it('renders new and init titles', () => {
-    expect(getBackgroundTitle('new', 'owner/repo')).toBe('New issue');
-    expect(getBackgroundTitle('init', 'owner/repo')).toBe('Init owner/repo');
-  });
-
-  it('renders unblock titles and detail copy', () => {
-    expect(getBackgroundTitle('unblock', 'owner/repo', 70)).toBe('Unblock #70');
-    expect(
-      getBackgroundDetail({
-        command: 'unblock',
-        status: 'running',
-        repo: 'owner/repo',
-        issueNumber: 70,
-      })
-    ).toBe('Unblocking #70...');
-    expect(
-      getBackgroundDetail({
-        command: 'unblock',
-        status: 'complete',
-        repo: 'owner/repo',
-        issueNumber: 70,
-      })
-    ).toBe('Unblock succeeded');
-  });
-
-  it('returns cancelled detail before any other status-specific copy', () => {
-    expect(
-      getBackgroundDetail({
-        command: 'ship',
-        status: 'failed',
-        repo: 'owner/repo',
-        issueNumber: 70,
-        latestOutput: 'fatal: merge conflict',
-        cancelled: true,
-      })
-    ).toBe('Cancelled');
-  });
-
-  it('uses failure output when present and a default failure message otherwise', () => {
-    expect(
-      getBackgroundDetail({
-        command: 'ship',
-        status: 'failed',
-        repo: 'owner/repo',
-        issueNumber: 70,
-        latestOutput: 'fatal: merge conflict',
-      })
-    ).toBe('fatal: merge conflict');
-    expect(
-      getBackgroundDetail({
-        command: 'new',
-        status: 'failed',
-        repo: 'owner/repo',
-      })
-    ).toBe('Command failed');
-  });
-
-  it('uses retry detail copy only for auto-origin retriable ship failures', () => {
-    expect(
-      getBackgroundDetail({
-        command: 'ship',
-        status: 'failed',
-        repo: 'owner/repo',
-        issueNumber: 70,
-        latestOutput: 'fatal: merge conflict',
-        retriable: true,
-        origin: 'auto',
-        autoShipEnabled: true,
-      })
-    ).toBe('Will retry later in this session');
-    expect(
-      getBackgroundDetail({
-        command: 'ship',
-        status: 'failed',
-        repo: 'owner/repo',
-        issueNumber: 70,
-        latestOutput: 'fatal: merge conflict',
-        retriable: true,
-        origin: 'manual',
-      })
-    ).toBe('fatal: merge conflict');
-    expect(
-      getBackgroundDetail({
-        command: 'ship',
-        status: 'failed',
-        repo: 'owner/repo',
-        issueNumber: 70,
-        latestOutput: 'fatal: merge conflict',
-        retriable: true,
-        origin: 'auto',
-        autoShipEnabled: false,
-      })
-    ).toBe('fatal: merge conflict');
-    expect(
-      getBackgroundDetail({
-        command: 'ship',
-        status: 'failed',
-        repo: 'owner/repo',
-        issueNumber: 70,
-        latestOutput: 'fatal: merge conflict',
-        retriable: false,
-        origin: 'auto',
-      })
-    ).toBe('fatal: merge conflict');
-  });
-
-  it('uses pausing and paused detail copy for ship sessions', () => {
-    expect(
-      getBackgroundDetail({
-        command: 'ship',
-        status: 'running',
-        repo: 'owner/repo',
-        issueNumber: 70,
-        pausePending: true,
-      })
-    ).toBe('Pausing...');
-    expect(
-      getBackgroundDetail({
-        command: 'ship',
-        status: 'paused',
-        repo: 'owner/repo',
-        issueNumber: 70,
-      })
-    ).toBe('Paused at stage boundary');
-  });
-
-  it('adds the merge suffix to ship titles only when merge is enabled', () => {
-    expect(getBackgroundTitle('ship', 'owner/repo', 71, true)).toBe('Ship #71 · merge');
-    expect(getBackgroundTitle('ship', 'owner/repo', 71, false)).toBe('Ship #71');
-  });
-
-  it('distinguishes merge-enabled succeeded ships in the detail copy', () => {
-    expect(
-      getBackgroundDetail({
-        command: 'ship',
-        status: 'complete',
-        repo: 'owner/repo',
-        issueNumber: 72,
-        merge: true,
-      })
-    ).toBe('Ship succeeded · merged');
-    expect(
-      getBackgroundDetail({
-        command: 'ship',
-        status: 'complete',
-        repo: 'owner/repo',
-        issueNumber: 72,
-        merge: false,
-      })
-    ).toBe('Ship succeeded');
-  });
-
-  it('uses the existing non-merge default detail copy for new, ship, and init commands', () => {
-    expect(
-      getBackgroundDetail({
-        command: 'new',
-        status: 'running',
-        repo: 'owner/repo',
-      })
-    ).toBe('Creating issue...');
-    expect(
-      getBackgroundDetail({
-        command: 'ship',
-        status: 'running',
-        repo: 'owner/repo',
-        issueNumber: 72,
-      })
-    ).toBe('Shipping #72...');
-    expect(
-      getBackgroundDetail({
-        command: 'init',
-        status: 'running',
-        repo: 'owner/repo',
-      })
-    ).toBe('Initializing owner/repo...');
-  });
-
+describe('background retry helpers', () => {
   it('builds new and init retry payloads', () => {
     expect(getBackgroundRetryPayload('new', 'owner/repo', 'Investigate flaky tests')).toEqual({
       command: 'new',
@@ -596,12 +399,16 @@ describe('merge-aware background helpers', () => {
     });
   });
 
-  it('preserves merge mode in ship retry payloads', () => {
-    expect(getBackgroundRetryPayload('ship', 'owner/repo', undefined, 73, true)).toEqual({
+  it('preserves merge mode and issue title in ship retry payloads', () => {
+    expect(
+      getBackgroundRetryPayload('ship', 'owner/repo', undefined, 73, true, 'auto', 'Ship title')
+    ).toEqual({
       command: 'ship',
       repo: 'owner/repo',
       issueNumber: 73,
       merge: true,
+      origin: 'auto',
+      issueTitle: 'Ship title',
     });
     expect(getBackgroundRetryPayload('ship', 'owner/repo', undefined, 74, false)).toEqual({
       command: 'ship',
@@ -611,11 +418,22 @@ describe('merge-aware background helpers', () => {
     });
   });
 
-  it('builds unblock retry payloads from the issue number', () => {
-    expect(getBackgroundRetryPayload('unblock', 'owner/repo', undefined, 75)).toEqual({
+  it('builds unblock retry payloads from the issue number and title', () => {
+    expect(
+      getBackgroundRetryPayload(
+        'unblock',
+        'owner/repo',
+        undefined,
+        75,
+        undefined,
+        undefined,
+        'Unblock title'
+      )
+    ).toEqual({
       command: 'unblock',
       repo: 'owner/repo',
       issueNumber: 75,
+      issueTitle: 'Unblock title',
     });
   });
 
@@ -822,66 +640,5 @@ describe('getWorkflowStageDisplayName', () => {
 
   it('returns undefined when labels contain no workflow stage', () => {
     expect(getWorkflowStageDisplayName([FAILED_LABEL, LOCKED_LABEL])).toBeUndefined();
-  });
-});
-
-describe('workflow stage cache helpers', () => {
-  it('uses the same repo and issue number key format for cache reads and writes', () => {
-    expect(getWorkflowStageCacheKey('owner/repo', 42)).toBe('owner/repo:42');
-  });
-
-  it('refreshes one repo cache without disturbing another repo', () => {
-    const current = new Map<string, string>([
-      [getWorkflowStageCacheKey('owner/repo-a', 11), 'Groomed'],
-      [getWorkflowStageCacheKey('owner/repo-a', 12), 'Planned'],
-      [getWorkflowStageCacheKey('owner/repo-b', 21), 'Designed'],
-    ]);
-
-    const next = syncWorkflowStageCacheForRepo(current, 'owner/repo-a', [
-      createIssue(12, [DESIGNED_LABEL]),
-      createIssue(13, [PLANNED_LABEL]),
-    ]);
-
-    expect(next).toEqual(
-      new Map<string, string>([
-        [getWorkflowStageCacheKey('owner/repo-a', 12), 'Designed'],
-        [getWorkflowStageCacheKey('owner/repo-a', 13), 'Planned'],
-        [getWorkflowStageCacheKey('owner/repo-b', 21), 'Designed'],
-      ])
-    );
-  });
-
-  it('removes stale repo entries when refreshed issues disappear or no longer have a workflow stage', () => {
-    const current = new Map<string, string>([
-      [getWorkflowStageCacheKey('owner/repo-a', 11), 'Groomed'],
-      [getWorkflowStageCacheKey('owner/repo-a', 12), 'Planned'],
-      [getWorkflowStageCacheKey('owner/repo-b', 21), 'Designed'],
-    ]);
-
-    const next = syncWorkflowStageCacheForRepo(current, 'owner/repo-a', [
-      createIssue(12, [FAILED_LABEL]),
-      createIssue(14, [GROOMED_LABEL]),
-    ]);
-
-    expect(next).toEqual(
-      new Map<string, string>([
-        [getWorkflowStageCacheKey('owner/repo-a', 14), 'Groomed'],
-        [getWorkflowStageCacheKey('owner/repo-b', 21), 'Designed'],
-      ])
-    );
-  });
-
-  it('clears all cached workflow stages for a repo when it is removed', () => {
-    const current = new Map<string, string>([
-      [getWorkflowStageCacheKey('owner/repo-a', 11), 'Groomed'],
-      [getWorkflowStageCacheKey('owner/repo-a', 12), 'Planned'],
-      [getWorkflowStageCacheKey('owner/repo-b', 21), 'Designed'],
-    ]);
-
-    const next = syncWorkflowStageCacheForRepo(current, 'owner/repo-a', []);
-
-    expect(next).toEqual(
-      new Map<string, string>([[getWorkflowStageCacheKey('owner/repo-b', 21), 'Designed']])
-    );
   });
 });

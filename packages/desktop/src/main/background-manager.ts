@@ -18,7 +18,9 @@ type HaltReason = 'user-pause' | 'auto-ship-off';
 
 export interface BackgroundSessionMeta {
   issueNumber?: number;
+  issueTitle?: string;
   merge?: boolean;
+  prMerged?: boolean;
   issueUrl?: string;
   logFile?: string;
   request?: string;

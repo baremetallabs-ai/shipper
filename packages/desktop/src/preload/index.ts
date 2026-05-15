@@ -34,7 +34,9 @@ type BackgroundStatus = 'queued' | 'running' | 'complete' | 'failed' | 'paused';
 
 interface BackgroundStatusMeta {
   issueNumber?: number;
+  issueTitle?: string;
   merge?: boolean;
+  prMerged?: boolean;
   issueUrl?: string;
   logFile?: string;
   request?: string;
@@ -101,11 +103,12 @@ const shipperAPI = {
     issueNumber: number,
     repo: string,
     merge: boolean,
-    origin?: 'auto' | 'manual'
-  ) => ipcRenderer.invoke('bg-spawn-ship', { issueNumber, repo, merge, origin }),
+    origin?: 'auto' | 'manual',
+    issueTitle?: string
+  ) => ipcRenderer.invoke('bg-spawn-ship', { issueNumber, repo, merge, origin, issueTitle }),
   spawnBackgroundInit: (repo: string) => ipcRenderer.invoke('bg-spawn-init', { repo }),
-  spawnBackgroundUnblock: (issueNumber: number, repo: string) =>
-    ipcRenderer.invoke('bg-spawn-unblock', { issueNumber, repo }),
+  spawnBackgroundUnblock: (issueNumber: number, repo: string, issueTitle?: string) =>
+    ipcRenderer.invoke('bg-spawn-unblock', { issueNumber, repo, issueTitle }),
   killBackground: (sessionId: string) => ipcRenderer.invoke('bg-kill', { sessionId }),
   requestPauseActive: (sessionId: string) => ipcRenderer.invoke('bg-request-pause', { sessionId }),
   requestAutoShipHalt: (repo: string) => ipcRenderer.invoke('bg-request-auto-ship-halt', { repo }),

@@ -359,6 +359,19 @@ function parseBackgroundSpawnCall(index = 0): Record<string, unknown> {
   return call;
 }
 
+function getBackgroundOnComplete(
+  spawnCall: Record<string, unknown>
+): (session: { spawnedAt: number | null; meta: Record<string, unknown> }) => Promise<unknown> {
+  if (typeof spawnCall.onComplete !== 'function') {
+    throw new Error('Expected background spawn call to include onComplete.');
+  }
+
+  return spawnCall.onComplete as (session: {
+    spawnedAt: number | null;
+    meta: Record<string, unknown>;
+  }) => Promise<unknown>;
+}
+
 function getPtySpawnCwds(): unknown[] {
   return (state.ptySpawnMock.mock.calls as unknown[][]).map((call) => {
     const options = call[3];
@@ -516,6 +529,27 @@ describe('desktop IPC locking', () => {
     expect(meta.request).toBe('draft issue');
     expect(meta.logFile).toContain('/.shipper/sessions/owner-repo/desktop-');
     expect(typeof spawnCall.onComplete).toBe('function');
+    state.ghMock.mockResolvedValueOnce({
+      stdout: JSON.stringify([
+        {
+          number: 43,
+          title: 'Created activity title',
+          url: 'https://github.com/owner/repo/issues/43',
+          createdAt: '2026-01-01T00:00:01.000Z',
+        },
+      ]),
+      stderr: '',
+    });
+    await expect(
+      getBackgroundOnComplete(spawnCall)({
+        spawnedAt: Date.parse('2026-01-01T00:00:00.000Z'),
+        meta: {},
+      })
+    ).resolves.toEqual({
+      issueNumber: 43,
+      issueUrl: 'https://github.com/owner/repo/issues/43',
+      issueTitle: 'Created activity title',
+    });
     expect(state.ptySpawnMock).not.toHaveBeenCalled();
   }, 10_000);
 
@@ -524,7 +558,15 @@ describe('desktop IPC locking', () => {
     const handler = getHandler('bg-spawn-ship');
 
     const result = parseSessionResult(
-      await handler({}, { repo: 'owner/repo', issueNumber: 42, merge: true })
+      await handler(
+        {},
+        {
+          repo: 'owner/repo',
+          issueNumber: 42,
+          merge: true,
+          issueTitle: 'Ship activity title',
+        }
+      )
     );
     const spawnCall = parseBackgroundSpawnCall();
 
@@ -535,7 +577,12 @@ describe('desktop IPC locking', () => {
     expect(spawnCall.commandName).toBe('shipper');
     expect(spawnCall.cwd).toBe('/tmp/repo');
     expect(spawnCall.args).toEqual(['ship', '42', '--mode', 'headless', '--merge']);
-    expect(spawnCall.meta).toEqual({ issueNumber: 42, merge: true });
+    expect(spawnCall.meta).toEqual({
+      issueNumber: 42,
+      merge: true,
+      issueTitle: 'Ship activity title',
+    });
+    expect(typeof spawnCall.onComplete).toBe('function');
     expect(state.ptySpawnMock).not.toHaveBeenCalled();
   });
 
@@ -554,6 +601,7 @@ describe('desktop IPC locking', () => {
     expect(spawnCall.cwd).toBe('/tmp/repo');
     expect(spawnCall.args).toEqual(['ship', '42', '--mode', 'headless']);
     expect(spawnCall.meta).toEqual({ issueNumber: 42, merge: false });
+    expect(typeof spawnCall.onComplete).toBe('function');
     expect(state.ptySpawnMock).not.toHaveBeenCalled();
   });
 
@@ -573,15 +621,84 @@ describe('desktop IPC locking', () => {
     expect(spawnCall.commandName).toBe('shipper');
     expect(spawnCall.cwd).toBe('/tmp/repo');
     expect(spawnCall.args).toEqual(['ship', '42', '--mode', 'headless']);
-    expect(spawnCall.meta).toEqual({ issueNumber: 42, merge: false, origin: undefined });
+    expect(spawnCall.meta).toEqual({ issueNumber: 42, merge: false });
     expect(state.ptySpawnMock).not.toHaveBeenCalled();
+  });
+
+  it('marks completed merge-requested ships as merged only when the matching PR is merged', async () => {
+    await loadHandlers();
+    const handler = getHandler('bg-spawn-ship');
+
+    await handler({}, { repo: 'owner/repo', issueNumber: 42, merge: true });
+    const spawnCall = parseBackgroundSpawnCall();
+
+    state.ghMock.mockResolvedValueOnce({
+      stdout: JSON.stringify([
+        {
+          number: 9,
+          headRefName: 'shipper/42-activity',
+          state: 'MERGED',
+          mergedAt: null,
+        },
+      ]),
+      stderr: '',
+    });
+
+    await expect(
+      getBackgroundOnComplete(spawnCall)({
+        spawnedAt: Date.now(),
+        meta: { autoShipHalted: false },
+      })
+    ).resolves.toEqual({ prMerged: true });
+    expect(state.ghMock).toHaveBeenCalledWith([
+      'pr',
+      'list',
+      '-R',
+      'owner/repo',
+      '--state',
+      'all',
+      '--json',
+      'number,headRefName,state,mergedAt',
+      '--limit',
+      '100',
+    ]);
+  });
+
+  it('does not mark completed ships as merged when the PR is open or lookup fails', async () => {
+    await loadHandlers();
+    const handler = getHandler('bg-spawn-ship');
+
+    await handler({}, { repo: 'owner/repo', issueNumber: 42, merge: true });
+    const spawnCall = parseBackgroundSpawnCall();
+    const onComplete = getBackgroundOnComplete(spawnCall);
+
+    state.ghMock.mockResolvedValueOnce({
+      stdout: JSON.stringify([
+        {
+          number: 9,
+          headRefName: 'shipper/42',
+          state: 'OPEN',
+          mergedAt: null,
+        },
+      ]),
+      stderr: '',
+    });
+    await expect(onComplete({ spawnedAt: Date.now(), meta: {} })).resolves.toEqual({});
+
+    state.ghMock.mockRejectedValueOnce(new Error('gh failed'));
+    await expect(onComplete({ spawnedAt: Date.now(), meta: {} })).resolves.toEqual({});
   });
 
   it('spawns `unblock` through the background manager in headless mode', async () => {
     await loadHandlers();
     const handler = getHandler('bg-spawn-unblock');
 
-    const result = parseSessionResult(await handler({}, { repo: 'owner/repo', issueNumber: 42 }));
+    const result = parseSessionResult(
+      await handler(
+        {},
+        { repo: 'owner/repo', issueNumber: 42, issueTitle: 'Blocked activity title' }
+      )
+    );
     const spawnCall = parseBackgroundSpawnCall();
 
     expect(result.sessionId).toEqual(expect.any(String));
@@ -591,7 +708,7 @@ describe('desktop IPC locking', () => {
     expect(spawnCall.commandName).toBe('shipper');
     expect(spawnCall.cwd).toBe('/tmp/repo');
     expect(spawnCall.args).toEqual(['unblock', '42', '--mode', 'headless']);
-    expect(spawnCall.meta).toEqual({ issueNumber: 42 });
+    expect(spawnCall.meta).toEqual({ issueNumber: 42, issueTitle: 'Blocked activity title' });
     expect(state.ptySpawnMock).not.toHaveBeenCalled();
   });
 

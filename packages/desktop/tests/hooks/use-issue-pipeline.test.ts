@@ -203,6 +203,7 @@ describe('useIssuePipeline', () => {
       await result.current.handleUnblockClick(createIssue(9, [PLANNED_LABEL, BLOCKED_LABEL]));
     });
 
+    expect(shipper.api.spawnBackgroundUnblock).toHaveBeenCalledWith(9, 'owner/repo', 'Issue 9');
     expect(result.current.unblockingIssues.has(9)).toBe(false);
     expect(pushToast).toHaveBeenCalledWith(
       expect.objectContaining({

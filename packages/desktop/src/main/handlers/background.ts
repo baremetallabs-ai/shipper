@@ -6,7 +6,7 @@ import { app, ipcMain } from 'electron';
 import { ensureRepoClone, gh, isPlainObject, toErrorMessage } from '@baremetallabs-ai/shipper-core';
 
 import type { BackgroundManager } from '../background-manager.js';
-import { isPositiveInteger, parseAdoptIssuePayload, parseRepo } from './shared.js';
+import { isPositiveInteger, parseRepo } from './shared.js';
 
 interface SpawnBackgroundCommandPayload {
   repo: string;
@@ -20,6 +20,12 @@ interface SpawnBackgroundShipPayload extends SpawnBackgroundCommandPayload {
   issueNumber: number;
   merge: boolean;
   origin?: 'auto' | 'manual';
+  issueTitle?: string;
+}
+
+interface SpawnBackgroundUnblockPayload extends SpawnBackgroundCommandPayload {
+  issueNumber: number;
+  issueTitle?: string;
 }
 
 interface SessionIdPayload {
@@ -31,6 +37,22 @@ interface RawCreatedIssueData {
   title: string;
   url: string;
   createdAt: string;
+}
+
+interface RawPullRequestData {
+  number: number;
+  headRefName: string;
+  state: string;
+  mergedAt: string | null;
+}
+
+function parseIssueTitle(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 function parseSpawnBackgroundCommandPayload(value: unknown): SpawnBackgroundCommandPayload | null {
@@ -88,6 +110,24 @@ function parseSpawnBackgroundShipPayload(value: unknown): SpawnBackgroundShipPay
     issueNumber: value.issueNumber,
     merge: 'merge' in value && typeof value.merge === 'boolean' ? value.merge : false,
     origin: parsedOrigin,
+    issueTitle: 'issueTitle' in value ? parseIssueTitle(value.issueTitle) : undefined,
+  };
+}
+
+function parseSpawnBackgroundUnblockPayload(value: unknown): SpawnBackgroundUnblockPayload | null {
+  if (typeof value !== 'object' || value === null || !('issueNumber' in value)) {
+    return null;
+  }
+
+  const payload = parseSpawnBackgroundCommandPayload(value);
+  if (payload === null || !isPositiveInteger(value.issueNumber)) {
+    return null;
+  }
+
+  return {
+    ...payload,
+    issueNumber: value.issueNumber,
+    issueTitle: 'issueTitle' in value ? parseIssueTitle(value.issueTitle) : undefined,
   };
 }
 
@@ -188,10 +228,41 @@ function parseCreatedIssueList(repo: string, json: string): RawCreatedIssueData[
   }
 }
 
+function parsePullRequestList(repo: string, json: string): RawPullRequestData[] {
+  try {
+    const parsed = JSON.parse(json) as unknown;
+    if (!Array.isArray(parsed)) {
+      throw new Error('GitHub CLI returned an invalid pull request list.');
+    }
+
+    return parsed.map((entry) => {
+      if (
+        !isPlainObject(entry) ||
+        typeof entry.number !== 'number' ||
+        typeof entry.headRefName !== 'string' ||
+        typeof entry.state !== 'string' ||
+        (entry.mergedAt !== null && typeof entry.mergedAt !== 'string')
+      ) {
+        throw new Error('GitHub CLI returned an invalid pull request payload.');
+      }
+
+      return {
+        number: entry.number,
+        headRefName: entry.headRefName,
+        state: entry.state,
+        mergedAt: entry.mergedAt,
+      };
+    });
+  } catch (error) {
+    const message = toErrorMessage(error);
+    throw new Error(`Failed to parse pull request metadata for ${repo}: ${message}`);
+  }
+}
+
 async function resolveCreatedIssueMeta(
   repo: string,
   spawnedAt: number | null
-): Promise<{ issueNumber?: number; issueUrl?: string }> {
+): Promise<{ issueNumber?: number; issueUrl?: string; issueTitle?: string }> {
   if (spawnedAt === null) {
     return {};
   }
@@ -217,9 +288,53 @@ async function resolveCreatedIssueMeta(
       .filter((issue) => issue.createdAt >= spawnedAtIso)
       .sort((left, right) => right.number - left.number)[0];
 
-    return match ? { issueNumber: match.number, issueUrl: match.url } : {};
+    return match ? { issueNumber: match.number, issueUrl: match.url, issueTitle: match.title } : {};
   } catch {
     console.warn(`[shipper] Failed to find matching created issue for ${repo}`);
+    return {};
+  }
+}
+
+async function resolveCompletedShipMeta(
+  repo: string,
+  issueNumber: number | undefined,
+  merge: boolean | undefined,
+  autoShipHalted: boolean | undefined
+): Promise<{ prMerged?: boolean }> {
+  if (merge !== true || issueNumber === undefined || autoShipHalted === true) {
+    return {};
+  }
+
+  try {
+    const result = await gh([
+      'pr',
+      'list',
+      '-R',
+      repo,
+      '--state',
+      'all',
+      '--json',
+      'number,headRefName,state,mergedAt',
+      '--limit',
+      '100',
+    ]);
+    const pullRequests = parsePullRequestList(repo, result.stdout);
+    const branchPrefix = `shipper/${issueNumber}-`;
+    const match = pullRequests.find(
+      (pr) => pr.headRefName === `shipper/${issueNumber}` || pr.headRefName.startsWith(branchPrefix)
+    );
+
+    if (!match) {
+      console.warn(`[shipper] Failed to find matching shipped PR for ${repo}#${issueNumber}`);
+      return {};
+    }
+
+    return match.state === 'MERGED' || match.mergedAt !== null ? { prMerged: true } : {};
+  } catch (error) {
+    const message = toErrorMessage(error);
+    console.warn(
+      `[shipper] Failed to resolve PR merge state for ${repo}#${issueNumber}: ${message}`
+    );
     return {};
   }
 }
@@ -274,8 +389,16 @@ export function registerBackgroundHandlers(backgroundManager: BackgroundManager)
       meta: {
         issueNumber: parsedPayload.issueNumber,
         merge: parsedPayload.merge,
-        origin: parsedPayload.origin,
+        ...(parsedPayload.origin ? { origin: parsedPayload.origin } : {}),
+        ...(parsedPayload.issueTitle ? { issueTitle: parsedPayload.issueTitle } : {}),
       },
+      onComplete: async (session) =>
+        resolveCompletedShipMeta(
+          parsedPayload.repo,
+          parsedPayload.issueNumber,
+          parsedPayload.merge,
+          session.meta.autoShipHalted
+        ),
     });
   });
 
@@ -300,7 +423,7 @@ export function registerBackgroundHandlers(backgroundManager: BackgroundManager)
   });
 
   ipcMain.handle('bg-spawn-unblock', async (_event, payload: unknown) => {
-    const parsedPayload = parseAdoptIssuePayload(payload);
+    const parsedPayload = parseSpawnBackgroundUnblockPayload(payload);
     if (parsedPayload === null) {
       throw new Error('Invalid bg-spawn-unblock payload.');
     }
@@ -315,7 +438,10 @@ export function registerBackgroundHandlers(backgroundManager: BackgroundManager)
       commandName: 'shipper',
       args: ['unblock', String(parsedPayload.issueNumber), '--mode', 'headless'],
       cwd: repoPath,
-      meta: { issueNumber: parsedPayload.issueNumber },
+      meta: {
+        issueNumber: parsedPayload.issueNumber,
+        ...(parsedPayload.issueTitle ? { issueTitle: parsedPayload.issueTitle } : {}),
+      },
     });
   });
 

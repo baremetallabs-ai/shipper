@@ -36,7 +36,6 @@ function createPipelineBridge(): IssuePipelineBridge {
   return {
     loadIssues: vi.fn(() => Promise.resolve({ ok: true, issues: [] } satisfies IssueListResult)),
     clearIssueState: vi.fn(),
-    clearStageCacheForRepo: vi.fn(),
     setFetchError: vi.fn(),
     getIssueByNumber: vi.fn(),
     getPausedIssues: vi.fn(() => new Set<number>()),
@@ -76,7 +75,7 @@ describe('useBackgroundCommands', () => {
       command: 'ship',
       repo: 'owner/repo',
       status: 'complete',
-      meta: { issueNumber: 11, merge: false },
+      meta: { issueNumber: 11, merge: false, issueTitle: 'Ship activity title' },
     });
     shipper.emitBackgroundOutput({ sessionId: 'ship-1', data: 'progress\n' });
     await flushHookEffects();
@@ -88,6 +87,7 @@ describe('useBackgroundCommands', () => {
           id: 'ship-1',
           status: 'complete',
           output: 'progress\n',
+          issueTitle: 'Ship activity title',
         })
       );
       expect(result.current.toasts).toContainEqual(
@@ -109,7 +109,45 @@ describe('useBackgroundCommands', () => {
     });
   });
 
-  it('shows succeeded copy for merge-enabled ship success toasts', async () => {
+  it('retains structured issue metadata when later status events omit it', async () => {
+    const shipper = createMockShipperApi();
+    shipper.install();
+    const { result } = renderHook(() =>
+      useBackgroundCommands({
+        activeRepo: 'owner/repo',
+        autoMergeRepos: new Set(),
+        checkInitState: vi.fn(() => Promise.resolve(undefined)),
+        pipelineBridgeRef: { current: createPipelineBridge() },
+      })
+    );
+    await flushHookEffects();
+
+    shipper.emitBackgroundStatus({
+      sessionId: 'ship-retain-title',
+      command: 'ship',
+      repo: 'owner/repo',
+      status: 'running',
+      meta: { issueNumber: 12, merge: true, issueTitle: 'Retained title', prMerged: true },
+    });
+    await flushHookEffects();
+    shipper.emitBackgroundStatus({
+      sessionId: 'ship-retain-title',
+      command: 'ship',
+      repo: 'owner/repo',
+      status: 'complete',
+      meta: { issueNumber: 12, merge: true, prMerged: true },
+    });
+    await flushHookEffects();
+
+    expect(result.current.backgroundCommands[0]).toEqual(
+      expect.objectContaining({
+        issueTitle: 'Retained title',
+        prMerged: true,
+      })
+    );
+  });
+
+  it('shows merged copy only when completed ship metadata confirms the PR merged', async () => {
     const shipper = createMockShipperApi();
     shipper.install();
     const { result } = renderHook(() =>
@@ -127,7 +165,7 @@ describe('useBackgroundCommands', () => {
       command: 'ship',
       repo: 'owner/repo',
       status: 'complete',
-      meta: { issueNumber: 12, merge: true },
+      meta: { issueNumber: 12, merge: true, prMerged: true },
     });
     await flushHookEffects();
 
@@ -138,6 +176,40 @@ describe('useBackgroundCommands', () => {
           variant: 'success',
           title: 'Ship #12 succeeded · merged',
           description: 'The background ship command succeeded and merged.',
+        })
+      );
+    });
+  });
+
+  it('does not claim a verified merge when completed ship metadata lacks prMerged', async () => {
+    const shipper = createMockShipperApi();
+    shipper.install();
+    const { result } = renderHook(() =>
+      useBackgroundCommands({
+        activeRepo: 'owner/repo',
+        autoMergeRepos: new Set(),
+        checkInitState: vi.fn(() => Promise.resolve(undefined)),
+        pipelineBridgeRef: { current: createPipelineBridge() },
+      })
+    );
+    await flushHookEffects();
+
+    shipper.emitBackgroundStatus({
+      sessionId: 'ship-merge-unverified',
+      command: 'ship',
+      repo: 'owner/repo',
+      status: 'complete',
+      meta: { issueNumber: 13, merge: true },
+    });
+    await flushHookEffects();
+
+    await waitFor(() => {
+      expect(result.current.toasts).toContainEqual(
+        expect.objectContaining({
+          sessionId: 'ship-merge-unverified',
+          variant: 'success',
+          title: 'Ship #13 succeeded',
+          description: 'The background ship command succeeded.',
         })
       );
     });
@@ -307,16 +379,79 @@ describe('useBackgroundCommands', () => {
       repo: 'owner/repo',
       status: 'failed',
       exitCode: 1,
-      meta: { issueNumber: 22, merge: true, origin: 'auto' },
+      meta: { issueNumber: 22, merge: true, origin: 'auto', issueTitle: 'Retry title' },
     });
+    await flushHookEffects();
+
+    const retryToast = result.current.toasts.find(
+      (toast) => toast.retryPayload?.command === 'ship'
+    );
+    expect(retryToast?.retryPayload).toEqual(
+      expect.objectContaining({
+        command: 'ship',
+        issueTitle: 'Retry title',
+      })
+    );
 
     await act(async () => {
       await result.current.handleRetryToast('ship-2');
     });
 
-    expect(shipper.api.spawnBackgroundShip).toHaveBeenCalledWith(22, 'owner/repo', true, 'auto');
+    expect(shipper.api.spawnBackgroundShip).toHaveBeenCalledWith(
+      22,
+      'owner/repo',
+      true,
+      'auto',
+      'Retry title'
+    );
     expect(result.current.toasts).toHaveLength(0);
     expect(result.current.backgroundCommands).toHaveLength(0);
+  });
+
+  it('preserves unblock issue titles in retry payloads', async () => {
+    const shipper = createMockShipperApi();
+    shipper.install();
+    const pipelineBridge = createPipelineBridge();
+    const { result } = renderHook(() =>
+      useBackgroundCommands({
+        activeRepo: 'owner/repo',
+        autoMergeRepos: new Set(),
+        checkInitState: vi.fn(() => Promise.resolve(undefined)),
+        pipelineBridgeRef: { current: pipelineBridge },
+      })
+    );
+    await flushHookEffects();
+
+    shipper.emitBackgroundStatus({
+      sessionId: 'unblock-retry',
+      command: 'unblock',
+      repo: 'owner/repo',
+      status: 'failed',
+      exitCode: 1,
+      meta: { issueNumber: 70, issueTitle: 'Blocked retry title' },
+    });
+    await flushHookEffects();
+
+    const retryToast = result.current.toasts.find(
+      (toast) => toast.retryPayload?.command === 'unblock'
+    );
+    expect(retryToast?.retryPayload).toEqual(
+      expect.objectContaining({
+        command: 'unblock',
+        issueTitle: 'Blocked retry title',
+      })
+    );
+
+    await act(async () => {
+      await result.current.handleRetryToast('unblock-retry');
+    });
+
+    expect(pipelineBridge.trackUnblockIssue).toHaveBeenCalledWith(70);
+    expect(shipper.api.spawnBackgroundUnblock).toHaveBeenCalledWith(
+      70,
+      'owner/repo',
+      'Blocked retry title'
+    );
   });
 
   it('refreshes the active repo after a failed ship without adding unlock-specific UI', async () => {
@@ -396,7 +531,13 @@ describe('useBackgroundCommands', () => {
     await flushHookEffects();
 
     await waitFor(() => {
-      expect(shipper.api.spawnBackgroundShip).toHaveBeenCalledWith(31, 'owner/repo', true, 'auto');
+      expect(shipper.api.spawnBackgroundShip).toHaveBeenCalledWith(
+        31,
+        'owner/repo',
+        true,
+        'auto',
+        'Issue 31'
+      );
       expect(result.current.toasts).toContainEqual(
         expect.objectContaining({
           title: 'Auto-ship: starting #31',
@@ -442,7 +583,6 @@ describe('useBackgroundCommands', () => {
           id: 'ship-retriable-auto',
           status: 'failed',
           retriable: true,
-          detail: 'Will retry later in this session',
         })
       );
       expect(result.current.toasts).toContainEqual(
@@ -454,7 +594,13 @@ describe('useBackgroundCommands', () => {
             'A transient merge conflict occurred. The issue remains eligible in this session.',
         })
       );
-      expect(shipper.api.spawnBackgroundShip).toHaveBeenCalledWith(31, 'owner/repo', false, 'auto');
+      expect(shipper.api.spawnBackgroundShip).toHaveBeenCalledWith(
+        31,
+        'owner/repo',
+        false,
+        'auto',
+        'Issue 31'
+      );
     });
   });
 
@@ -490,7 +636,6 @@ describe('useBackgroundCommands', () => {
       expect.objectContaining({
         id: 'ship-retriable-auto-disabled',
         retriable: true,
-        detail: 'Command failed',
       })
     );
     expect(result.current.toasts).toContainEqual(
@@ -533,7 +678,7 @@ describe('useBackgroundCommands', () => {
     await flushHookEffects();
 
     await waitFor(() => {
-      expect(shipper.api.spawnBackgroundUnblock).toHaveBeenCalledWith(41, 'owner/repo');
+      expect(shipper.api.spawnBackgroundUnblock).toHaveBeenCalledWith(41, 'owner/repo', 'Issue 41');
       expect(pipelineBridge.trackUnblockIssue).toHaveBeenCalledWith(41);
     });
 
@@ -713,7 +858,7 @@ describe('useBackgroundCommands', () => {
     await flushHookEffects();
 
     await waitFor(() => {
-      expect(shipper.api.spawnBackgroundUnblock).toHaveBeenCalledWith(43, 'owner/repo');
+      expect(shipper.api.spawnBackgroundUnblock).toHaveBeenCalledWith(43, 'owner/repo', 'Issue 43');
       expect(pipelineBridge.trackUnblockIssue).toHaveBeenCalledWith(43);
       expect(result.current.toasts).toContainEqual(
         expect.objectContaining({
@@ -760,7 +905,7 @@ describe('useBackgroundCommands', () => {
     await waitFor(() => {
       expect(shipper.api.checkLockStale).toHaveBeenCalledWith('owner/repo', 45);
       expect(shipper.api.unlockIssue).toHaveBeenCalledWith('owner/repo', 45);
-      expect(shipper.api.spawnBackgroundUnblock).toHaveBeenCalledWith(45, 'owner/repo');
+      expect(shipper.api.spawnBackgroundUnblock).toHaveBeenCalledWith(45, 'owner/repo', 'Issue 45');
       expect(pipelineBridge.trackUnblockIssue).toHaveBeenCalledWith(45);
     });
 
@@ -811,7 +956,7 @@ describe('useBackgroundCommands', () => {
     await waitFor(() => {
       expect(shipper.api.checkLockStale).toHaveBeenCalledWith('owner/repo', 47);
       expect(shipper.api.unlockIssue).not.toHaveBeenCalledWith('owner/repo', 47);
-      expect(shipper.api.spawnBackgroundUnblock).toHaveBeenCalledWith(46, 'owner/repo');
+      expect(shipper.api.spawnBackgroundUnblock).toHaveBeenCalledWith(46, 'owner/repo', 'Issue 46');
       expect(pipelineBridge.trackUnblockIssue).toHaveBeenCalledWith(46);
       expect(result.current.toasts).toContainEqual(
         expect.objectContaining({
@@ -858,7 +1003,7 @@ describe('useBackgroundCommands', () => {
     await flushHookEffects();
 
     await waitFor(() => {
-      expect(shipper.api.spawnBackgroundUnblock).toHaveBeenCalledWith(42, 'owner/repo');
+      expect(shipper.api.spawnBackgroundUnblock).toHaveBeenCalledWith(42, 'owner/repo', 'Issue 42');
     });
 
     shipper.emitBackgroundStatus({
@@ -872,7 +1017,13 @@ describe('useBackgroundCommands', () => {
     await flushHookEffects();
 
     await waitFor(() => {
-      expect(shipper.api.spawnBackgroundShip).toHaveBeenCalledWith(42, 'owner/repo', true, 'auto');
+      expect(shipper.api.spawnBackgroundShip).toHaveBeenCalledWith(
+        42,
+        'owner/repo',
+        true,
+        'auto',
+        'Issue 42'
+      );
     });
   });
 
@@ -1029,7 +1180,13 @@ describe('useBackgroundCommands', () => {
       expect(shipper.api.pauseIssue).toHaveBeenCalledWith('owner/repo', 72);
       expect(pipelineBridge.trackPausedIssue).toHaveBeenCalledWith(72);
       expect(result.current.pausePendingIssues.has(72)).toBe(false);
-      expect(shipper.api.spawnBackgroundShip).toHaveBeenCalledWith(73, 'owner/repo', true, 'auto');
+      expect(shipper.api.spawnBackgroundShip).toHaveBeenCalledWith(
+        73,
+        'owner/repo',
+        true,
+        'auto',
+        'Issue 73'
+      );
     });
   });
 
@@ -1169,7 +1326,13 @@ describe('useBackgroundCommands', () => {
 
     await waitFor(() => {
       expect(shipper.api.listPausedIssues).toHaveBeenCalledWith('other/repo');
-      expect(shipper.api.spawnBackgroundShip).toHaveBeenCalledWith(82, 'other/repo', true, 'auto');
+      expect(shipper.api.spawnBackgroundShip).toHaveBeenCalledWith(
+        82,
+        'other/repo',
+        true,
+        'auto',
+        'Issue 82'
+      );
     });
   });
 
@@ -1236,7 +1399,6 @@ describe('useBackgroundCommands', () => {
       expect.objectContaining({
         id: 'ship-retriable-manual',
         retriable: true,
-        detail: 'Command failed',
       })
     );
     expect(result.current.toasts).toContainEqual(
