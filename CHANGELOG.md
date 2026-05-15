@@ -7,18 +7,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.0]
+
+### Added
+
+- Troubleshooting guide for common Shipper failures on the docs site (#781).
+- `shipper init` drift guard: CI and the local pre-push hook now block drift between
+  tracked `.shipper/` output and what `shipper init` would write (#774).
+- Experimental adversarial design-review loop in the `design` stage (gated by a flag).
+- Expanded Starlight docs site: recipes guide (#780), environment-variables reference
+  (#782), `.shipper` directory reference (#783), hooks reference (#784), MCP setup guide
+  (#785), supported coding agents page (#786), MCP architecture coverage (#792), and
+  substantive index-page overviews (#788). Linux support is now declared for the CLI and
+  MCP.
+- Desktop operational workflows and Activity-drawer guidance in the desktop guide (#818).
+
 ### Changed
 
 - `shipper new` now uses the output protocol: agents draft issue artifacts under
   `.shipper/output/`, then Shipper validates the draft, creates the GitHub issue, applies
-  `shipper:new`, and records the final `created_issue` identity.
+  `shipper:new`, and records the final `created_issue` identity (#827).
+- Renamed the desktop "Action Queue" drawer to "Activity" with restructured completed
+  cards: a four-line layout, a status-or-stage badge, a hyperlinked issue reference, and
+  the issue title surfaced from app state. Per-card stage resolution distinguishes merged
+  ships, blocked unblocks, and pre-merge `shipper:ready` (#842).
+- Restored close outcomes for groom runs under the file-based output protocol so groom can
+  again signal a closed issue back to the workflow (#825).
+- Relaxed CLI version freshness gating so minor/patch drift no longer hard-fails Shipper
+  invocations; major drift still gates (#840).
+- `shipper setup` no longer runs inside a sandbox; headless setup is rejected with a clear
+  error and the Claude sandbox shim is removed (#787).
+- Renamed the desktop action-queue status label `Complete` → `Succeeded` (#817).
+- Hardened the groom prompt so the issue body never resolves product decisions, and
+  carved the Duplicate-detection gate out of the Phase 3 anchor.
+
+### Fixed
+
+- Restricted the AskUserQuestion bridge to MCP runs, and preserved deferred-question
+  ordering when headless batches arrive together (#835, #814).
+- Full-decomposition grooming is accepted without parent details, and parent labels are
+  cleaned up afterward (#836).
+- Desktop action-log modal stays contained within its dialog; its scrollport is now
+  focusable for keyboard users (#831).
+- Lock-renewal log lines no longer disrupt interactive stage TUIs — output is buffered
+  and drained around stage interaction (#826).
+- Closed-groom summaries are now validated before being recorded (#825).
+- Desktop GitHub releases no longer stay in draft; release state is normalized and the
+  publish flow is guarded against stale tag runs (#773).
+- Issues are unlocked when a desktop grooming session is intentionally aborted (#775).
+- Avoided double punctuation in CLI group intro lines (#788).
+- Hardened init drift remediation output (#774).
+- Migration to Starlight 0.39's sidebar shape for the docs site.
+
+### Maintenance
+
+- Migrated the test suite to Vitest 4: API changes, stricter mock semantics, branch
+  coverage thresholds, and the matching `@vitest/coverage-v8` bump.
+- Added `RELEASING.md` documenting the tag-driven release process and the `Publish`
+  workflow.
+- Added Dependabot configuration for routine dependency updates (#776).
+- Routine dependency bumps: `electron` 41 → 42, `electron-vite` 3 → 5, `@commitlint/cli`
+  19 → 21, npm minor/patch group, and GitHub Actions
+  (`checkout` 4 → 6, `setup-node` 4 → 6, `upload-pages-artifact` 3 → 5,
+  `deploy-pages` 4 → 5).
 
 ### Migration notes
 
-- Local `.shipper/prompts/<agent>/new.md` overrides written for the old `gh issue create` contract
-  must be re-ejected with `shipper eject new` or migrated to write `.shipper/output/result.json`
-  with `issue_draft`, plus `.shipper/output/issue-draft.json` and
-  `.shipper/output/issue-body.md`.
+- Local `.shipper/prompts/<agent>/new.md` overrides written for the old `gh issue create`
+  contract must be re-ejected with `shipper eject new` or migrated to write
+  `.shipper/output/result.json` with `issue_draft`, plus `.shipper/output/issue-draft.json`
+  and `.shipper/output/issue-body.md` (#827).
 
 ## [3.0.1]
 
@@ -80,6 +138,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Per-repo session metadata under `~/.shipper/sessions/<owner>-<repo>/` and clones under `~/.shipper/repos/<owner>/<repo>/` are keyed by GitHub remote slug. After updating the remote, new runs write to `baremetallabs-ai-shipper`/`baremetallabs-ai/shipper`; old data under `dnsquared-shipper-cli`/`dnsquared/shipper-cli` is not migrated. Delete or copy the old directories as needed.
 
-[Unreleased]: https://github.com/baremetallabs-ai/shipper/compare/v3.0.1...HEAD
+[Unreleased]: https://github.com/baremetallabs-ai/shipper/compare/v3.1.0...HEAD
+[3.1.0]: https://github.com/baremetallabs-ai/shipper/compare/v3.0.1...v3.1.0
 [3.0.1]: https://github.com/baremetallabs-ai/shipper/compare/v3.0.0...v3.0.1
 [3.0.0]: https://github.com/baremetallabs-ai/shipper/compare/v2.0.0...v3.0.0
