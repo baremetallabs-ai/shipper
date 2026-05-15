@@ -625,20 +625,29 @@ describe('desktop IPC locking', () => {
     expect(state.ptySpawnMock).not.toHaveBeenCalled();
   });
 
-  it('marks completed merge-requested ships as merged only when the matching PR is merged', async () => {
+  it('marks completed merge-requested ships as merged only when the exact matching PR is merged', async () => {
     await loadHandlers();
     const handler = getHandler('bg-spawn-ship');
 
-    await handler({}, { repo: 'owner/repo', issueNumber: 42, merge: true });
+    await handler(
+      {},
+      {
+        repo: 'owner/repo',
+        issueNumber: 42,
+        merge: true,
+        issueTitle: 'Activity',
+      }
+    );
     const spawnCall = parseBackgroundSpawnCall();
 
-    state.ghMock.mockResolvedValueOnce({
+    state.ghMock.mockResolvedValueOnce({ stdout: '[]', stderr: '' }).mockResolvedValueOnce({
       stdout: JSON.stringify([
         {
           number: 9,
           headRefName: 'shipper/42-activity',
           state: 'MERGED',
           mergedAt: null,
+          createdAt: '2026-01-01T00:00:00.000Z',
         },
       ]),
       stderr: '',
@@ -650,17 +659,33 @@ describe('desktop IPC locking', () => {
         meta: { autoShipHalted: false },
       })
     ).resolves.toEqual({ prMerged: true });
-    expect(state.ghMock).toHaveBeenCalledWith([
+    expect(state.ghMock).toHaveBeenNthCalledWith(1, [
       'pr',
       'list',
       '-R',
       'owner/repo',
       '--state',
       'all',
+      '--head',
+      'shipper/42',
       '--json',
-      'number,headRefName,state,mergedAt',
+      'number,headRefName,state,mergedAt,createdAt',
       '--limit',
-      '100',
+      '20',
+    ]);
+    expect(state.ghMock).toHaveBeenNthCalledWith(2, [
+      'pr',
+      'list',
+      '-R',
+      'owner/repo',
+      '--state',
+      'all',
+      '--head',
+      'shipper/42-activity',
+      '--json',
+      'number,headRefName,state,mergedAt,createdAt',
+      '--limit',
+      '20',
     ]);
   });
 
@@ -672,21 +697,70 @@ describe('desktop IPC locking', () => {
     const spawnCall = parseBackgroundSpawnCall();
     const onComplete = getBackgroundOnComplete(spawnCall);
 
-    state.ghMock.mockResolvedValueOnce({
+    state.ghMock
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify([
+          {
+            number: 9,
+            headRefName: 'shipper/42',
+            state: 'OPEN',
+            mergedAt: null,
+            createdAt: '2026-01-01T00:00:00.000Z',
+          },
+        ]),
+        stderr: '',
+      })
+      .mockResolvedValueOnce({ stdout: '[]', stderr: '' });
+    await expect(onComplete({ spawnedAt: Date.now(), meta: {} })).resolves.toEqual({});
+
+    state.ghMock.mockRejectedValueOnce(new Error('gh failed')).mockResolvedValueOnce({
+      stdout: '[]',
+      stderr: '',
+    });
+    await expect(onComplete({ spawnedAt: Date.now(), meta: {} })).resolves.toEqual({});
+  });
+
+  it('does not use stale merged PRs when the matching head has a newer open candidate', async () => {
+    await loadHandlers();
+    const handler = getHandler('bg-spawn-ship');
+
+    await handler(
+      {},
+      {
+        repo: 'owner/repo',
+        issueNumber: 42,
+        merge: true,
+        issueTitle: 'Activity',
+      }
+    );
+    const spawnCall = parseBackgroundSpawnCall();
+
+    state.ghMock.mockResolvedValueOnce({ stdout: '[]', stderr: '' }).mockResolvedValueOnce({
       stdout: JSON.stringify([
         {
+          number: 8,
+          headRefName: 'shipper/42-activity',
+          state: 'MERGED',
+          mergedAt: '2026-01-01T00:00:00.000Z',
+          createdAt: '2025-12-31T00:00:00.000Z',
+        },
+        {
           number: 9,
-          headRefName: 'shipper/42',
+          headRefName: 'shipper/42-activity',
           state: 'OPEN',
           mergedAt: null,
+          createdAt: '2026-01-02T00:00:00.000Z',
         },
       ]),
       stderr: '',
     });
-    await expect(onComplete({ spawnedAt: Date.now(), meta: {} })).resolves.toEqual({});
 
-    state.ghMock.mockRejectedValueOnce(new Error('gh failed'));
-    await expect(onComplete({ spawnedAt: Date.now(), meta: {} })).resolves.toEqual({});
+    await expect(
+      getBackgroundOnComplete(spawnCall)({
+        spawnedAt: Date.parse('2026-01-01T12:00:00.000Z'),
+        meta: { autoShipHalted: false },
+      })
+    ).resolves.toEqual({});
   });
 
   it('spawns `unblock` through the background manager in headless mode', async () => {

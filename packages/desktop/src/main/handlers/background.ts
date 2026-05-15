@@ -44,6 +44,7 @@ interface RawPullRequestData {
   headRefName: string;
   state: string;
   mergedAt: string | null;
+  createdAt: string;
 }
 
 function parseIssueTitle(value: unknown): string | undefined {
@@ -229,34 +230,47 @@ function parseCreatedIssueList(repo: string, json: string): RawCreatedIssueData[
 }
 
 function parsePullRequestList(repo: string, json: string): RawPullRequestData[] {
+  const trimmed = json.trim();
+  if (trimmed.length === 0) {
+    throw new Error(`GitHub CLI returned empty pull request metadata for ${repo}.`);
+  }
+
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(json) as unknown;
-    if (!Array.isArray(parsed)) {
-      throw new Error('GitHub CLI returned an invalid pull request list.');
-    }
-
-    return parsed.map((entry) => {
-      if (
-        !isPlainObject(entry) ||
-        typeof entry.number !== 'number' ||
-        typeof entry.headRefName !== 'string' ||
-        typeof entry.state !== 'string' ||
-        (entry.mergedAt !== null && typeof entry.mergedAt !== 'string')
-      ) {
-        throw new Error('GitHub CLI returned an invalid pull request payload.');
-      }
-
-      return {
-        number: entry.number,
-        headRefName: entry.headRefName,
-        state: entry.state,
-        mergedAt: entry.mergedAt,
-      };
-    });
+    parsed = JSON.parse(trimmed) as unknown;
   } catch (error) {
     const message = toErrorMessage(error);
     throw new Error(`Failed to parse pull request metadata for ${repo}: ${message}`);
   }
+
+  if (!Array.isArray(parsed)) {
+    throw new Error(
+      `GitHub CLI returned invalid pull request metadata for ${repo}: expected array.`
+    );
+  }
+
+  return parsed.map((entry, index) => {
+    if (
+      !isPlainObject(entry) ||
+      typeof entry.number !== 'number' ||
+      typeof entry.headRefName !== 'string' ||
+      typeof entry.state !== 'string' ||
+      (entry.mergedAt !== null && typeof entry.mergedAt !== 'string') ||
+      typeof entry.createdAt !== 'string'
+    ) {
+      throw new Error(
+        `GitHub CLI returned invalid pull request metadata for ${repo} at index ${index}.`
+      );
+    }
+
+    return {
+      number: entry.number,
+      headRefName: entry.headRefName,
+      state: entry.state,
+      mergedAt: entry.mergedAt,
+      createdAt: entry.createdAt,
+    };
+  });
 }
 
 async function resolveCreatedIssueMeta(
@@ -295,37 +309,95 @@ async function resolveCreatedIssueMeta(
   }
 }
 
+function getGeneratedIssueBranch(issueNumber: number, issueTitle: string | undefined): string {
+  const slug = (issueTitle ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 50)
+    .replace(/-$/, '');
+
+  return slug ? `shipper/${issueNumber}-${slug}` : `shipper/${issueNumber}-implement`;
+}
+
+function getShipPrHeadCandidates(issueNumber: number, issueTitle: string | undefined): string[] {
+  return [`shipper/${issueNumber}`, getGeneratedIssueBranch(issueNumber, issueTitle)].filter(
+    (branch, index, branches) => branches.indexOf(branch) === index
+  );
+}
+
+async function listPullRequestsForHead(
+  repo: string,
+  headRefName: string
+): Promise<RawPullRequestData[]> {
+  const result = await gh([
+    'pr',
+    'list',
+    '-R',
+    repo,
+    '--state',
+    'all',
+    '--head',
+    headRefName,
+    '--json',
+    'number,headRefName,state,mergedAt,createdAt',
+    '--limit',
+    '20',
+  ]);
+
+  return parsePullRequestList(repo, result.stdout);
+}
+
+function selectUniqueShipPullRequest(
+  repo: string,
+  issueNumber: number,
+  pullRequests: RawPullRequestData[],
+  spawnedAt: number | null
+): RawPullRequestData | undefined {
+  if (pullRequests.length === 0) {
+    console.warn(`[shipper] Failed to find matching shipped PR for ${repo}#${issueNumber}`);
+    return undefined;
+  }
+
+  if (pullRequests.length === 1) {
+    return pullRequests[0];
+  }
+
+  if (spawnedAt !== null) {
+    const recentPullRequests = pullRequests.filter((pr) => Date.parse(pr.createdAt) >= spawnedAt);
+    if (recentPullRequests.length === 1) {
+      return recentPullRequests[0];
+    }
+  }
+
+  const prNumbers = pullRequests.map((pr) => `#${pr.number}`).join(', ');
+  console.warn(
+    `[shipper] Found ambiguous shipped PR candidates for ${repo}#${issueNumber}: ${prNumbers}`
+  );
+  return undefined;
+}
+
 async function resolveCompletedShipMeta(
   repo: string,
   issueNumber: number | undefined,
+  issueTitle: string | undefined,
   merge: boolean | undefined,
-  autoShipHalted: boolean | undefined
+  autoShipHalted: boolean | undefined,
+  spawnedAt: number | null
 ): Promise<{ prMerged?: boolean }> {
   if (merge !== true || issueNumber === undefined || autoShipHalted === true) {
     return {};
   }
 
   try {
-    const result = await gh([
-      'pr',
-      'list',
-      '-R',
-      repo,
-      '--state',
-      'all',
-      '--json',
-      'number,headRefName,state,mergedAt',
-      '--limit',
-      '100',
-    ]);
-    const pullRequests = parsePullRequestList(repo, result.stdout);
-    const branchPrefix = `shipper/${issueNumber}-`;
-    const match = pullRequests.find(
-      (pr) => pr.headRefName === `shipper/${issueNumber}` || pr.headRefName.startsWith(branchPrefix)
-    );
+    const headCandidates = getShipPrHeadCandidates(issueNumber, issueTitle);
+    const pullRequests = (
+      await Promise.all(headCandidates.map((head) => listPullRequestsForHead(repo, head)))
+    ).flat();
+    const uniquePullRequests = [...new Map(pullRequests.map((pr) => [pr.number, pr])).values()];
+    const match = selectUniqueShipPullRequest(repo, issueNumber, uniquePullRequests, spawnedAt);
 
     if (!match) {
-      console.warn(`[shipper] Failed to find matching shipped PR for ${repo}#${issueNumber}`);
       return {};
     }
 
@@ -396,8 +468,10 @@ export function registerBackgroundHandlers(backgroundManager: BackgroundManager)
         resolveCompletedShipMeta(
           parsedPayload.repo,
           parsedPayload.issueNumber,
+          parsedPayload.issueTitle,
           parsedPayload.merge,
-          session.meta.autoShipHalted
+          session.meta.autoShipHalted,
+          session.spawnedAt
         ),
     });
   });
