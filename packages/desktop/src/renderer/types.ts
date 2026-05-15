@@ -157,10 +157,15 @@ export interface ShipperApi {
     issueNumber: number,
     repo: string,
     merge: boolean,
-    origin?: 'auto' | 'manual'
+    origin?: 'auto' | 'manual',
+    issueTitle?: string
   ) => Promise<{ sessionId: string }>;
   spawnBackgroundInit: (repo: string) => Promise<{ sessionId: string }>;
-  spawnBackgroundUnblock: (issueNumber: number, repo: string) => Promise<{ sessionId: string }>;
+  spawnBackgroundUnblock: (
+    issueNumber: number,
+    repo: string,
+    issueTitle?: string
+  ) => Promise<{ sessionId: string }>;
   killBackground: (sessionId: string) => Promise<void>;
   requestPauseActive: (sessionId: string) => Promise<void>;
   requestAutoShipHalt: (repo: string) => Promise<number>;
@@ -183,7 +188,6 @@ export type IssueListResult = Awaited<ReturnType<ShipperApi['listIssues']>>;
 export interface IssuePipelineBridge {
   loadIssues: (repo: string) => Promise<IssueListResult | null>;
   clearIssueState: () => void;
-  clearStageCacheForRepo: (repo: string) => void;
   setFetchError: (message: string | null) => void;
   getIssueByNumber: (issueNumber: number) => ListIssueItem | undefined;
   getPausedIssues: () => ReadonlySet<number>;
@@ -231,13 +235,16 @@ export type BackgroundRetryPayload =
       issueNumber: number;
       merge: boolean;
       origin?: 'auto' | 'manual';
+      issueTitle?: string;
     }
   | { command: 'init'; repo: string }
-  | { command: 'unblock'; repo: string; issueNumber: number };
+  | { command: 'unblock'; repo: string; issueNumber: number; issueTitle?: string };
 
 export interface BackgroundStatusMeta {
   issueNumber?: number;
+  issueTitle?: string;
   merge?: boolean;
+  prMerged?: boolean;
   issueUrl?: string;
   logFile?: string;
   request?: string;
@@ -268,12 +275,12 @@ export interface BackgroundCommandState {
   repo: string;
   status: BackgroundCommandStatus;
   stateChangedAt: number;
-  title: string;
-  detail: string;
   output: string;
   request?: string;
   issueNumber?: number;
+  issueTitle?: string;
   merge?: boolean;
+  prMerged?: boolean;
   issueUrl?: string;
   logFile?: string;
   exitCode?: number | null;
@@ -307,20 +314,6 @@ export interface BackgroundLogViewerState {
   sessionId: string | null;
   title: string;
   content: string;
-}
-
-export interface BackgroundDetailInput {
-  command: BackgroundCommandKind;
-  status: BackgroundCommandStatus;
-  repo: string;
-  issueNumber?: number;
-  merge?: boolean;
-  latestOutput?: string | null;
-  cancelled?: boolean;
-  pausePending?: boolean;
-  retriable?: boolean;
-  origin?: 'auto' | 'manual';
-  autoShipEnabled?: boolean;
 }
 
 export interface AutoShipCandidate {

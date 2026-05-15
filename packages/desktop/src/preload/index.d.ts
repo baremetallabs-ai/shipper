@@ -97,7 +97,9 @@ type BackgroundStatus = 'queued' | 'running' | 'complete' | 'failed' | 'paused';
 
 interface BackgroundStatusMeta {
   issueNumber?: number;
+  issueTitle?: string;
   merge?: boolean;
+  prMerged?: boolean;
   issueUrl?: string;
   logFile?: string;
   request?: string;
@@ -191,10 +193,15 @@ interface ShipperAPI {
     issueNumber: number,
     repo: string,
     merge: boolean,
-    origin?: 'auto' | 'manual'
+    origin?: 'auto' | 'manual',
+    issueTitle?: string
   ) => Promise<{ sessionId: string }>;
   spawnBackgroundInit: (repo: string) => Promise<{ sessionId: string }>;
-  spawnBackgroundUnblock: (issueNumber: number, repo: string) => Promise<{ sessionId: string }>;
+  spawnBackgroundUnblock: (
+    issueNumber: number,
+    repo: string,
+    issueTitle?: string
+  ) => Promise<{ sessionId: string }>;
   killBackground: (sessionId: string) => Promise<void>;
   requestPauseActive: (sessionId: string) => Promise<void>;
   requestAutoShipHalt: (repo: string) => Promise<number>;

@@ -10,9 +10,7 @@ import {
 
 import {
   getActiveShipIssueNumbers,
-  getBackgroundDetail,
   getBackgroundRetryPayload,
-  getBackgroundTitle,
   getNextAutoShipFailureState,
   selectInitialAutoUnblockIssue,
   selectNextAutoShipIssue,
@@ -77,6 +75,23 @@ function getBackgroundLogTitle(
       return `Init logs — ${repo}`;
     case 'unblock':
       return issueNumber ? `Unblock #${issueNumber} logs` : `Unblock logs — ${repo}`;
+  }
+}
+
+function getBackgroundToastSubject(
+  command: BackgroundCommandKind,
+  repo: string,
+  issueNumber?: number
+): string {
+  switch (command) {
+    case 'new':
+      return 'New issue';
+    case 'ship':
+      return issueNumber ? `Ship #${issueNumber}` : 'Ship';
+    case 'init':
+      return `Init ${repo}`;
+    case 'unblock':
+      return issueNumber ? `Unblock #${issueNumber}` : 'Unblock';
   }
 }
 
@@ -361,7 +376,8 @@ export function useBackgroundCommands({
             payload.issueNumber,
             payload.repo,
             payload.merge,
-            payload.origin
+            payload.origin,
+            payload.issueTitle
           );
           return;
         case 'init':
@@ -370,7 +386,11 @@ export function useBackgroundCommands({
         case 'unblock':
           pipelineBridgeRef.current?.trackUnblockIssue(payload.issueNumber);
           try {
-            await getShipperApi().spawnBackgroundUnblock(payload.issueNumber, payload.repo);
+            await getShipperApi().spawnBackgroundUnblock(
+              payload.issueNumber,
+              payload.repo,
+              payload.issueTitle
+            );
           } catch (error) {
             pipelineBridgeRef.current?.clearUnblockIssue(payload.issueNumber);
             throw error;
@@ -516,7 +536,9 @@ export function useBackgroundCommands({
     const latestOutput = getLatestOutputLine(output);
     const request = event.meta?.request ?? previousCommand?.request;
     const issueNumber = event.meta?.issueNumber ?? previousCommand?.issueNumber;
+    const issueTitle = event.meta?.issueTitle ?? previousCommand?.issueTitle;
     const merge = event.meta?.merge ?? previousCommand?.merge ?? false;
+    const prMerged = event.meta?.prMerged ?? previousCommand?.prMerged;
     const issueUrl = event.meta?.issueUrl ?? previousCommand?.issueUrl;
     const logFile = event.meta?.logFile ?? previousCommand?.logFile;
     const cancelled = event.meta?.cancelled ?? previousCommand?.cancelled ?? false;
@@ -546,24 +568,12 @@ export function useBackgroundCommands({
       repo: event.repo,
       status: event.status,
       stateChangedAt,
-      title: getBackgroundTitle(event.command, event.repo, issueNumber, merge),
-      detail: getBackgroundDetail({
-        command: event.command,
-        status: event.status,
-        repo: event.repo,
-        issueNumber,
-        merge,
-        latestOutput,
-        cancelled,
-        pausePending,
-        retriable,
-        origin,
-        autoShipEnabled,
-      }),
       output,
       request,
       issueNumber,
+      issueTitle,
       merge,
+      prMerged,
       issueUrl,
       logFile,
       exitCode: event.exitCode,
@@ -646,12 +656,12 @@ export function useBackgroundCommands({
                   event.command === 'init'
                     ? `Initialized ${event.repo}`
                     : issueNumber
-                      ? `Ship #${issueNumber} succeeded${merge ? ' · merged' : ''}`
+                      ? `Ship #${issueNumber} succeeded${prMerged === true ? ' · merged' : ''}`
                       : 'Ship succeeded',
                 description:
                   event.command === 'init'
                     ? 'Repository labels and settings were updated.'
-                    : merge
+                    : prMerged === true
                       ? 'The background ship command succeeded and merged.'
                       : 'The background ship command succeeded.',
               };
@@ -728,7 +738,8 @@ export function useBackgroundCommands({
               candidate.number,
               event.repo,
               autoMergeRepos.has(event.repo),
-              'auto'
+              'auto',
+              candidate.title
             );
             pushToast({
               id: `auto-ship-${event.repo}-${candidate.number}-${Date.now()}`,
@@ -753,7 +764,11 @@ export function useBackgroundCommands({
 
           trackAutoUnblockIssue(event.repo, nextQueuedIssue.issue.number);
           try {
-            await getShipperApi().spawnBackgroundUnblock(nextQueuedIssue.issue.number, event.repo);
+            await getShipperApi().spawnBackgroundUnblock(
+              nextQueuedIssue.issue.number,
+              event.repo,
+              nextQueuedIssue.issue.title
+            );
           } catch {
             console.warn(
               `[shipper] Failed to spawn background unblock for #${nextQueuedIssue.issue.number}`
@@ -792,12 +807,13 @@ export function useBackgroundCommands({
     }
 
     if (event.status === 'failed') {
+      const toastSubject = getBackgroundToastSubject(event.command, event.repo, issueNumber);
       if (cancelled) {
         pushToast({
           id: event.sessionId,
           sessionId: event.sessionId,
           variant: 'cancelled',
-          title: `${nextCommand.title} cancelled`,
+          title: `${toastSubject} cancelled`,
           description: 'The background command was stopped before it finished.',
         });
       } else {
@@ -807,7 +823,8 @@ export function useBackgroundCommands({
           request,
           issueNumber,
           merge,
-          origin
+          origin,
+          issueTitle
         );
 
         if (event.command === 'ship' && origin === 'auto' && autoShipEnabled && retriable) {
@@ -826,7 +843,7 @@ export function useBackgroundCommands({
             id: event.sessionId,
             sessionId: event.sessionId,
             variant: 'error',
-            title: `${nextCommand.title} failed`,
+            title: `${toastSubject} failed`,
             description:
               latestOutput ??
               (event.exitCode === null || event.exitCode === undefined
@@ -908,7 +925,8 @@ export function useBackgroundCommands({
           try {
             await getShipperApi().spawnBackgroundUnblock(
               initialAutoUnblockIssue.issue.number,
-              event.repo
+              event.repo,
+              initialAutoUnblockIssue.issue.title
             );
           } catch {
             console.warn(
@@ -939,7 +957,8 @@ export function useBackgroundCommands({
           nextIssue.number,
           event.repo,
           autoMergeRepos.has(event.repo),
-          'auto'
+          'auto',
+          nextIssue.title
         );
         pushToast({
           id: `auto-ship-${event.repo}-${nextIssue.number}-${Date.now()}`,
@@ -986,7 +1005,8 @@ export function useBackgroundCommands({
           candidate.number,
           event.repo,
           autoMergeRepos.has(event.repo),
-          'auto'
+          'auto',
+          candidate.title
         );
         pushToast({
           id: `auto-ship-${event.repo}-${candidate.number}-${Date.now()}`,
@@ -1011,7 +1031,11 @@ export function useBackgroundCommands({
 
       trackAutoUnblockIssue(event.repo, nextQueuedIssue.issue.number);
       try {
-        await getShipperApi().spawnBackgroundUnblock(nextQueuedIssue.issue.number, event.repo);
+        await getShipperApi().spawnBackgroundUnblock(
+          nextQueuedIssue.issue.number,
+          event.repo,
+          nextQueuedIssue.issue.title
+        );
       } catch {
         console.warn(
           `[shipper] Failed to spawn background unblock for #${nextQueuedIssue.issue.number}`
@@ -1056,16 +1080,6 @@ export function useBackgroundCommands({
           return {
             ...command,
             output,
-            detail: getBackgroundDetail({
-              command: command.command,
-              status: command.status,
-              repo: command.repo,
-              issueNumber: command.issueNumber,
-              merge: command.merge,
-              latestOutput: getLatestOutputLine(output),
-              cancelled: command.cancelled,
-              pausePending: command.pausePending,
-            }),
           };
         })
       );

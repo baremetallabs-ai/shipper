@@ -16,7 +16,6 @@ import type {
   AutoShipFailureState,
   BackgroundCommandKind,
   BackgroundCommandState,
-  BackgroundDetailInput,
   BackgroundRetryPayload,
   ShipperApi,
   SelectNextAutoUnblockIssueResult,
@@ -106,107 +105,35 @@ async function unlockIssueBestEffort(
   }
 }
 
-export function getBackgroundTitle(
-  command: BackgroundCommandKind,
-  repo: string,
-  issueNumber?: number,
-  merge?: boolean
-): string {
-  switch (command) {
-    case 'new':
-      return 'New issue';
-    case 'ship':
-      return issueNumber ? `Ship #${issueNumber}${merge ? ' · merge' : ''}` : 'Ship';
-    case 'init':
-      return `Init ${repo}`;
-    case 'unblock':
-      return issueNumber ? `Unblock #${issueNumber}` : 'Unblock';
-  }
-}
-
-export function getBackgroundDetail({
-  command,
-  status,
-  repo,
-  issueNumber,
-  merge,
-  latestOutput,
-  cancelled,
-  pausePending,
-  retriable,
-  origin,
-  autoShipEnabled,
-}: BackgroundDetailInput): string {
-  if (cancelled) {
-    return 'Cancelled';
-  }
-
-  if (pausePending) {
-    return 'Pausing...';
-  }
-
-  if (status === 'queued' && command === 'ship' && issueNumber) {
-    return `Ship #${issueNumber} queued`;
-  }
-
-  if (status === 'paused') {
-    return command === 'ship' ? 'Paused at stage boundary' : 'Paused';
-  }
-
-  if (status === 'failed') {
-    if (command === 'ship' && retriable && origin === 'auto' && autoShipEnabled) {
-      return 'Will retry later in this session';
-    }
-    return latestOutput ?? 'Command failed';
-  }
-
-  if (status === 'complete') {
-    switch (command) {
-      case 'new':
-        return 'Issue created';
-      case 'ship':
-        return merge ? 'Ship succeeded · merged' : 'Ship succeeded';
-      case 'init':
-        return 'Initialization succeeded';
-      case 'unblock':
-        return 'Unblock succeeded';
-    }
-  }
-
-  if (command === 'new') {
-    return 'Creating issue...';
-  }
-
-  if (command === 'ship') {
-    return latestOutput ?? (issueNumber ? `Shipping #${issueNumber}...` : 'Shipping...');
-  }
-
-  if (command === 'unblock') {
-    return latestOutput ?? (issueNumber ? `Unblocking #${issueNumber}...` : 'Unblocking...');
-  }
-
-  return latestOutput ?? `Initializing ${repo}...`;
-}
-
 export function getBackgroundRetryPayload(
   command: BackgroundCommandKind,
   repo: string,
   request?: string,
   issueNumber?: number,
   merge?: boolean,
-  origin?: 'auto' | 'manual'
+  origin?: 'auto' | 'manual',
+  issueTitle?: string
 ): BackgroundRetryPayload | undefined {
   switch (command) {
     case 'new':
       return request ? { command, repo, request } : undefined;
     case 'ship':
       return issueNumber
-        ? { command, repo, issueNumber, merge: merge ?? false, origin }
+        ? {
+            command,
+            repo,
+            issueNumber,
+            merge: merge ?? false,
+            origin,
+            ...(issueTitle ? { issueTitle } : {}),
+          }
         : undefined;
     case 'init':
       return { command, repo };
     case 'unblock':
-      return issueNumber ? { command, repo, issueNumber } : undefined;
+      return issueNumber
+        ? { command, repo, issueNumber, ...(issueTitle ? { issueTitle } : {}) }
+        : undefined;
   }
 }
 
@@ -240,36 +167,6 @@ export function getWorkflowStageDisplayName(labels: string[]): string | undefine
   }
 
   return undefined;
-}
-
-export function getWorkflowStageCacheKey(repo: string, issueNumber: number): string {
-  return `${repo}:${issueNumber}`;
-}
-
-export function syncWorkflowStageCacheForRepo(
-  current: ReadonlyMap<string, string>,
-  repo: string,
-  issues: ListIssueItem[]
-): Map<string, string> {
-  const next = new Map(current);
-  const repoPrefix = `${repo}:`;
-
-  for (const key of next.keys()) {
-    if (key.startsWith(repoPrefix)) {
-      next.delete(key);
-    }
-  }
-
-  for (const issue of issues) {
-    const stage = getWorkflowStageDisplayName(issue.labels);
-    if (!stage) {
-      continue;
-    }
-
-    next.set(getWorkflowStageCacheKey(repo, issue.number), stage);
-  }
-
-  return next;
 }
 
 export async function selectNextAutoShipIssue(

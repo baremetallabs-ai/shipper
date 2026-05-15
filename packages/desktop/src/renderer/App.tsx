@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { JSX } from 'react';
 
-import { toErrorMessage } from '@baremetallabs-ai/shipper-core';
+import { BLOCKED_LABEL, toErrorMessage } from '@baremetallabs-ai/shipper-core';
 
 import { ActionQueueDrawer } from './components/action-queue-drawer.js';
 import { AdoptDialog } from './components/adopt-dialog.js';
@@ -26,7 +26,7 @@ import { useBackgroundCommands } from './hooks/use-background-commands.js';
 import { useIssuePipeline } from './hooks/use-issue-pipeline.js';
 import { useRepos } from './hooks/use-repos.js';
 import { useTerminalSessions } from './hooks/use-terminal-sessions.js';
-import { getWorkflowStageCacheKey } from './lib/app-utils.js';
+import { getWorkflowStageDisplayName } from './lib/app-utils.js';
 import { getShipperApi } from './lib/shipper-api.js';
 import type { BackgroundCommandsBridge, IssuePipelineBridge } from './types.js';
 
@@ -110,28 +110,35 @@ export default function App(): JSX.Element {
   }, [activeRepo, launchingShipKeys]);
   const actionQueueCommands = useMemo(
     () =>
-      backgroundState.backgroundCommands.map((command) => ({
-        id: command.id,
-        command: command.command,
-        status: command.status,
-        stateChangedAt: command.stateChangedAt,
-        title: command.title,
-        repo: command.repo,
-        detail: command.detail,
-        canCancel: command.status === 'queued' || command.status === 'running',
-        canShowLogs:
-          command.command === 'new'
-            ? Boolean(command.logFile)
-            : command.output.length > 0 || command.status !== 'queued',
-        cancelled: command.cancelled,
-        workflowStage:
-          command.command === 'ship' && command.issueNumber !== undefined
-            ? pipelineState.stageCache.get(
-                getWorkflowStageCacheKey(command.repo, command.issueNumber)
-              )
+      backgroundState.backgroundCommands.map((command) => {
+        const currentIssue =
+          command.issueNumber !== undefined && command.repo === activeRepo
+            ? pipelineState.getIssueByNumber(command.issueNumber)
+            : undefined;
+
+        return {
+          id: command.id,
+          command: command.command,
+          status: command.status,
+          stateChangedAt: command.stateChangedAt,
+          repo: command.repo,
+          issueNumber: command.issueNumber,
+          issueUrl: command.issueUrl,
+          issueTitle: currentIssue?.title ?? command.issueTitle,
+          workflowStage: currentIssue
+            ? getWorkflowStageDisplayName(currentIssue.labels)
             : undefined,
-      })),
-    [backgroundState.backgroundCommands, pipelineState.stageCache]
+          stillBlocked: currentIssue?.labels.includes(BLOCKED_LABEL) ?? false,
+          prMerged: command.prMerged,
+          canCancel: command.status === 'queued' || command.status === 'running',
+          canShowLogs:
+            command.command === 'new'
+              ? Boolean(command.logFile)
+              : command.output.length > 0 || command.status !== 'queued',
+          cancelled: command.cancelled,
+        };
+      }),
+    [activeRepo, backgroundState.backgroundCommands, pipelineState.getIssueByNumber]
   );
 
   useEffect(() => {
@@ -236,10 +243,14 @@ export default function App(): JSX.Element {
     setLaunchingShipKeys(new Map(launchingShipKeysRef.current));
 
     try {
+      const issueTitle =
+        repo === activeRepo ? pipelineState.getIssueByNumber(issueNumber)?.title : undefined;
       const result = await getShipperApi().spawnBackgroundShip(
         issueNumber,
         repo,
-        reposState.autoMergeRepos.has(repo)
+        reposState.autoMergeRepos.has(repo),
+        undefined,
+        issueTitle
       );
       launchingShipKeysRef.current.set(shipKey, result.sessionId);
       setLaunchingShipKeys(new Map(launchingShipKeysRef.current));
@@ -301,7 +312,6 @@ export default function App(): JSX.Element {
   pipelineBridgeRef.current = {
     loadIssues: pipelineState.loadIssues,
     clearIssueState: pipelineState.clearIssueState,
-    clearStageCacheForRepo: pipelineState.clearStageCacheForRepo,
     setFetchError: pipelineState.setFetchError,
     getIssueByNumber: pipelineState.getIssueByNumber,
     getPausedIssues: () => pipelineState.pausedIssues,

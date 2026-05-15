@@ -671,6 +671,42 @@ describe('BackgroundManager', () => {
     expectRemoveLabelCall('41', 'owner/repo');
   });
 
+  it('emits completion metadata returned by onComplete', async () => {
+    const manager = createManager();
+
+    manager.spawn({
+      sessionId: 'ship-complete-meta',
+      command: 'ship',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['ship', '41', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+      meta: { issueNumber: 41 },
+      onComplete: () => ({ issueTitle: 'Resolved title', prMerged: true }),
+    });
+
+    latestChild().close(0);
+    await flushBackgroundCleanup();
+
+    const completeEvent = statusEvents().find(
+      (event) => event.sessionId === 'ship-complete-meta' && event.status === 'complete'
+    );
+    expect(completeEvent).toEqual(
+      expect.objectContaining({
+        sessionId: 'ship-complete-meta',
+        status: 'complete',
+        exitCode: 0,
+      })
+    );
+    expect(isRecord(completeEvent?.meta) ? completeEvent.meta : undefined).toEqual(
+      expect.objectContaining({
+        issueNumber: 41,
+        issueTitle: 'Resolved title',
+        prMerged: true,
+      })
+    );
+  });
+
   it('maps auto-ship halts to complete while preserving paused status for user pauses', () => {
     const autoHaltManager = createManager();
 
