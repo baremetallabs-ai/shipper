@@ -1,6 +1,6 @@
 {
   "name": "@baremetallabs-ai/shipper-cli",
-  "version": "3.0.1",
+  "version": "3.1.0",
   "description": "CLI workflow orchestrator for GitHub issues using coding agents",
   "homepage": "https://shipper.baremetallabs.ai",
   "bugs": {
@@ -46,7 +46,7 @@
     "dist"
   ],
   "dependencies": {
-    "@baremetallabs-ai/shipper-core": "3.0.1",
+    "@baremetallabs-ai/shipper-core": "3.1.0",
     "commander": "^13.1.0"
   },
   "devDependencies": {

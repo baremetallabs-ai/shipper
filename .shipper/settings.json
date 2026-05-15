@@ -18,5 +18,5 @@
     "requirePassingChecks": true
   },
   "installCommand": "npm install",
-  "cliVersion": "3.0.1"
+  "cliVersion": "3.1.0"
 }
