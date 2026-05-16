@@ -10,6 +10,7 @@ const state = vi.hoisted(() => ({
   backgroundState: {},
   pipelineState: {},
   terminalState: {},
+  pipelineOptions: null as Record<string, unknown> | null,
   terminalOptions: null as Record<string, unknown> | null,
   spawnShipperSetupMock: vi.fn(),
   spawnShipperGroomMock: vi.fn(),
@@ -27,7 +28,10 @@ vi.mock('../../src/renderer/hooks/use-background-commands.js', () => ({
 }));
 
 vi.mock('../../src/renderer/hooks/use-issue-pipeline.js', () => ({
-  useIssuePipeline: () => state.pipelineState,
+  useIssuePipeline: (options: Record<string, unknown>) => {
+    state.pipelineOptions = options;
+    return state.pipelineState;
+  },
 }));
 
 vi.mock('../../src/renderer/hooks/use-terminal-sessions.js', () => ({
@@ -206,6 +210,7 @@ function resetMockState(): void {
   state.spawnBackgroundShipMock.mockReset();
   state.requestAutoShipHaltMock.mockReset();
   state.actionQueueDrawerProps = null;
+  state.pipelineOptions = null;
   state.terminalOptions = null;
   state.reposState = {
     activeRepo: 'owner/repo',
@@ -242,7 +247,6 @@ function resetMockState(): void {
     handleRetryToast: vi.fn(),
     handleShowBackgroundLogs: vi.fn(),
     handleToggleActionQueue: vi.fn(),
-    hasRunningShipCommand: false,
     logViewer: {
       content: '',
       open: false,
@@ -364,6 +368,24 @@ describe('App setup launch', () => {
     expect(state.terminalOptions?.pushToast).toBe(state.backgroundState.pushToast);
     expect(state.terminalOptions?.refreshIssuesForActiveRepo).toBe(
       state.pipelineState.refreshIssuesForActiveRepo
+    );
+  });
+
+  it('passes app-level options into pipeline state without running-ship state', () => {
+    render(<App />);
+
+    expect(state.pipelineOptions).toEqual(
+      expect.objectContaining({
+        activeRepo: 'owner/repo',
+        canFetch: true,
+        hasActiveRepo: true,
+      })
+    );
+    expect(state.pipelineOptions?.pushToast).toBe(
+      (state.backgroundState as { pushToast: unknown }).pushToast
+    );
+    expect(state.pipelineOptions).not.toHaveProperty(
+      ['has', 'Running', 'Ship', 'Command'].join('')
     );
   });
 

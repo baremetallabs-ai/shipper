@@ -18,11 +18,12 @@ import type {
   ResetSelection,
 } from '../types.js';
 
+const PIPELINE_POLL_INTERVAL_MS = 60_000;
+
 interface UseIssuePipelineOptions {
   activeRepo: string;
   canFetch: boolean;
   hasActiveRepo: boolean;
-  hasRunningShipCommand: boolean;
   pushToast: (toast: BackgroundToastItem) => void;
 }
 
@@ -82,7 +83,6 @@ export function useIssuePipeline({
   activeRepo,
   canFetch,
   hasActiveRepo,
-  hasRunningShipCommand,
   pushToast,
 }: UseIssuePipelineOptions): UseIssuePipelineResult {
   const [issues, setIssues] = useState<PipelineIssue[]>([]);
@@ -250,15 +250,14 @@ export function useIssuePipeline({
       return;
     }
 
-    const intervalMs = hasRunningShipCommand ? 10_000 : 60_000;
     const intervalId = globalThis.setInterval(() => {
       void loadIssues(activeRepo);
-    }, intervalMs);
+    }, PIPELINE_POLL_INTERVAL_MS);
 
     return () => {
       globalThis.clearInterval(intervalId);
     };
-  }, [activeRepo, canFetch, hasActiveRepo, hasRunningShipCommand, loadIssues]);
+  }, [activeRepo, canFetch, hasActiveRepo, loadIssues]);
 
   const handleRefresh = useCallback(async () => {
     if (!canFetch || !hasActiveRepo || isLoading) {

@@ -85,7 +85,6 @@ describe('useIssuePipeline', () => {
         activeRepo: 'owner/repo',
         canFetch: true,
         hasActiveRepo: true,
-        hasRunningShipCommand: false,
         pushToast,
       })
     );
@@ -113,20 +112,17 @@ describe('useIssuePipeline', () => {
     expect(pushToast).not.toHaveBeenCalled();
   });
 
-  it('tracks busy sets, dialog state, and refresh polling intervals', async () => {
+  it('tracks busy sets, dialog state, and the 60-second refresh polling interval', async () => {
     const shipper = createMockShipperApi();
     shipper.install();
     const pushToast = vi.fn();
-    const { result, rerender } = renderHook(
-      ({ hasRunningShipCommand }: { hasRunningShipCommand: boolean }) =>
-        useIssuePipeline({
-          activeRepo: 'owner/repo',
-          canFetch: true,
-          hasActiveRepo: true,
-          hasRunningShipCommand,
-          pushToast,
-        }),
-      { initialProps: { hasRunningShipCommand: false } }
+    const { result } = renderHook(() =>
+      useIssuePipeline({
+        activeRepo: 'owner/repo',
+        canFetch: true,
+        hasActiveRepo: true,
+        pushToast,
+      })
     );
 
     act(() => {
@@ -141,12 +137,17 @@ describe('useIssuePipeline', () => {
     expect(result.current.isNewIssueOpen).toBe(true);
     expect(result.current.isAdoptOpen).toBe(true);
 
-    await advanceHookTimers(60_000);
+    await advanceHookTimers(59_999);
+    expect(shipper.api.listIssues).not.toHaveBeenCalled();
+
+    await advanceHookTimers(1);
     expect(shipper.api.listIssues).toHaveBeenCalledTimes(1);
 
-    rerender({ hasRunningShipCommand: true });
-    await advanceHookTimers(60_000);
-    expect(shipper.api.listIssues).toHaveBeenCalledTimes(7);
+    await advanceHookTimers(10 * 1_000);
+    expect(shipper.api.listIssues).toHaveBeenCalledTimes(1);
+
+    await advanceHookTimers(50_000);
+    expect(shipper.api.listIssues).toHaveBeenCalledTimes(2);
   });
 
   it('handles unlock flows, including stale locks and confirmation-required locks', async () => {
@@ -159,7 +160,6 @@ describe('useIssuePipeline', () => {
         activeRepo: 'owner/repo',
         canFetch: true,
         hasActiveRepo: true,
-        hasRunningShipCommand: false,
         pushToast,
       })
     );
@@ -193,7 +193,6 @@ describe('useIssuePipeline', () => {
         activeRepo: 'owner/repo',
         canFetch: true,
         hasActiveRepo: true,
-        hasRunningShipCommand: false,
         pushToast,
       })
     );
@@ -243,7 +242,6 @@ describe('useIssuePipeline', () => {
           activeRepo,
           canFetch: true,
           hasActiveRepo: true,
-          hasRunningShipCommand: false,
           pushToast: vi.fn(),
         }),
       { initialProps: { activeRepo: 'owner/repo' } }
@@ -292,7 +290,6 @@ describe('useIssuePipeline', () => {
         activeRepo: 'owner/repo',
         canFetch: true,
         hasActiveRepo: true,
-        hasRunningShipCommand: false,
         pushToast: vi.fn(),
       })
     );
