@@ -55,21 +55,18 @@ export function NewIssueDialog({
   const [capabilities, setCapabilities] = useState<NewIssueCapabilities | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const attachmentsRef = useRef<ScreenshotAttachment[]>([]);
+  const openRef = useRef(open);
+  const selectedRepoRef = useRef(selectedRepo);
+  const pasteGenerationRef = useRef(0);
+  const previewCloseButtonRef = useRef<HTMLButtonElement>(null);
+  const previewReturnFocusRef = useRef<HTMLElement | null>(null);
+
+  openRef.current = open;
+  selectedRepoRef.current = selectedRepo;
 
   useEffect(() => {
     attachmentsRef.current = attachments;
   }, [attachments]);
-
-  useEffect(() => {
-    if (!open) {
-      setSelectedRepo(activeRepo);
-      setPasteError(null);
-      setPreviewAttachmentId(null);
-      setCapabilities(null);
-      revokeAttachments(attachmentsRef.current);
-      setAttachments([]);
-    }
-  }, [activeRepo, open]);
 
   useEffect(() => {
     if (!open) {
@@ -103,6 +100,8 @@ export function NewIssueDialog({
 
   useEffect(() => {
     return () => {
+      pasteGenerationRef.current += 1;
+      openRef.current = false;
       revokeAttachments(attachmentsRef.current);
     };
   }, []);
@@ -115,6 +114,7 @@ export function NewIssueDialog({
   }
 
   const clearAttachments = useCallback(() => {
+    pasteGenerationRef.current += 1;
     revokeAttachments(attachmentsRef.current);
     attachmentsRef.current = [];
     setAttachments([]);
@@ -122,35 +122,121 @@ export function NewIssueDialog({
   }, []);
 
   const removeAttachment = useCallback((id: string) => {
-    setAttachments((current) => {
-      const removed = current.find((attachment) => attachment.id === id);
-      if (removed) {
-        URL.revokeObjectURL(removed.objectUrl);
-      }
-      return current.filter((attachment) => attachment.id !== id);
-    });
+    const removed = attachmentsRef.current.find((attachment) => attachment.id === id);
+    if (removed) {
+      URL.revokeObjectURL(removed.objectUrl);
+    }
+    attachmentsRef.current = attachmentsRef.current.filter((attachment) => attachment.id !== id);
+    setAttachments((current) => current.filter((attachment) => attachment.id !== id));
     setPasteError(null);
     setPreviewAttachmentId((current) => (current === id ? null : current));
   }, []);
 
+  useEffect(() => {
+    if (!open) {
+      setSelectedRepo(activeRepo);
+      setPasteError(null);
+      setCapabilities(null);
+      clearAttachments();
+    }
+  }, [activeRepo, clearAttachments, open]);
+
+  const handleDialogOpenChange = useCallback(
+    (nextOpen: boolean) => {
+      if (!nextOpen) {
+        setPasteError(null);
+        setCapabilities(null);
+        clearAttachments();
+      }
+      onOpenChange(nextOpen);
+    },
+    [clearAttachments, onOpenChange]
+  );
+
+  const isPasteCurrent = useCallback((generation: number, repo: string): boolean => {
+    return (
+      openRef.current &&
+      pasteGenerationRef.current === generation &&
+      selectedRepoRef.current === repo
+    );
+  }, []);
+
+  const openPreview = useCallback((id: string) => {
+    const activeElement = document.activeElement;
+    previewReturnFocusRef.current = activeElement instanceof HTMLElement ? activeElement : null;
+    setPreviewAttachmentId(id);
+  }, []);
+
+  const closePreview = useCallback(() => {
+    const returnFocus = previewReturnFocusRef.current;
+    previewReturnFocusRef.current = null;
+    setPreviewAttachmentId(null);
+    globalThis.queueMicrotask(() => {
+      if (returnFocus && document.contains(returnFocus)) {
+        returnFocus.focus();
+      }
+    });
+  }, []);
+
   async function addImageFiles(
-    files: Array<{ file: File; mimeType: NewIssueImageMimeType }>
+    files: Array<{ file: File; mimeType: NewIssueImageMimeType }>,
+    repo: string,
+    maxImages: number
   ): Promise<void> {
     const created: ScreenshotAttachment[] = [];
+    const generation = pasteGenerationRef.current;
     try {
       for (const { file, mimeType } of files) {
+        const bytes = await file.arrayBuffer();
+        if (!isPasteCurrent(generation, repo)) {
+          revokeAttachments(created);
+          return;
+        }
+
         created.push({
           id: createAttachmentId(),
           mimeType,
-          bytes: await file.arrayBuffer(),
+          bytes,
           objectUrl: URL.createObjectURL(file),
         });
       }
-      setAttachments((current) => [...current, ...created]);
-      setPasteError(null);
+
+      if (!isPasteCurrent(generation, repo)) {
+        revokeAttachments(created);
+        return;
+      }
+
+      const commitResult = {
+        accepted: false,
+        rejectedForCapacity: false,
+      };
+      setAttachments((current) => {
+        if (!isPasteCurrent(generation, repo)) {
+          return current;
+        }
+        if (current.length + created.length > maxImages) {
+          commitResult.rejectedForCapacity = true;
+          return current;
+        }
+
+        commitResult.accepted = true;
+        return [...current, ...created];
+      });
+
+      if (commitResult.accepted) {
+        setPasteError(null);
+        return;
+      }
+
+      revokeAttachments(created);
+      if (commitResult.rejectedForCapacity && isPasteCurrent(generation, repo)) {
+        setPasteError('Remove an existing screenshot before pasting another one.');
+      }
     } catch {
       revokeAttachments(created);
-      setPasteError('Unable to read the pasted image. Try copying it again.');
+      if (isPasteCurrent(generation, repo)) {
+        setPasteError('Unable to read the pasted image. Try copying it again.');
+      }
     }
   }
 
@@ -168,7 +254,7 @@ export function NewIssueDialog({
 
     e.preventDefault();
 
-    if (attachments.length + imageItems.length > capabilities.maxImages) {
+    if (attachmentsRef.current.length + imageItems.length > capabilities.maxImages) {
       setPasteError('Remove an existing screenshot before pasting another one.');
       return;
     }
@@ -193,7 +279,7 @@ export function NewIssueDialog({
       files.push({ file, mimeType: item.type as NewIssueImageMimeType });
     }
 
-    void addImageFiles(files);
+    void addImageFiles(files, selectedRepo, capabilities.maxImages);
   }
 
   function handleSubmit(e: SyntheticEvent): void {
@@ -207,7 +293,7 @@ export function NewIssueDialog({
     onSubmit(trimmed, selectedRepo, screenshots.length > 0 ? screenshots : undefined);
     clearAttachments();
     setRequest('');
-    onOpenChange(false);
+    handleDialogOpenChange(false);
   }
 
   const previewAttachment =
@@ -216,14 +302,20 @@ export function NewIssueDialog({
       : attachments.find((attachment) => attachment.id === previewAttachmentId);
   const imageAttachmentsUnavailable = capabilities !== null && !capabilities.supportsImages;
 
+  useEffect(() => {
+    if (previewAttachment) {
+      previewCloseButtonRef.current?.focus();
+    }
+  }, [previewAttachment]);
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleDialogOpenChange}>
       <DialogContent
         className="gap-0 p-0"
         onEscapeKeyDown={(event) => {
           if (previewAttachment) {
             event.preventDefault();
-            setPreviewAttachmentId(null);
+            closePreview();
           }
         }}
         onPaste={capabilities?.supportsImages ? handlePaste : undefined}
@@ -235,17 +327,26 @@ export function NewIssueDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <form ref={formRef} onSubmit={handleSubmit} className="px-6 py-4">
+        <form
+          ref={formRef}
+          onSubmit={handleSubmit}
+          className="px-6 py-4"
+          inert={previewAttachment ? true : undefined}
+          aria-hidden={previewAttachment ? true : undefined}
+        >
           <label className="mb-3 block">
             <span className="mb-1 block text-sm font-medium text-foreground">Repository</span>
             <select
               value={selectedRepo}
               onChange={(e) => {
-                if (e.target.value !== selectedRepo) {
+                const nextRepo = e.target.value;
+                if (nextRepo !== selectedRepo) {
+                  selectedRepoRef.current = nextRepo;
                   clearAttachments();
                   setPasteError(null);
+                  setCapabilities(null);
                 }
-                setSelectedRepo(e.target.value);
+                setSelectedRepo(nextRepo);
               }}
               disabled={repos.length === 1}
               className="border-input bg-card text-foreground focus-visible:border-ring focus-visible:ring-ring/50 block h-9 w-full rounded-md border px-3 py-1 text-sm transition-[color,box-shadow] outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50"
@@ -275,12 +376,12 @@ export function NewIssueDialog({
                   <button
                     type="button"
                     onClick={() => {
-                      setPreviewAttachmentId(attachment.id);
+                      openPreview(attachment.id);
                     }}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter' || event.key === ' ') {
                         event.preventDefault();
-                        setPreviewAttachmentId(attachment.id);
+                        openPreview(attachment.id);
                       }
                     }}
                     className="relative size-16 overflow-hidden rounded-md border border-border bg-card outline-none transition-[border-color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
@@ -330,7 +431,7 @@ export function NewIssueDialog({
               type="button"
               variant="outline"
               onClick={() => {
-                onOpenChange(false);
+                handleDialogOpenChange(false);
               }}
             >
               Cancel
@@ -342,9 +443,23 @@ export function NewIssueDialog({
         </form>
         {previewAttachment ? (
           <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Screenshot preview"
             className="absolute inset-0 z-10 grid place-items-center rounded-sm bg-background/95 p-6"
             onClick={() => {
-              setPreviewAttachmentId(null);
+              closePreview();
+            }}
+            onKeyDownCapture={(event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                event.stopPropagation();
+                closePreview();
+              } else if (event.key === 'Tab') {
+                event.preventDefault();
+                event.stopPropagation();
+                previewCloseButtonRef.current?.focus();
+              }
             }}
           >
             <div
@@ -359,10 +474,11 @@ export function NewIssueDialog({
                 className="max-h-[min(70vh,34rem)] max-w-[min(80vw,46rem)] rounded-md border border-border object-contain shadow-xl"
               />
               <button
+                ref={previewCloseButtonRef}
                 type="button"
                 aria-label="Close screenshot preview"
                 onClick={() => {
-                  setPreviewAttachmentId(null);
+                  closePreview();
                 }}
                 className="absolute -top-3 -right-3 grid size-8 place-items-center rounded-full border border-border bg-background text-foreground shadow-sm transition-colors hover:bg-accent focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
               >

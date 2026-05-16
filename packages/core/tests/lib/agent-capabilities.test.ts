@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   NEW_ISSUE_IMAGE_EXTENSION_BY_MIME_TYPE,
+  NEW_ISSUE_IMAGE_CAPABLE_AGENTS,
   NEW_ISSUE_IMAGE_MIME_TYPES,
   NEW_ISSUE_MAX_IMAGE_BYTES,
   NEW_ISSUE_MAX_IMAGES,
@@ -33,6 +34,7 @@ describe('New Issue image capabilities', () => {
   });
 
   it('supports New Issue images only for Codex', () => {
+    expect(NEW_ISSUE_IMAGE_CAPABLE_AGENTS).toEqual(['codex']);
     expect(supportsNewIssueImages('codex')).toBe(true);
     expect(supportsNewIssueImages('claude')).toBe(false);
     expect(supportsNewIssueImages('copilot')).toBe(false);

@@ -320,9 +320,14 @@ export class BackgroundManager {
       session.pauseSentinelPath = this.createPauseSentinelPath(session.id);
     }
 
+    const sessionEnv = Object.fromEntries(
+      Object.entries(session.env ?? {}).filter(
+        (entry): entry is [string, string] => entry[1] !== undefined
+      )
+    );
     const env = {
       ...process.env,
-      ...(session.env ?? {}),
+      ...sessionEnv,
       ...(session.pauseSentinelPath
         ? { SHIPPER_PAUSE_SENTINEL_FILE: session.pauseSentinelPath }
         : {}),
