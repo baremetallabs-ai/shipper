@@ -1684,7 +1684,57 @@ describe('useBackgroundCommands', () => {
         })
       );
     });
+    await waitFor(() => {
+      expect(pipelineBridge.loadIssues).toHaveBeenCalledWith('owner/repo');
+    });
     expect(pipelineBridge.trackPausedIssue).not.toHaveBeenCalledWith(78);
+  });
+
+  it('does not refresh a paused ship repo after it stops being active', async () => {
+    const shipper = createMockShipperApi();
+    shipper.install();
+    let resolvePause!: () => void;
+    const pauseIssuePromise = new Promise<void>((resolve) => {
+      resolvePause = resolve;
+    });
+    vi.mocked(shipper.api.pauseIssue).mockReturnValue(pauseIssuePromise);
+    const pipelineBridge = createPipelineBridge();
+    const checkInitState = vi.fn(() => Promise.resolve(undefined));
+    const { rerender } = renderHook(
+      ({ activeRepo }: { activeRepo: string }) =>
+        useBackgroundCommands({
+          activeRepo,
+          autoMergeRepos: new Set(),
+          checkInitState,
+          pipelineBridgeRef: { current: pipelineBridge },
+        }),
+      { initialProps: { activeRepo: 'owner/repo' } }
+    );
+    await flushHookEffects();
+
+    shipper.emitBackgroundStatus({
+      sessionId: 'ship-paused-active-switch',
+      command: 'ship',
+      repo: 'owner/repo',
+      status: 'paused',
+      meta: { issueNumber: 79, merge: false },
+    });
+    await flushHookEffects();
+
+    expect(shipper.api.pauseIssue).toHaveBeenCalledWith('owner/repo', 79);
+
+    rerender({ activeRepo: 'other/repo' });
+    await flushHookEffects();
+
+    await act(async () => {
+      resolvePause();
+      await pauseIssuePromise;
+    });
+    await flushHookEffects();
+
+    expect(pipelineBridge.trackPausedIssue).toHaveBeenCalledWith(79);
+    expect(pipelineBridge.loadIssues).not.toHaveBeenCalled();
+    expect(checkInitState).not.toHaveBeenCalled();
   });
 
   it('shows the final-stage pause no-op message instead of persisting pause', async () => {

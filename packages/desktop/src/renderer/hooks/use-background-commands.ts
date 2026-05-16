@@ -151,6 +151,9 @@ export function useBackgroundCommands({
   const autoUnblockQueueRef = useRef<Map<string, number[]>>(new Map());
   const autoUnblockIssuesRef = useRef<Map<string, Set<number>>>(new Map());
   const pausedIssuesByRepoRef = useRef<Map<string, Set<number>>>(new Map());
+  const activeRepoRef = useRef(activeRepo);
+
+  activeRepoRef.current = activeRepo;
 
   const viewedBackgroundCommand =
     logViewer.sessionId === null
@@ -322,7 +325,7 @@ export function useBackgroundCommands({
       command: BackgroundCommandKind,
       status: BackgroundCommandState['status']
     ): Promise<IssueListResult | null> => {
-      if (repo !== activeRepo) {
+      if (repo !== activeRepoRef.current) {
         return null;
       }
 
@@ -341,7 +344,7 @@ export function useBackgroundCommands({
 
       return null;
     },
-    [activeRepo, checkInitState, pipelineBridgeRef]
+    [checkInitState, pipelineBridgeRef]
   );
 
   const handleRetryBackgroundCommand = useCallback(
@@ -588,27 +591,30 @@ export function useBackgroundCommands({
       setPausePendingIssue(event.repo, issueNumber, pausePending);
     }
 
-    if (event.status === 'paused' && event.command === 'ship' && issueNumber !== undefined) {
-      try {
-        await getShipperApi().pauseIssue(event.repo, issueNumber);
-        trackPausedIssueForRepo(event.repo, issueNumber);
-        pushToast({
-          id: `paused-${event.repo}-${issueNumber}`,
-          sessionId: event.sessionId,
-          variant: 'cancelled',
-          title: `#${issueNumber} paused`,
-          description: 'The current stage finished and no further stage was started.',
-        });
-        await refreshRepoAfterBackground(event.repo, event.command, event.status);
-      } catch (error) {
-        pushToast({
-          id: `paused-${event.repo}-${issueNumber}-failed`,
-          sessionId: event.sessionId,
-          variant: 'error',
-          title: `Failed to pause #${issueNumber}`,
-          description: toErrorMessage(error),
-        });
+    if (event.status === 'paused' && event.command === 'ship') {
+      if (issueNumber !== undefined) {
+        try {
+          await getShipperApi().pauseIssue(event.repo, issueNumber);
+          trackPausedIssueForRepo(event.repo, issueNumber);
+          pushToast({
+            id: `paused-${event.repo}-${issueNumber}`,
+            sessionId: event.sessionId,
+            variant: 'cancelled',
+            title: `#${issueNumber} paused`,
+            description: 'The current stage finished and no further stage was started.',
+          });
+        } catch (error) {
+          pushToast({
+            id: `paused-${event.repo}-${issueNumber}-failed`,
+            sessionId: event.sessionId,
+            variant: 'error',
+            title: `Failed to pause #${issueNumber}`,
+            description: toErrorMessage(error),
+          });
+        }
       }
+
+      await refreshRepoAfterBackground(event.repo, event.command, event.status);
     }
 
     if (event.status === 'complete' && event.command !== 'unblock') {
