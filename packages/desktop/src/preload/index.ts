@@ -1,5 +1,9 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
-import type { WorkflowStage } from '@baremetallabs-ai/shipper-core';
+import type {
+  AgentName,
+  NewIssueImageMimeType,
+  WorkflowStage,
+} from '@baremetallabs-ai/shipper-core';
 
 interface ConfigPayload {
   repos: string[];
@@ -61,6 +65,19 @@ interface BackgroundOutputEvent {
   data: string;
 }
 
+interface NewIssueCapabilities {
+  agent: AgentName;
+  supportsImages: boolean;
+  acceptedMimeTypes: NewIssueImageMimeType[];
+  maxImageBytes: number;
+  maxImages: number;
+}
+
+interface NewIssueScreenshotPayload {
+  mimeType: NewIssueImageMimeType;
+  bytes: ArrayBuffer;
+}
+
 const shipperAPI = {
   checkPrerequisites: () => ipcRenderer.invoke('check-prerequisites'),
   getConfig: () => ipcRenderer.invoke('get-config'),
@@ -97,8 +114,14 @@ const shipperAPI = {
     ipcRenderer.invoke('pty-spawn-shipper-groom', { issueNumber, repo, cols, rows }),
   spawnShipperSetup: (repo: string, cols: number, rows: number) =>
     ipcRenderer.invoke('pty-spawn-shipper-setup', { repo, cols, rows }),
-  spawnBackgroundNew: (request: string, repo: string) =>
-    ipcRenderer.invoke('bg-spawn-new', { request, repo }),
+  getNewIssueCapabilities: (repo: string): Promise<NewIssueCapabilities> =>
+    ipcRenderer.invoke('get-new-issue-capabilities', { repo }) as Promise<NewIssueCapabilities>,
+  spawnBackgroundNew: (request: string, repo: string, screenshots?: NewIssueScreenshotPayload[]) =>
+    ipcRenderer.invoke('bg-spawn-new', {
+      request,
+      repo,
+      ...(screenshots === undefined ? {} : { screenshots }),
+    }),
   spawnBackgroundShip: (
     issueNumber: number,
     repo: string,

@@ -17,6 +17,7 @@
     "src/preload/index.d.ts",
     "src/renderer/**/*",
     "../core/src/browser.ts",
+    "../core/src/lib/agent-capabilities.ts",
     "../core/src/lib/errors.ts",
     "../core/src/lib/labels.ts",
     "../core/src/lib/token-usage.ts",

@@ -1,9 +1,25 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { app, ipcMain } from 'electron';
-import { ensureRepoClone, gh, isPlainObject, toErrorMessage } from '@baremetallabs-ai/shipper-core';
+import {
+  NEW_ISSUE_IMAGE_EXTENSION_BY_MIME_TYPE,
+  NEW_ISSUE_IMAGE_MIME_TYPES,
+  NEW_ISSUE_MAX_IMAGE_BYTES,
+  NEW_ISSUE_MAX_IMAGES,
+  SHIPPER_NEW_ISSUE_SCREENSHOT_DIR_ENV,
+  ensureRepoClone,
+  gh,
+  isNewIssueImageMimeType,
+  isPlainObject,
+  loadSettingsFromDir,
+  resolveAgentFromSettings,
+  supportsNewIssueImages,
+  toErrorMessage,
+  type AgentName,
+  type NewIssueImageMimeType,
+} from '@baremetallabs-ai/shipper-core';
 
 import type { BackgroundManager } from '../background-manager.js';
 import { isPositiveInteger, parseRepo } from './shared.js';
@@ -14,6 +30,12 @@ interface SpawnBackgroundCommandPayload {
 
 interface SpawnBackgroundNewPayload extends SpawnBackgroundCommandPayload {
   request: string;
+  screenshots: NewIssueScreenshotPayload[];
+}
+
+interface NewIssueScreenshotPayload {
+  mimeType: NewIssueImageMimeType;
+  bytes: ArrayBuffer;
 }
 
 interface SpawnBackgroundShipPayload extends SpawnBackgroundCommandPayload {
@@ -79,10 +101,50 @@ function parseSpawnBackgroundNewPayload(value: unknown): SpawnBackgroundNewPaylo
     return null;
   }
 
+  const screenshots =
+    'screenshots' in value && value.screenshots !== undefined
+      ? parseNewIssueScreenshotPayloads(value.screenshots)
+      : [];
+  if (screenshots === null) {
+    return null;
+  }
+
   return {
     ...payload,
     request: value.request,
+    screenshots,
   };
+}
+
+function parseNewIssueScreenshotPayloads(value: unknown): NewIssueScreenshotPayload[] | null {
+  if (!Array.isArray(value) || value.length > NEW_ISSUE_MAX_IMAGES) {
+    return null;
+  }
+
+  const screenshots: NewIssueScreenshotPayload[] = [];
+  for (const item of value) {
+    if (!isPlainObject(item)) {
+      return null;
+    }
+
+    const { mimeType, bytes } = item;
+    if (
+      typeof mimeType !== 'string' ||
+      !isNewIssueImageMimeType(mimeType) ||
+      !(bytes instanceof ArrayBuffer) ||
+      bytes.byteLength === 0 ||
+      bytes.byteLength > NEW_ISSUE_MAX_IMAGE_BYTES
+    ) {
+      return null;
+    }
+
+    screenshots.push({
+      mimeType,
+      bytes,
+    });
+  }
+
+  return screenshots;
 }
 
 function parseSpawnBackgroundShipPayload(value: unknown): SpawnBackgroundShipPayload | null {
@@ -147,45 +209,9 @@ function parseSessionIdPayload(value: unknown): SessionIdPayload | null {
   };
 }
 
-function readConfiguredAgentFromSettings(
-  filepath: string
-): 'claude' | 'codex' | 'copilot' | undefined {
-  try {
-    const data = JSON.parse(readFileSync(filepath, 'utf8')) as Record<string, unknown>;
-    const commands = isPlainObject(data.commands) ? data.commands : undefined;
-    const commandDefault = isPlainObject(commands?.default) ? commands.default : undefined;
-    const agents = isPlainObject(data.agents) ? data.agents : undefined;
-
-    const configuredAgent =
-      typeof commandDefault?.agent === 'string'
-        ? commandDefault.agent
-        : typeof agents?.default === 'string'
-          ? agents.default
-          : typeof data.agent === 'string'
-            ? data.agent
-            : undefined;
-
-    return configuredAgent === 'claude' ||
-      configuredAgent === 'codex' ||
-      configuredAgent === 'copilot'
-      ? configuredAgent
-      : undefined;
-  } catch {
-    // Missing or malformed settings file — fall through to default.
-    return undefined;
-  }
-}
-
-function resolveInitAgent(repoPath: string): 'claude' | 'codex' | 'copilot' {
-  const localAgent = readConfiguredAgentFromSettings(
-    join(repoPath, '.shipper', 'settings.local.json')
-  );
-  if (localAgent) {
-    return localAgent;
-  }
-
-  const storedAgent = readConfiguredAgentFromSettings(join(repoPath, '.shipper', 'settings.json'));
-  return storedAgent ?? 'claude';
+async function resolveAgentForRepo(repoPath: string, step: string): Promise<AgentName> {
+  const settings = await loadSettingsFromDir(repoPath);
+  return resolveAgentFromSettings(settings, step);
 }
 
 function getRepoSlug(repo: string): string {
@@ -196,6 +222,26 @@ function createDesktopNewLogFile(repo: string): string {
   const sessionsDir = join(app.getPath('home'), '.shipper', 'sessions', getRepoSlug(repo));
   mkdirSync(sessionsDir, { recursive: true, mode: 0o700 });
   return join(sessionsDir, `desktop-${randomUUID()}.jsonl`);
+}
+
+function stageNewIssueScreenshots(
+  sessionId: string,
+  screenshots: NewIssueScreenshotPayload[]
+): string | undefined {
+  if (screenshots.length === 0) {
+    return undefined;
+  }
+
+  const stagingDir = join(app.getPath('userData'), 'new-issue-screenshots', sessionId);
+  mkdirSync(stagingDir, { recursive: true, mode: 0o700 });
+
+  screenshots.forEach((screenshot, index) => {
+    const extension = NEW_ISSUE_IMAGE_EXTENSION_BY_MIME_TYPE[screenshot.mimeType];
+    const filename = `screenshot-${String(index + 1).padStart(2, '0')}.${extension}`;
+    writeFileSync(join(stagingDir, filename), Buffer.from(screenshot.bytes));
+  });
+
+  return stagingDir;
 }
 
 function parseCreatedIssueList(repo: string, json: string): RawCreatedIssueData[] {
@@ -412,6 +458,23 @@ async function resolveCompletedShipMeta(
 }
 
 export function registerBackgroundHandlers(backgroundManager: BackgroundManager): void {
+  ipcMain.handle('get-new-issue-capabilities', async (_event, payload: unknown) => {
+    const parsedPayload = parseSpawnBackgroundCommandPayload(payload);
+    if (parsedPayload === null) {
+      throw new Error('Invalid get-new-issue-capabilities payload.');
+    }
+
+    const repoPath = await ensureRepoClone(parsedPayload.repo);
+    const agent = await resolveAgentForRepo(repoPath, 'new');
+    return {
+      agent,
+      supportsImages: supportsNewIssueImages(agent),
+      acceptedMimeTypes: [...NEW_ISSUE_IMAGE_MIME_TYPES],
+      maxImageBytes: NEW_ISSUE_MAX_IMAGE_BYTES,
+      maxImages: NEW_ISSUE_MAX_IMAGES,
+    };
+  });
+
   ipcMain.handle('bg-spawn-new', async (_event, payload: unknown) => {
     const parsedPayload = parseSpawnBackgroundNewPayload(payload);
     if (parsedPayload === null) {
@@ -421,21 +484,56 @@ export function registerBackgroundHandlers(backgroundManager: BackgroundManager)
     const repoPath = await ensureRepoClone(parsedPayload.repo);
     const logFile = createDesktopNewLogFile(parsedPayload.repo);
     const sessionId = randomUUID();
+    const screenshots = parsedPayload.screenshots;
+    if (screenshots.length > 0) {
+      const agent = await resolveAgentForRepo(repoPath, 'new');
+      if (!supportsNewIssueImages(agent)) {
+        throw new Error(`Image inputs are not supported for the "${agent}" agent.`);
+      }
+    }
 
-    return backgroundManager.spawn({
-      sessionId,
-      command: 'new',
-      repo: parsedPayload.repo,
-      commandName: 'shipper',
-      args: ['new', parsedPayload.request, '--mode', 'headless', '--log-file', logFile],
-      cwd: repoPath,
-      logFile,
-      meta: {
-        request: parsedPayload.request,
+    let stagingDir: string | undefined;
+    try {
+      stagingDir = stageNewIssueScreenshots(sessionId, screenshots);
+      const screenshotSessionOptions:
+        | {
+            env: Record<string, string>;
+            onFinally: () => void;
+          }
+        | Record<string, never> = stagingDir
+        ? {
+            env: { [SHIPPER_NEW_ISSUE_SCREENSHOT_DIR_ENV]: stagingDir },
+            onFinally: (() => {
+              const screenshotStagingDir = stagingDir;
+              return () => {
+                rmSync(screenshotStagingDir, { recursive: true, force: true });
+              };
+            })(),
+          }
+        : {};
+
+      return backgroundManager.spawn({
+        sessionId,
+        command: 'new',
+        repo: parsedPayload.repo,
+        commandName: 'shipper',
+        args: ['new', parsedPayload.request, '--mode', 'headless', '--log-file', logFile],
+        cwd: repoPath,
         logFile,
-      },
-      onComplete: async (session) => resolveCreatedIssueMeta(parsedPayload.repo, session.spawnedAt),
-    });
+        meta: {
+          request: parsedPayload.request,
+          logFile,
+        },
+        ...screenshotSessionOptions,
+        onComplete: async (session) =>
+          resolveCreatedIssueMeta(parsedPayload.repo, session.spawnedAt),
+      });
+    } catch (error) {
+      if (stagingDir) {
+        rmSync(stagingDir, { recursive: true, force: true });
+      }
+      throw error;
+    }
   });
 
   ipcMain.handle('bg-spawn-ship', async (_event, payload: unknown) => {
@@ -483,7 +581,7 @@ export function registerBackgroundHandlers(backgroundManager: BackgroundManager)
     }
 
     const repoPath = await ensureRepoClone(parsedPayload.repo);
-    const agent = resolveInitAgent(repoPath);
+    const agent = await resolveAgentForRepo(repoPath, 'default');
     const sessionId = randomUUID();
 
     return backgroundManager.spawn({

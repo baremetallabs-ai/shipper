@@ -413,6 +413,180 @@ describe('BackgroundManager', () => {
     );
   });
 
+  it('passes custom env through to non-ship sessions', () => {
+    const manager = createManager();
+
+    manager.spawn({
+      sessionId: 'new-1',
+      command: 'new',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['new', 'idea', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+      env: { SHIPPER_NEW_ISSUE_SCREENSHOT_DIR: '/tmp/screens' },
+    });
+
+    const spawnOptions = mockSpawn.mock.calls[0]?.[2];
+    expect(spawnOptions?.env).toEqual(
+      expect.objectContaining({
+        SHIPPER_NEW_ISSUE_SCREENSHOT_DIR: '/tmp/screens',
+      })
+    );
+  });
+
+  it('merges custom env with the pause sentinel for ship sessions', () => {
+    const manager = createManager();
+
+    manager.spawn({
+      sessionId: 'ship-1',
+      command: 'ship',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['ship', '41', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+      env: { SHIPPER_NEW_ISSUE_SCREENSHOT_DIR: '/tmp/screens' },
+      meta: { issueNumber: 41 },
+    });
+
+    const spawnOptions = mockSpawn.mock.calls[0]?.[2];
+    expect(spawnOptions?.env).toEqual(
+      expect.objectContaining({
+        SHIPPER_NEW_ISSUE_SCREENSHOT_DIR: '/tmp/screens',
+        SHIPPER_PAUSE_SENTINEL_FILE: join(tempDir, 'pause-sentinels', 'ship-1'),
+      })
+    );
+  });
+
+  it.each([
+    ['success', 0, 'complete'],
+    ['failure', 1, 'failed'],
+    ['paused', PAUSED_EXIT_CODE, 'paused'],
+  ])('runs onFinally exactly once after %s exits', async (_name, exitCode, status) => {
+    const manager = createManager();
+    const onFinally = vi.fn();
+
+    manager.spawn({
+      sessionId: `session-${status}`,
+      command: 'new',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['new', 'idea', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+      onFinally,
+    });
+
+    latestChild().close(exitCode);
+    latestChild().close(exitCode);
+    await flushBackgroundCleanup();
+
+    expect(onFinally).toHaveBeenCalledTimes(1);
+    expect(onFinally).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: `session-${status}`,
+        status,
+        exitCode,
+      })
+    );
+  });
+
+  it('runs onFinally exactly once after cancellation', async () => {
+    const manager = createManager();
+    const onFinally = vi.fn();
+    vi.spyOn(process, 'kill').mockImplementation(() => true);
+
+    manager.spawn({
+      sessionId: 'new-cancelled',
+      command: 'new',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['new', 'idea', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+      onFinally,
+    });
+
+    manager.kill('new-cancelled');
+    latestChild().close(0);
+    latestChild().close(0);
+    await flushBackgroundCleanup();
+
+    expect(onFinally).toHaveBeenCalledTimes(1);
+    const snapshot = onFinally.mock.calls[0]?.[0] as
+      | { id?: string; status?: string; meta?: { cancelled?: boolean } }
+      | undefined;
+    expect(snapshot).toEqual(
+      expect.objectContaining({
+        id: 'new-cancelled',
+        status: 'failed',
+      })
+    );
+    expect(snapshot?.meta).toEqual(expect.objectContaining({ cancelled: true }));
+  });
+
+  it('runs onFinally exactly once after a child error', async () => {
+    const manager = createManager();
+    const onFinally = vi.fn();
+
+    manager.spawn({
+      sessionId: 'new-error',
+      command: 'new',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['new', 'idea', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+      onFinally,
+    });
+
+    latestChild().emit('error', new Error('spawn failed'));
+    latestChild().close(1);
+    await flushBackgroundCleanup();
+
+    expect(onFinally).toHaveBeenCalledTimes(1);
+    expect(onFinally).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'new-error',
+        status: 'failed',
+        exitCode: 1,
+      })
+    );
+  });
+
+  it('runs onFinally when onComplete throws and preserves completion status', async () => {
+    const manager = createManager();
+    const onFinally = vi.fn();
+
+    manager.spawn({
+      sessionId: 'new-complete-throws',
+      command: 'new',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['new', 'idea', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+      onComplete: () => {
+        throw new Error('metadata failed');
+      },
+      onFinally,
+    });
+
+    latestChild().close(0);
+    await flushBackgroundCleanup();
+
+    expect(onFinally).toHaveBeenCalledTimes(1);
+    expect(onFinally).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'new-complete-throws',
+        status: 'complete',
+        exitCode: 0,
+      })
+    );
+    expect(statusEvents()).toContainEqual(
+      expect.objectContaining({
+        sessionId: 'new-complete-throws',
+        status: 'complete',
+        exitCode: 0,
+      })
+    );
+  });
+
   it('writes the pause sentinel and emits pausePending for a running ship session', () => {
     const manager = createManager();
 

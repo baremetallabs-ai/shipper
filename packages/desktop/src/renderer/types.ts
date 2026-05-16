@@ -1,4 +1,10 @@
-import type { ListIssueItem, TokenUsage, WorkflowStage } from '@baremetallabs-ai/shipper-core';
+import type {
+  AgentName,
+  ListIssueItem,
+  NewIssueImageMimeType,
+  TokenUsage,
+  WorkflowStage,
+} from '@baremetallabs-ai/shipper-core';
 
 export interface CheckResult {
   ok: boolean;
@@ -98,6 +104,19 @@ export interface PtyStatusEvent {
   status: TerminalSessionStatus;
 }
 
+export interface NewIssueCapabilities {
+  agent: AgentName;
+  supportsImages: boolean;
+  acceptedMimeTypes: NewIssueImageMimeType[];
+  maxImageBytes: number;
+  maxImages: number;
+}
+
+export interface NewIssueScreenshotPayload {
+  mimeType: NewIssueImageMimeType;
+  bytes: ArrayBuffer;
+}
+
 export interface ShipperApi {
   checkPrerequisites: () => Promise<Prerequisites>;
   getConfig: () => Promise<AppConfig>;
@@ -152,7 +171,12 @@ export interface ShipperApi {
     rows: number
   ) => Promise<{ sessionId: string }>;
   spawnShipperSetup: (repo: string, cols: number, rows: number) => Promise<{ sessionId: string }>;
-  spawnBackgroundNew: (request: string, repo: string) => Promise<{ sessionId: string }>;
+  getNewIssueCapabilities: (repo: string) => Promise<NewIssueCapabilities>;
+  spawnBackgroundNew: (
+    request: string,
+    repo: string,
+    screenshots?: NewIssueScreenshotPayload[]
+  ) => Promise<{ sessionId: string }>;
   spawnBackgroundShip: (
     issueNumber: number,
     repo: string,

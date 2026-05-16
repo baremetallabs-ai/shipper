@@ -931,6 +931,86 @@ describe('runPrompt', () => {
     expect(spawnedArgs()).not.toContain('--model');
   });
 
+  it('passes Codex New Issue image paths before exec in headless mode', async () => {
+    resolveAgentMock.mockReturnValue('codex');
+    resolveModeMock.mockReturnValue('headless');
+    readFileMock.mockResolvedValueOnce(makePrompt('codex'));
+    mockSpawnResult();
+
+    await expect(
+      runPrompt('new', {
+        imageInputPaths: ['/tmp/wt/.shipper/input/screenshot-01.png'],
+      })
+    ).resolves.toBe(0);
+
+    const args = spawnedArgs();
+    const imageIdx = args.indexOf('--image');
+    expect(imageIdx).toBeGreaterThanOrEqual(0);
+    expect(args[imageIdx + 1]).toBe('/tmp/wt/.shipper/input/screenshot-01.png');
+    expect(imageIdx).toBeLessThan(args.indexOf('exec'));
+  });
+
+  it('preserves multiple Codex New Issue image path order', async () => {
+    resolveAgentMock.mockReturnValue('codex');
+    resolveModeMock.mockReturnValue('headless');
+    readFileMock.mockResolvedValueOnce(makePrompt('codex'));
+    mockSpawnResult();
+
+    await expect(
+      runPrompt('new', {
+        imageInputPaths: [
+          '/tmp/wt/.shipper/input/screenshot-01.png',
+          '/tmp/wt/.shipper/input/screenshot-02.jpg',
+        ],
+      })
+    ).resolves.toBe(0);
+
+    expect(spawnedArgs().slice(0, 4)).toEqual([
+      '--image',
+      '/tmp/wt/.shipper/input/screenshot-01.png',
+      '--image',
+      '/tmp/wt/.shipper/input/screenshot-02.jpg',
+    ]);
+    expect(spawnedArgs().indexOf('--image')).toBeLessThan(spawnedArgs().indexOf('exec'));
+  });
+
+  it('rejects New Issue image inputs for non-capable agents before spawning', async () => {
+    resolveAgentMock.mockReturnValue('claude');
+
+    await expect(
+      runPrompt('new', {
+        imageInputPaths: ['/tmp/wt/.shipper/input/screenshot-01.png'],
+      })
+    ).resolves.toBe(1);
+
+    expect(readFileMock).not.toHaveBeenCalled();
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects image inputs for non-New Issue prompts before spawning', async () => {
+    resolveAgentMock.mockReturnValue('codex');
+
+    await expect(
+      runPrompt('design', {
+        imageInputPaths: ['/tmp/wt/.shipper/input/screenshot-01.png'],
+      })
+    ).resolves.toBe(1);
+
+    expect(readFileMock).not.toHaveBeenCalled();
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it('does not add image args when imageInputPaths is omitted', async () => {
+    resolveAgentMock.mockReturnValue('codex');
+    resolveModeMock.mockReturnValue('headless');
+    readFileMock.mockResolvedValueOnce(makePrompt('codex'));
+    mockSpawnResult();
+
+    await expect(runPrompt('new', {})).resolves.toBe(0);
+
+    expect(spawnedArgs()).not.toContain('--image');
+  });
+
   it('passes --model for copilot when a model is resolved', async () => {
     resolveAgentMock.mockReturnValue('copilot');
     resolveModelMock.mockReturnValue('gpt-5');

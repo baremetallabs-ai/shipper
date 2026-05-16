@@ -1,6 +1,14 @@
 export { toError, toErrorMessage } from './lib/errors.js';
 export { isPlainObject } from './lib/type-guards.js';
 export type { TokenUsage } from './lib/token-usage.js';
+export type { NewIssueImageMimeType } from './lib/agent-capabilities.js';
+export {
+  NEW_ISSUE_IMAGE_MIME_TYPES,
+  NEW_ISSUE_MAX_IMAGE_BYTES,
+  NEW_ISSUE_MAX_IMAGES,
+} from './lib/agent-capabilities.js';
+
+export type AgentName = 'claude' | 'codex' | 'copilot';
 export {
   LABELS,
   WORKFLOW_LABELS,

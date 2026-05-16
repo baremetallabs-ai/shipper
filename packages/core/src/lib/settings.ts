@@ -93,8 +93,12 @@ const KNOWN_PROMPT_COMMANDS = new Set([
 ]);
 
 export async function loadSettings(): Promise<void> {
-  const basePath = path.resolve('.shipper', 'settings.json');
-  const localPath = path.resolve('.shipper', 'settings.local.json');
+  settings = await loadSettingsFromDir(process.cwd());
+}
+
+export async function loadSettingsFromDir(repoPath: string): Promise<Settings> {
+  const basePath = path.resolve(repoPath, '.shipper', 'settings.json');
+  const localPath = path.resolve(repoPath, '.shipper', 'settings.local.json');
 
   let base: Partial<Settings> = {};
   let local: Partial<Settings> = {};
@@ -102,6 +106,10 @@ export async function loadSettings(): Promise<void> {
   base = await readSettingsFile(basePath);
   local = await readSettingsFile(localPath);
 
+  return mergeSettings(base, local);
+}
+
+function mergeSettings(base: Partial<Settings>, local: Partial<Settings>): Settings {
   const baseCommands: Record<string, unknown> = isPlainObject(base.commands) ? base.commands : {};
   const localCommands: Record<string, unknown> = isPlainObject(local.commands)
     ? local.commands
@@ -138,7 +146,7 @@ export async function loadSettings(): Promise<void> {
     };
   }
 
-  settings = {
+  const mergedSettings: Settings = {
     ...DEFAULTS,
     ...base,
     ...local,
@@ -152,17 +160,19 @@ export async function loadSettings(): Promise<void> {
     );
   }
 
-  for (const [command, config] of Object.entries(settings.commands)) {
+  for (const [command, config] of Object.entries(mergedSettings.commands)) {
     validateModel(config?.model, command);
     validateDisableMcp(config?.disableMcp, command);
   }
-  validateHookTimeoutMinutes(settings.hookTimeoutMinutes);
+  validateHookTimeoutMinutes(mergedSettings.hookTimeoutMinutes);
 
-  for (const command of Object.keys(settings.commands)) {
+  for (const command of Object.keys(mergedSettings.commands)) {
     if (command !== 'default' && !KNOWN_PROMPT_COMMANDS.has(command)) {
       logger.warn(`Warning: Unknown command "${command}" in settings.commands.`);
     }
   }
+
+  return mergedSettings;
 }
 
 export function getSettings(): Settings {
@@ -178,11 +188,19 @@ export function getSettings(): Settings {
 }
 
 export function resolveAgent(step: string, override?: AgentName): AgentName {
+  return resolveAgentFromSettings(getSettings(), step, override);
+}
+
+export function resolveAgentFromSettings(
+  settings: Settings,
+  step: string,
+  override?: AgentName
+): AgentName {
   if (override) {
     return override;
   }
-  const s = getSettings();
-  const configuredAgent: unknown = s.commands[step]?.agent ?? s.commands.default.agent;
+  const configuredAgent: unknown =
+    settings.commands[step]?.agent ?? settings.commands.default.agent;
   if (
     configuredAgent !== 'claude' &&
     configuredAgent !== 'codex' &&
