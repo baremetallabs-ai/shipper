@@ -111,7 +111,6 @@ export interface UseBackgroundCommandsResult {
   pausePendingIssues: Set<number>;
   shippingCommands: Map<number, ActiveShippingCommand>;
   activeCommandRepos: Set<string>;
-  hasRunningShipCommand: boolean;
   pushToast: (toast: BackgroundToastItem) => void;
   dismissToast: (toastId: string) => void;
   handleLogViewerOpenChange: (open: boolean) => void;
@@ -152,18 +151,6 @@ export function useBackgroundCommands({
   const autoUnblockQueueRef = useRef<Map<string, number[]>>(new Map());
   const autoUnblockIssuesRef = useRef<Map<string, Set<number>>>(new Map());
   const pausedIssuesByRepoRef = useRef<Map<string, Set<number>>>(new Map());
-
-  const hasRunningShipCommand = useMemo(
-    () =>
-      backgroundCommands.some(
-        (command) =>
-          command.command === 'ship' &&
-          command.repo === activeRepo &&
-          command.status === 'running' &&
-          !command.cancelled
-      ),
-    [activeRepo, backgroundCommands]
-  );
 
   const viewedBackgroundCommand =
     logViewer.sessionId === null
@@ -339,24 +326,16 @@ export function useBackgroundCommands({
         return null;
       }
 
-      if (command === 'new' && status === 'complete') {
-        return pipelineBridgeRef.current?.loadIssues(repo) ?? null;
-      }
+      const isTerminalStatus = status === 'complete' || status === 'failed';
+      const shouldRefresh =
+        (command === 'ship' && (isTerminalStatus || status === 'paused')) ||
+        ((command === 'unblock' || command === 'new' || command === 'init') && isTerminalStatus);
 
       if (command === 'init' && status === 'complete') {
         void checkInitState(repo);
-        return pipelineBridgeRef.current?.loadIssues(repo) ?? null;
       }
 
-      if (command === 'unblock' && (status === 'complete' || status === 'failed')) {
-        return pipelineBridgeRef.current?.loadIssues(repo) ?? null;
-      }
-
-      if (command === 'ship' && (status === 'complete' || status === 'failed')) {
-        return pipelineBridgeRef.current?.loadIssues(repo) ?? null;
-      }
-
-      if (command === 'ship' && status === 'paused') {
+      if (shouldRefresh) {
         return pipelineBridgeRef.current?.loadIssues(repo) ?? null;
       }
 
@@ -1266,7 +1245,6 @@ export function useBackgroundCommands({
     pausePendingIssues,
     shippingCommands,
     activeCommandRepos,
-    hasRunningShipCommand,
     pushToast,
     dismissToast,
     handleLogViewerOpenChange,

@@ -61,7 +61,6 @@ export default function App(): JSX.Element {
     activeRepo: reposState.activeRepo,
     canFetch: reposState.canFetch,
     hasActiveRepo: reposState.hasActiveRepo,
-    hasRunningShipCommand: backgroundState.hasRunningShipCommand,
     pushToast: backgroundState.pushToast,
   });
   const terminalState = useTerminalSessions({

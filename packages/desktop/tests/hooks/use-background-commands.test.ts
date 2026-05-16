@@ -10,7 +10,13 @@ import {
   PR_REVIEWED_LABEL,
   READY_LABEL,
 } from '@baremetallabs-ai/shipper-core';
-import type { IssuePipelineBridge, IssueListResult } from '../../src/renderer/types.js';
+import type {
+  BackgroundCommandKind,
+  BackgroundCommandStatus,
+  BackgroundStatusMeta,
+  IssuePipelineBridge,
+  IssueListResult,
+} from '../../src/renderer/types.js';
 import { useBackgroundCommands } from '../../src/renderer/hooks/use-background-commands.js';
 import {
   createMockShipperApi,
@@ -45,6 +51,85 @@ function createPipelineBridge(): IssuePipelineBridge {
     clearUnblockIssue: vi.fn(),
   };
 }
+
+interface BackgroundRefreshCase {
+  name: string;
+  sessionId: string;
+  command: BackgroundCommandKind;
+  status: BackgroundCommandStatus;
+  exitCode?: number;
+  meta?: BackgroundStatusMeta;
+  checksInitState?: boolean;
+}
+
+const activeRepoRefreshCases: BackgroundRefreshCase[] = [
+  {
+    name: 'ship paused',
+    sessionId: 'ship-paused-refresh',
+    command: 'ship',
+    status: 'paused',
+    meta: { issueNumber: 90, merge: false },
+  },
+  {
+    name: 'ship complete',
+    sessionId: 'ship-complete-refresh',
+    command: 'ship',
+    status: 'complete',
+    meta: { issueNumber: 91, merge: false },
+  },
+  {
+    name: 'ship failed',
+    sessionId: 'ship-failed-terminal-refresh',
+    command: 'ship',
+    status: 'failed',
+    exitCode: 1,
+    meta: { issueNumber: 92, merge: false },
+  },
+  {
+    name: 'unblock complete',
+    sessionId: 'unblock-complete-refresh',
+    command: 'unblock',
+    status: 'complete',
+    meta: { issueNumber: 93 },
+  },
+  {
+    name: 'unblock failed',
+    sessionId: 'unblock-failed-refresh',
+    command: 'unblock',
+    status: 'failed',
+    exitCode: 1,
+    meta: { issueNumber: 94 },
+  },
+  {
+    name: 'new complete',
+    sessionId: 'new-complete-refresh',
+    command: 'new',
+    status: 'complete',
+    meta: { issueNumber: 95 },
+  },
+  {
+    name: 'new failed',
+    sessionId: 'new-failed-refresh',
+    command: 'new',
+    status: 'failed',
+    exitCode: 1,
+    meta: { request: 'Draft a new issue' },
+  },
+  {
+    name: 'init complete',
+    sessionId: 'init-complete-refresh',
+    command: 'init',
+    status: 'complete',
+    checksInitState: true,
+  },
+  {
+    name: 'init failed',
+    sessionId: 'init-failed-refresh',
+    command: 'init',
+    status: 'failed',
+    exitCode: 1,
+  },
+];
 
 describe('useBackgroundCommands', () => {
   afterEach(() => {
@@ -499,6 +584,99 @@ describe('useBackgroundCommands', () => {
     expect(
       result.current.toasts.some((toast) => /unlock|lock release/i.test(toast.description))
     ).toBe(false);
+  });
+
+  for (const testCase of activeRepoRefreshCases) {
+    it(`refreshes the active repo after ${testCase.name}`, async () => {
+      const shipper = createMockShipperApi();
+      shipper.install();
+      const pipelineBridge = createPipelineBridge();
+      const checkInitState = vi.fn(() => Promise.resolve(undefined));
+      renderHook(() =>
+        useBackgroundCommands({
+          activeRepo: 'owner/repo',
+          autoMergeRepos: new Set(),
+          checkInitState,
+          pipelineBridgeRef: { current: pipelineBridge },
+        })
+      );
+      await flushHookEffects();
+
+      shipper.emitBackgroundStatus({
+        sessionId: testCase.sessionId,
+        command: testCase.command,
+        repo: 'owner/repo',
+        status: testCase.status,
+        ...(testCase.exitCode !== undefined ? { exitCode: testCase.exitCode } : {}),
+        ...(testCase.meta ? { meta: testCase.meta } : {}),
+      });
+      await flushHookEffects();
+
+      await waitFor(() => {
+        expect(pipelineBridge.loadIssues).toHaveBeenCalledWith('owner/repo');
+      });
+
+      if (testCase.checksInitState) {
+        expect(checkInitState).toHaveBeenCalledWith('owner/repo');
+      } else {
+        expect(checkInitState).not.toHaveBeenCalled();
+      }
+    });
+  }
+
+  it('does not refresh the pipeline for terminal events from another repo', async () => {
+    const shipper = createMockShipperApi();
+    shipper.install();
+    const pipelineBridge = createPipelineBridge();
+    const checkInitState = vi.fn(() => Promise.resolve(undefined));
+    renderHook(() =>
+      useBackgroundCommands({
+        activeRepo: 'owner/repo',
+        autoMergeRepos: new Set(),
+        checkInitState,
+        pipelineBridgeRef: { current: pipelineBridge },
+      })
+    );
+    await flushHookEffects();
+
+    for (const testCase of [
+      {
+        sessionId: 'other-ship-complete',
+        command: 'ship' as const,
+        status: 'complete' as const,
+        meta: { issueNumber: 100, merge: false },
+      },
+      {
+        sessionId: 'other-unblock-failed',
+        command: 'unblock' as const,
+        status: 'failed' as const,
+        exitCode: 1,
+        meta: { issueNumber: 101 },
+      },
+      {
+        sessionId: 'other-new-complete',
+        command: 'new' as const,
+        status: 'complete' as const,
+      },
+      {
+        sessionId: 'other-init-complete',
+        command: 'init' as const,
+        status: 'complete' as const,
+      },
+    ]) {
+      shipper.emitBackgroundStatus({
+        sessionId: testCase.sessionId,
+        command: testCase.command,
+        repo: 'other/repo',
+        status: testCase.status,
+        ...(testCase.exitCode !== undefined ? { exitCode: testCase.exitCode } : {}),
+        ...(testCase.meta ? { meta: testCase.meta } : {}),
+      });
+      await flushHookEffects();
+    }
+
+    expect(pipelineBridge.loadIssues).not.toHaveBeenCalled();
+    expect(checkInitState).not.toHaveBeenCalled();
   });
 
   it('queues the next auto-ship candidate after a completed ship when auto-ship is enabled', async () => {
