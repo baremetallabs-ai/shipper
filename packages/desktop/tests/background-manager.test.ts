@@ -434,6 +434,32 @@ describe('BackgroundManager', () => {
     );
   });
 
+  it('filters undefined custom env values and ignores child stdin', () => {
+    const manager = createManager();
+
+    manager.spawn({
+      sessionId: 'new-1',
+      command: 'new',
+      repo: 'owner/repo',
+      commandName: 'shipper',
+      args: ['new', 'idea', '--mode', 'headless'],
+      cwd: '/tmp/repo',
+      env: {
+        SHIPPER_PRESENT_TEST_ENV: '1',
+        SHIPPER_OMITTED_TEST_ENV: undefined,
+      },
+    });
+
+    const spawnOptions = mockSpawn.mock.calls[0]?.[2];
+    expect(spawnOptions?.env).toEqual(
+      expect.objectContaining({
+        SHIPPER_PRESENT_TEST_ENV: '1',
+      })
+    );
+    expect(spawnOptions?.env).not.toHaveProperty('SHIPPER_OMITTED_TEST_ENV');
+    expect(spawnOptions?.stdio).toEqual(['ignore', 'pipe', 'pipe']);
+  });
+
   it('merges custom env with the pause sentinel for ship sessions', () => {
     const manager = createManager();
 

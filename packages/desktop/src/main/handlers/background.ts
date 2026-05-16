@@ -233,13 +233,18 @@ function stageNewIssueScreenshots(
   }
 
   const stagingDir = join(app.getPath('userData'), 'new-issue-screenshots', sessionId);
-  mkdirSync(stagingDir, { recursive: true, mode: 0o700 });
+  try {
+    mkdirSync(stagingDir, { recursive: true, mode: 0o700 });
 
-  screenshots.forEach((screenshot, index) => {
-    const extension = NEW_ISSUE_IMAGE_EXTENSION_BY_MIME_TYPE[screenshot.mimeType];
-    const filename = `screenshot-${String(index + 1).padStart(2, '0')}.${extension}`;
-    writeFileSync(join(stagingDir, filename), Buffer.from(screenshot.bytes));
-  });
+    screenshots.forEach((screenshot, index) => {
+      const extension = NEW_ISSUE_IMAGE_EXTENSION_BY_MIME_TYPE[screenshot.mimeType];
+      const filename = `screenshot-${String(index + 1).padStart(2, '0')}.${extension}`;
+      writeFileSync(join(stagingDir, filename), Buffer.from(screenshot.bytes));
+    });
+  } catch (error) {
+    rmSync(stagingDir, { recursive: true, force: true });
+    throw error;
+  }
 
   return stagingDir;
 }
@@ -495,20 +500,18 @@ export function registerBackgroundHandlers(backgroundManager: BackgroundManager)
     let stagingDir: string | undefined;
     try {
       stagingDir = stageNewIssueScreenshots(sessionId, screenshots);
+      const screenshotStagingDir = stagingDir;
       const screenshotSessionOptions:
         | {
             env: Record<string, string>;
             onFinally: () => void;
           }
-        | Record<string, never> = stagingDir
+        | Record<string, never> = screenshotStagingDir
         ? {
-            env: { [SHIPPER_NEW_ISSUE_SCREENSHOT_DIR_ENV]: stagingDir },
-            onFinally: (() => {
-              const screenshotStagingDir = stagingDir;
-              return () => {
-                rmSync(screenshotStagingDir, { recursive: true, force: true });
-              };
-            })(),
+            env: { [SHIPPER_NEW_ISSUE_SCREENSHOT_DIR_ENV]: screenshotStagingDir },
+            onFinally: () => {
+              rmSync(screenshotStagingDir, { recursive: true, force: true });
+            },
           }
         : {};
 

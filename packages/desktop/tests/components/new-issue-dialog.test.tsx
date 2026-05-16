@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-/* global DataTransferItem, File, HTMLElement */
+/* global DataTransferItem, document, File, HTMLElement */
 
 import { TextEncoder } from 'node:util';
 import React from 'react';
@@ -62,6 +62,29 @@ function makeImageFile(type: string, name = `screenshot-${type.split('/')[1]}`):
     ),
   });
   return file;
+}
+
+function makeDeferredImageFile(
+  type: string,
+  name = `screenshot-${type.split('/')[1]}`
+): { file: File; resolve: () => void } {
+  const file = new File([`bytes:${type}`], name, { type });
+  const bytes = new TextEncoder().encode(`bytes:${type}`);
+  let resolveBuffer!: (value: ArrayBuffer) => void;
+  const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+  const promise = new Promise<ArrayBuffer>((resolve) => {
+    resolveBuffer = resolve;
+  });
+  Object.defineProperty(file, 'arrayBuffer', {
+    configurable: true,
+    value: vi.fn(() => promise),
+  });
+  return {
+    file,
+    resolve: () => {
+      resolveBuffer(buffer);
+    },
+  };
 }
 
 function makeOversizedImageFile(): File {
@@ -200,6 +223,39 @@ describe('NewIssueDialog screenshots', () => {
     expect(await screen.findByRole('button', { name: 'Remove screenshot 5' })).toBeTruthy();
   });
 
+  it('rechecks the max screenshot count when async paste reads finish', async () => {
+    renderDialog();
+    const textarea = screen.getByPlaceholderText('What do you want to build?');
+    await waitForCapabilities();
+
+    const delayedFiles = Array.from({ length: 3 }, (_, index) =>
+      makeDeferredImageFile('image/png', `slow-${index}.png`)
+    );
+    pasteImages(
+      textarea,
+      delayedFiles.map(({ file }) => file)
+    );
+    pasteImages(
+      textarea,
+      Array.from({ length: 3 }, (_, index) => makeImageFile('image/png', `fast-${index}.png`))
+    );
+
+    expect(await screen.findByRole('button', { name: 'Preview screenshot 3' })).toBeTruthy();
+
+    await act(async () => {
+      for (const delayed of delayedFiles) {
+        delayed.resolve();
+      }
+      await Promise.resolve();
+    });
+
+    expect(
+      await screen.findByText('Remove an existing screenshot before pasting another one.')
+    ).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Preview screenshot 4' })).toBeNull();
+    expect(screen.getAllByRole('button', { name: /Preview screenshot/ })).toHaveLength(3);
+  });
+
   it('removes a chip from the keyboard and renumbers remaining chips', async () => {
     renderDialog();
     const textarea = screen.getByPlaceholderText('What do you want to build?');
@@ -226,16 +282,25 @@ describe('NewIssueDialog screenshots', () => {
     pasteImages(textarea, [makeImageFile('image/png')]);
     const previewButton = await screen.findByRole('button', { name: 'Preview screenshot 1' });
 
+    previewButton.focus();
     fireEvent.click(previewButton);
     expect(screen.getByAltText('Screenshot preview')).toBeTruthy();
-    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+    const previewDialog = screen.getByRole('dialog', { name: 'Screenshot preview' });
+    const closeButton = screen.getByRole('button', { name: 'Close screenshot preview' });
+    expect(document.activeElement).toBe(closeButton);
+
+    fireEvent.keyDown(previewDialog, { key: 'Tab' });
+    expect(document.activeElement).toBe(closeButton);
+
+    fireEvent.keyDown(previewDialog, { key: 'Escape' });
     await waitFor(() => {
       expect(screen.queryByAltText('Screenshot preview')).toBeNull();
+      expect(document.activeElement).toBe(previewButton);
     });
 
     fireEvent.keyDown(previewButton, { key: 'Enter' });
     expect(screen.getByAltText('Screenshot preview')).toBeTruthy();
-    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Screenshot preview' })).toBeTruthy();
   });
 
   it('keeps Launch gated by trimmed text with or without screenshots', async () => {
@@ -290,6 +355,44 @@ describe('NewIssueDialog screenshots', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Launch' }));
     expect(onOpenChange).toHaveBeenCalledWith(false);
     expect(revokeObjectUrlMock).toHaveBeenCalled();
+  });
+
+  it('ignores completed paste reads after the dialog is closed', async () => {
+    const { rerender, onOpenChange, onSubmit } = renderDialog();
+    const textarea = screen.getByPlaceholderText('What do you want to build?');
+    await waitForCapabilities();
+
+    const delayed = makeDeferredImageFile('image/png', 'slow.png');
+    pasteImages(textarea, [delayed.file]);
+
+    rerender(
+      <NewIssueDialog
+        open={false}
+        onOpenChange={onOpenChange}
+        repos={['owner/repo']}
+        activeRepo="owner/repo"
+        onSubmit={onSubmit}
+      />
+    );
+
+    await act(async () => {
+      delayed.resolve();
+      await Promise.resolve();
+    });
+
+    rerender(
+      <NewIssueDialog
+        open
+        onOpenChange={onOpenChange}
+        repos={['owner/repo']}
+        activeRepo="owner/repo"
+        onSubmit={onSubmit}
+      />
+    );
+    await waitForCapabilities('owner/repo', 2);
+
+    expect(screen.queryByRole('button', { name: /Preview screenshot/ })).toBeNull();
+    expect(createObjectUrlMock).not.toHaveBeenCalled();
   });
 
   it('shows the non-capable agent hint and suppresses image paste behavior', async () => {

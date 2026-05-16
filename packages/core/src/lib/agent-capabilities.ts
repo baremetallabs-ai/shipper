@@ -15,5 +15,5 @@ export function isNewIssueImageMimeType(value: string): value is NewIssueImageMi
 }
 
 export function supportsNewIssueImages(agent: string): boolean {
-  return agent === 'codex';
+  return (NEW_ISSUE_IMAGE_CAPABLE_AGENTS as readonly string[]).includes(agent);
 }
