@@ -20,6 +20,7 @@ import {
   SHIPPER_DESKTOP_CONTROL_DIR_ENV,
   isDesktopFinalizeRequested,
 } from './desktop-control.js';
+import { supportsNewIssueImages } from './agent-capabilities.js';
 import { StreamJsonDeferConsumer } from './defer-stream.js';
 import { hasErrorCode, toError, toErrorMessage } from './errors.js';
 import { parseFrontmatter } from './frontmatter.js';
@@ -63,6 +64,7 @@ export interface RunPromptOpts {
   model?: string;
   disableMcp?: boolean;
   logFile?: string;
+  imageInputPaths?: string[];
 }
 
 export interface PromptCommand {
@@ -434,6 +436,18 @@ async function resolvePromptCommand(
   disableMcp: boolean;
 }> {
   const agent = resolveAgent(name, opts.agent);
+  const imageInputPaths = opts.imageInputPaths ?? [];
+  if (imageInputPaths.length > 0) {
+    if (name !== 'new') {
+      throw new Error(
+        `Image inputs are only supported for New Issue runs; received step "${name}" with agent "${agent}".`
+      );
+    }
+    if (!supportsNewIssueImages(agent)) {
+      throw new Error(`Image inputs are not supported for the "${agent}" agent on New Issue runs.`);
+    }
+  }
+
   if (agent === 'copilot') {
     try {
       execFileSync('copilot', ['--version'], { stdio: 'ignore' });
@@ -536,6 +550,15 @@ async function resolvePromptCommand(
           }
           args.splice(insertIdx, 0, ...addDirArgs);
         }
+      }
+      if (imageInputPaths.length > 0) {
+        const execIdx = args.indexOf('exec');
+        const insertIdx = execIdx === -1 ? 0 : execIdx;
+        args.splice(
+          insertIdx,
+          0,
+          ...imageInputPaths.flatMap((imagePath) => ['--image', imagePath])
+        );
       }
       break;
     }

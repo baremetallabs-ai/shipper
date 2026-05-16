@@ -194,6 +194,8 @@ describe('shipper-cli', () => {
       expect(newHelp).toContain('--enable-mcp');
       expect(newHelp).toContain('--log-file <path>');
       expect(newHelp).not.toContain('--headless');
+      expect(newHelp).not.toMatch(/--(?:image|screenshot|attach)\b/);
+      expect(newHelp).not.toMatch(/screenshot|drag\/drop|file-picker/i);
       expect(initHelp).toContain('--autocommit');
       expect(initHelp).toContain('stage and commit .shipper/ after writing files');
       expect(initHelp).toContain('--push');

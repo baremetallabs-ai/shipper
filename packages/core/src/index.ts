@@ -13,6 +13,17 @@ export {
   fetchChecks,
   rerunFailedChecks,
 } from './lib/checks.js';
+export type { NewIssueImageMimeType } from './lib/agent-capabilities.js';
+export {
+  NEW_ISSUE_IMAGE_CAPABLE_AGENTS,
+  NEW_ISSUE_IMAGE_EXTENSION_BY_MIME_TYPE,
+  NEW_ISSUE_IMAGE_MIME_TYPES,
+  NEW_ISSUE_MAX_IMAGE_BYTES,
+  NEW_ISSUE_MAX_IMAGES,
+  SHIPPER_NEW_ISSUE_SCREENSHOT_DIR_ENV,
+  isNewIssueImageMimeType,
+  supportsNewIssueImages,
+} from './lib/agent-capabilities.js';
 export { hasErrorCode, toError, toErrorMessage } from './lib/errors.js';
 export type { DesktopControlState } from './lib/desktop-control.js';
 export {
@@ -115,6 +126,7 @@ export {
   handleAgentCrash,
   postComment,
   postReplies,
+  PROTOCOL_INPUT_DIR,
   PROTOCOL_OUTPUT_DIR,
   processGroomResult,
   processResult,
@@ -197,6 +209,9 @@ export {
   SETTING_DESCRIPTIONS,
   getSettings,
   loadSettings,
+  loadSettingsFromDir,
+  resolveAgent,
+  resolveAgentFromSettings,
   resolveDisableMcp,
   resolveMode,
 } from './lib/settings.js';

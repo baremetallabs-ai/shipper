@@ -26,8 +26,10 @@ const state = vi.hoisted(() => ({
   getSettingsMock: vi.fn(),
   ghMock: vi.fn(),
   isLockStaleMock: vi.fn(),
+  loadSettingsFromDirMock: vi.fn(),
   listIssuesMock: vi.fn(),
   resolveBaseBranchMock: vi.fn(),
+  resolveAgentFromSettingsMock: vi.fn(),
   scanArtifactsMock: vi.fn(),
   backgroundSetWindowMock: vi.fn(),
   backgroundSpawnMock: vi.fn<(options: Record<string, unknown>) => void>(),
@@ -129,18 +131,32 @@ vi.mock('@baremetallabs-ai/shipper-core', async () => {
     gh: state.ghMock,
     FAILED_LABEL: 'shipper:failed',
     isPlainObject,
+    isNewIssueImageMimeType: (value: string) =>
+      value === 'image/png' || value === 'image/jpeg' || value === 'image/webp',
     isLockStale: state.isLockStaleMock,
+    loadSettingsFromDir: state.loadSettingsFromDirMock,
     listIssues: state.listIssuesMock,
     LOCKED_LABEL: 'shipper:locked',
+    NEW_ISSUE_IMAGE_EXTENSION_BY_MIME_TYPE: {
+      'image/png': 'png',
+      'image/jpeg': 'jpg',
+      'image/webp': 'webp',
+    },
+    NEW_ISSUE_IMAGE_MIME_TYPES: ['image/png', 'image/jpeg', 'image/webp'],
+    NEW_ISSUE_MAX_IMAGE_BYTES: 10 * 1024 * 1024,
+    NEW_ISSUE_MAX_IMAGES: 5,
     parseStage,
     PRIORITY_HIGH_LABEL: 'shipper:priority-high',
     PRIORITY_LOW_LABEL: 'shipper:priority-low',
     releaseIssueLock: state.releaseIssueLockMock,
     renewIssueLock: state.renewIssueLockMock,
+    resolveAgentFromSettings: state.resolveAgentFromSettingsMock,
     resolveBaseBranch: state.resolveBaseBranchMock,
     scanArtifacts: state.scanArtifactsMock,
     SHIPPER_DESKTOP_CONTROL_DIR_ENV: 'SHIPPER_DESKTOP_CONTROL_DIR',
+    SHIPPER_NEW_ISSUE_SCREENSHOT_DIR_ENV: 'SHIPPER_NEW_ISSUE_SCREENSHOT_DIR',
     STAGE_LABEL_NAMES: stageLabels,
+    supportsNewIssueImages: (agent: string) => agent === 'codex',
     toError,
     toErrorMessage,
   };
@@ -266,6 +282,8 @@ async function loadHandlers(): Promise<Map<string, IpcHandler>> {
     }
   );
   state.getSettingsMock.mockReturnValue({ lockTimeoutMinutes: 30, defaultBaseBranch: undefined });
+  state.loadSettingsFromDirMock.mockResolvedValue({ commands: { default: { agent: 'codex' } } });
+  state.resolveAgentFromSettingsMock.mockReturnValue('codex');
   state.acquireIssueLockMock.mockResolvedValue(undefined);
   state.aggregateAllIssueUsageMock.mockResolvedValue(new Map());
   state.releaseIssueLockMock.mockResolvedValue(undefined);
@@ -357,6 +375,13 @@ function parseBackgroundSpawnCall(index = 0): Record<string, unknown> {
   }
 
   return call;
+}
+
+function makeArrayBuffer(input: string): ArrayBuffer {
+  const buffer = Buffer.from(input);
+  const arrayBuffer = new ArrayBuffer(buffer.length);
+  new Uint8Array(arrayBuffer).set(buffer);
+  return arrayBuffer;
 }
 
 function getBackgroundOnComplete(
@@ -526,6 +551,7 @@ describe('desktop IPC locking', () => {
     expect(spawnCall.cwd).toBe('/tmp/repo');
     expect(args.slice(0, 5)).toEqual(['new', 'draft issue', '--mode', 'headless', '--log-file']);
     expect(args[5]).toContain('/.shipper/sessions/owner-repo/desktop-');
+    expect(spawnCall.env).toBeUndefined();
     expect(meta.request).toBe('draft issue');
     expect(meta.logFile).toContain('/.shipper/sessions/owner-repo/desktop-');
     expect(typeof spawnCall.onComplete).toBe('function');
@@ -552,6 +578,121 @@ describe('desktop IPC locking', () => {
     });
     expect(state.ptySpawnMock).not.toHaveBeenCalled();
   }, 10_000);
+
+  it('returns New Issue capabilities for a Codex-capable repo', async () => {
+    const settings = { commands: { default: { agent: 'claude' }, new: { agent: 'codex' } } };
+    await loadHandlers();
+    state.loadSettingsFromDirMock.mockResolvedValueOnce(settings);
+    state.resolveAgentFromSettingsMock.mockReturnValueOnce('codex');
+    const handler = getHandler('get-new-issue-capabilities');
+
+    await expect(handler({}, { repo: 'owner/repo' })).resolves.toEqual({
+      agent: 'codex',
+      supportsImages: true,
+      acceptedMimeTypes: ['image/png', 'image/jpeg', 'image/webp'],
+      maxImageBytes: 10 * 1024 * 1024,
+      maxImages: 5,
+    });
+    expect(state.ensureRepoCloneMock).toHaveBeenCalledWith('owner/repo');
+    expect(state.loadSettingsFromDirMock).toHaveBeenCalledWith('/tmp/repo');
+    expect(state.resolveAgentFromSettingsMock).toHaveBeenCalledWith(settings, 'new');
+  });
+
+  it('returns New Issue capabilities for a non-capable repo', async () => {
+    await loadHandlers();
+    state.resolveAgentFromSettingsMock.mockReturnValueOnce('claude');
+    const handler = getHandler('get-new-issue-capabilities');
+
+    await expect(handler({}, { repo: 'owner/repo' })).resolves.toEqual(
+      expect.objectContaining({
+        agent: 'claude',
+        supportsImages: false,
+      })
+    );
+  });
+
+  it('stages screenshot payloads and injects the private screenshot env var', async () => {
+    await loadHandlers();
+    const handler = getHandler('bg-spawn-new');
+
+    const result = parseSessionResult(
+      await handler(
+        {},
+        {
+          repo: 'owner/repo',
+          request: 'draft issue',
+          screenshots: [
+            { mimeType: 'image/png', bytes: makeArrayBuffer('png-bytes') },
+            { mimeType: 'image/jpeg', bytes: makeArrayBuffer('jpg-bytes') },
+            { mimeType: 'image/webp', bytes: makeArrayBuffer('webp-bytes') },
+          ],
+        }
+      )
+    );
+    const spawnCall = parseBackgroundSpawnCall();
+    const env = spawnCall.env as Record<string, string>;
+    const stagingDir = env.SHIPPER_NEW_ISSUE_SCREENSHOT_DIR;
+
+    expect(result.sessionId).toEqual(expect.any(String));
+    expect(stagingDir).toBe(join(mockUserDataPath, 'new-issue-screenshots', result.sessionId));
+    expect(readFileSync(join(stagingDir, 'screenshot-01.png'), 'utf8')).toBe('png-bytes');
+    expect(readFileSync(join(stagingDir, 'screenshot-02.jpg'), 'utf8')).toBe('jpg-bytes');
+    expect(readFileSync(join(stagingDir, 'screenshot-03.webp'), 'utf8')).toBe('webp-bytes');
+    expect(spawnCall.args).toEqual([
+      'new',
+      'draft issue',
+      '--mode',
+      'headless',
+      '--log-file',
+      expect.any(String),
+    ]);
+
+    const onFinally = spawnCall.onFinally as () => void;
+    onFinally();
+    expect(() => readFileSync(join(stagingDir, 'screenshot-01.png'), 'utf8')).toThrow();
+  });
+
+  it.each([
+    ['malformed screenshot payload', [{ mimeType: 'image/png', bytes: 'not-bytes' }]],
+    [
+      'unsupported screenshot MIME type',
+      [{ mimeType: 'image/bmp', bytes: makeArrayBuffer('bmp') }],
+    ],
+    [
+      'oversized screenshot',
+      [{ mimeType: 'image/png', bytes: new ArrayBuffer(10 * 1024 * 1024 + 1) }],
+    ],
+    [
+      'more than five screenshots',
+      Array.from({ length: 6 }, () => ({ mimeType: 'image/png', bytes: makeArrayBuffer('png') })),
+    ],
+  ])('rejects %s before spawning', async (_name, screenshots) => {
+    await loadHandlers();
+    const handler = getHandler('bg-spawn-new');
+
+    await expect(
+      handler({}, { repo: 'owner/repo', request: 'draft issue', screenshots })
+    ).rejects.toThrow('Invalid bg-spawn-new payload.');
+    expect(state.backgroundSpawnMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects screenshot launches for non-capable agents before spawning', async () => {
+    await loadHandlers();
+    state.resolveAgentFromSettingsMock.mockReturnValueOnce('claude');
+    const handler = getHandler('bg-spawn-new');
+
+    await expect(
+      handler(
+        {},
+        {
+          repo: 'owner/repo',
+          request: 'draft issue',
+          screenshots: [{ mimeType: 'image/png', bytes: makeArrayBuffer('png') }],
+        }
+      )
+    ).rejects.toThrow('Image inputs are not supported for the "claude" agent.');
+    expect(state.backgroundSpawnMock).not.toHaveBeenCalled();
+  });
 
   it('spawns `ship` through the background manager with `--merge` when requested', async () => {
     await loadHandlers();
@@ -1327,21 +1468,13 @@ describe('desktop IPC locking', () => {
     expect(state.ghMock).toHaveBeenCalledTimes(4);
   });
 
-  it('prefers settings.local.json over settings.json when resolving the init agent', async () => {
+  it('resolves the init agent through shared repo settings helpers', async () => {
     await loadHandlers();
     const repoPath = mkdtempSync(join(tmpdir(), 'shipper-desktop-init-'));
-    mkdirSync(join(repoPath, '.shipper'), { recursive: true });
-    writeFileSync(
-      join(repoPath, '.shipper', 'settings.json'),
-      JSON.stringify({ commands: { default: { agent: 'claude' } } }),
-      'utf8'
-    );
-    writeFileSync(
-      join(repoPath, '.shipper', 'settings.local.json'),
-      JSON.stringify({ commands: { default: { agent: 'codex' } } }),
-      'utf8'
-    );
+    const settings = { commands: { default: { agent: 'codex' } } };
     state.ensureRepoCloneMock.mockResolvedValueOnce(repoPath);
+    state.loadSettingsFromDirMock.mockResolvedValueOnce(settings);
+    state.resolveAgentFromSettingsMock.mockReturnValueOnce('codex');
     const handler = getHandler('bg-spawn-init');
 
     const result = parseSessionResult(await handler({}, { repo: 'owner/repo' }));
@@ -1351,6 +1484,8 @@ describe('desktop IPC locking', () => {
     expect(spawnCall.command).toBe('init');
     expect(spawnCall.args).toEqual(['init', '--agent', 'codex']);
     expect(spawnCall.cwd).toBe(repoPath);
+    expect(state.loadSettingsFromDirMock).toHaveBeenCalledWith(repoPath);
+    expect(state.resolveAgentFromSettingsMock).toHaveBeenCalledWith(settings, 'default');
 
     rmSync(repoPath, { recursive: true, force: true });
   });
@@ -1358,13 +1493,10 @@ describe('desktop IPC locking', () => {
   it('uses copilot from settings.json when resolving the init agent', async () => {
     await loadHandlers();
     const repoPath = mkdtempSync(join(tmpdir(), 'shipper-desktop-init-'));
-    mkdirSync(join(repoPath, '.shipper'), { recursive: true });
-    writeFileSync(
-      join(repoPath, '.shipper', 'settings.json'),
-      JSON.stringify({ commands: { default: { agent: 'copilot' } } }),
-      'utf8'
-    );
+    const settings = { commands: { default: { agent: 'copilot' } } };
     state.ensureRepoCloneMock.mockResolvedValueOnce(repoPath);
+    state.loadSettingsFromDirMock.mockResolvedValueOnce(settings);
+    state.resolveAgentFromSettingsMock.mockReturnValueOnce('copilot');
     const handler = getHandler('bg-spawn-init');
 
     const result = parseSessionResult(await handler({}, { repo: 'owner/repo' }));
@@ -1374,20 +1506,19 @@ describe('desktop IPC locking', () => {
     expect(spawnCall.command).toBe('init');
     expect(spawnCall.args).toEqual(['init', '--agent', 'copilot']);
     expect(spawnCall.cwd).toBe(repoPath);
+    expect(state.loadSettingsFromDirMock).toHaveBeenCalledWith(repoPath);
+    expect(state.resolveAgentFromSettingsMock).toHaveBeenCalledWith(settings, 'default');
 
     rmSync(repoPath, { recursive: true, force: true });
   });
 
-  it('falls back to legacy settings keys and then to claude for init', async () => {
+  it('uses the shared resolver result for legacy and default init settings', async () => {
     await loadHandlers();
     const repoPath = mkdtempSync(join(tmpdir(), 'shipper-desktop-init-'));
-    mkdirSync(join(repoPath, '.shipper'), { recursive: true });
-    writeFileSync(
-      join(repoPath, '.shipper', 'settings.json'),
-      JSON.stringify({ agents: { default: 'codex' } }),
-      'utf8'
-    );
+    const legacySettings = { agents: { default: 'codex' } };
     state.ensureRepoCloneMock.mockResolvedValueOnce(repoPath);
+    state.loadSettingsFromDirMock.mockResolvedValueOnce(legacySettings);
+    state.resolveAgentFromSettingsMock.mockReturnValueOnce('codex');
     const initHandler = getHandler('bg-spawn-init');
 
     await initHandler({}, { repo: 'owner/repo' });
@@ -1397,12 +1528,19 @@ describe('desktop IPC locking', () => {
     expect(legacySpawnCall.args).toEqual(['init', '--agent', 'codex']);
 
     const emptyRepoPath = mkdtempSync(join(tmpdir(), 'shipper-desktop-init-empty-'));
+    const defaultSettings = { commands: { default: { agent: 'claude' } } };
     state.ensureRepoCloneMock.mockResolvedValueOnce(emptyRepoPath);
+    state.loadSettingsFromDirMock.mockResolvedValueOnce(defaultSettings);
+    state.resolveAgentFromSettingsMock.mockReturnValueOnce('claude');
     await initHandler({}, { repo: 'owner/repo' });
     const defaultSpawnCall = parseBackgroundSpawnCall(1);
 
     expect(defaultSpawnCall.command).toBe('init');
     expect(defaultSpawnCall.args).toEqual(['init', '--agent', 'claude']);
+    expect(state.loadSettingsFromDirMock).toHaveBeenCalledWith(repoPath);
+    expect(state.resolveAgentFromSettingsMock).toHaveBeenCalledWith(legacySettings, 'default');
+    expect(state.loadSettingsFromDirMock).toHaveBeenCalledWith(emptyRepoPath);
+    expect(state.resolveAgentFromSettingsMock).toHaveBeenCalledWith(defaultSettings, 'default');
 
     rmSync(repoPath, { recursive: true, force: true });
     rmSync(emptyRepoPath, { recursive: true, force: true });
@@ -2258,6 +2396,7 @@ describe('desktop IPC locking', () => {
         'pty-close-state',
         'pty-finalize',
         'pty-force-kill',
+        'get-new-issue-capabilities',
         'bg-spawn-new',
         'bg-spawn-ship',
         'bg-spawn-init',

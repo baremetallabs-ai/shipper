@@ -28,7 +28,11 @@ import { useRepos } from './hooks/use-repos.js';
 import { useTerminalSessions } from './hooks/use-terminal-sessions.js';
 import { getWorkflowStageDisplayName } from './lib/app-utils.js';
 import { getShipperApi } from './lib/shipper-api.js';
-import type { BackgroundCommandsBridge, IssuePipelineBridge } from './types.js';
+import type {
+  BackgroundCommandsBridge,
+  IssuePipelineBridge,
+  NewIssueScreenshotPayload,
+} from './types.js';
 
 function getLaunchKey(repo: string, issueNumber: number): string {
   return `${repo}#${issueNumber}`;
@@ -162,9 +166,13 @@ export default function App(): JSX.Element {
     }
   }, [backgroundState.backgroundCommands, launchingShipKeys]);
 
-  async function handleShipperNew(request: string, repo = activeRepo): Promise<void> {
+  async function handleShipperNew(
+    request: string,
+    repo = activeRepo,
+    screenshots?: NewIssueScreenshotPayload[]
+  ): Promise<void> {
     try {
-      await getShipperApi().spawnBackgroundNew(request, repo);
+      await getShipperApi().spawnBackgroundNew(request, repo, screenshots);
     } catch (error) {
       pipelineState.setFetchError(`Failed to launch shipper new: ${toErrorMessage(error)}`);
     }
@@ -348,8 +356,8 @@ export default function App(): JSX.Element {
           onOpenChange={pipelineState.setIsNewIssueOpen}
           repos={reposState.repos}
           activeRepo={activeRepo}
-          onSubmit={(request, repo) => {
-            void handleShipperNew(request, repo);
+          onSubmit={(request, repo, screenshots) => {
+            void handleShipperNew(request, repo, screenshots);
           }}
         />
         <AdoptDialog

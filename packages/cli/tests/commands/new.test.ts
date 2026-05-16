@@ -1,4 +1,5 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import * as core from '@baremetallabs-ai/shipper-core';
@@ -93,6 +94,7 @@ describe('newCommand', () => {
   let promptCalls: Array<{ name: string; opts: RunPromptOpts }>;
   let errorSpy: MockInstance;
   let persistNewResultSpy: MockInstance;
+  let stagingDirs: string[];
 
   const importCommand = async () => await import('../../src/commands/new.js');
 
@@ -112,12 +114,31 @@ describe('newCommand', () => {
     });
   };
 
+  const createScreenshotStagingDir = async (
+    files: Array<{ name: string; bytes?: Buffer | string; directory?: boolean }>
+  ): Promise<string> => {
+    const stagingDir = await mkdtemp(path.join(tmpdir(), 'shipper-new-screenshots-'));
+    stagingDirs.push(stagingDir);
+    for (const file of files) {
+      const filePath = path.join(stagingDir, file.name);
+      if (file.directory) {
+        await mkdir(filePath, { recursive: true });
+        continue;
+      }
+      await writeFile(filePath, file.bytes ?? file.name);
+    }
+    process.env[core.SHIPPER_NEW_ISSUE_SCREENSHOT_DIR_ENV] = stagingDir;
+    return stagingDir;
+  };
+
   beforeEach(() => {
     fake = createFakeCore();
     fake.install();
     promptCalls = [];
+    stagingDirs = [];
     delete process.env.SHIPPER_HEADLESS;
     delete process.env.SHIPPER_SESSION_RUN_ID;
+    delete process.env.SHIPPER_NEW_ISSUE_SCREENSHOT_DIR;
     process.exitCode = undefined;
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-04-22T02:38:36Z'));
@@ -148,9 +169,15 @@ describe('newCommand', () => {
   afterEach(async () => {
     process.exitCode = undefined;
     delete process.env.SHIPPER_SESSION_RUN_ID;
+    delete process.env.SHIPPER_NEW_ISSUE_SCREENSHOT_DIR;
     errorSpy.mockRestore();
     vi.useRealTimers();
     vi.restoreAllMocks();
+    await Promise.all(
+      stagingDirs.map(async (dir) => {
+        await rm(dir, { recursive: true, force: true });
+      })
+    );
     await fake.dispose();
   });
 
@@ -200,6 +227,7 @@ describe('newCommand', () => {
         },
       },
     ]);
+    expect(promptCalls[0]?.opts).not.toHaveProperty('imageInputPaths');
     expect(scrubOutputDirSpy).toHaveBeenCalledWith(fake.wtPath());
     expect(withStageHooksSpy.mock.invocationCallOrder[0]).toBeLessThan(
       withWorktreeSpy.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER
@@ -398,6 +426,111 @@ describe('newCommand', () => {
       })
     );
     expect(process.exitCode).toBe(0);
+  });
+
+  it('copies staged screenshots into the worktree input dir and passes Codex image paths', async () => {
+    const firstBytes = Buffer.from('png bytes');
+    const secondBytes = Buffer.from('jpg bytes');
+    const thirdBytes = Buffer.from('webp bytes');
+    await createScreenshotStagingDir([
+      { name: 'screenshot-01.png', bytes: firstBytes },
+      { name: 'screenshot-02.jpg', bytes: secondBytes },
+      { name: 'screenshot-03.webp', bytes: thirdBytes },
+    ]);
+    const { newCommand } = await importCommand();
+
+    await expect(
+      newCommand(repo, ['describe', 'the', 'bug'], { agent: 'codex' })
+    ).resolves.toBeUndefined();
+
+    const inputDir = path.join(fake.wtPath(), '.shipper', 'input');
+    const copiedPaths = [
+      path.join(inputDir, 'screenshot-01.png'),
+      path.join(inputDir, 'screenshot-02.jpg'),
+      path.join(inputDir, 'screenshot-03.webp'),
+    ];
+    await expect(readFile(copiedPaths[0])).resolves.toEqual(firstBytes);
+    await expect(readFile(copiedPaths[1])).resolves.toEqual(secondBytes);
+    await expect(readFile(copiedPaths[2])).resolves.toEqual(thirdBytes);
+
+    expect(promptCalls[0]?.opts.imageInputPaths).toEqual(copiedPaths);
+    expect(promptCalls[0]?.opts.userInput).toContain('describe the bug');
+    expect(promptCalls[0]?.opts.userInput).toContain('3 screenshot attachments were provided');
+    expect(promptCalls[0]?.opts.userInput).toContain('attached and inspected');
+    expect(promptCalls[0]?.opts.userInput).not.toContain('.shipper/input');
+    expect(process.exitCode).toBe(0);
+  });
+
+  it('passes identical image input paths on invalid draft retries', async () => {
+    await createScreenshotStagingDir([{ name: 'screenshot-01.png', bytes: 'png bytes' }]);
+    fake.scriptRunPrompt(async (name, opts) => {
+      promptCalls.push({ name, opts });
+      if (promptCalls.length === 1) {
+        await writeNewDraft(fake.wtPath(), '');
+        return 0;
+      }
+
+      await writeNewDraft(fake.wtPath(), 'Repaired issue title');
+      return 0;
+    });
+    const { newCommand } = await importCommand();
+
+    await expect(newCommand(repo, ['my', 'request'], { agent: 'codex' })).resolves.toBeUndefined();
+
+    expect(promptCalls).toHaveLength(2);
+    expect(promptCalls[1]?.opts.imageInputPaths).toEqual(promptCalls[0]?.opts.imageInputPaths);
+    expect(process.exitCode).toBe(0);
+  });
+
+  it.each([
+    ['unknown staging file', [{ name: 'notes.txt', bytes: 'not an image' }]],
+    ['non-contiguous numbering', [{ name: 'screenshot-02.png', bytes: 'png bytes' }]],
+    [
+      'more than five files',
+      [
+        { name: 'screenshot-01.png', bytes: '1' },
+        { name: 'screenshot-02.png', bytes: '2' },
+        { name: 'screenshot-03.png', bytes: '3' },
+        { name: 'screenshot-04.png', bytes: '4' },
+        { name: 'screenshot-05.png', bytes: '5' },
+        { name: 'screenshot-06.png', bytes: '6' },
+      ],
+    ],
+    ['unsupported extension', [{ name: 'screenshot-01.gif', bytes: 'gif bytes' }]],
+    ['non-file entry', [{ name: 'screenshot-01.png', directory: true }]],
+  ])('rejects staged screenshots with %s', async (_name, files) => {
+    await createScreenshotStagingDir(files);
+    const { newCommand } = await importCommand();
+
+    await expect(newCommand(repo, ['my', 'request'], { agent: 'codex' })).resolves.toBeUndefined();
+
+    expect(promptCalls).toEqual([]);
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('rejects staged screenshots larger than 10 MB', async () => {
+    await createScreenshotStagingDir([
+      {
+        name: 'screenshot-01.png',
+        bytes: Buffer.alloc(core.NEW_ISSUE_MAX_IMAGE_BYTES + 1),
+      },
+    ]);
+    const { newCommand } = await importCommand();
+
+    await expect(newCommand(repo, ['my', 'request'], { agent: 'codex' })).resolves.toBeUndefined();
+
+    expect(promptCalls).toEqual([]);
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('fails before prompt execution when staged screenshots target a non-capable agent', async () => {
+    await createScreenshotStagingDir([{ name: 'screenshot-01.png', bytes: 'png bytes' }]);
+    const { newCommand } = await importCommand();
+
+    await expect(newCommand(repo, ['my', 'request'], { agent: 'claude' })).resolves.toBeUndefined();
+
+    expect(promptCalls).toEqual([]);
+    expect(process.exitCode).toBe(1);
   });
 
   it('retries an invalid draft and creates exactly one labeled issue after repair', async () => {

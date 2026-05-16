@@ -14,9 +14,11 @@ const state = vi.hoisted(() => ({
   terminalOptions: null as Record<string, unknown> | null,
   spawnShipperSetupMock: vi.fn(),
   spawnShipperGroomMock: vi.fn(),
+  spawnBackgroundNewMock: vi.fn(),
   spawnBackgroundShipMock: vi.fn(),
   requestAutoShipHaltMock: vi.fn(),
   actionQueueDrawerProps: null as Record<string, unknown> | null,
+  newIssueDialogProps: null as Record<string, unknown> | null,
 }));
 
 vi.mock('../../src/renderer/hooks/use-repos.js', () => ({
@@ -45,7 +47,7 @@ vi.mock('../../src/renderer/lib/shipper-api.js', () => ({
   getShipperApi: () => ({
     spawnShipperSetup: state.spawnShipperSetupMock,
     spawnShipperGroom: state.spawnShipperGroomMock,
-    spawnBackgroundNew: vi.fn(),
+    spawnBackgroundNew: state.spawnBackgroundNewMock,
     spawnBackgroundShip: state.spawnBackgroundShipMock,
     spawnBackgroundInit: vi.fn(),
     requestAutoShipHalt: state.requestAutoShipHaltMock,
@@ -80,7 +82,10 @@ vi.mock('../../src/renderer/components/close-not-planned-dialog.js', () => ({
 }));
 
 vi.mock('../../src/renderer/components/new-issue-dialog.js', () => ({
-  NewIssueDialog: () => null,
+  NewIssueDialog: (props: Record<string, unknown>) => {
+    state.newIssueDialogProps = props;
+    return null;
+  },
 }));
 
 vi.mock('../../src/renderer/components/pipeline-board.js', () => ({
@@ -207,9 +212,11 @@ import App from '../../src/renderer/App.js';
 function resetMockState(): void {
   state.spawnShipperSetupMock.mockReset();
   state.spawnShipperGroomMock.mockReset();
+  state.spawnBackgroundNewMock.mockReset();
   state.spawnBackgroundShipMock.mockReset();
   state.requestAutoShipHaltMock.mockReset();
   state.actionQueueDrawerProps = null;
+  state.newIssueDialogProps = null;
   state.pipelineOptions = null;
   state.terminalOptions = null;
   state.reposState = {
@@ -387,6 +394,23 @@ describe('App setup launch', () => {
     expect(state.pipelineOptions).not.toHaveProperty(
       ['has', 'Running', 'Ship', 'Command'].join('')
     );
+  });
+
+  it('forwards New Issue screenshot payloads to the background API', async () => {
+    const payload = [{ mimeType: 'image/png' as const, bytes: new ArrayBuffer(4) }];
+    render(<App />);
+
+    const onSubmit = state.newIssueDialogProps?.onSubmit as
+      | ((request: string, repo: string, screenshots?: typeof payload) => void)
+      | undefined;
+    expect(onSubmit).toBeDefined();
+
+    await act(async () => {
+      onSubmit?.('request', 'owner/repo', payload);
+      await Promise.resolve();
+    });
+
+    expect(state.spawnBackgroundNewMock).toHaveBeenCalledWith('request', 'owner/repo', payload);
   });
 
   it('shows pending Groom feedback only for the launching issue and clears it on success', async () => {

@@ -1,4 +1,9 @@
-import type { ListIssueItem, TokenUsage } from '@baremetallabs-ai/shipper-core';
+import type {
+  AgentName,
+  ListIssueItem,
+  NewIssueImageMimeType,
+  TokenUsage,
+} from '@baremetallabs-ai/shipper-core';
 
 interface CheckResult {
   ok: boolean;
@@ -124,6 +129,19 @@ interface BackgroundOutputEvent {
   data: string;
 }
 
+interface NewIssueCapabilities {
+  agent: AgentName;
+  supportsImages: boolean;
+  acceptedMimeTypes: NewIssueImageMimeType[];
+  maxImageBytes: number;
+  maxImages: number;
+}
+
+interface NewIssueScreenshotPayload {
+  mimeType: NewIssueImageMimeType;
+  bytes: ArrayBuffer;
+}
+
 interface ShipperAPI {
   checkPrerequisites: () => Promise<{
     ghInstalled: CheckResult;
@@ -188,7 +206,12 @@ interface ShipperAPI {
   ) => Promise<{
     sessionId: string;
   }>;
-  spawnBackgroundNew: (request: string, repo: string) => Promise<{ sessionId: string }>;
+  getNewIssueCapabilities: (repo: string) => Promise<NewIssueCapabilities>;
+  spawnBackgroundNew: (
+    request: string,
+    repo: string,
+    screenshots?: NewIssueScreenshotPayload[]
+  ) => Promise<{ sessionId: string }>;
   spawnBackgroundShip: (
     issueNumber: number,
     repo: string,

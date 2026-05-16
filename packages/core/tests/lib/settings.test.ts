@@ -16,6 +16,9 @@ const warnMock = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
 const settingsPath = path.resolve('.shipper', 'settings.json');
 const localPath = path.resolve('.shipper', 'settings.local.json');
+const repoPath = path.resolve('/tmp/repo');
+const repoSettingsPath = path.resolve(repoPath, '.shipper', 'settings.json');
+const repoLocalPath = path.resolve(repoPath, '.shipper', 'settings.local.json');
 
 function enoent(filepath: string): Error {
   const err = new Error(`ENOENT: no such file or directory, open '${filepath}'`) as Error & {
@@ -349,6 +352,60 @@ describe('loadSettings', () => {
   });
 });
 
+describe('loadSettingsFromDir', () => {
+  it('loads and merges repo-scoped settings using the same migrations as loadSettings', async () => {
+    readFileMock.mockImplementation((p: string) => {
+      if (p === repoSettingsPath) {
+        return JSON.stringify({
+          agents: { default: 'claude', new: 'codex' },
+          headless: { new: true },
+        });
+      }
+      if (p === repoLocalPath) {
+        return JSON.stringify({
+          commands: {
+            default: { agent: 'copilot' },
+            new: { agent: 'claude' },
+          },
+        });
+      }
+      throw enoent(p);
+    });
+
+    const { loadSettingsFromDir } = await loadModule();
+    const loaded = await loadSettingsFromDir(repoPath);
+
+    expect(readFileMock).toHaveBeenCalledWith(repoSettingsPath, 'utf-8');
+    expect(readFileMock).toHaveBeenCalledWith(repoLocalPath, 'utf-8');
+    expect(loaded.commands).toEqual({
+      default: { agent: 'copilot' },
+      groom: { disableMcp: true },
+      new: { agent: 'claude', mode: 'headless' },
+    });
+  });
+
+  it('does not mutate global settings until loadSettings is called', async () => {
+    readFileMock.mockImplementation((p: string) => {
+      if (p === repoSettingsPath) {
+        return JSON.stringify({ commands: { default: { agent: 'codex' } } });
+      }
+      if (p === settingsPath) {
+        return JSON.stringify({ commands: { default: { agent: 'copilot' } } });
+      }
+      throw enoent(p);
+    });
+
+    const { getSettings, loadSettings, loadSettingsFromDir } = await loadModule();
+    const loaded = await loadSettingsFromDir(repoPath);
+
+    expect(loaded.commands.default.agent).toBe('codex');
+    expect(getSettings().commands.default.agent).toBe('claude');
+
+    await loadSettings();
+    expect(getSettings().commands.default.agent).toBe('copilot');
+  });
+});
+
 describe('getSettings', () => {
   it('returns defaults when loadSettings has not been called', async () => {
     const { getSettings } = await loadModule();
@@ -657,6 +714,38 @@ describe('resolveAgent', () => {
 
     expect(() => resolveAgent('groom')).toThrow(
       'Invalid agent "vim" for step "groom". Must be "claude", "codex", or "copilot".'
+    );
+  });
+});
+
+describe('resolveAgentFromSettings', () => {
+  it('resolves default, per-command, and CLI override agents from a settings object', async () => {
+    const { DEFAULTS, resolveAgentFromSettings } = await loadModule();
+    const repoSettings = {
+      ...DEFAULTS,
+      commands: {
+        default: { agent: 'claude' as const },
+        new: { agent: 'codex' as const },
+      },
+    };
+
+    expect(resolveAgentFromSettings(repoSettings, 'implement')).toBe('claude');
+    expect(resolveAgentFromSettings(repoSettings, 'new')).toBe('codex');
+    expect(resolveAgentFromSettings(repoSettings, 'new', 'copilot')).toBe('copilot');
+  });
+
+  it('validates invalid agents from an explicit settings object', async () => {
+    const { DEFAULTS, resolveAgentFromSettings } = await loadModule();
+    const repoSettings = {
+      ...DEFAULTS,
+      commands: {
+        default: { agent: 'claude' as const },
+        new: { agent: 'vim' as never },
+      },
+    };
+
+    expect(() => resolveAgentFromSettings(repoSettings, 'new')).toThrow(
+      'Invalid agent "vim" for step "new". Must be "claude", "codex", or "copilot".'
     );
   });
 });

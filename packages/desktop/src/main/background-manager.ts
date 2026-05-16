@@ -65,12 +65,14 @@ export interface SpawnBackgroundSessionOptions {
   cwd: string;
   logFile?: string;
   meta?: BackgroundSessionMeta;
+  env?: Record<string, string | undefined>;
   onComplete?: (
     session: BackgroundSessionSnapshot
   ) =>
     | Partial<BackgroundSessionMeta>
     | undefined
     | Promise<Partial<BackgroundSessionMeta> | undefined>;
+  onFinally?: (session: BackgroundSessionSnapshot) => void | Promise<void>;
 }
 
 export type RemoveQueuedSessionResult = 'ignored' | 'pause-requested' | 'paused';
@@ -88,7 +90,10 @@ interface BackgroundSession {
   exitCode?: number | null;
   spawnedAt: number | null;
   meta: BackgroundSessionMeta;
+  env?: SpawnBackgroundSessionOptions['env'];
   onComplete?: SpawnBackgroundSessionOptions['onComplete'];
+  onFinally?: SpawnBackgroundSessionOptions['onFinally'];
+  finallyCompleted: boolean;
   cancelRequested: boolean;
   pauseSentinelPath?: string;
   haltReason?: HaltReason;
@@ -131,7 +136,10 @@ export class BackgroundManager {
         ...options.meta,
         logFile: options.logFile ?? options.meta?.logFile,
       },
+      env: options.env,
       onComplete: options.onComplete,
+      onFinally: options.onFinally,
+      finallyCompleted: false,
       cancelRequested: false,
     };
 
@@ -184,6 +192,7 @@ export class BackgroundManager {
       session.exitCode = null;
       session.meta = { ...session.meta, cancelled: true };
       this.emitStatus(session);
+      void this.runFinally(session);
       return;
     }
 
@@ -282,6 +291,7 @@ export class BackgroundManager {
     session.exitCode = null;
     session.status = 'paused';
     this.emitStatus(session);
+    void this.runFinally(session);
     return 'paused';
   }
 
@@ -310,9 +320,13 @@ export class BackgroundManager {
       session.pauseSentinelPath = this.createPauseSentinelPath(session.id);
     }
 
-    const env = session.pauseSentinelPath
-      ? { ...process.env, SHIPPER_PAUSE_SENTINEL_FILE: session.pauseSentinelPath }
-      : process.env;
+    const env = {
+      ...process.env,
+      ...(session.env ?? {}),
+      ...(session.pauseSentinelPath
+        ? { SHIPPER_PAUSE_SENTINEL_FILE: session.pauseSentinelPath }
+        : {}),
+    };
     const child = spawn(session.commandName, session.args, {
       cwd: session.cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -389,6 +403,9 @@ export class BackgroundManager {
     }
 
     this.cleanupPauseSentinel(session.pauseSentinelPath);
+    if (session.onFinally) {
+      await this.runFinally(session);
+    }
     if (
       session.command === 'ship' &&
       session.status === 'failed' &&
@@ -398,6 +415,24 @@ export class BackgroundManager {
     }
     this.emitStatus(session);
     this.maybeAdvanceShipQueue(session);
+  }
+
+  private async runFinally(session: BackgroundSession): Promise<void> {
+    if (session.finallyCompleted) {
+      return;
+    }
+    session.finallyCompleted = true;
+
+    if (!session.onFinally) {
+      return;
+    }
+
+    try {
+      await session.onFinally(this.snapshotSession(session));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[shipper] Background session cleanup failed for ${session.id}: ${message}`);
+    }
   }
 
   private async releaseShipLockWithRetry(repo: string, issueNumber: number): Promise<void> {

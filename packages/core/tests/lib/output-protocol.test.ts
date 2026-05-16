@@ -791,6 +791,47 @@ describe('output protocol helpers', () => {
       await expect(readFile(outputAbs('issue-body.md'), 'utf-8')).resolves.toContain('# Request');
     });
 
+    it('keeps screenshot-informed issue creation on the body-file path only', async () => {
+      await writeNewIssueDraft({
+        body: [
+          '# Request',
+          '',
+          'Fix the visual layout shown in the screenshot.',
+          '',
+          '# Interpretation',
+          '',
+          'The screenshot shows the modal content overlapping its footer controls.',
+          '',
+          '2 screenshots were attached and inspected while drafting this issue.',
+        ].join('\n'),
+      });
+      const draft = await readNewIssueDraft(tempDir);
+      ghMock.mockResolvedValueOnce({
+        stdout: 'https://github.com/owner/repo/issues/42\n',
+        stderr: '',
+      });
+
+      await expect(createIssueFromDraft('owner/repo', draft)).resolves.toEqual({
+        number: 42,
+        title: 'Add generated MCP reference pages',
+        url: 'https://github.com/owner/repo/issues/42',
+      });
+
+      expect(ghMock).toHaveBeenCalledWith([
+        'issue',
+        'create',
+        '-R',
+        'owner/repo',
+        '--title',
+        'Add generated MCP reference pages',
+        '--body-file',
+        outputAbs('issue-body.md'),
+        '--label',
+        'shipper:new',
+      ]);
+      expect(ghMock.mock.calls[0]?.[0].join(' ')).not.toMatch(/upload|attach|image/i);
+    });
+
     it('rejects issue creation output without a parseable issue number', async () => {
       await writeNewIssueDraft();
       const draft = await readNewIssueDraft(tempDir);

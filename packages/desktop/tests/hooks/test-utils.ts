@@ -1,4 +1,9 @@
 import { act } from '@testing-library/react';
+import {
+  NEW_ISSUE_IMAGE_MIME_TYPES,
+  NEW_ISSUE_MAX_IMAGE_BYTES,
+  NEW_ISSUE_MAX_IMAGES,
+} from '@baremetallabs-ai/shipper-core';
 import { vi } from 'vitest';
 
 import type {
@@ -111,6 +116,15 @@ export function createMockShipperApi(): MockShipperApiController {
     setPriority: vi.fn(() => Promise.resolve({ ok: true })),
     spawnShipperGroom: vi.fn(() => Promise.resolve({ sessionId: 'pty-session-1' })),
     spawnShipperSetup: vi.fn(() => Promise.resolve({ sessionId: 'pty-setup-1' })),
+    getNewIssueCapabilities: vi.fn(() =>
+      Promise.resolve({
+        agent: 'codex',
+        supportsImages: true,
+        acceptedMimeTypes: [...NEW_ISSUE_IMAGE_MIME_TYPES],
+        maxImageBytes: NEW_ISSUE_MAX_IMAGE_BYTES,
+        maxImages: NEW_ISSUE_MAX_IMAGES,
+      })
+    ),
     spawnBackgroundNew: vi.fn(() => Promise.resolve({ sessionId: 'bg-new-1' })),
     spawnBackgroundShip: vi.fn(() => Promise.resolve({ sessionId: 'bg-ship-1' })),
     spawnBackgroundInit: vi.fn(() => Promise.resolve({ sessionId: 'bg-init-1' })),
