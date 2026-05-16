@@ -89,10 +89,14 @@ function renderDialog({
   open = true,
   onOpenChange = vi.fn(),
   onSubmit = vi.fn(),
+  repos = ['owner/repo'],
+  activeRepo = 'owner/repo',
 }: {
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   onSubmit?: (request: string, repo: string, screenshots?: NewIssueScreenshotPayload[]) => void;
+  repos?: string[];
+  activeRepo?: string;
 } = {}): ReturnType<typeof render> & {
   onOpenChange: (open: boolean) => void;
   onSubmit: (request: string, repo: string, screenshots?: NewIssueScreenshotPayload[]) => void;
@@ -101,8 +105,8 @@ function renderDialog({
     <NewIssueDialog
       open={open}
       onOpenChange={onOpenChange}
-      repos={['owner/repo']}
-      activeRepo="owner/repo"
+      repos={repos}
+      activeRepo={activeRepo}
       onSubmit={onSubmit}
     />
   );
@@ -306,6 +310,34 @@ describe('NewIssueDialog screenshots', () => {
 
     expect(screen.queryByRole('button', { name: /Preview screenshot/ })).toBeNull();
     expect(screen.queryByText(/Only PNG/)).toBeNull();
+  });
+
+  it('clears pasted screenshots when switching to a non-capable repo', async () => {
+    const onSubmit = vi.fn();
+    renderDialog({ onSubmit, repos: ['owner/repo', 'owner/claude'] });
+    const textarea = screen.getByPlaceholderText('What do you want to build?');
+    await waitForCapabilities('owner/repo');
+
+    pasteImages(textarea, [makeImageFile('image/png')]);
+    expect(await screen.findByRole('button', { name: 'Preview screenshot 1' })).toBeTruthy();
+
+    getNewIssueCapabilitiesMock.mockResolvedValueOnce({
+      ...defaultCapabilities,
+      agent: 'claude',
+      supportsImages: false,
+    });
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'owner/claude' } });
+
+    expect(revokeObjectUrlMock).toHaveBeenCalledWith('blob:test-1');
+    expect(screen.queryByRole('button', { name: /Preview screenshot/ })).toBeNull();
+    expect(
+      await screen.findByText("Image attachments aren't available for the claude agent.")
+    ).toBeTruthy();
+
+    fireEvent.change(textarea, { target: { value: 'Text-only issue' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Launch' }));
+
+    expect(onSubmit).toHaveBeenCalledWith('Text-only issue', 'owner/claude', undefined);
   });
 
   it('submits screenshot payloads in chip order without object URLs', async () => {
