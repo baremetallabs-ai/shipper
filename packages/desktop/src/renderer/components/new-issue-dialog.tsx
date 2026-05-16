@@ -201,7 +201,9 @@ export function NewIssueDialog({
     const trimmed = request.trim();
     if (!trimmed) return;
 
-    const screenshots = attachments.map(({ mimeType, bytes }) => ({ mimeType, bytes }));
+    const screenshots = capabilities?.supportsImages
+      ? attachments.map(({ mimeType, bytes }) => ({ mimeType, bytes }))
+      : [];
     onSubmit(trimmed, selectedRepo, screenshots.length > 0 ? screenshots : undefined);
     clearAttachments();
     setRequest('');
@@ -239,6 +241,10 @@ export function NewIssueDialog({
             <select
               value={selectedRepo}
               onChange={(e) => {
+                if (e.target.value !== selectedRepo) {
+                  clearAttachments();
+                  setPasteError(null);
+                }
                 setSelectedRepo(e.target.value);
               }}
               disabled={repos.length === 1}
